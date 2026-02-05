@@ -98,8 +98,8 @@ git push
 | Person | Role | Branch |
 |--------|------|--------|
 | **Deepak** | Scrum Master / Senior Dev | `Deepak` + manages `main` |
-| [Developer 2] | Developer | [their branch] |
-| [Developer 3] | Developer | [their branch] |
+| Akhil | Developer | `Akhil` |
+| Srikar | Developer | `Srikar` |
 
 ---
 
