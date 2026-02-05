@@ -3,67 +3,95 @@
 ## Branch Strategy
 
 ```
-main          ← Production-ready code (protected)
-  └── develop ← Integration branch for features
-        ├── feature/E02-xxx  ← Epic/Story branches
-        ├── feature/M1-xxx   ← Module-specific work
-        └── fix/xxx          ← Bug fixes
+main                ← Production-ready code (protected)
+  ├── Deepak        ← Developer branch
+  ├── [Developer2]  ← Developer branch
+  └── [Developer3]  ← Developer branch
 ```
 
-## Workflow
+Each developer works on their own named branch. When work is complete, create a Pull Request to `main`.
 
-### 1. Starting New Work
+---
+
+## Git + Jira Workflow
+
+### Jira Board Columns
+
+| Column | When to Use | Git Action |
+|--------|-------------|------------|
+| **To Do** | Story is assigned but not started | — |
+| **In Progress** | Actively coding | Create/switch to your branch |
+| **Blocked** | Waiting on dependency or clarification | Add blocker comment in Jira |
+| **Ready for Review** | Code complete, PR created | Push + Create PR |
+| **Done** | PR merged to main | Merge PR |
+
+---
+
+## Step-by-Step Workflow
+
+### 1. Pick a Story (To Do → In Progress)
 ```bash
-# Always start from develop
-git checkout develop
-git pull origin develop
-
-# Create your feature branch
-git checkout -b feature/E02-S01-domain-models
+# Switch to your branch
+git checkout Deepak
+git pull origin main  # Get latest from main
 ```
+Move the Jira ticket to **In Progress**.
 
-### 2. Naming Conventions
-- **Features**: `feature/<epic>-<story>-<short-description>`
-  - Example: `feature/E02-S01-domain-models`
-- **Module work**: `feature/<module>-<description>`
-  - Example: `feature/M1-admissions-wizard`
-- **Bug fixes**: `fix/<issue-id>-<description>`
-  - Example: `fix/123-state-transition-error`
-
-### 3. Committing
+### 2. Code & Commit
 ```bash
 git add .
-git commit -m "E02-S01: Add domain models for student entity"
+git commit -m "E01-S03: Implement RBAC middleware"
 ```
-
 Commit message format: `<Epic-Story>: <Description>`
 
-### 4. Pushing & Pull Requests
+### 3. Push & Create PR (In Progress → Ready for Review)
 ```bash
-git push -u origin feature/E02-S01-domain-models
+git push origin Deepak
+```
+- Create a Pull Request on GitHub: `Deepak` → `main`
+- Link the Jira ticket in the PR description
+- Move Jira ticket to **Ready for Review**
+
+### 4. Address Review Feedback
+If changes are requested:
+```bash
+git add .
+git commit -m "E01-S03: Address review feedback"
+git push
 ```
 
-Then create a Pull Request on GitHub targeting `develop`.
+### 5. Merge (Ready for Review → Done)
+Once approved:
+- Squash and merge the PR
+- Delete the feature branch (optional)
+- Move Jira ticket to **Done**
 
-### 5. Merging to Main
-- Only after PR review and approval
-- Squash merge preferred for clean history
-- `main` should always be deployable
+---
+
+## Handling Blockers
+
+If blocked:
+1. Move Jira ticket to **Blocked**
+2. Add a comment explaining the blocker
+3. Tag the relevant person
+4. Continue with other work if possible
+
+---
 
 ## Code Review Checklist
 
 Before approving a PR, verify:
-- [ ] Layer(s) are explicitly referenced in docstrings
-- [ ] Decision is declared (for wizards)
+- [ ] Layer(s) referenced in docstrings
 - [ ] State transitions are legal (Layer 3)
 - [ ] Global Locks are checked (Layer 4)
-- [ ] Authority is respected (Layer 5)
-- [ ] Failure modes are handled
 - [ ] No cloud LLM dependencies
+- [ ] Tests pass (if applicable)
 
-## Current Branches
+---
 
-| Branch | Purpose |
-|--------|---------|
-| `main` | Production code |
-| `develop` | Integration branch |
+## Current Team Branches
+
+| Branch | Developer |
+|--------|-----------|
+| `main` | Protected (production) |
+| `Deepak` | Deepak |
