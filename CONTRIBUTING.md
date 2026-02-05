@@ -1,77 +1,112 @@
-# How We Work Together on ALIS
+# ALIS Developer Guide
 
-## Branches
-
-Each developer has their own branch named after them:
-- **Deepak** (you) — manages main
-- **[Developer 2]** — works on their branch
-- **[Developer 3]** — works on their branch
-
-The `main` branch is the production code. **Only Deepak merges into main.**
+Welcome to the ALIS team! This guide will help you get started and work effectively with the team.
 
 ---
 
-## For Developers: Your Workflow
+## 🚀 Getting Started
 
-### When you start a task (To Do → In Progress)
-1. Move the Jira ticket to "In Progress"
-2. Switch to your branch and get latest code:
+### Step 1: Clone the Repository
+If you haven't already, clone the repo:
+```
+git clone https://github.com/ramavathdeepak05/ALIS-Production.git
+cd ALIS-Production
+```
+
+### Step 2: Create Your Branch
+Each developer has their own branch. Ask Deepak to create one for you, or create it yourself:
+```
+git checkout -b [YourName]
+git push -u origin [YourName]
+```
+
+### Step 3: Get the Latest Code
+Before starting any work, always get the latest code from main:
+```
+git checkout [YourName]
+git pull origin main
+```
+
+---
+
+## 📋 Daily Workflow
+
+### Starting a Task
+
+1. **Pick a ticket** from the Jira board (from "To Do")
+2. **Move it** to "In Progress"
+3. **Get latest code:**
    ```
    git checkout [YourName]
    git pull origin main
    ```
-3. Start coding
+4. **Start coding!**
 
-### While you're working
+### Saving Your Work
+
 Save your progress regularly **in your branch**:
 ```
 git add .
-git commit -m "What you did"
+git commit -m "Short description of what you did"
 git push
 ```
 
-### When you're done (In Progress → Ready for Review)
-1. Make sure all your changes are pushed
-2. Move the Jira ticket to "Ready for Review"
-3. **That's it!** Deepak will review and merge your code
+💡 **Tip:** Commit often! Small, frequent commits are better than one big commit.
 
-### If you're stuck (Blocked)
-1. Move the Jira ticket to "Blocked"
+### When You're Done
+
+1. Make sure all your changes are pushed (`git push`)
+2. Move the Jira ticket to **"Ready for Review"**
+3. **That's it!** Deepak will review and merge your code into main
+
+### If You're Stuck
+
+1. Move the Jira ticket to **"Blocked"**
 2. Add a comment explaining what's blocking you
-3. Tag the person who can help
+3. Tag Deepak or the person who can help
+4. Work on something else while you wait
 
 ---
 
-## For Deepak: Merging Code
+## 📌 Jira Board Explained
 
-When a developer moves their ticket to "Ready for Review":
-
-1. Review their code on GitHub
-2. If it looks good, merge their branch into main:
-   ```
-   git checkout main
-   git pull origin main
-   git merge origin/[DeveloperName]
-   git push
-   ```
-3. Move the Jira ticket to "Done"
+| Column | What it means |
+|--------|---------------|
+| **To Do** | Tasks waiting to be picked up |
+| **In Progress** | You're actively working on it |
+| **Blocked** | You're stuck and need help |
+| **Ready for Review** | You're done, waiting for Deepak to review |
+| **Done** | Merged into main ✅ |
 
 ---
 
-## Quick Commands
+## 🔧 Quick Command Reference
 
 | I want to... | Command |
 |--------------|---------|
 | Switch to my branch | `git checkout [YourName]` |
-| Get latest code | `git pull origin main` |
-| Save my changes | `git add .` then `git commit -m "message"` |
+| Get latest code from main | `git pull origin main` |
+| Save my changes | `git add .` → `git commit -m "message"` |
 | Upload my code | `git push` |
+| See what branch I'm on | `git branch` |
+| See my changes | `git status` |
 
 ---
 
-## Team
+## 👥 Team
 
-| Branch | Person | Role |
-|--------|--------|------|
-| main | Deepak | Scrum Master (manages merges) |
-| Deepak | Deepak | Senior Dev |
+| Person | Role | Branch |
+|--------|------|--------|
+| **Deepak** | Scrum Master / Senior Dev | `Deepak` + manages `main` |
+| [Developer 2] | Developer | [their branch] |
+| [Developer 3] | Developer | [their branch] |
+
+---
+
+## ❓ Need Help?
+
+- **Git issues?** Ask Deepak
+- **Code questions?** Add a comment in Jira or message the team
+- **Blocked?** Move your ticket to "Blocked" and tag someone
+
+Happy coding! 🎉
