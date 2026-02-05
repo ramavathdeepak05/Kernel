@@ -100,6 +100,7 @@ git push
 | **Deepak** | Scrum Master / Senior Dev | `Deepak` + manages `main` |
 | Akhil | Developer | `Akhil` |
 | Srikar | Developer | `Srikar` |
+| External | External Contributors | `external` |
 
 ---
 
