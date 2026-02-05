@@ -23,7 +23,7 @@ The `main` branch is the production code. **Only Deepak merges into main.**
 3. Start coding
 
 ### While you're working
-Save your progress regularly:
+Save your progress regularly **in your branch**:
 ```
 git add .
 git commit -m "What you did"
