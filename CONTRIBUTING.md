@@ -2,79 +2,76 @@
 
 ## Branches
 
-Each developer has their own branch named after them. For example:
-- **Deepak** works on the `Deepak` branch
-- **[Other Developer]** works on their own branch
+Each developer has their own branch named after them:
+- **Deepak** (you) — manages main
+- **[Developer 2]** — works on their branch
+- **[Developer 3]** — works on their branch
 
-The `main` branch is our "finished" code. Don't push directly to main.
+The `main` branch is the production code. **Only Deepak merges into main.**
 
 ---
 
-## Using Jira + Git Together
+## For Developers: Your Workflow
 
-Here's what each Jira column means and what you should do:
-
-### To Do
-The task is waiting for you. You haven't started yet.
-
-### In Progress
-You're actively working on it.
-
-**What to do:**
-1. Open your terminal
-2. Switch to your branch: `git checkout Deepak`
-3. Get the latest code: `git pull origin main`
-4. Start coding!
-
-### Blocked
-You're stuck and need help or waiting for someone else.
-
-**What to do:**
-1. Add a comment in Jira explaining what's blocking you
-2. Tag the person who can help
-3. Work on something else while you wait
-
-### Ready for Review
-You finished coding and want someone to check your work.
-
-**What to do:**
-1. Save your work:
+### When you start a task (To Do → In Progress)
+1. Move the Jira ticket to "In Progress"
+2. Switch to your branch and get latest code:
    ```
-   git add .
-   git commit -m "Short description of what you did"
+   git checkout [YourName]
+   git pull origin main
+   ```
+3. Start coding
+
+### While you're working
+Save your progress regularly:
+```
+git add .
+git commit -m "What you did"
+git push
+```
+
+### When you're done (In Progress → Ready for Review)
+1. Make sure all your changes are pushed
+2. Move the Jira ticket to "Ready for Review"
+3. **That's it!** Deepak will review and merge your code
+
+### If you're stuck (Blocked)
+1. Move the Jira ticket to "Blocked"
+2. Add a comment explaining what's blocking you
+3. Tag the person who can help
+
+---
+
+## For Deepak: Merging Code
+
+When a developer moves their ticket to "Ready for Review":
+
+1. Review their code on GitHub
+2. If it looks good, merge their branch into main:
+   ```
+   git checkout main
+   git pull origin main
+   git merge origin/[DeveloperName]
    git push
    ```
-2. Go to GitHub and create a Pull Request
-3. Move the Jira ticket to "Ready for Review"
-
-### Done
-Your code has been reviewed, approved, and merged into main.
+3. Move the Jira ticket to "Done"
 
 ---
 
-## Before Your Code Gets Approved
-
-The reviewer will check:
-- Does the code follow our ALIS architecture rules?
-- Does it work correctly?
-- Are there any obvious bugs?
-
----
-
-## Quick Reference
+## Quick Commands
 
 | I want to... | Command |
 |--------------|---------|
-| Switch to my branch | `git checkout Deepak` |
+| Switch to my branch | `git checkout [YourName]` |
 | Get latest code | `git pull origin main` |
 | Save my changes | `git add .` then `git commit -m "message"` |
 | Upload my code | `git push` |
 
 ---
 
-## Team Branches
+## Team
 
-| Branch | Owner |
-|--------|-------|
-| main | Everyone (protected) |
-| Deepak | Deepak |
+| Branch | Person | Role |
+|--------|--------|------|
+| main | Deepak | Scrum Master (manages merges) |
+| Deepak | Deepak | Senior Dev |
