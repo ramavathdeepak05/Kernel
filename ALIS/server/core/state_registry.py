@@ -80,6 +80,33 @@ class OverrideState(str, Enum):
     EXPIRED = "EXPIRED"
 
 
+class WorkflowState(str, Enum):
+    """
+    Workflow lifecycle states for E02-S01.
+
+    These states apply to all workflows/wizards orchestrated by the
+    Shared Workflow Engine. Domain-specific state machines (e.g., Student)
+    remain separate.
+
+    Allowed Transitions:
+        CREATED → IN_PROGRESS
+        IN_PROGRESS → AWAITING_APPROVAL | COMPLETED | FAILED
+        AWAITING_APPROVAL → APPROVED | REJECTED
+        APPROVED → COMPLETED | FAILED
+        REJECTED → CLOSED
+        COMPLETED → CLOSED
+        FAILED → CLOSED
+    """
+    CREATED = "CREATED"
+    IN_PROGRESS = "IN_PROGRESS"
+    AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CLOSED = "CLOSED"  # Terminal state
+
+
 # --- Transition Result ---
 
 @dataclass
@@ -138,6 +165,27 @@ OVERRIDE_TRANSITIONS: Dict[OverrideState, Set[OverrideState]] = {
     OverrideState.CLOSED: set(),  # Terminal
 }
 
+WORKFLOW_TRANSITIONS: Dict[WorkflowState, Set[WorkflowState]] = {
+    WorkflowState.CREATED: {WorkflowState.IN_PROGRESS, WorkflowState.FAILED},
+    WorkflowState.IN_PROGRESS: {
+        WorkflowState.AWAITING_APPROVAL,
+        WorkflowState.COMPLETED,
+        WorkflowState.FAILED
+    },
+    WorkflowState.AWAITING_APPROVAL: {
+        WorkflowState.APPROVED,
+        WorkflowState.REJECTED
+    },
+    WorkflowState.APPROVED: {
+        WorkflowState.COMPLETED,
+        WorkflowState.FAILED
+    },
+    WorkflowState.REJECTED: {WorkflowState.CLOSED},
+    WorkflowState.COMPLETED: {WorkflowState.CLOSED},
+    WorkflowState.FAILED: {WorkflowState.CLOSED},
+    WorkflowState.CLOSED: set(),  # Terminal
+}
+
 
 # --- State Registry Class ---
 
@@ -156,6 +204,7 @@ class StateRegistry:
         "student": STUDENT_TRANSITIONS,
         "exam": EXAM_TRANSITIONS,
         "override": OVERRIDE_TRANSITIONS,
+        "workflow": WORKFLOW_TRANSITIONS,
     }
 
     @classmethod
