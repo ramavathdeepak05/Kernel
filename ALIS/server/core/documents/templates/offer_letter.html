@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Offer Letter - {{ applicant_name }}{% endblock %}
+
+{% block document_type %}Offer of Admission{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .offer-details {
+        margin: 20px 0;
+    }
+
+    .offer-details p {
+        margin: 10px 0;
+    }
+
+    .highlight {
+        font-weight: bold;
+        color: #1a5276;
+    }
+
+    .conditions {
+        margin: 30px 0;
+        padding: 15px;
+        background-color: #f9f9f9;
+        border-left: 4px solid #1a5276;
+    }
+
+    .conditions h3 {
+        margin-bottom: 10px;
+    }
+
+    .conditions ul {
+        margin-left: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<p><strong>Date:</strong> {{ offer_date }}</p>
+<p><strong>Reference:</strong> {{ reference_number | default('ALIS/ADM/' + offer_date[:4] + '/') }}{{ applicant_id |
+    default('') }}</p>
+
+<br>
+
+<p>Dear <strong>{{ applicant_name }}</strong>,</p>
+
+<div class="offer-details">
+    <p>
+        We are pleased to inform you that based on your application and evaluation,
+        you have been offered admission to the following program:
+    </p>
+
+    <table>
+        <tr>
+            <th>Program</th>
+            <td class="highlight">{{ program_name }}</td>
+        </tr>
+        <tr>
+            <th>Batch</th>
+            <td>{{ batch | default('2024-2025') }}</td>
+        </tr>
+        <tr>
+            <th>Category</th>
+            <td>{{ category | default('General') }}</td>
+        </tr>
+        {% if scholarship_percentage %}
+        <tr>
+            <th>Scholarship</th>
+            <td>{{ scholarship_percentage }}%</td>
+        </tr>
+        {% endif %}
+    </table>
+</div>
+
+<div class="conditions">
+    <h3>Terms and Conditions</h3>
+    <ul>
+        <li>This offer is valid until <strong>{{ validity_date | default('15 days from the date of issue') }}</strong>.
+        </li>
+        <li>Admission is subject to verification of original documents.</li>
+        <li>Fee payment must be completed within the stipulated timeline.</li>
+        <li>This offer is non-transferable.</li>
+        {% for condition in additional_conditions | default([]) %}
+        <li>{{ condition }}</li>
+        {% endfor %}
+    </ul>
+</div>
+
+<p>
+    Please visit the admissions office with original documents to complete the admission process.
+</p>
+
+<br>
+
+<p>We congratulate you and look forward to welcoming you to our institution.</p>
+
+<div class="signature-block">
+    <div class="signature">
+        <div class="signature-line">
+            Admissions Officer
+        </div>
+    </div>
+    <div class="signature">
+        <div class="signature-line">
+            Dean of Admissions
+        </div>
+    </div>
+</div>
+{% endblock %}

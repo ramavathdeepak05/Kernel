@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+
+{% block title %}Transcript - {{ student_name }}{% endblock %}
+
+{% block document_type %}Academic Transcript{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .transcript-header {
+        margin-bottom: 30px;
+    }
+
+    .student-info-table {
+        margin-bottom: 30px;
+    }
+
+    .grade-table th {
+        background-color: #2c3e50;
+        color: white;
+    }
+
+    .semester-header {
+        background-color: #34495e;
+        color: white;
+        font-weight: bold;
+    }
+
+    .gpa-row {
+        background-color: #ecf0f1;
+        font-weight: bold;
+    }
+
+    .cgpa-box {
+        margin-top: 30px;
+        padding: 15px;
+        background-color: #1a5276;
+        color: white;
+        text-align: center;
+    }
+
+    .cgpa-box .label {
+        font-size: 12pt;
+    }
+
+    .cgpa-box .value {
+        font-size: 28pt;
+        font-weight: bold;
+    }
+
+    .grade-scale {
+        margin-top: 30px;
+        font-size: 10pt;
+    }
+
+    .grade-scale table {
+        width: auto;
+        margin: 10px auto;
+    }
+
+    .grade-scale th,
+    .grade-scale td {
+        padding: 5px 15px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="transcript-header">
+    <table class="student-info-table">
+        <tr>
+            <th>Student Name</th>
+            <td><strong>{{ student_name }}</strong></td>
+            <th>Roll Number</th>
+            <td>{{ roll_number }}</td>
+        </tr>
+        <tr>
+            <th>Program</th>
+            <td>{{ program_name | default('') }}</td>
+            <th>Batch</th>
+            <td>{{ batch | default('') }}</td>
+        </tr>
+        <tr>
+            <th>Date of Admission</th>
+            <td>{{ admission_date | default('') }}</td>
+            <th>Date of Completion</th>
+            <td>{{ completion_date | default('In Progress') }}</td>
+        </tr>
+    </table>
+</div>
+
+<table class="grade-table">
+    <tr>
+        <th>Course Code</th>
+        <th>Course Name</th>
+        <th>Credits</th>
+        <th>Grade</th>
+        <th>Grade Points</th>
+    </tr>
+
+    {% for semester in semesters | default([]) %}
+    <tr class="semester-header">
+        <td colspan="5">Semester {{ semester.number }} - {{ semester.term | default('') }}</td>
+    </tr>
+
+    {% for course in semester.courses %}
+    <tr>
+        <td>{{ course.code }}</td>
+        <td>{{ course.name }}</td>
+        <td style="text-align: center;">{{ course.credits }}</td>
+        <td style="text-align: center;">{{ course.grade }}</td>
+        <td style="text-align: center;">{{ course.grade_points }}</td>
+    </tr>
+    {% endfor %}
+
+    <tr class="gpa-row">
+        <td colspan="2">Semester GPA</td>
+        <td style="text-align: center;">{{ semester.total_credits }}</td>
+        <td colspan="2" style="text-align: center;">{{ semester.sgpa }}</td>
+    </tr>
+    {% endfor %}
+</table>
+
+{% if cgpa %}
+<div class="cgpa-box">
+    <p class="label">Cumulative Grade Point Average (CGPA)</p>
+    <p class="value">{{ cgpa }}</p>
+    <p>Total Credits Earned: {{ total_credits | default('') }}</p>
+</div>
+{% endif %}
+
+<div class="grade-scale">
+    <h4>Grading Scale</h4>
+    <table>
+        <tr>
+            <th>Grade</th>
+            <th>Points</th>
+            <th>Description</th>
+        </tr>
+        <tr>
+            <td>O</td>
+            <td>10</td>
+            <td>Outstanding</td>
+        </tr>
+        <tr>
+            <td>A+</td>
+            <td>9</td>
+            <td>Excellent</td>
+        </tr>
+        <tr>
+            <td>A</td>
+            <td>8</td>
+            <td>Very Good</td>
+        </tr>
+        <tr>
+            <td>B+</td>
+            <td>7</td>
+            <td>Good</td>
+        </tr>
+        <tr>
+            <td>B</td>
+            <td>6</td>
+            <td>Above Average</td>
+        </tr>
+        <tr>
+            <td>C</td>
+            <td>5</td>
+            <td>Average</td>
+        </tr>
+        <tr>
+            <td>P</td>
+            <td>4</td>
+            <td>Pass</td>
+        </tr>
+        <tr>
+            <td>F</td>
+            <td>0</td>
+            <td>Fail</td>
+        </tr>
+    </table>
+</div>
+
+<div class="signature-block" style="margin-top: 50px;">
+    <div class="signature">
+        <div class="signature-line">
+            Controller of Examinations
+        </div>
+    </div>
+    <div class="signature">
+        <div class="signature-line">
+            Registrar
+        </div>
+    </div>
+</div>
+{% endblock %}
