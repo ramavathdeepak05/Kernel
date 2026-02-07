@@ -46,6 +46,23 @@ class OrganizationStatus(str, Enum):
     ARCHIVED = "ARCHIVED"
 
 
+# --- E02-S03: Notification Enums ---
+
+class NotificationStatus(str, Enum):
+    """Delivery status for notifications."""
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    RETRYING = "RETRYING"
+
+
+class NotificationChannel(str, Enum):
+    """Supported notification channels."""
+    EMAIL = "EMAIL"
+    SMS = "SMS"
+    WHATSAPP = "WHATSAPP"
+
+
 # --- Base Models ---
 
 class BaseEntity(BaseModel):
@@ -142,3 +159,40 @@ class Organization(BaseEntity):
         self.is_deleted = True
         self.deleted_at = datetime.utcnow()
         self.updated_at = datetime.utcnow()
+
+
+# --- E02-S03: Notification Log ---
+
+class NotificationLog(BaseEntity):
+    """
+    Audit log for notification delivery attempts.
+
+    MODULE: Shared Services (E02-S03)
+    LAYER: Layer 6 (Resilience)
+
+    Tracks all notification send attempts with status, retries, and errors.
+    """
+    # Target
+    recipient_id: str = Field(..., description="User ID of recipient")
+    recipient_address: str = Field(..., description="Email/Phone number")
+
+    # Content
+    template_id: str = Field(..., description="Template used")
+    channel: NotificationChannel = NotificationChannel.EMAIL
+
+    # Delivery Status
+    status: NotificationStatus = NotificationStatus.PENDING
+    error_message: Optional[str] = None
+    retry_count: int = 0
+    max_retries: int = 3
+
+    # Timestamps
+    sent_at: Optional[datetime] = None
+    last_retry_at: Optional[datetime] = None
+
+    # Context (for debugging)
+    context_snapshot: Optional[dict] = None
+
+    # Organization scoping
+    org_id: Optional[str] = None
+

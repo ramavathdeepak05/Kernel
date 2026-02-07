@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Receipt - {{ receipt_number }}{% endblock %}
+
+{% block document_type %}Payment Receipt{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .receipt-header {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+
+    .receipt-number {
+        font-size: 14pt;
+        font-weight: bold;
+        color: #1a5276;
+    }
+
+    .payment-details {
+        margin: 30px 0;
+    }
+
+    .amount-box {
+        background-color: #f0f8ff;
+        border: 2px solid #1a5276;
+        padding: 15px;
+        text-align: center;
+        margin: 20px 0;
+    }
+
+    .amount-box .label {
+        font-size: 11pt;
+        color: #666;
+    }
+
+    .amount-box .amount {
+        font-size: 24pt;
+        font-weight: bold;
+        color: #1a5276;
+    }
+
+    .amount-words {
+        font-style: italic;
+        text-align: center;
+        margin-top: 10px;
+    }
+
+    .payment-breakdown {
+        margin: 20px 0;
+    }
+
+    .watermark {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%) rotate(-45deg);
+        font-size: 72pt;
+        color: rgba(0, 128, 0, 0.1);
+        font-weight: bold;
+        pointer-events: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="watermark">PAID</div>
+
+<div class="receipt-header">
+    <p class="receipt-number">Receipt No: {{ receipt_number }}</p>
+    <p>Date: {{ payment_date }}</p>
+</div>
+
+<div class="payment-details">
+    <table>
+        <tr>
+            <th>Received From</th>
+            <td><strong>{{ student_name }}</strong></td>
+        </tr>
+        <tr>
+            <th>Roll Number</th>
+            <td>{{ roll_number | default('N/A') }}</td>
+        </tr>
+        <tr>
+            <th>Program</th>
+            <td>{{ program_name | default('') }}</td>
+        </tr>
+        <tr>
+            <th>Payment Mode</th>
+            <td>{{ payment_mode | default('Online') }}</td>
+        </tr>
+        {% if transaction_id %}
+        <tr>
+            <th>Transaction ID</th>
+            <td>{{ transaction_id }}</td>
+        </tr>
+        {% endif %}
+    </table>
+</div>
+
+{% if breakdown %}
+<div class="payment-breakdown">
+    <h3>Payment Breakdown</h3>
+    <table>
+        <tr>
+            <th>Description</th>
+            <th style="text-align: right;">Amount (₹)</th>
+        </tr>
+        {% for item in breakdown %}
+        <tr>
+            <td>{{ item.description }}</td>
+            <td style="text-align: right;">{{ "{:,.2f}".format(item.amount) }}</td>
+        </tr>
+        {% endfor %}
+        <tr style="font-weight: bold; background-color: #f5f5f5;">
+            <td>Total</td>
+            <td style="text-align: right;">{{ "{:,.2f}".format(amount) }}</td>
+        </tr>
+    </table>
+</div>
+{% endif %}
+
+<div class="amount-box">
+    <p class="label">Amount Received</p>
+    <p class="amount">₹ {{ "{:,.2f}".format(amount) }}</p>
+</div>
+
+{% if amount_in_words %}
+<p class="amount-words">({{ amount_in_words }} only)</p>
+{% endif %}
+
+<p style="margin-top: 30px;">
+    <strong>Purpose:</strong> {{ purpose | default('Fee Payment') }}
+</p>
+
+<div class="signature-block">
+    <div class="signature">
+        <div class="signature-line">
+            Cashier
+        </div>
+    </div>
+    <div class="signature">
+        <div class="signature-line">
+            Accounts Officer
+        </div>
+    </div>
+</div>
+{% endblock %}
