@@ -43,6 +43,7 @@ class ConfigCategory(str, Enum):
     ACADEMIC = "academic"
     HR = "hr"
     SYSTEM = "system"
+    NOTIFICATION = "notification"  # E02-S03
 
 
 # --- Config Version ---
@@ -166,6 +167,14 @@ class ConfigRegistry:
     SCHOLARSHIP_INCOME_LIMIT = "admission.scholarship.income_limit"
     MARKS_ENTRY_WINDOW_DAYS = "examination.marks_entry_window_days"
 
+    # E02-S03: Notification Config Keys
+    NOTIFICATION_EMAIL_ENABLED = "notification.email.enabled"
+    NOTIFICATION_SMS_ENABLED = "notification.sms.enabled"
+    NOTIFICATION_WHATSAPP_ENABLED = "notification.whatsapp.enabled"
+    NOTIFICATION_EMAIL_SMTP_HOST = "notification.email.smtp_host"
+    NOTIFICATION_EMAIL_SMTP_PORT = "notification.email.smtp_port"
+    NOTIFICATION_MAX_RETRIES = "notification.max_retries"
+
     @classmethod
     def initialize_defaults(cls) -> None:
         """Initialize default configuration values."""
@@ -213,6 +222,53 @@ class ConfigRegistry:
                 value_type="int",
                 min_value=1,
                 max_value=60
+            ),
+            # E02-S03: Notification Defaults
+            ConfigEntry(
+                key=cls.NOTIFICATION_EMAIL_ENABLED,
+                category=ConfigCategory.NOTIFICATION,
+                description="Enable email notifications",
+                current_value=True,
+                value_type="bool"
+            ),
+            ConfigEntry(
+                key=cls.NOTIFICATION_SMS_ENABLED,
+                category=ConfigCategory.NOTIFICATION,
+                description="Enable SMS notifications",
+                current_value=False,
+                value_type="bool"
+            ),
+            ConfigEntry(
+                key=cls.NOTIFICATION_WHATSAPP_ENABLED,
+                category=ConfigCategory.NOTIFICATION,
+                description="Enable WhatsApp notifications",
+                current_value=False,
+                value_type="bool"
+            ),
+            ConfigEntry(
+                key=cls.NOTIFICATION_EMAIL_SMTP_HOST,
+                category=ConfigCategory.NOTIFICATION,
+                description="SMTP host for email",
+                current_value="localhost",
+                value_type="string"
+            ),
+            ConfigEntry(
+                key=cls.NOTIFICATION_EMAIL_SMTP_PORT,
+                category=ConfigCategory.NOTIFICATION,
+                description="SMTP port for email",
+                current_value=25,
+                value_type="int",
+                min_value=1,
+                max_value=65535
+            ),
+            ConfigEntry(
+                key=cls.NOTIFICATION_MAX_RETRIES,
+                category=ConfigCategory.NOTIFICATION,
+                description="Maximum retries for failed notifications",
+                current_value=3,
+                value_type="int",
+                min_value=0,
+                max_value=10
             ),
         ]
 
