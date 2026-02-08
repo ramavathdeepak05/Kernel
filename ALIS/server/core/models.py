@@ -196,3 +196,69 @@ class NotificationLog(BaseEntity):
     # Organization scoping
     org_id: Optional[str] = None
 
+
+# --- E02-S08: Task & Reminder Engine ---
+
+class TaskStatus(str, Enum):
+    """Lifecycle states for a Task entity."""
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
+
+
+class TaskPriority(str, Enum):
+    """Priority levels for tasks."""
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class Task(BaseEntity):
+    """
+    System-driven Task entity (E02-S08).
+    
+    Represents a unit of work assigned to a User OR a Role.
+    
+    constraints:
+    - Must have either assignee_id OR assignee_role (but not both empty)
+    - If assignee_role is set, it follows the "Shared Worklist" pattern
+    """
+    # content
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    priority: TaskPriority = TaskPriority.MEDIUM
+    
+    # Assignment (User OR Role)
+    assignee_id: Optional[str] = None
+    assignee_role: Optional[str] = None  # Stores Role.value
+    
+    # Scheduling
+    due_date: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    reminder_sent: bool = False
+    
+    # Context / Source Linking
+    entity_type: Optional[str] = None  # e.g., "approval_request", "document"
+    entity_id: Optional[str] = None
+    
+    # Status
+    status: TaskStatus = TaskStatus.PENDING
+    
+    # Organization
+    org_id: Optional[str] = None
+    
+    def complete(self, user_id: str) -> None:
+        """Mark task as completed by a specific user."""
+        if self.status in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]:
+            raise ValueError(f"Task is already {self.status}")
+            
+        self.status = TaskStatus.COMPLETED
+        self.completed_at = datetime.utcnow()
+        self.updated_at = datetime.utcnow()
+        # If it was a role-based task, we might want to capture who actually did it
+        # effectively "claiming" it. For now, we just mark it done.
+
+
