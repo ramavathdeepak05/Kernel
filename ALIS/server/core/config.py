@@ -175,6 +175,10 @@ class ConfigRegistry:
     NOTIFICATION_EMAIL_SMTP_PORT = "notification.email.smtp_port"
     NOTIFICATION_MAX_RETRIES = "notification.max_retries"
 
+    # E03-S01: AI Gateway Config Keys
+    LLM_BASE_URL = "ai.llm.base_url"
+    LLM_MODEL_NAME = "ai.llm.model_name"
+
     @classmethod
     def initialize_defaults(cls) -> None:
         """Initialize default configuration values."""
@@ -269,6 +273,21 @@ class ConfigRegistry:
                 value_type="int",
                 min_value=0,
                 max_value=10
+            ),
+            # E03-S01: AI Gateway Defaults
+            ConfigEntry(
+                key=cls.LLM_BASE_URL,
+                category=ConfigCategory.SYSTEM,
+                description="Base URL for local LLM (Ollama)",
+                current_value="http://localhost:11434",
+                value_type="string"
+            ),
+            ConfigEntry(
+                key=cls.LLM_MODEL_NAME,
+                category=ConfigCategory.SYSTEM,
+                description="Default LLM model name",
+                current_value="llama3",
+                value_type="string"
             ),
         ]
 
