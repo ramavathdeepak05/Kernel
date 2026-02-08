@@ -41,23 +41,16 @@ from .workflow_schema import (
     WorkflowDecision,
     AuthorityLevel,
 )
+from .exceptions import (
+    ALISError,
+    IllegalStateTransitionError,
+    GlobalLockViolationError,
+    DecisionError
+)
 
 
-class WorkflowError(Exception):
-    """Base exception for workflow errors."""
-    pass
-
-
-class IllegalTransitionError(WorkflowError):
-    """Raised when an illegal state transition is attempted."""
-    pass
-
-
-class GlobalLockViolationError(WorkflowError):
-    """Raised when a global lock prevents workflow execution."""
-    def __init__(self, violations: List[str]):
-        self.violations = violations
-        super().__init__(f"Global locks active: {', '.join(violations)}")
+# Alias for backward compatibility if needed, or just use ALISError
+WorkflowError = ALISError
 
 
 class BaseWorkflow(ABC):
@@ -135,7 +128,7 @@ class BaseWorkflow(ABC):
         lock_result = self._check_locks()
         if lock_result.is_locked:
             self._transition_to(WorkflowState.FAILED)
-            raise GlobalLockViolationError(lock_result.reasons)
+            raise GlobalLockViolationError(violations=lock_result.reasons)
 
         # Step 2: Transition to IN_PROGRESS
         self._transition_to(WorkflowState.IN_PROGRESS)
@@ -283,7 +276,7 @@ class BaseWorkflow(ABC):
         )
 
         if not result.allowed:
-            raise IllegalTransitionError(result.reason)
+            raise IllegalStateTransitionError(result.reason)
 
         # Execute transition
         previous_state = current.value

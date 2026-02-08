@@ -37,6 +37,7 @@ class AuditAction(str, Enum):
 
     # State Changes
     STATE_TRANSITION = "state_transition"
+    EVENT_PUBLISHED = "event_published"
 
     # Access
     LOGIN = "login"

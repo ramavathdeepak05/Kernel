@@ -30,6 +30,7 @@ Acceptance Criteria (E01-S04):
 from enum import Enum
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+from .exceptions import PermissionDeniedError
 
 
 # --- Role Definitions ---
@@ -312,10 +313,9 @@ def require_permission(permission: Permission):
                 if role:
                     result = verify_access(role, permission, context)
                     if not result.allowed:
-                        from fastapi import HTTPException
-                        raise HTTPException(
-                            status_code=403,
-                            detail=result.reason
+                        raise PermissionDeniedError(
+                            message=result.reason,
+                            details={"violations": result.context_violations}
                         )
 
             return await func(*args, **kwargs)
