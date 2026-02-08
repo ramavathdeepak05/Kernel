@@ -65,6 +65,13 @@ Organize your code exactly like this:
 /core
 /rbac.py                   # RBAC+ Middleware
 /schema.py           # Pydantic Models
+
+/web
+/app                            # Next.js App Router
+/components             # Shadcn UI Components
+/lib                              # Shared Utilities
+# The 'web' folder is the ONLY place for UI code. It consumes /server via localhost.
+# Deployment: Dedicated Instance per Client.
 ________________________________________
 The "No-Cloud" Rule
 `import openai` -> Immediate Termination of PR
