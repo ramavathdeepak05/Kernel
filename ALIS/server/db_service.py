@@ -148,8 +148,48 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_search_vector ON search_index USING GIN(search_vector);
     CREATE INDEX IF NOT EXISTS idx_entity_type ON search_index(entity_type);
     """
+
+    activity_table_sql = """
+    CREATE TABLE IF NOT EXISTS activity_feed (
+        id SERIAL PRIMARY KEY,
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id VARCHAR(100) NOT NULL,
+        activity_type VARCHAR(50) NOT NULL,
+        description TEXT NOT NULL,
+        metadata JSONB,
+        actor_id VARCHAR(100) NOT NULL,
+        actor_role VARCHAR(50) NOT NULL,
+        visible_to_roles TEXT[], -- Array of roles allowed to see this activity
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_activity_entity ON activity_feed(entity_type, entity_id);
+    """
+
+    comments_table_sql = """
+    CREATE TABLE IF NOT EXISTS comments (
+        id SERIAL PRIMARY KEY,
+        entity_type VARCHAR(50) NOT NULL,
+        entity_id VARCHAR(100) NOT NULL,
+        content TEXT NOT NULL,
+        parent_id INTEGER REFERENCES comments(id),
+        actor_id VARCHAR(100) NOT NULL,
+        actor_role VARCHAR(50) NOT NULL,
+        visible_to_roles TEXT[], -- Array of roles allowed to see this comment
+        is_hidden BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_comments_entity ON comments(entity_type, entity_id);
+    """
+
     try:
-        execute_transaction([(search_table_sql, None)])
-        logger.info("Search index table initialized.")
+        execute_transaction([
+            (search_table_sql, None),
+            (activity_table_sql, None),
+            (comments_table_sql, None)
+        ])
+        logger.info("Database tables initialized (search, activity, comments).")
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")
