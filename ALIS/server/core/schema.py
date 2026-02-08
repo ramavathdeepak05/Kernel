@@ -106,3 +106,22 @@ class OrganizationRead(BaseModel):
     status: OrganizationStatus
     created_at: datetime
     updated_at: Optional[datetime]
+
+
+from typing import Dict, Any
+
+# --- Event Schema (E02-S09) ---
+
+class Event(BaseModel):
+    """
+    Standard Logic Event Envelope (Shared Service).
+    
+    All system events must conform to this schema.
+    """
+    id: str = Field(..., description="Unique Event ID (UUID4)")
+    type: str = Field(..., description="Event Type (e.g., 'm1.admissions.student_enrolled')")
+    version: str = Field(default="1.0.0", description="Schema Version")
+    source: str = Field(..., description="Source System/Module ID")
+    payload: Dict[str, Any] = Field(default_factory=dict, description="Event Data")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="UTC Timestamp")
+    correlation_id: Optional[str] = Field(None, description="Trace ID for cross-event tracking")
