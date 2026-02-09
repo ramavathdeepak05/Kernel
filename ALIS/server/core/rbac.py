@@ -103,6 +103,9 @@ class Permission(str, Enum):
     CONFIG_WRITE = "config:write"
     GLOBAL_LOCK_CHECK = "global_lock:check"
 
+    # AI Gateway (E03-S01)
+    AI_INVOKE = "ai:invoke"
+
 
 # --- Role-Permission Mapping ---
 
@@ -168,6 +171,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.MARKS_READ,
         Permission.FEE_READ,
         Permission.GLOBAL_LOCK_CHECK,
+        Permission.AI_INVOKE,  # E03-S01: AI Agents can invoke AI Gateway
     ],
     Role.SYSTEM: [
         # System has all permissions for internal operations

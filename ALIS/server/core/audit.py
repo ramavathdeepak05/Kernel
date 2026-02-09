@@ -54,6 +54,9 @@ class AuditAction(str, Enum):
     AGENT_DECISION = "agent_decision"
     AGENT_TOOL_CALL = "agent_tool_call"
 
+    # AI Gateway (E03-S01)
+    AI_INVOCATION = "ai_invocation"
+
     # System
     CONFIG_CHANGE = "config_change"
     LOCK_TRIGGERED = "lock_triggered"
