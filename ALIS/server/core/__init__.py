@@ -17,6 +17,7 @@ This package contains the foundational platform components:
 - diff_tracker: Field-level change tracking (E00-S08)
 - data_classification: Data sensitivity model (E00-S01)
 - policy_service: Policy Governance & Registry (E00-S09)
+- policy_resolver: Policy Resolver Middleware (E00-S10)
 """
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
@@ -42,6 +43,7 @@ from .exceptions import (
     TenantIsolationError, EscalationDeniedError, DualControlRequiredError,
     LockdownActiveError,  # E00-S05
     DiffTrackingError,  # E00-S08
+    PolicyResolutionError,  # E00-S10
 )
 from .tenant_crypto import TenantKeyManager
 from .escalation import (
@@ -64,6 +66,10 @@ from .diff_tracker import (  # E00-S08
     TRACKED_ENTITIES, is_tracked_entity,
 )
 from .policy_service import PolicyService, PolicyStatus  # E00-S09
+from .policy_resolver import (  # E00-S10
+    PolicyResolverCache, RequirePolicy, resolve_policy_for_rule,
+    build_policy_context, get_resolver_cache,
+)
 
 __all__ = [
     # Models
@@ -110,5 +116,8 @@ __all__ = [
     "TRACKED_ENTITIES", "is_tracked_entity", "DiffTrackingError",
     # Policy Governance (E00-S09)
     "PolicyService", "PolicyStatus",
+    # Policy Resolver Middleware (E00-S10)
+    "PolicyResolverCache", "RequirePolicy", "resolve_policy_for_rule",
+    "build_policy_context", "get_resolver_cache", "PolicyResolutionError",
 ]
 
