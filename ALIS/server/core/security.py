@@ -31,7 +31,7 @@ import secrets
 import contextvars
 import logging
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -73,9 +73,9 @@ class Session:
     ip_address: Optional[str] = None
 
     # Timestamps
-    created_at: datetime = field(default_factory=datetime.utcnow)
-    expires_at: datetime = field(default_factory=lambda: datetime.utcnow() + timedelta(hours=24))
-    last_activity: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(hours=24))
+    last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Status
     is_active: bool = True
@@ -84,17 +84,17 @@ class Session:
 
     @property
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def refresh(self, extend_hours: int = 24) -> None:
         """Extend session expiry."""
-        self.expires_at = datetime.utcnow() + timedelta(hours=extend_hours)
-        self.last_activity = datetime.utcnow()
+        self.expires_at = datetime.now(timezone.utc) + timedelta(hours=extend_hours)
+        self.last_activity = datetime.now(timezone.utc)
 
     def revoke(self, reason: str = "Manual revocation") -> None:
         """Revoke the session."""
         self.is_active = False
-        self.revoked_at = datetime.utcnow()
+        self.revoked_at = datetime.now(timezone.utc)
         self.revoke_reason = reason
 
 
@@ -190,13 +190,13 @@ class FailedLoginTracker:
             cls._attempts[identifier] = []
 
         cls._attempts[identifier].append(LoginAttempt(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             success=success,
             ip_address=ip_address
         ))
 
         # Keep only recent attempts
-        cutoff = datetime.utcnow() - cls.LOCKOUT_DURATION
+        cutoff = datetime.now(timezone.utc) - cls.LOCKOUT_DURATION
         cls._attempts[identifier] = [
             a for a in cls._attempts[identifier]
             if a.timestamp > cutoff
@@ -224,7 +224,7 @@ class FailedLoginTracker:
 
         oldest_in_window = min(a.timestamp for a in attempts)
         unlock_time = oldest_in_window + cls.LOCKOUT_DURATION
-        remaining = unlock_time - datetime.utcnow()
+        remaining = unlock_time - datetime.now(timezone.utc)
 
         return remaining if remaining.total_seconds() > 0 else None
 
@@ -261,7 +261,7 @@ class SessionManager:
             device_id=device_id,
             user_agent=user_agent,
             ip_address=ip_address,
-            expires_at=datetime.utcnow() + timedelta(hours=expiry_hours)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
         )
 
         cls._sessions[session.id] = session
@@ -280,7 +280,7 @@ class SessionManager:
             if session.token_hash == token_hash:
                 if session.is_expired or not session.is_active:
                     return None
-                session.last_activity = datetime.utcnow()
+                session.last_activity = datetime.now(timezone.utc)
                 return session
 
         return None
@@ -334,7 +334,7 @@ class RateLimiter:
 
         Returns True if allowed, False if rate limited.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         entry = cls._limits.get(identifier)
 
         if entry is None:

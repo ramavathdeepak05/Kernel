@@ -5,7 +5,7 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ALIS.server.core.models import TaskStatus, TaskPriority
 from ALIS.server.core.schema import TaskCreate, TaskUpdate
 from ALIS.server.core.tasks import TaskService
@@ -91,7 +91,7 @@ class TestTaskEngine(unittest.TestCase):
     def test_reminders(self):
         """Test reminder generation for due tasks"""
         # Create task due in 2 hours
-        due_soon = datetime.utcnow() + timedelta(hours=2)
+        due_soon = datetime.now(timezone.utc) + timedelta(hours=2)
         task_in = TaskCreate(
             title="Urgent Task",
             assignee_id="user-123",

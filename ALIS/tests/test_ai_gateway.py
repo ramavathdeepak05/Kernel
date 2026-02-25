@@ -19,9 +19,52 @@ from server.core.ai_gateway import (
 from server.core.rbac import Role, Permission
 from server.core.audit import AuditLog, AuditAction
 from server.core.exceptions import PermissionDeniedError
+from uuid import uuid4
 
+@pytest.fixture(autouse=True)
+def mock_audit_log_in_memory():
+    """Mock AuditLog to use in-memory storage for AI Gateway tests."""
+    AuditLog._entries = []
+    
+    def mock_log(**kwargs):
+        entry = MagicMock()
+        # Enums to values for easier comparison in some tests
+        action = kwargs.get("action")
+        if hasattr(action, "value"): action = action.value
+        
+        # Set attributes
+        setattr(entry, "action", action)
+        setattr(entry, "actor_id", kwargs.get("actor_id"))
+        setattr(entry, "actor_type", kwargs.get("actor_type", "system"))
+        setattr(entry, "module", kwargs.get("module"))
+        setattr(entry, "success", kwargs.get("success", True))
+        setattr(entry, "failure_reason", kwargs.get("failure_reason"))
+        setattr(entry, "metadata", kwargs.get("metadata", {}))
+        setattr(entry, "id", str(uuid4()))
+        
+        # Ensure __str__ doesn't contain prompt if metadata is there
+        entry.__str__.return_value = f"AuditEntry(action={action})"
+        
+        AuditLog._entries.append(entry)
+        return entry
 
-class TestAIGatewayContext:
+    def mock_query(**kwargs):
+        results = []
+        for entry in AuditLog._entries:
+            match = True
+            for k, v in kwargs.items():
+                val = getattr(entry, k, None)
+                target = v.value if hasattr(v, "value") else v
+                if val != target:
+                    match = False
+                    break
+            if match:
+                results.append(entry)
+        return results
+
+    with patch.object(AuditLog, "log", side_effect=mock_log), \
+         patch.object(AuditLog, "query", side_effect=mock_query):
+        yield AuditLog._entries
     """Tests for AIGatewayContext."""
 
     def test_context_defaults(self):

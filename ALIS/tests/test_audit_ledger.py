@@ -14,26 +14,40 @@ from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 
 # ---------------------------------------------------------------------------
-# Direct-load server/core/audit.py without triggering core/__init__.py
-# (which imports pydantic, psycopg2, etc.)
+# Direct-load server/core/audit.py inside a controlled fixture
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _AUDIT_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "audit.py")
 
-spec = importlib.util.spec_from_file_location("server.core.audit", _AUDIT_PATH)
-audit_mod = importlib.util.module_from_spec(spec)
-sys.modules["server.core.audit"] = audit_mod
-spec.loader.exec_module(audit_mod)
-
-AuditAction = audit_mod.AuditAction
-AuditEntry = audit_mod.AuditEntry
-AuditLedger = audit_mod.AuditLedger
-AuditLog = audit_mod.AuditLog
-compute_entry_hash = audit_mod.compute_entry_hash
-_canonical_payload = audit_mod._canonical_payload
-_tenant_lock_key = audit_mod._tenant_lock_key
-_rows_to_csv = audit_mod._rows_to_csv
-_rows_to_json = audit_mod._rows_to_json
+@pytest.fixture(scope="module", autouse=True)
+def audit_context():
+    """Load audit module only for this module's scope."""
+    _orig_modules = sys.modules.copy()
+    try:
+        spec = importlib.util.spec_from_file_location("server.core.audit", _AUDIT_PATH)
+        audit_mod = importlib.util.module_from_spec(spec)
+        sys.modules["server.core.audit"] = audit_mod
+        spec.loader.exec_module(audit_mod)
+        
+        # Inject symbols into the module's global namespace safely
+        globals()["AuditAction"] = audit_mod.AuditAction
+        globals()["AuditEntry"] = audit_mod.AuditEntry
+        globals()["AuditLedger"] = audit_mod.AuditLedger
+        globals()["AuditLog"] = audit_mod.AuditLog
+        globals()["compute_entry_hash"] = audit_mod.compute_entry_hash
+        globals()["_canonical_payload"] = audit_mod._canonical_payload
+        globals()["_tenant_lock_key"] = audit_mod._tenant_lock_key
+        globals()["_rows_to_csv"] = audit_mod._rows_to_csv
+        globals()["_rows_to_json"] = audit_mod._rows_to_json
+        
+        yield
+    finally:
+        # Restore sys.modules
+        for mod_name in list(sys.modules.keys()):
+            if mod_name not in _orig_modules:
+                del sys.modules[mod_name]
+            else:
+                sys.modules[mod_name] = _orig_modules[mod_name]
 
 
 
@@ -145,11 +159,11 @@ class TestBackwardCompatibility:
 
     def test_old_api_signature_accepted(self):
         """Old callers pass actor_type, action_detail, success, etc."""
-        # Inject mock psycopg2 and server.db_service into sys.modules
-        mock_psycopg2_extras = MagicMock()
-        sys.modules["psycopg2"] = MagicMock()
-        sys.modules["psycopg2.extras"] = mock_psycopg2_extras
+        # Mock dependencies using patch.dict to avoid poisoning the rest of the test suite
+        from unittest.mock import patch
 
+        mock_psycopg2_extras = MagicMock()
+        
         mock_cursor = MagicMock()
         mock_cursor.fetchone.side_effect = [
             None,                       # No previous hash (genesis)
@@ -164,30 +178,34 @@ class TestBackwardCompatibility:
         mock_db_ctx.__enter__ = MagicMock(return_value=mock_conn)
         mock_db_ctx.__exit__ = MagicMock(return_value=False)
         mock_db_service.get_db_connection.return_value = mock_db_ctx
-        if "server" not in sys.modules:
-            sys.modules["server"] = MagicMock()
-        sys.modules["server.db_service"] = mock_db_service
 
         # Mock tenant context resolution to avoid importing security
         mock_security = MagicMock()
         mock_security.get_current_tenant_id.return_value = "test_tenant"
-        sys.modules["server.core.security"] = mock_security
 
-        # This is how existing callers invoke the method:
-        entry = AuditLog.log(
-            action=AuditAction.LOCK_TRIGGERED,
-            actor_id="admin-1",
-            actor_type="human",          # OLD kwarg
-            actor_role="super_admin",    # NEW kwarg (takes priority)
-            entity_type="lockdown",
-            entity_id="evt-123",
-            action_detail="Lockdown ACTIVATED: breach",  # OLD kwarg
-            success=True,
-            metadata={"reason": "breach"},
-        )
+        modules_to_patch = {
+            "psycopg2": MagicMock(),
+            "psycopg2.extras": mock_psycopg2_extras,
+            "server.db_service": mock_db_service,
+            "server.core.security": mock_security,
+        }
 
-        assert entry.actor_role == "super_admin"
-        assert entry.id == "42"
+        with patch.dict(sys.modules, modules_to_patch):
+            # This is how existing callers invoke the method:
+            entry = AuditLog.log(
+                action=AuditAction.LOCK_TRIGGERED,
+                actor_id="admin-1",
+                actor_type="human",          # OLD kwarg
+                actor_role="super_admin",    # NEW kwarg (takes priority)
+                entity_type="lockdown",
+                entity_id="evt-123",
+                action_detail="Lockdown ACTIVATED: breach",  # OLD kwarg
+                success=True,
+                metadata={"reason": "breach"},
+            )
+
+            assert entry.actor_role == "super_admin"
+            assert entry.id == "42"
 
 
 # ============================================================================
@@ -246,23 +264,18 @@ class TestExportHelpers:
 class TestVerifyChainIntegrity:
     """Test verify_chain_integrity with mocked DB rows."""
 
-    def _inject_mock_query(self, return_value):
-        """
-        verify_chain_integrity does `from server.db_service import
-        execute_system_query` internally.  Since we don't have psycopg2
-        / pydantic installed, we inject a mock `server.db_service` module
-        into sys.modules before calling the method.
-        """
-        mock_db_service = MagicMock()
-        mock_db_service.execute_system_query = MagicMock(return_value=return_value)
-        # Ensure the parent packages exist in sys.modules
-        if "server" not in sys.modules:
-            sys.modules["server"] = MagicMock()
-        sys.modules["server.db_service"] = mock_db_service
-        return mock_db_service
+    @pytest.fixture(autouse=True)
+    def _mock_db_service(self):
+        """Mock server.db_service and restore sys.modules after test."""
+        from unittest.mock import patch
+        self.mock_db_service = MagicMock()
+        
+        # Capture current modules to prevent permanent poisoning
+        with patch.dict(sys.modules, {"server.db_service": self.mock_db_service}):
+            yield
 
     def test_empty_ledger_is_valid(self):
-        self._inject_mock_query([])
+        self.mock_db_service.execute_system_query.return_value = []
         result = AuditLedger.verify_chain_integrity("t1")
         assert result["valid"] is True
         assert result["total_entries"] == 0
@@ -283,14 +296,14 @@ class TestVerifyChainIntegrity:
         h3 = compute_entry_hash(previous_hash=h2, action="delete",
                                 timestamp=ts3, **base)
 
-        self._inject_mock_query([
+        self.mock_db_service.execute_system_query.return_value = [
             {**base, "id": 1, "action": "create", "metadata": None,
              "timestamp": ts1, "previous_hash": None, "hash": h1},
             {**base, "id": 2, "action": "update", "metadata": None,
              "timestamp": ts2, "previous_hash": h1, "hash": h2},
             {**base, "id": 3, "action": "delete", "metadata": None,
              "timestamp": ts3, "previous_hash": h2, "hash": h3},
-        ])
+        ]
 
         result = AuditLedger.verify_chain_integrity("t1")
         assert result["valid"] is True
@@ -302,11 +315,11 @@ class TestVerifyChainIntegrity:
         base = dict(tenant_id="t1", actor_id="u1", actor_role="admin",
                     entity_type="x", entity_id="x1")
 
-        self._inject_mock_query([
+        self.mock_db_service.execute_system_query.return_value = [
             {**base, "id": 1, "action": "create", "metadata": None,
              "timestamp": ts1, "previous_hash": None,
              "hash": "aaaa_tampered_hash_aaaa"},
-        ])
+        ]
 
         result = AuditLedger.verify_chain_integrity("t1")
         assert result["valid"] is False
@@ -325,12 +338,12 @@ class TestVerifyChainIntegrity:
         h2 = compute_entry_hash(previous_hash="WRONG", action="update",
                                 timestamp=ts2, **base)
 
-        self._inject_mock_query([
+        self.mock_db_service.execute_system_query.return_value = [
             {**base, "id": 1, "action": "create", "metadata": None,
              "timestamp": ts1, "previous_hash": None, "hash": h1},
             {**base, "id": 2, "action": "update", "metadata": None,
              "timestamp": ts2, "previous_hash": "WRONG", "hash": h2},
-        ])
+        ]
 
         result = AuditLedger.verify_chain_integrity("t1")
         assert result["valid"] is False

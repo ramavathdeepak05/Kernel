@@ -24,7 +24,7 @@ Acceptance Criteria:
 """
 
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -57,7 +57,7 @@ class ConfigVersion:
     effective_from: datetime
     effective_until: Optional[datetime] = None
     created_by: str = ""
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     change_reason: Optional[str] = None
 
 
@@ -81,7 +81,7 @@ class ConfigEntry:
     versions: List[ConfigVersion] = field(default_factory=list)
 
     # Metadata
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
 
     # Constraints
@@ -117,7 +117,7 @@ class ConfigEntry:
         new_version = ConfigVersion(
             version=self.current_version + 1,
             value=new_value,
-            effective_from=effective_from or datetime.utcnow(),
+            effective_from=effective_from or datetime.now(timezone.utc),
             created_by=changed_by,
             change_reason=reason
         )
@@ -129,7 +129,7 @@ class ConfigEntry:
         self.versions.append(new_version)
         self.current_version = new_version.version
         self.current_value = new_value
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(timezone.utc)
 
         return new_version
 
@@ -336,7 +336,7 @@ class ConfigRegistry:
                 config.versions.append(ConfigVersion(
                     version=1,
                     value=config.current_value,
-                    effective_from=datetime.utcnow(),
+                    effective_from=datetime.now(timezone.utc),
                     created_by="system"
                 ))
                 cls._configs[config.key] = config

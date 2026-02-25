@@ -16,7 +16,7 @@ Layer Compliance:
 """
 import hashlib
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
 from io import BytesIO
@@ -102,7 +102,7 @@ class DocumentService:
         Returns:
             Full path for storing the document
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         year_month_dir = self.storage_dir / str(now.year) / f"{now.month:02d}"
         year_month_dir.mkdir(parents=True, exist_ok=True)
         return year_month_dir / f"{document_id}.pdf"
@@ -221,7 +221,7 @@ class DocumentService:
         enhanced_context = {
             **context,
             "document_id": document_id,
-            "generation_date": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+            "generation_date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         }
         
         # Step 5: Render HTML

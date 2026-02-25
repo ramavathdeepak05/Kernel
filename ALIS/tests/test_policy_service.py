@@ -88,20 +88,50 @@ _policy = _load_module(
     os.path.join(_PROJECT_ROOT, "server/core/policy_service.py"),
 )
 
-# Wire parent namespace attributes so @patch("server.db_service...") works
-sys.modules["server"].db_service = _db_service
-sys.modules["server"].core = sys.modules["server.core"]
-sys.modules["server.core"].policy_service = _policy
-sys.modules["server.core"].audit = _audit
-sys.modules["server.core"].events = _events
-sys.modules["server.core"].rbac = _rbac
+# ---------------------------------------------------------------------------
+# Direct-load modules inside a controlled module-scoped fixture
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-PolicyService = _policy.PolicyService
-PolicyStatus = _policy.PolicyStatus
-POLICY_TRANSITIONS = _policy.POLICY_TRANSITIONS
-_validate_transition = _policy._validate_transition
-compute_policy_hash = _policy.compute_policy_hash
-AuditAction = _audit.AuditAction
+@pytest.fixture(scope="module", autouse=True)
+def policy_context():
+    """Setup policy modules in sys.modules and globals for this module."""
+    _orig_modules = sys.modules.copy()
+    try:
+        # Load dependencies in order
+        db_service_mod = _load_module("server.db_service", os.path.join(_PROJECT_ROOT, "server/db_service.py"))
+        exceptions_mod = _load_module("server.core.exceptions", os.path.join(_PROJECT_ROOT, "server/core/exceptions.py"))
+        audit_mod = _load_module("server.core.audit", os.path.join(_PROJECT_ROOT, "server/core/audit.py"))
+        events_mod = _load_module("server.core.events", os.path.join(_PROJECT_ROOT, "server/core/events.py"))
+        rbac_mod = _load_module("server.core.rbac", os.path.join(_PROJECT_ROOT, "server/core/rbac.py"))
+        policy_mod = _load_module("server.core.policy_service", os.path.join(_PROJECT_ROOT, "server/core/policy_service.py"))
+
+        # Wire parent namespace attributes
+        if "server" in sys.modules:
+            sys.modules["server"].db_service = db_service_mod
+            sys.modules["server"].core = sys.modules.get("server.core")
+        if "server.core" in sys.modules:
+            sys.modules["server.core"].policy_service = policy_mod
+            sys.modules["server.core"].audit = audit_mod
+            sys.modules["server.core"].events = events_mod
+            sys.modules["server.core"].rbac = rbac_mod
+
+        # Inject symbols into globals()
+        globals()["PolicyService"] = policy_mod.PolicyService
+        globals()["PolicyStatus"] = policy_mod.PolicyStatus
+        globals()["POLICY_TRANSITIONS"] = policy_mod.POLICY_TRANSITIONS
+        globals()["_validate_transition"] = policy_mod._validate_transition
+        globals()["compute_policy_hash"] = policy_mod.compute_policy_hash
+        globals()["AuditAction"] = audit_mod.AuditAction
+
+        yield
+    finally:
+        # Restore sys.modules
+        for mod_name in list(sys.modules.keys()):
+            if mod_name not in _orig_modules:
+                del sys.modules[mod_name]
+            else:
+                sys.modules[mod_name] = _orig_modules[mod_name]
 
 
 # ============================================================================

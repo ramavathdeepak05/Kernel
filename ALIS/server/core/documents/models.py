@@ -3,7 +3,7 @@ Document Generation Models
 ==========================
 Pydantic models for document templates and generated documents.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
@@ -31,7 +31,7 @@ class DocumentTemplate(BaseModel):
     name: str = Field(..., description="Human-readable template name")
     file_path: str = Field(..., description="Path to template file relative to templates dir")
     is_active: bool = Field(default=True, description="Whether template is currently active")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     class Config:
         frozen = True  # Immutable after creation
@@ -64,7 +64,7 @@ class GeneratedDocument(BaseModel):
     entity_id: Optional[str] = Field(None, description="Related entity ID")
     entity_type: Optional[str] = Field(None, description="Related entity type")
     generated_by: str = Field(..., description="User ID who generated the document")
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     class Config:
         frozen = True  # Immutable after creation

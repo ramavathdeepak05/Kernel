@@ -26,7 +26,7 @@ import secrets
 import hashlib
 import logging
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict
 from dataclasses import dataclass, field
 
@@ -49,7 +49,7 @@ class TenantKeyEntry:
     id: str = field(default_factory=lambda: str(uuid4()))
     tenant_id: str = ""
     key_hash: str = ""  # SHA-256 hash of key (for verification, not the key itself)
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     rotated_at: Optional[datetime] = None
     is_active: bool = True
     version: int = 1
@@ -217,7 +217,7 @@ class TenantKeyManager:
             )
 
         new_entry = cls.generate_tenant_key(tenant_id, actor_id)
-        new_entry.rotated_at = datetime.utcnow()
+        new_entry.rotated_at = datetime.now(timezone.utc)
 
         # Audit log
         AuditLog.log(
