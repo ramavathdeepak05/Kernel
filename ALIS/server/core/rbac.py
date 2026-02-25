@@ -219,13 +219,15 @@ def verify_access(
 
     This implements Blueprint C from the ALIS Master Handbook:
     1. Standard RBAC (Role)
-    2. Context-Awareness (State)
-    3. Agent Constraints (AI Safety)
+    2. Tenant Isolation (E00-S03 — Layer 4 Invariant)
+    3. Context-Awareness (State)
+    4. Agent Constraints (AI Safety)
 
     Args:
         actor_role: The role of the actor requesting access
         permission: The permission being requested
         context: Optional context dict with state information
+            - tenant_id: Current tenant scope (MANDATORY for non-system)
             - exam_status: Current exam cycle state
             - course_id: Course being accessed
             - is_owner: Whether actor owns the resource
@@ -244,7 +246,25 @@ def verify_access(
             reason=f"Role '{actor_role.value}' does not have permission '{permission.value}'"
         )
 
-    # --- Step 2: Context-Awareness Checks ---
+    # --- Step 2: Tenant Isolation Check (E00-S03 — Layer 4) ---
+    # System role is exempt from tenant checks (internal operations)
+    if actor_role != Role.SYSTEM:
+        tenant_id = context.get("tenant_id")
+        if not tenant_id:
+            # Try to get from ContextVar (set by TenantMiddleware)
+            try:
+                from .security import get_current_tenant_id
+                tenant_id = get_current_tenant_id()
+            except Exception:
+                pass  # Will be caught by the check below
+
+        if not tenant_id:
+            violations.append(
+                "Tenant isolation: tenant_id is required for all non-system operations "
+                "(Layer 4 Invariant)"
+            )
+
+    # --- Step 3: Context-Awareness Checks ---
 
     # Example: Faculty can only edit marks during "Evaluation Window"
     if actor_role == Role.FACULTY and permission == Permission.MARKS_ENTRY:
@@ -260,8 +280,9 @@ def verify_access(
         if not is_owner and actor_role not in [Role.HOD, Role.ADMIN, Role.SUPER_ADMIN]:
             violations.append("Course update denied: Actor is not the course owner")
 
-    # --- Step 3: Agent Constraints (AI Safety) ---
+    # --- Step 4: Agent Constraints (AI Safety) ---
     # AI Agents have READ access but NO WRITE access to Sensitive Data
+    # AI Agents CANNOT override tenant context under any circumstance
     if actor_role == Role.AI_AGENT:
         action = context.get("action", "read")
         sensitive_write_perms = [
@@ -273,6 +294,13 @@ def verify_access(
         if action == "write" or permission in sensitive_write_perms:
             violations.append(
                 "AI Agent constraint: Agents cannot perform write operations on sensitive data"
+            )
+
+        # E00-S03: AI Agents cannot override tenant context
+        if context.get("override_tenant"):
+            violations.append(
+                "AI Agent constraint: Agents cannot override tenant context "
+                "(E00-S03 Layer 4 Invariant)"
             )
 
     # --- Final Decision ---

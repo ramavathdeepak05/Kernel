@@ -116,6 +116,24 @@ class GlobalLockViolationError(ALISError):
         )
 
 
+class TenantIsolationError(ALISError):
+    """
+    Raised when tenant isolation is violated (Layer 4).
+
+    Examples:
+    - Request missing tenant_id context
+    - Cross-tenant data access attempt
+    - Tenant context mismatch in DB query
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_LAYER4_TENANT",
+            details=details,
+            http_status=403  # Forbidden
+        )
+
+
 # --- Layer 5: Authority & RBAC ---
 
 class AuthorityError(ALISError):

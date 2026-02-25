@@ -8,9 +8,10 @@ This package contains the foundational platform components:
 - state_registry: State machine enforcement (Layer 3)
 - locks: Global Locks engine (Layer 4)
 - overrides: Override lifecycle management (Layer 6)
-- security: Authentication & session control
+- security: Authentication & session control + Tenant Isolation (E00-S03)
 - audit: Immutable audit log
 - config: System configuration registry
+- tenant_crypto: Tenant-specific encryption (E00-S03)
 """
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
@@ -25,9 +26,14 @@ from .overrides import Override, OverrideType, OverrideSeverity, OverrideService
 from .audit import AuditLog, AuditAction, AuditEntry
 from .security import (
     PasswordHasher, TokenGenerator, SessionManager, Session,
-    FailedLoginTracker, RateLimiter, InputValidator, SecurityException
+    FailedLoginTracker, RateLimiter, InputValidator, SecurityException,
+    # E00-S03: Tenant Isolation
+    TenantMiddleware, TenantContext,
+    set_tenant_context, get_current_tenant_id, clear_tenant_context,
 )
 from .config import ConfigRegistry, ConfigCategory, ConfigEntry
+from .exceptions import TenantIsolationError
+from .tenant_crypto import TenantKeyManager
 
 __all__ = [
     # Models
@@ -48,6 +54,11 @@ __all__ = [
     # Security
     "PasswordHasher", "TokenGenerator", "SessionManager", "Session",
     "FailedLoginTracker", "RateLimiter", "InputValidator", "SecurityException",
+    # Tenant Isolation (E00-S03)
+    "TenantMiddleware", "TenantContext", "TenantIsolationError",
+    "set_tenant_context", "get_current_tenant_id", "clear_tenant_context",
+    "TenantKeyManager",
     # Config
     "ConfigRegistry", "ConfigCategory", "ConfigEntry",
 ]
+
