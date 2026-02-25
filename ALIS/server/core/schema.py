@@ -7,7 +7,7 @@ Separate from core models to maintain clean separation.
 
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import ActorType, UserStatus, OrganizationStatus, TaskStatus, TaskPriority
 
@@ -123,5 +123,5 @@ class Event(BaseModel):
     version: str = Field(default="1.0.0", description="Schema Version")
     source: str = Field(..., description="Source System/Module ID")
     payload: Dict[str, Any] = Field(default_factory=dict, description="Event Data")
-    timestamp: datetime = Field(default_factory=datetime.utcnow, description="UTC Timestamp")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="UTC Timestamp")
     correlation_id: Optional[str] = Field(None, description="Trace ID for cross-event tracking")

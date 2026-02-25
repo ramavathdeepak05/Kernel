@@ -27,7 +27,7 @@ Acceptance Criteria:
 """
 
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -66,7 +66,7 @@ class ApprovalRecord:
     """Record of an approval action."""
     approver_id: str
     action: str  # "approve" or "reject"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     comment: Optional[str] = None
 
 
@@ -96,7 +96,7 @@ class Override:
 
     # Requestor
     requested_by: str = ""
-    requested_at: datetime = field(default_factory=datetime.utcnow)
+    requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # State
     status: OverrideState = OverrideState.REQUESTED
@@ -133,14 +133,14 @@ class Override:
 
         # Set default validity (24 hours if not specified)
         if self.valid_until is None:
-            self.valid_until = datetime.utcnow() + timedelta(hours=24)
+            self.valid_until = datetime.now(timezone.utc) + timedelta(hours=24)
 
     @property
     def is_expired(self) -> bool:
         """Check if override has expired."""
         if self.valid_until is None:
             return False
-        return datetime.utcnow() > self.valid_until
+        return datetime.now(timezone.utc) > self.valid_until
 
     @property
     def approval_count(self) -> int:
@@ -199,7 +199,7 @@ class Override:
             raise ValueError("Override has expired before execution")
 
         self.executed_by = executor_id
-        self.executed_at = datetime.utcnow()
+        self.executed_at = datetime.now(timezone.utc)
         self.execution_result = result
         self._transition_to(OverrideState.EXECUTED)
 
@@ -214,7 +214,7 @@ class Override:
             raise ValueError(f"Cannot close override in state {self.status}")
 
         self.closed_by = closed_by
-        self.closed_at = datetime.utcnow()
+        self.closed_at = datetime.now(timezone.utc)
         self._transition_to(OverrideState.CLOSED)
 
     def _transition_to(self, new_state: OverrideState) -> None:
@@ -260,7 +260,7 @@ class OverrideService:
             entity_type=entity_type,
             entity_id=entity_id,
             requested_by=requested_by,
-            valid_until=datetime.utcnow() + timedelta(hours=valid_hours)
+            valid_until=datetime.now(timezone.utc) + timedelta(hours=valid_hours)
         )
 
         cls._overrides[override.id] = override

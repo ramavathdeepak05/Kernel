@@ -95,23 +95,50 @@ _policy_resolver = _load_module(
     os.path.join(_PROJECT_ROOT, "server/core/policy_resolver.py"),
 )
 
-# Wire parent namespace attributes
-sys.modules["server"].db_service = _db_service
-sys.modules["server"].core = sys.modules["server.core"]
-sys.modules["server.core"].policy_service = _policy_service
-sys.modules["server.core"].policy_resolver = _policy_resolver
-sys.modules["server.core"].audit = _audit
-sys.modules["server.core"].events = _events
-sys.modules["server.core"].rbac = _rbac
-sys.modules["server.core"].exceptions = _exceptions
+# ---------------------------------------------------------------------------
+# Direct-load modules inside a controlled module-scoped fixture
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module", autouse=True)
+def resolver_context():
+    """Setup resolver modules in sys.modules and globals for this module."""
+    _orig_modules = sys.modules.copy()
+    try:
+        # Load dependencies in order
+        db_service_mod = _load_module("server.db_service", os.path.join(_PROJECT_ROOT, "server/db_service.py"))
+        exceptions_mod = _load_module("server.core.exceptions", os.path.join(_PROJECT_ROOT, "server/core/exceptions.py"))
+        audit_mod = _load_module("server.core.audit", os.path.join(_PROJECT_ROOT, "server/core/audit.py"))
+        events_mod = _load_module("server.core.events", os.path.join(_PROJECT_ROOT, "server/core/events.py"))
+        rbac_mod = _load_module("server.core.rbac", os.path.join(_PROJECT_ROOT, "server/core/rbac.py"))
+        policy_service_mod = _load_module("server.core.policy_service", os.path.join(_PROJECT_ROOT, "server/core/policy_service.py"))
+        policy_resolver_mod = _load_module("server.core.policy_resolver", os.path.join(_PROJECT_ROOT, "server/core/policy_resolver.py"))
 
-# Import the classes under test
-PolicyResolverCache = _policy_resolver.PolicyResolverCache
-RequirePolicy = _policy_resolver.RequirePolicy
-resolve_policy_for_rule = _policy_resolver.resolve_policy_for_rule
-build_policy_context = _policy_resolver.build_policy_context
-get_resolver_cache = _policy_resolver.get_resolver_cache
-PolicyResolutionError = _exceptions.PolicyResolutionError
+        # Wire parent namespace attributes
+        if "server" in sys.modules:
+            sys.modules["server"].db_service = db_service_mod
+            sys.modules["server"].core = sys.modules.get("server.core")
+        if "server.core" in sys.modules:
+            sys.modules["server.core"].policy_service = policy_service_mod
+            sys.modules["server.core"].policy_resolver = policy_resolver_mod
+            sys.modules["server.core"].audit = audit_mod
+            sys.modules["server.core"].events = events_mod
+            sys.modules["server.core"].rbac = rbac_mod
+
+        # Inject symbols into globals()
+        globals()["PolicyResolverCache"] = policy_resolver_mod.PolicyResolverCache
+        globals()["RequirePolicy"] = policy_resolver_mod.RequirePolicy
+        globals()["resolve_policy_for_rule"] = policy_resolver_mod.resolve_policy_for_rule
+        globals()["build_policy_context"] = policy_resolver_mod.build_policy_context
+        globals()["get_resolver_cache"] = policy_resolver_mod.get_resolver_cache
+        globals()["PolicyResolutionError"] = exceptions_mod.PolicyResolutionError
+
+        yield
+    finally:
+        # Restore sys.modules
+        for mod_name in list(sys.modules.keys()):
+            if mod_name not in _orig_modules:
+                del sys.modules[mod_name]
+            else:
+                sys.modules[mod_name] = _orig_modules[mod_name]
 
 
 # ============================================================================
@@ -343,7 +370,7 @@ class TestRequirePolicy:
         mock_request.query_params = {}
 
         # RequirePolicy.__call__ is async
-        result = asyncio.get_event_loop().run_until_complete(dep(mock_request))
+        result = asyncio.run(dep(mock_request))
 
         assert result["id"] == "policy_100"
         assert result["version"] == 2
@@ -367,7 +394,7 @@ class TestRequirePolicy:
         mock_request.headers = {"x-tenant-id": "tenant_001"}
         mock_request.query_params = {}
 
-        asyncio.get_event_loop().run_until_complete(dep(mock_request))
+        asyncio.run(dep(mock_request))
 
         # Verify policy_version_used was attached
         pvr = mock_request.state.policy_version_used
@@ -394,7 +421,7 @@ class TestRequirePolicy:
         from fastapi import HTTPException
 
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(dep(mock_request))
+            asyncio.run(dep(mock_request))
 
         assert exc_info.value.status_code == 428
 

@@ -21,7 +21,7 @@ Acceptance Criteria:
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 
 from ..models import (
@@ -167,7 +167,7 @@ class NotificationDispatcher:
         
         if result.success:
             log.status = NotificationStatus.SENT
-            log.sent_at = datetime.utcnow()
+            log.sent_at = datetime.now(timezone.utc)
             logger.info(
                 f"Notification sent: {template_id} -> {recipient_address} via {channel_type}"
             )
@@ -210,7 +210,7 @@ class NotificationDispatcher:
         
         # Update retry metadata
         log.retry_count += 1
-        log.last_retry_at = datetime.utcnow()
+        log.last_retry_at = datetime.now(timezone.utc)
         log.status = NotificationStatus.RETRYING
         
         # Re-attempt send
@@ -238,7 +238,7 @@ class NotificationDispatcher:
         
         if result.success:
             log.status = NotificationStatus.SENT
-            log.sent_at = datetime.utcnow()
+            log.sent_at = datetime.now(timezone.utc)
             log.error_message = None
         else:
             log.status = NotificationStatus.FAILED

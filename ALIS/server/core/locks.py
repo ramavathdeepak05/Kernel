@@ -31,7 +31,7 @@ Acceptance Criteria:
 from enum import Enum
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # --- Lock Types ---
@@ -58,7 +58,7 @@ class LockStatus:
     lock_type: Optional[LockType] = None
     reason: Optional[str] = None
     details: Optional[Dict[str, Any]] = None
-    checked_at: datetime = field(default_factory=datetime.utcnow)
+    checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass

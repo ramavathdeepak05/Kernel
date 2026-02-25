@@ -40,7 +40,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from enum import Enum
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import re
 import logging
@@ -530,7 +530,7 @@ class InstrumentedLLM:
                                     fails validation (E00-S06)
         """
         request_id = str(uuid4())
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         # --- Step 0: Lockdown Check (E00-S05) ---
         # During lockdown ALL AI invocations are blocked regardless of role.
@@ -604,7 +604,7 @@ class InstrumentedLLM:
             )
 
         # --- Step 3: Calculate Metrics ---
-        end_time = datetime.utcnow()
+        end_time = datetime.now(timezone.utc)
         latency_ms = (end_time - start_time).total_seconds() * 1000
 
         # --- Step 4: Audit Log ---

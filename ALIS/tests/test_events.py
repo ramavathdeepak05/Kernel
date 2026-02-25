@@ -102,8 +102,9 @@ def test_decorator_subscription():
     
     received_events = []
     
+    # Define and register local handler inside the test so it survives reset_bus
     @EventBus.listen("decorated.event")
-    def my_handler(event):
+    def my_handler_local(event):
         received_events.append(event)
         
     event = Event(

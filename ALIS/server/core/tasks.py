@@ -21,7 +21,7 @@ Acceptance Criteria:
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 from uuid import uuid4
 
@@ -134,10 +134,10 @@ class TaskService:
         if update_in.status is not None:
             # Validate transitions (Layer 3)
             if update_in.status == TaskStatus.COMPLETED and task.status != TaskStatus.COMPLETED:
-                task.completed_at = datetime.utcnow()
+                task.completed_at = datetime.now(timezone.utc)
             task.status = update_in.status
             
-        task.updated_at = datetime.utcnow()
+        task.updated_at = datetime.now(timezone.utc)
         
         return task
 
@@ -206,7 +206,7 @@ class TaskService:
             Number of reminders sent.
         """
         logger.info("Processing task reminders...")
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         reminder_window = timedelta(hours=24) # Remind 24h before
         
         count = 0
@@ -227,7 +227,7 @@ class TaskService:
                 
                 # Update state
                 task.reminder_sent = True
-                task.updated_at = datetime.utcnow()
+                task.updated_at = datetime.now(timezone.utc)
                 count += 1
                 
         return count

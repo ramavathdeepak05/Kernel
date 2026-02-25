@@ -28,7 +28,7 @@ Layer Compliance:
 import hashlib
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -82,7 +82,7 @@ class FileVersion(BaseModel):
     file_hash: str = Field(..., description="SHA-256 hash of file content")
     size_bytes: int = Field(..., ge=0, description="File size in bytes")
     created_by: str = Field(..., description="User ID who created this version")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     
     class Config:
         frozen = True  # Immutable after creation
@@ -105,7 +105,7 @@ class FileMetadata(BaseModel):
     current_version: int = Field(default=1, ge=1, description="Latest version number")
     versions: List[FileVersion] = Field(default_factory=list)
     
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
     
     def get_version(self, version: Optional[int] = None) -> Optional[FileVersion]:
@@ -216,7 +216,7 @@ class FileStorageService:
         Organizes files by year/month for scalability.
         Format: storage/files/{year}/{month}/{file_id}_v{version}
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         year_month_dir = self.storage_dir / str(now.year) / f"{now.month:02d}"
         year_month_dir.mkdir(parents=True, exist_ok=True)
         return year_month_dir / f"{file_id}_v{version}"
@@ -403,7 +403,7 @@ class FileStorageService:
             current_version=new_version_num,
             versions=[*metadata.versions, new_version],
             created_at=metadata.created_at,
-            updated_at=datetime.utcnow(),
+            updated_at=datetime.now(timezone.utc),
         )
         
         # Save updated metadata

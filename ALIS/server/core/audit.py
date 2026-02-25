@@ -47,7 +47,7 @@ import logging
 import csv
 import io
 from uuid import uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -484,9 +484,10 @@ class AuditLedger:
     # Query
     # ------------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def query(
-        tenant_id: str,
+        cls,
+        tenant_id: Optional[str] = None,
         actor_id: Optional[str] = None,
         entity_type: Optional[str] = None,
         entity_id: Optional[str] = None,
@@ -495,17 +496,23 @@ class AuditLedger:
         end_time: Optional[datetime] = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> List[AuditEntry]:
         """
-        Query audit ledger entries for a tenant.
+        Query audit ledger entries. If tenant_id is not provided, 
+        resolved from context.
+        """
+        resolved_tenant = tenant_id
+        if not resolved_tenant:
+            try:
+                from server.core.security import get_current_tenant_id
+                resolved_tenant = get_current_tenant_id()
+            except Exception:
+                resolved_tenant = "SYSTEM"
 
-        All filters are ANDed together.  Results are ordered by id DESC
-        (newest first).
-        """
         from server.db_service import execute_query
 
         conditions = ["tenant_id = %s"]
-        params: list = [tenant_id]
+        params: list = [resolved_tenant]
 
         if actor_id:
             conditions.append("actor_id = %s")
@@ -535,7 +542,8 @@ class AuditLedger:
             f"ORDER BY id DESC "
             f"LIMIT %s OFFSET %s"
         )
-        return execute_query(sql, tuple(params), tenant_id=tenant_id)
+        rows = execute_query(sql, tuple(params))
+        return [AuditEntry(**row) for row in rows]
 
     @classmethod
     def get_entity_history(

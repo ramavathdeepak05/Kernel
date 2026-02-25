@@ -30,7 +30,7 @@ Acceptance Criteria (E00-S04):
 """
 
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
@@ -108,7 +108,7 @@ class ElevatedAccessToken:
 
     # Lifecycle
     state: EscalationState = EscalationState.REQUESTED
-    requested_at: datetime = field(default_factory=datetime.utcnow)
+    requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     granted_by: Optional[str] = None
     granted_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -119,7 +119,7 @@ class ElevatedAccessToken:
         """Check if the token has expired (TTL exceeded)."""
         if self.expires_at is None:
             return False
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(timezone.utc) > self.expires_at
 
     def is_active(self) -> bool:
         """Check if the token is currently active and not expired."""
@@ -234,7 +234,7 @@ class EscalationService:
             reason=reason,
             ttl_minutes=effective_ttl,
             state=EscalationState.REQUESTED,
-            requested_at=datetime.utcnow()
+            requested_at=datetime.now(timezone.utc)
         )
 
         cls._tokens[token.id] = token
@@ -324,10 +324,10 @@ class EscalationService:
         # Transition: REQUESTED → GRANTED → ACTIVE
         token._transition_to(EscalationState.GRANTED)
         token.granted_by = grantor_id
-        token.granted_at = datetime.utcnow()
+        token.granted_at = datetime.now(timezone.utc)
 
         # Set expiry and activate
-        token.expires_at = datetime.utcnow() + timedelta(minutes=token.ttl_minutes)
+        token.expires_at = datetime.now(timezone.utc) + timedelta(minutes=token.ttl_minutes)
         token._transition_to(EscalationState.ACTIVE)
 
         # Audit log
@@ -418,7 +418,7 @@ class EscalationService:
 
         token._transition_to(EscalationState.REVOKED)
         token.revoked_by = actor_id
-        token.revoked_at = datetime.utcnow()
+        token.revoked_at = datetime.now(timezone.utc)
 
         # Audit log
         AuditLog.log(
@@ -518,7 +518,7 @@ class EscalationService:
             metadata={
                 "user_id": token.user_id,
                 "ttl_minutes": token.ttl_minutes,
-                "expired_at": datetime.utcnow().isoformat()
+                "expired_at": datetime.now(timezone.utc).isoformat()
             },
             org_id=token.tenant_id
         )
