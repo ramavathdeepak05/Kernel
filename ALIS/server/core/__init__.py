@@ -26,7 +26,7 @@ from .state_registry import (
 )
 from .locks import LockType, LockStatus, check_global_locks, GlobalLockRegistry
 from .overrides import Override, OverrideType, OverrideSeverity, OverrideService
-from .audit import AuditLog, AuditAction, AuditEntry
+from .audit import AuditLog, AuditLedger, AuditAction, AuditEntry
 from .security import (
     PasswordHasher, TokenGenerator, SessionManager, Session,
     FailedLoginTracker, RateLimiter, InputValidator, SecurityException,
@@ -66,7 +66,7 @@ __all__ = [
     # Overrides
     "Override", "OverrideType", "OverrideSeverity", "OverrideService",
     # Audit
-    "AuditLog", "AuditAction", "AuditEntry",
+    "AuditLog", "AuditLedger", "AuditAction", "AuditEntry",
     # Security
     "PasswordHasher", "TokenGenerator", "SessionManager", "Session",
     "FailedLoginTracker", "RateLimiter", "InputValidator", "SecurityException",

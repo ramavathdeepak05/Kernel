@@ -356,12 +356,75 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_comments_tenant_entity ON comments(tenant_id, entity_type);
     """
 
+    # --- E00-S02: Immutable Audit Ledger Table ---
+    audit_ledger_table_sql = """
+    CREATE TABLE IF NOT EXISTS audit_ledger (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id VARCHAR(50) NOT NULL,
+        actor_id VARCHAR(100) NOT NULL,
+        actor_role VARCHAR(50) NOT NULL,
+        action VARCHAR(100) NOT NULL,
+        entity_type VARCHAR(100) NOT NULL,
+        entity_id VARCHAR(200) NOT NULL,
+        metadata JSONB,
+        timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        previous_hash VARCHAR(64),
+        hash VARCHAR(64) NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_ledger_tenant
+        ON audit_ledger(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_ledger_tenant_ts
+        ON audit_ledger(tenant_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_audit_ledger_entity
+        ON audit_ledger(entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_ledger_actor
+        ON audit_ledger(tenant_id, actor_id);
+    """
+
+    # --- E00-S02: Immutability Enforcement (Layer 4 — Lock After Commit) ---
+    audit_ledger_immutability_sql = """
+    -- Trigger function: block UPDATE and DELETE on audit_ledger
+    CREATE OR REPLACE FUNCTION audit_ledger_immutable_guard()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        RAISE EXCEPTION
+            'E00-S02 VIOLATION: audit_ledger is append-only. '
+            '% operations are prohibited.',
+            TG_OP;
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    -- Attach trigger for UPDATE
+    DROP TRIGGER IF EXISTS trg_audit_ledger_no_update ON audit_ledger;
+    CREATE TRIGGER trg_audit_ledger_no_update
+        BEFORE UPDATE ON audit_ledger
+        FOR EACH ROW
+        EXECUTE FUNCTION audit_ledger_immutable_guard();
+
+    -- Attach trigger for DELETE
+    DROP TRIGGER IF EXISTS trg_audit_ledger_no_delete ON audit_ledger;
+    CREATE TRIGGER trg_audit_ledger_no_delete
+        BEFORE DELETE ON audit_ledger
+        FOR EACH ROW
+        EXECUTE FUNCTION audit_ledger_immutable_guard();
+
+    -- Block TRUNCATE via a statement-level trigger
+    DROP TRIGGER IF EXISTS trg_audit_ledger_no_truncate ON audit_ledger;
+    CREATE TRIGGER trg_audit_ledger_no_truncate
+        BEFORE TRUNCATE ON audit_ledger
+        FOR EACH STATEMENT
+        EXECUTE FUNCTION audit_ledger_immutable_guard();
+    """
+
     # --- E00-S03: Row-Level Security Policies ---
     rls_policies_sql = """
     -- Enable RLS on tenant-scoped tables
     ALTER TABLE search_index ENABLE ROW LEVEL SECURITY;
     ALTER TABLE activity_feed ENABLE ROW LEVEL SECURITY;
     ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE audit_ledger ENABLE ROW LEVEL SECURITY;
 
     -- Create RLS policies (idempotent via DROP IF EXISTS + CREATE)
     DROP POLICY IF EXISTS tenant_isolation_search ON search_index;
@@ -375,6 +438,13 @@ def init_db():
     DROP POLICY IF EXISTS tenant_isolation_comments ON comments;
     CREATE POLICY tenant_isolation_comments ON comments
         USING (tenant_id = current_setting('alis.current_tenant', true));
+
+    -- E00-S02: Audit ledger RLS — tenant-scoped SELECT + INSERT only
+    DROP POLICY IF EXISTS tenant_isolation_audit_ledger ON audit_ledger;
+    CREATE POLICY tenant_isolation_audit_ledger ON audit_ledger
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
     try:
@@ -383,11 +453,14 @@ def init_db():
             (search_table_sql, None),
             (activity_table_sql, None),
             (comments_table_sql, None),
+            (audit_ledger_table_sql, None),
+            (audit_ledger_immutability_sql, None),
             (rls_policies_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
-            "(search, activity, comments + RLS policies)."
+            "(search, activity, comments, audit_ledger + RLS policies + "
+            "immutability triggers)."
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")
