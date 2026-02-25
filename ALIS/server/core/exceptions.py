@@ -14,7 +14,7 @@ Hierarchy matches the ALIS Layered Architecture:
   - Layer 2: DecisionError, BusinessRuleViolation
   - Layer 3: IllegalStateTransitionError
   - Layer 4: GlobalLockViolationError
-  - Layer 5: AuthorityError (PermissionDenied, QuotaExceeded)
+  - Layer 5: AuthorityError (PermissionDenied, QuotaExceeded, EscalationDenied, DualControlRequired)
   - Layer 6: ResilienceError (ProvisionalWarning)
 """
 
@@ -164,6 +164,47 @@ class QuotaExceededError(AuthorityError):
             code="ERR_LAYER5_QUOTA",
             details=details,
             http_status=429
+        )
+
+
+class EscalationDeniedError(AuthorityError):
+    """
+    Raised when a privilege escalation request is denied (E00-S04).
+
+    Examples:
+    - Grantor lacks ESCALATION_GRANT permission
+    - Self-grant attempted when require_different_grantor is True
+    - Requested TTL exceeds maximum allowed
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_LAYER5_ESCALATION",
+            details=details,
+            http_status=403
+        )
+
+
+class DualControlRequiredError(AuthorityError):
+    """
+    Raised when a critical operation is attempted without dual approval (E00-S04).
+
+    Critical operations (result publish, payroll release, transcript seal)
+    require 2-authority confirmation before execution.
+    """
+    def __init__(
+        self,
+        operation_id: str,
+        message: Optional[str] = None,
+        details: Optional[Dict] = None
+    ):
+        details = details or {}
+        details["operation_id"] = operation_id
+        super().__init__(
+            message=message or f"Dual control approval required for: {operation_id}",
+            code="ERR_LAYER5_DUAL_CONTROL",
+            details=details,
+            http_status=403
         )
 
 

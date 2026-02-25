@@ -62,6 +62,16 @@ class AuditAction(str, Enum):
     LOCK_TRIGGERED = "lock_triggered"
     LOCK_CLEARED = "lock_cleared"
 
+    # Escalation & Dual Control (E00-S04)
+    ESCALATION_REQUESTED = "escalation_requested"
+    ESCALATION_GRANTED = "escalation_granted"
+    ESCALATION_DENIED = "escalation_denied"
+    ESCALATION_EXPIRED = "escalation_expired"
+    ESCALATION_REVOKED = "escalation_revoked"
+    ESCALATION_USED = "escalation_used"
+    DUAL_CONTROL_REQUESTED = "dual_control_requested"
+    DUAL_CONTROL_COMPLETED = "dual_control_completed"
+
 
 # --- Audit Entry ---
 
