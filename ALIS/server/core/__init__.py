@@ -16,6 +16,7 @@ This package contains the foundational platform components:
 - lockdown: Incident response & lockdown mode (E00-S05)
 - diff_tracker: Field-level change tracking (E00-S08)
 - data_classification: Data sensitivity model (E00-S01)
+- policy_service: Policy Governance & Registry (E00-S09)
 """
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
@@ -62,6 +63,7 @@ from .diff_tracker import (  # E00-S08
     compute_and_log_field_diffs, get_decrypted_field_diffs,
     TRACKED_ENTITIES, is_tracked_entity,
 )
+from .policy_service import PolicyService, PolicyStatus  # E00-S09
 
 __all__ = [
     # Models
@@ -106,5 +108,7 @@ __all__ = [
     # Field-Level Change Tracking (E00-S08)
     "compute_and_log_field_diffs", "get_decrypted_field_diffs",
     "TRACKED_ENTITIES", "is_tracked_entity", "DiffTrackingError",
+    # Policy Governance (E00-S09)
+    "PolicyService", "PolicyStatus",
 ]
 

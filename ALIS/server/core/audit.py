@@ -127,6 +127,12 @@ class AuditAction(str, Enum):
     # Field-Level Change Tracking (E00-S08)
     FIELD_CHANGE = "field_change"
 
+    # Policy Governance (E00-S09)
+    POLICY_DRAFTED = "policy_drafted"
+    POLICY_SUBMITTED = "policy_submitted"
+    POLICY_APPROVED = "policy_approved"
+    POLICY_ACTIVATED = "policy_activated"
+
 
 # ============================================================================
 # AUDIT ENTRY (immutable value object)
