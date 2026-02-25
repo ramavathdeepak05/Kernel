@@ -50,6 +50,7 @@ class Role(str, Enum):
     HR_ADMIN = "hr_admin"
     ADMIN = "admin"
     SUPER_ADMIN = "super_admin"
+    DEAN_ELEVATED = "dean_elevated"  # E00-S04: Temporary elevated role
 
     # System Roles
     AI_AGENT = "ai_agent"
@@ -106,6 +107,12 @@ class Permission(str, Enum):
     # AI Gateway (E03-S01)
     AI_INVOKE = "ai:invoke"
 
+    # Escalation & Dual Control (E00-S04)
+    ESCALATION_REQUEST = "escalation:request"
+    ESCALATION_GRANT = "escalation:grant"
+    ESCALATION_REVOKE = "escalation:revoke"
+    DUAL_CONTROL_APPROVE = "dual_control:approve"
+
 
 # --- Role-Permission Mapping ---
 
@@ -132,6 +139,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.MARKS_ENTRY,
         Permission.MARKS_FINALIZE,
         Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,  # E00-S04
     ],
     Role.REGISTRAR: [
         Permission.STUDENT_READ,
@@ -143,6 +151,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.RESULT_PUBLISH,
         Permission.OVERRIDE_REQUEST,
         Permission.OVERRIDE_APPROVE,
+        Permission.ESCALATION_REQUEST,   # E00-S04
+        Permission.DUAL_CONTROL_APPROVE, # E00-S04
     ],
     Role.FINANCE_OFFICER: [
         Permission.FEE_READ,
@@ -150,6 +160,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.PAYMENT_PROCESS,
         Permission.LEDGER_READ,
         Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,   # E00-S04
+        Permission.DUAL_CONTROL_APPROVE, # E00-S04
     ],
     Role.ADMIN: [
         Permission.USER_READ,
@@ -159,6 +171,10 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.AUDIT_LOG_READ,
         Permission.OVERRIDE_REQUEST,
         Permission.OVERRIDE_APPROVE,
+        Permission.ESCALATION_REQUEST,   # E00-S04
+        Permission.ESCALATION_GRANT,     # E00-S04
+        Permission.ESCALATION_REVOKE,    # E00-S04
+        Permission.DUAL_CONTROL_APPROVE, # E00-S04
     ],
     Role.SUPER_ADMIN: [
         # Super admin has all permissions

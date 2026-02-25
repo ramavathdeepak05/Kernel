@@ -44,6 +44,7 @@ class ConfigCategory(str, Enum):
     HR = "hr"
     SYSTEM = "system"
     NOTIFICATION = "notification"  # E02-S03
+    SECURITY = "security"  # E00-S04
 
 
 # --- Config Version ---
@@ -179,6 +180,12 @@ class ConfigRegistry:
     LLM_BASE_URL = "ai.llm.base_url"
     LLM_MODEL_NAME = "ai.llm.model_name"
 
+    # E00-S04: Escalation & Dual Control Config Keys
+    ESCALATION_DEFAULT_TTL = "escalation.default_ttl_minutes"
+    ESCALATION_MAX_TTL = "escalation.max_ttl_minutes"
+    ESCALATION_REQUIRE_DIFFERENT_GRANTOR = "escalation.require_different_grantor"
+    ESCALATION_CRITICAL_OPERATIONS = "escalation.critical_operations"
+
     @classmethod
     def initialize_defaults(cls) -> None:
         """Initialize default configuration values."""
@@ -288,6 +295,39 @@ class ConfigRegistry:
                 description="Default LLM model name",
                 current_value="llama3",
                 value_type="string"
+            ),
+            # E00-S04: Escalation & Dual Control Defaults
+            ConfigEntry(
+                key=cls.ESCALATION_DEFAULT_TTL,
+                category=ConfigCategory.SECURITY,
+                description="Default TTL for elevated access tokens (minutes)",
+                current_value=30,
+                value_type="int",
+                min_value=5,
+                max_value=480
+            ),
+            ConfigEntry(
+                key=cls.ESCALATION_MAX_TTL,
+                category=ConfigCategory.SECURITY,
+                description="Maximum allowed TTL for elevated access tokens (minutes)",
+                current_value=120,
+                value_type="int",
+                min_value=5,
+                max_value=480
+            ),
+            ConfigEntry(
+                key=cls.ESCALATION_REQUIRE_DIFFERENT_GRANTOR,
+                category=ConfigCategory.SECURITY,
+                description="Require grantor to differ from requestor",
+                current_value=True,
+                value_type="bool"
+            ),
+            ConfigEntry(
+                key=cls.ESCALATION_CRITICAL_OPERATIONS,
+                category=ConfigCategory.SECURITY,
+                description="List of operation IDs requiring dual control",
+                current_value=["result_publish", "payroll_release", "transcript_seal"],
+                value_type="json"
             ),
         ]
 

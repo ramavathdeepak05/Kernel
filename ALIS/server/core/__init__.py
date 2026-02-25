@@ -12,6 +12,7 @@ This package contains the foundational platform components:
 - audit: Immutable audit log
 - config: System configuration registry
 - tenant_crypto: Tenant-specific encryption (E00-S03)
+- escalation: Privilege escalation & dual control (E00-S04)
 """
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
@@ -32,8 +33,12 @@ from .security import (
     set_tenant_context, get_current_tenant_id, clear_tenant_context,
 )
 from .config import ConfigRegistry, ConfigCategory, ConfigEntry
-from .exceptions import TenantIsolationError
+from .exceptions import TenantIsolationError, EscalationDeniedError, DualControlRequiredError
 from .tenant_crypto import TenantKeyManager
+from .escalation import (
+    EscalationService, ElevatedAccessToken, EscalationState,
+    DualControlGuard, CriticalOperation
+)
 
 __all__ = [
     # Models
@@ -60,5 +65,9 @@ __all__ = [
     "TenantKeyManager",
     # Config
     "ConfigRegistry", "ConfigCategory", "ConfigEntry",
+    # Escalation & Dual Control (E00-S04)
+    "EscalationService", "ElevatedAccessToken", "EscalationState",
+    "DualControlGuard", "CriticalOperation",
+    "EscalationDeniedError", "DualControlRequiredError",
 ]
 
