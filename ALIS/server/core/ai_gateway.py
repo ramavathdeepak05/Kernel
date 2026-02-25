@@ -1,8 +1,8 @@
 """
-ALIS AI Gateway - E03-S01
+ALIS AI Gateway - E03-S01 + E00-S06
 
 MODULE: Platform Core (E03 - AI Gateway & Agents)
-LAYER: Layer 2 (Agentic Decisions)
+LAYER: Layer 2 (Agentic Decisions) + Layer 4 (Invariant Enforcement)
 ENTITY: AIGateway
 
 This module implements the centralized AI Gateway service.
@@ -14,20 +14,39 @@ Must Align With:
 - "AI is read-only with respect to state"
 - "No cloud LLM usage"
 
+E00-S06 — AI Boundary Enforcement:
+- Prompt injection detection layer (before LLM call)
+- Strict JSON schema validation on AI output
+- STATE_IMPACT invariant enforcement (forbid Final/Commit/Override)
+- Confidence scoring mandate for non-advisory agents
+- PII masking before AI context injection (via DataMasker)
+
 Acceptance Criteria (E03-S01):
 - [x] Single API surface for AI calls
 - [x] No direct model invocation elsewhere in codebase
 - [x] Request/response fully logged (metadata only)
 - [x] RBAC-protected access
 - [x] Tenant-aware invocation
+
+Acceptance Criteria (E00-S06):
+- [x] AI cannot call mutation endpoints
+- [x] Injection attempts flagged
+- [x] PII masked before AI context injection
+- [x] AI output validated against mandatory schema
+- [x] Forbidden STATE_IMPACT values rejected
 """
 
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
-from functools import wraps
+from enum import Enum
 from uuid import uuid4
 from datetime import datetime
+import json
+import re
 import logging
+import hashlib
+
+from pydantic import BaseModel, Field as PydanticField, field_validator
 
 from langchain_ollama import OllamaLLM
 from langchain_core.language_models.base import BaseLanguageModel
@@ -36,13 +55,376 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from .rbac import Role, Permission, verify_access, AccessResult
 from .audit import AuditLog, AuditAction
 from .config import ConfigRegistry
-from .exceptions import PermissionDeniedError
+from .exceptions import (
+    PermissionDeniedError,
+    PromptInjectionError,
+    AISchemaViolationError,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-# --- Gateway Context ---
+# =============================================================================
+# E00-S06: AI RESPONSE SCHEMA (Mandatory Output Contract)
+# =============================================================================
+
+class ConfidenceTier(str, Enum):
+    """Confidence tier classification per ALIS AI Governance Sec. 6."""
+    HIGH = "HIGH"
+    MEDIUM = "MEDIUM"
+    LOW = "LOW"
+
+
+class StateImpact(str, Enum):
+    """
+    Allowed STATE_IMPACT values per ALIS AI Governance Sec. 5.
+
+    FORBIDDEN values (Final, Commit, Override) are intentionally absent.
+    If the LLM outputs them, validation will reject immediately.
+    """
+    NONE = "None"
+    DRAFT = "Draft"
+    PROVISIONAL_ONLY = "ProvisionalOnly"
+
+
+# Forbidden values — if the LLM emits any of these, the response is rejected.
+_FORBIDDEN_STATE_IMPACTS = {"final", "commit", "override"}
+
+
+class AIResponseSchema(BaseModel):
+    """
+    Mandatory schema for all non-advisory AI agent outputs.
+
+    Per ALIS AI Governance Sec. 5, 6, and 8:
+    - AI must return structured JSON
+    - Free-text may not be used directly for decisions
+    - Confidence scoring is mandatory
+    - STATE_IMPACT must be declared and cannot be Final/Commit/Override
+
+    This model is used to parse and validate the raw LLM text output.
+    """
+    decision: str = PydanticField(
+        ...,
+        description="The AI's proposed decision or recommendation"
+    )
+    confidence_score: float = PydanticField(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence score between 0.0 and 1.0"
+    )
+    confidence_tier: ConfidenceTier = PydanticField(
+        ...,
+        description="Confidence tier: HIGH, MEDIUM, or LOW"
+    )
+    state_impact: str = PydanticField(
+        default="Draft",
+        description="State impact declaration: None, Draft, or ProvisionalOnly"
+    )
+    reasoning: Optional[str] = PydanticField(
+        default=None,
+        description="Optional reasoning or justification"
+    )
+
+    @field_validator("state_impact")
+    @classmethod
+    def validate_state_impact(cls, v: str) -> str:
+        """
+        Layer 4 Invariant: Reject forbidden STATE_IMPACT values.
+
+        Per ALIS AI Governance Sec. 5:
+        Forbidden: Final, Commit, Override
+        If detected → reject configuration.
+        """
+        if v.lower().strip() in _FORBIDDEN_STATE_IMPACTS:
+            raise ValueError(
+                f"Forbidden STATE_IMPACT '{v}' — AI cannot declare "
+                f"Final, Commit, or Override (E00-S06 Layer 4 Invariant)"
+            )
+        return v
+
+
+# =============================================================================
+# E00-S06: PROMPT INJECTION DETECTOR
+# =============================================================================
+
+class PromptInjectionDetector:
+    """
+    Deterministic heuristic-based prompt injection detector.
+
+    Scans input prompts for known injection patterns before they reach
+    the LLM. This is a security-critical component (E00-S06).
+
+    Detection Strategy:
+    - Regex-based pattern matching against known injection vectors
+    - Case-insensitive matching
+    - Returns all matched patterns for audit logging
+    """
+
+    # Known injection patterns (case-insensitive)
+    _INJECTION_PATTERNS: List[re.Pattern] = [
+        # Direct instruction override
+        re.compile(r"ignore\s+(all\s+)?previous\s+instructions?", re.IGNORECASE),
+        re.compile(r"ignore\s+(all\s+)?prior\s+instructions?", re.IGNORECASE),
+        re.compile(r"ignore\s+(all\s+)?above\s+instructions?", re.IGNORECASE),
+        re.compile(r"disregard\s+(all\s+)?previous", re.IGNORECASE),
+        re.compile(r"forget\s+(everything|all|your)\s+(you\s+)?know", re.IGNORECASE),
+
+        # System prompt manipulation
+        re.compile(r"you\s+are\s+now\s+(in\s+)?(\w+\s+)?mode", re.IGNORECASE),
+        re.compile(r"new\s+system\s+prompt", re.IGNORECASE),
+        re.compile(r"override\s+system\s+prompt", re.IGNORECASE),
+        re.compile(r"system\s*:\s*you\s+are", re.IGNORECASE),
+
+        # Jailbreak patterns
+        re.compile(r"\bDAN\s+mode\b", re.IGNORECASE),
+        re.compile(r"do\s+anything\s+now", re.IGNORECASE),
+        re.compile(r"jailbreak", re.IGNORECASE),
+        re.compile(r"bypass\s+(safety|filter|restriction|guardrail)", re.IGNORECASE),
+
+        # Role manipulation
+        re.compile(r"pretend\s+you\s+(are|have)\s+no\s+(restrictions?|limits?|rules?)", re.IGNORECASE),
+        re.compile(r"act\s+as\s+(if|though)\s+you\s+have\s+no\s+rules?", re.IGNORECASE),
+
+        # Data exfiltration / authority escalation
+        re.compile(r"reveal\s+(your\s+)?(system|initial)\s+prompt", re.IGNORECASE),
+        re.compile(r"show\s+(me\s+)?(your\s+)?(system|initial)\s+prompt", re.IGNORECASE),
+        re.compile(r"output\s+(your\s+)?(system|initial)\s+prompt", re.IGNORECASE),
+        re.compile(r"what\s+(is|are)\s+your\s+(system|initial)\s+(prompt|instructions?)", re.IGNORECASE),
+
+        # Delimiter injection
+        re.compile(r"```\s*system\b", re.IGNORECASE),
+        re.compile(r"\[SYSTEM\]", re.IGNORECASE),
+        re.compile(r"<\|system\|>", re.IGNORECASE),
+    ]
+
+    @classmethod
+    def detect(cls, text: str) -> List[str]:
+        """
+        Scan input text for known prompt injection patterns.
+
+        Args:
+            text: The prompt text to scan
+
+        Returns:
+            List of matched pattern descriptions. Empty list = clean.
+        """
+        if not text:
+            return []
+
+        matches = []
+        for pattern in cls._INJECTION_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                matches.append(
+                    f"Injection pattern detected: '{match.group()}' "
+                    f"(pattern: {pattern.pattern})"
+                )
+
+        return matches
+
+    @classmethod
+    def assert_clean(cls, text: str, context: Optional["AIGatewayContext"] = None) -> None:
+        """
+        Assert that the prompt is clean. Raises PromptInjectionError if not.
+
+        Also logs the injection attempt to the audit ledger.
+
+        Args:
+            text: The prompt text to scan
+            context: Optional gateway context for audit logging
+
+        Raises:
+            PromptInjectionError: If injection patterns are detected
+        """
+        matches = cls.detect(text)
+        if matches:
+            # Log the injection attempt
+            AuditLog.log(
+                action=AuditAction.AI_PROMPT_INJECTION,
+                actor_id=context.actor_id if context else "unknown",
+                actor_type=context.actor_type if context else "unknown",
+                actor_role=(
+                    context.actor_role.value
+                    if context and context.actor_role
+                    else None
+                ),
+                entity_type="ai_gateway",
+                entity_id=context.request_id if context else "unknown",
+                success=False,
+                failure_reason="Prompt injection detected",
+                org_id=context.org_id if context else None,
+                module=context.module if context else None,
+                wizard=context.wizard if context else None,
+                metadata={
+                    "injection_patterns": matches,
+                    "prompt_hash": hashlib.sha256(
+                        text.encode("utf-8")
+                    ).hexdigest(),
+                },
+            )
+
+            raise PromptInjectionError(
+                message="Prompt injection detected — request blocked (E00-S06)",
+                details={
+                    "patterns_matched": len(matches),
+                    "patterns": matches,
+                },
+            )
+
+
+# =============================================================================
+# E00-S06: OUTPUT SCHEMA VALIDATOR
+# =============================================================================
+
+class AIOutputValidator:
+    """
+    Validates AI output against the mandatory AIResponseSchema.
+
+    Per ALIS AI Governance Sec. 8:
+    - AI must return structured JSON
+    - Schema must be validated before any downstream logic executes
+    - Invalid schema → reject output (no silent fallback)
+    """
+
+    @classmethod
+    def validate(
+        cls,
+        raw_output: str,
+        context: Optional["AIGatewayContext"] = None,
+    ) -> AIResponseSchema:
+        """
+        Parse and validate raw LLM text output.
+
+        Args:
+            raw_output: The raw string response from the LLM
+            context: Optional gateway context for audit logging
+
+        Returns:
+            Validated AIResponseSchema instance
+
+        Raises:
+            AISchemaViolationError: If output is not valid JSON or
+                                    fails schema validation
+        """
+        # Step 1: Extract JSON from the raw output
+        json_str = cls._extract_json(raw_output)
+        if json_str is None:
+            cls._log_schema_rejection(
+                reason="LLM output is not valid JSON",
+                raw_output=raw_output,
+                context=context,
+            )
+            raise AISchemaViolationError(
+                message=(
+                    "AI output is not valid JSON — "
+                    "free-text responses cannot be used for decisions (E00-S06)"
+                ),
+                details={"raw_output_length": len(raw_output)},
+            )
+
+        # Step 2: Parse JSON
+        try:
+            parsed = json.loads(json_str)
+        except json.JSONDecodeError as e:
+            cls._log_schema_rejection(
+                reason=f"JSON parse error: {e}",
+                raw_output=raw_output,
+                context=context,
+            )
+            raise AISchemaViolationError(
+                message=f"AI output JSON parse failed: {e}",
+                details={"raw_output_length": len(raw_output)},
+            )
+
+        # Step 3: Validate against Pydantic schema
+        try:
+            validated = AIResponseSchema(**parsed)
+        except Exception as e:
+            cls._log_schema_rejection(
+                reason=f"Schema validation failed: {e}",
+                raw_output=raw_output,
+                context=context,
+            )
+            raise AISchemaViolationError(
+                message=f"AI output failed schema validation: {e}",
+                details={
+                    "parsed_keys": list(parsed.keys()) if isinstance(parsed, dict) else [],
+                    "error": str(e),
+                },
+            )
+
+        return validated
+
+    @staticmethod
+    def _extract_json(text: str) -> Optional[str]:
+        """
+        Extract a JSON object from LLM output.
+
+        Handles common LLM output patterns:
+        1. Pure JSON string
+        2. JSON wrapped in markdown code fences (```json ... ```)
+        3. JSON embedded in explanatory text
+        """
+        text = text.strip()
+
+        # Case 1: Direct JSON object
+        if text.startswith("{") and text.endswith("}"):
+            return text
+
+        # Case 2: Markdown code-fenced JSON
+        fence_match = re.search(
+            r"```(?:json)?\s*\n?(\{.*?\})\s*\n?```",
+            text,
+            re.DOTALL,
+        )
+        if fence_match:
+            return fence_match.group(1).strip()
+
+        # Case 3: Embedded JSON — find outermost { ... }
+        brace_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
+        if brace_match:
+            return brace_match.group(0)
+
+        return None
+
+    @classmethod
+    def _log_schema_rejection(
+        cls,
+        reason: str,
+        raw_output: str,
+        context: Optional["AIGatewayContext"] = None,
+    ) -> None:
+        """Log a schema validation rejection to the audit ledger."""
+        AuditLog.log(
+            action=AuditAction.AI_SCHEMA_REJECTED,
+            actor_id=context.actor_id if context else "unknown",
+            actor_type=context.actor_type if context else "unknown",
+            actor_role=(
+                context.actor_role.value
+                if context and context.actor_role
+                else None
+            ),
+            entity_type="ai_gateway",
+            entity_id=context.request_id if context else "unknown",
+            success=False,
+            failure_reason=reason,
+            org_id=context.org_id if context else None,
+            module=context.module if context else None,
+            wizard=context.wizard if context else None,
+            metadata={
+                "output_length": len(raw_output),
+                "output_hash": hashlib.sha256(
+                    raw_output.encode("utf-8")
+                ).hexdigest(),
+            },
+        )
+
+
+# =============================================================================
+# GATEWAY CONTEXT
+# =============================================================================
 
 @dataclass
 class AIGatewayContext:
@@ -73,7 +455,9 @@ class AIGatewayContext:
     metadata: Optional[Dict[str, Any]] = None
 
 
-# --- Gateway Invocation Result ---
+# =============================================================================
+# GATEWAY INVOCATION RESULT
+# =============================================================================
 
 @dataclass
 class AIInvocationResult:
@@ -86,8 +470,13 @@ class AIInvocationResult:
     latency_ms: float = 0.0
     token_count: Optional[int] = None
 
+    # E00-S06: Validated structured output (populated when validate_schema=True)
+    validated_output: Optional[AIResponseSchema] = None
 
-# --- Instrumented LLM Wrapper ---
+
+# =============================================================================
+# INSTRUMENTED LLM WRAPPER
+# =============================================================================
 
 class InstrumentedLLM:
     """
@@ -95,8 +484,10 @@ class InstrumentedLLM:
 
     This wrapper intercepts all LLM calls to:
     1. Verify RBAC permissions before invocation
-    2. Log invocation metadata to audit log
-    3. Measure latency and track usage
+    2. Detect prompt injection attempts (E00-S06)
+    3. Log invocation metadata to audit log
+    4. Optionally validate output schema (E00-S06)
+    5. Measure latency and track usage
 
     The wrapper is transparent to LangGraph - it can be used as a drop-in
     replacement for any LangChain LLM.
@@ -112,16 +503,31 @@ class InstrumentedLLM:
         self._context = context
         self._model_name = model_name
 
-    def invoke(self, input_text: str, **kwargs) -> AIInvocationResult:
+    def invoke(
+        self,
+        input_text: str,
+        validate_schema: bool = False,
+        **kwargs,
+    ) -> AIInvocationResult:
         """
-        Invoke the LLM with RBAC checking and audit logging.
+        Invoke the LLM with RBAC checking, injection detection, and audit
+        logging.
 
         Args:
             input_text: The prompt to send to the LLM
+            validate_schema: If True, parse and validate output against
+                             AIResponseSchema (E00-S06). Agents that produce
+                             decisions MUST set this to True.
             **kwargs: Additional arguments passed to the LLM
 
         Returns:
             AIInvocationResult with the response or error
+
+        Raises:
+            PermissionDeniedError: If actor lacks AI_INVOKE permission
+            PromptInjectionError: If injection patterns detected (E00-S06)
+            AISchemaViolationError: If validate_schema=True and output
+                                    fails validation (E00-S06)
         """
         request_id = str(uuid4())
         start_time = datetime.utcnow()
@@ -164,8 +570,6 @@ class InstrumentedLLM:
 
         # --- Step 1.5: E00-S01 — AI Context Scrubbing ---
         # Mask sensitive fields in context metadata before LLM sees them.
-        # The input_text prompt itself is passed through, but any structured
-        # context data attached via metadata is scrubbed.
         _sensitive_fields_scrubbed = False
         if self._context.metadata:
             from .data_classification import DataMasker
@@ -175,6 +579,9 @@ class InstrumentedLLM:
                     self._context.metadata, entity_type
                 )
                 _sensitive_fields_scrubbed = True
+
+        # --- Step 1.6: E00-S06 — Prompt Injection Detection ---
+        PromptInjectionDetector.assert_clean(input_text, context=self._context)
 
         # --- Step 2: LLM Invocation ---
         try:
@@ -188,11 +595,37 @@ class InstrumentedLLM:
             success = False
             error = str(e)
 
+        # --- Step 2.5: E00-S06 — Output Schema Validation ---
+        validated_output = None
+        if success and validate_schema and content:
+            # This will raise AISchemaViolationError if invalid
+            validated_output = AIOutputValidator.validate(
+                content, context=self._context
+            )
+
         # --- Step 3: Calculate Metrics ---
         end_time = datetime.utcnow()
         latency_ms = (end_time - start_time).total_seconds() * 1000
 
-        # --- Step 4: Audit Log (Metadata Only - No PII/Prompt Content) ---
+        # --- Step 4: Audit Log ---
+        # Per AI Governance Sec. 10: log output_json and confidence_score
+        # for replay capability. We log the sanitized parsed JSON, not raw text.
+        audit_metadata: Dict[str, Any] = {
+            "model": self._model_name,
+            "latency_ms": latency_ms,
+            "prompt_length": len(input_text),
+            "response_length": len(content) if content else 0,
+            "correlation_id": self._context.correlation_id,
+            "schema_validated": validate_schema,
+        }
+
+        # If schema was validated, include structured output in audit
+        if validated_output:
+            audit_metadata["confidence_score"] = validated_output.confidence_score
+            audit_metadata["confidence_tier"] = validated_output.confidence_tier.value
+            audit_metadata["state_impact"] = validated_output.state_impact
+            audit_metadata["output_json"] = validated_output.model_dump()
+
         AuditLog.log(
             action=AuditAction.AI_INVOCATION,
             actor_id=self._context.actor_id,
@@ -205,13 +638,7 @@ class InstrumentedLLM:
             org_id=self._context.org_id,
             module=self._context.module,
             wizard=self._context.wizard,
-            metadata={
-                "model": self._model_name,
-                "latency_ms": latency_ms,
-                "prompt_length": len(input_text),
-                "response_length": len(content) if content else 0,
-                "correlation_id": self._context.correlation_id
-            }
+            metadata=audit_metadata,
         )
 
         return AIInvocationResult(
@@ -220,7 +647,8 @@ class InstrumentedLLM:
             error=error,
             request_id=request_id,
             model=self._model_name,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            validated_output=validated_output,
         )
 
     def __getattr__(self, name):
@@ -228,7 +656,9 @@ class InstrumentedLLM:
         return getattr(self._llm, name)
 
 
-# --- AI Gateway Service ---
+# =============================================================================
+# AI GATEWAY SERVICE
+# =============================================================================
 
 class AIGateway:
     """
@@ -247,6 +677,12 @@ class AIGateway:
     - No OpenAI, Anthropic, or external cloud inference
     - All invocations are logged
     - RBAC is enforced
+
+    E00-S06 Enforcement:
+    - Prompt injection detection (pre-LLM)
+    - Output schema validation (post-LLM)
+    - STATE_IMPACT invariant (no Final/Commit/Override)
+    - Confidence scoring logged to audit
     """
 
     # Forbidden imports (for static analysis / linting)

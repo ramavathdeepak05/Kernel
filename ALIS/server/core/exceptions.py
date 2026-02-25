@@ -153,6 +153,62 @@ class LockdownActiveError(ALISError):
         )
 
 
+# --- E00-S06: AI Boundary Enforcement ---
+
+class AIBoundaryViolationError(ALISError):
+    """
+    Base class for AI boundary enforcement violations (E00-S06).
+
+    Raised when AI attempts to breach its operational constraints:
+    - Prompt injection detected
+    - Forbidden STATE_IMPACT value in output
+    - Invalid output schema
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_AI_BOUNDARY",
+            details=details,
+            http_status=422
+        )
+
+
+class PromptInjectionError(AIBoundaryViolationError):
+    """
+    Raised when a prompt injection attempt is detected (E00-S06).
+
+    Examples:
+    - "Ignore previous instructions"
+    - "You are now in DAN mode"
+    - System prompt override attempts
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "ERR_AI_PROMPT_INJECTION"
+
+
+class AISchemaViolationError(AIBoundaryViolationError):
+    """
+    Raised when AI output fails mandatory schema validation (E00-S06).
+
+    Examples:
+    - Missing confidence_score
+    - STATE_IMPACT set to 'Final' or 'Commit' (forbidden)
+    - Free-text response where structured JSON is required
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "ERR_AI_SCHEMA_VIOLATION"
+
+
 # --- Layer 5: Authority & RBAC ---
 
 class AuthorityError(ALISError):
