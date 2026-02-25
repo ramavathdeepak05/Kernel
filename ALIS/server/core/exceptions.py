@@ -134,6 +134,25 @@ class TenantIsolationError(ALISError):
         )
 
 
+class LockdownActiveError(ALISError):
+    """
+    Raised when an operation is blocked because the system is in
+    lockdown mode (E00-S05 — Incident Response).
+
+    Examples:
+    - Non-admin write attempt during lockdown
+    - AI invocation attempt during lockdown
+    - Session creation for non-admin during lockdown
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_LAYER4_LOCKDOWN",
+            details=details,
+            http_status=423  # Locked
+        )
+
+
 # --- Layer 5: Authority & RBAC ---
 
 class AuthorityError(ALISError):

@@ -72,6 +72,17 @@ class AuditAction(str, Enum):
     DUAL_CONTROL_REQUESTED = "dual_control_requested"
     DUAL_CONTROL_COMPLETED = "dual_control_completed"
 
+    # Incident Response & Lockdown (E00-S05)
+    LOCKDOWN_ACTIVATED = "lockdown_activated"
+    LOCKDOWN_DEACTIVATED = "lockdown_deactivated"
+    LOCKDOWN_WRITE_BLOCKED = "lockdown_write_blocked"
+    LOCKDOWN_AI_BLOCKED = "lockdown_ai_blocked"
+
+    # Data Classification (E00-S01)
+    DATA_CLASSIFIED = "data_classified"
+    SENSITIVITY_CHANGED = "sensitivity_changed"
+    SENSITIVE_ACCESS = "sensitive_access"
+
 
 # --- Audit Entry ---
 

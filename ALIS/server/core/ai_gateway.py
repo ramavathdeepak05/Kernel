@@ -126,6 +126,11 @@ class InstrumentedLLM:
         request_id = str(uuid4())
         start_time = datetime.utcnow()
 
+        # --- Step 0: Lockdown Check (E00-S05) ---
+        # During lockdown ALL AI invocations are blocked regardless of role.
+        from .lockdown import LockdownManager
+        LockdownManager.assert_ai_allowed(actor_id=self._context.actor_id)
+
         # --- Step 1: RBAC Check ---
         access_result = verify_access(
             actor_role=self._context.actor_role,
@@ -156,6 +161,20 @@ class InstrumentedLLM:
                 message=f"AI Gateway access denied: {access_result.reason}",
                 details={"violations": access_result.context_violations}
             )
+
+        # --- Step 1.5: E00-S01 — AI Context Scrubbing ---
+        # Mask sensitive fields in context metadata before LLM sees them.
+        # The input_text prompt itself is passed through, but any structured
+        # context data attached via metadata is scrubbed.
+        _sensitive_fields_scrubbed = False
+        if self._context.metadata:
+            from .data_classification import DataMasker
+            entity_type = self._context.metadata.get("entity_type", "")
+            if entity_type:
+                self._context.metadata = DataMasker.mask_for_ai_context(
+                    self._context.metadata, entity_type
+                )
+                _sensitive_fields_scrubbed = True
 
         # --- Step 2: LLM Invocation ---
         try:

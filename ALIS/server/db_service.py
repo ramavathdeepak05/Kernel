@@ -182,6 +182,12 @@ def execute_transaction(
         logger.warning("Mocking execute_transaction.")
         return
 
+    # --- E00-S05: Lockdown Write Gate (Layer 4) ---
+    # Block all state mutations when system is in lockdown mode.
+    # Admin/SuperAdmin bypass is handled inside assert_write_allowed.
+    from server.core.lockdown import LockdownManager
+    LockdownManager.assert_write_allowed()
+
     # Resolve tenant_id
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
 
