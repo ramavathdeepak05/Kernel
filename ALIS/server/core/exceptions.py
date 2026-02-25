@@ -209,6 +209,26 @@ class AISchemaViolationError(AIBoundaryViolationError):
         self.code = "ERR_AI_SCHEMA_VIOLATION"
 
 
+# --- E00-S08: Field-Level Change Tracking ---
+
+class DiffTrackingError(ALISError):
+    """
+    Raised when field-level change tracking encounters an error (E00-S08).
+
+    Examples:
+    - Entity type not registered for diff tracking
+    - Encryption failure for previous values
+    - Diff computation failure
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_DIFF_TRACKING",
+            details=details,
+            http_status=500
+        )
+
+
 # --- Layer 5: Authority & RBAC ---
 
 class AuthorityError(ALISError):
