@@ -113,6 +113,10 @@ class Permission(str, Enum):
     ESCALATION_REVOKE = "escalation:revoke"
     DUAL_CONTROL_APPROVE = "dual_control:approve"
 
+    # Data Retention & Deletion (E00-S07)
+    RETENTION_MANAGE = "retention:manage"
+    HARD_DELETE = "retention:hard_delete"
+
 
 # --- Role-Permission Mapping ---
 

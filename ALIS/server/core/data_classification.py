@@ -81,6 +81,33 @@ class RegulatedDataType(str, Enum):
     TRANSCRIPT = "TRANSCRIPT" # Academic transcripts and grade records
 
 
+class RetentionClass(str, Enum):
+    """
+    Data retention classification — E00-S07.
+
+    Defines how long a data class must be retained before archival
+    or legal deletion is permitted.
+
+        TEMPORARY   — Short-lived operational data (e.g., session tokens)
+        STANDARD    — Normal institutional data (e.g., attendance logs)
+        LONG_TERM   — Extended retention (e.g., biometric logs)
+        PERMANENT   — Never deleted (e.g., transcripts, audit records)
+    """
+    TEMPORARY = "TEMPORARY"
+    STANDARD = "STANDARD"
+    LONG_TERM = "LONG_TERM"
+    PERMANENT = "PERMANENT"
+
+
+# Default retention periods in days (None = permanent / no auto-archival)
+_DEFAULT_RETENTION_DAYS: Dict[RetentionClass, Optional[int]] = {
+    RetentionClass.TEMPORARY: 90,       # 3 months
+    RetentionClass.STANDARD: 1825,      # 5 years
+    RetentionClass.LONG_TERM: 730,      # 2 years (biometric default)
+    RetentionClass.PERMANENT: None,     # Never
+}
+
+
 # =============================================================================
 # FIELD-LEVEL CLASSIFICATION
 # =============================================================================
@@ -113,12 +140,32 @@ class EntityClassification:
 
     Captures the default sensitivity for the entity as a whole,
     plus per-field overrides for fields that differ from the default.
+
+    E00-S07 additions:
+        retention_class:  Lifecycle classification for archival
+        retention_days:   Override for auto-archival period (None = use class default)
     """
     entity_type: str
     default_sensitivity: SensitivityLevel = SensitivityLevel.INTERNAL
     default_regulated_type: RegulatedDataType = RegulatedDataType.NONE
     field_overrides: Dict[str, FieldClassification] = field(default_factory=dict)
     description: str = ""
+
+    # E00-S07: Data Retention Metadata (Layer 1)
+    retention_class: RetentionClass = RetentionClass.STANDARD
+    retention_days: Optional[int] = None  # None = use _DEFAULT_RETENTION_DAYS
+
+    @property
+    def effective_retention_days(self) -> Optional[int]:
+        """Return explicit override or class-level default. None = permanent."""
+        if self.retention_days is not None:
+            return self.retention_days
+        return _DEFAULT_RETENTION_DAYS.get(self.retention_class)
+
+    @property
+    def is_permanent(self) -> bool:
+        """True if this entity class must never be auto-archived or deleted."""
+        return self.effective_retention_days is None
 
 
 # =============================================================================
@@ -484,6 +531,7 @@ def initialize_default_classifications() -> None:
         default_sensitivity=SensitivityLevel.CONFIDENTIAL,
         default_regulated_type=RegulatedDataType.PII,
         description="User identity — contains PII (name, email)",
+        retention_class=RetentionClass.STANDARD,   # E00-S07: PII — 5 years
         field_overrides={
             "id": FieldClassification(
                 field_name="id",
@@ -548,6 +596,7 @@ def initialize_default_classifications() -> None:
         default_sensitivity=SensitivityLevel.CONFIDENTIAL,
         default_regulated_type=RegulatedDataType.PII,
         description="Notification records — contains recipient PII",
+        retention_class=RetentionClass.STANDARD,   # E00-S07: 5 years
         field_overrides={
             "recipient_address": FieldClassification(
                 field_name="recipient_address",
@@ -571,6 +620,7 @@ def initialize_default_classifications() -> None:
         entity_type="task",
         default_sensitivity=SensitivityLevel.INTERNAL,
         description="System tasks — internal operational data",
+        retention_class=RetentionClass.TEMPORARY,  # E00-S07: 90 days
     ))
 
     # --- FileMetadata (E02-S05) ---
@@ -596,6 +646,7 @@ def initialize_default_classifications() -> None:
         default_sensitivity=SensitivityLevel.REGULATED,
         default_regulated_type=RegulatedDataType.TRANSCRIPT,
         description="Official documents (transcripts, certificates) — REGULATED",
+        retention_class=RetentionClass.PERMANENT,  # E00-S07: Transcripts are permanent
         field_overrides={
             "document_id": FieldClassification(
                 field_name="document_id",
@@ -613,6 +664,7 @@ def initialize_default_classifications() -> None:
         entity_type="audit_entry",
         default_sensitivity=SensitivityLevel.INTERNAL,
         description="Audit logs — metadata is INTERNAL, contents may be masked",
+        retention_class=RetentionClass.PERMANENT,  # E00-S07: Audit records are permanent
         field_overrides={
             "metadata": FieldClassification(
                 field_name="metadata",
@@ -621,6 +673,32 @@ def initialize_default_classifications() -> None:
                 mask_in_ai=True,
             ),
         },
+    ))
+
+    # --- E00-S07: Biometric Attendance Logs ---
+    EntityClassificationRegistry.register(EntityClassification(
+        entity_type="biometric_log",
+        default_sensitivity=SensitivityLevel.REGULATED,
+        default_regulated_type=RegulatedDataType.BIOMETRIC,
+        description="Biometric attendance logs — REGULATED, 2-year retention",
+        retention_class=RetentionClass.LONG_TERM,  # E00-S07: Biometric = 2 years
+    ))
+
+    # --- E00-S07: Attendance Records ---
+    EntityClassificationRegistry.register(EntityClassification(
+        entity_type="attendance_record",
+        default_sensitivity=SensitivityLevel.INTERNAL,
+        description="Daily attendance records — 5-year retention",
+        retention_class=RetentionClass.STANDARD,   # E00-S07: Attendance = 5 years
+    ))
+
+    # --- E00-S07: Financial Records ---
+    EntityClassificationRegistry.register(EntityClassification(
+        entity_type="financial_record",
+        default_sensitivity=SensitivityLevel.REGULATED,
+        default_regulated_type=RegulatedDataType.FINANCE,
+        description="Fee payments, ledger entries — REGULATED, permanent",
+        retention_class=RetentionClass.PERMANENT,  # E00-S07: Financial = permanent
     ))
 
     logger.info(

@@ -45,6 +45,7 @@ class LockType(str, Enum):
     EXAM_ELIGIBILITY = "exam_eligibility"
     LIBRARY_DUES = "library_dues"
     HOSTEL_DUES = "hostel_dues"
+    ARCHIVED_RECORD = "archived_record"  # E00-S07: Prevents mutation of archived data
     CUSTOM = "custom"
 
 
@@ -216,12 +217,35 @@ def _check_disciplinary_hold(entity_id: str, context: Optional[Dict] = None) -> 
     return LockStatus(is_locked=False)
 
 
+def _check_archived_record(entity_id: str, context: Optional[Dict] = None) -> LockStatus:
+    """
+    E00-S07: Check if entity is archived.
+
+    Archived records are permanently frozen — no module may update
+    or delete them without going through the legal deletion workflow.
+    This lock is evaluated BEFORE all decisions (Layer 4 invariant).
+    """
+    context = context or {}
+    is_archived = context.get("is_archived", False)
+    status = context.get("status", "")
+
+    if is_archived or str(status).upper() == "ARCHIVED":
+        return LockStatus(
+            is_locked=True,
+            lock_type=LockType.ARCHIVED_RECORD,
+            reason="Record is permanently archived — mutations are blocked (E00-S07)",
+            details={"entity_id": entity_id, "archival_lock": True}
+        )
+    return LockStatus(is_locked=False)
+
+
 # --- Register Default Locks ---
 
 GlobalLockRegistry.register_lock(LockType.FINANCIAL_DUES, _check_financial_dues)
 GlobalLockRegistry.register_lock(LockType.ATTENDANCE_SHORTAGE, _check_attendance_shortage)
 GlobalLockRegistry.register_lock(LockType.DOCUMENT_INCOMPLETE, _check_document_incomplete)
 GlobalLockRegistry.register_lock(LockType.DISCIPLINARY_HOLD, _check_disciplinary_hold)
+GlobalLockRegistry.register_lock(LockType.ARCHIVED_RECORD, _check_archived_record)  # E00-S07
 
 
 # --- Convenience Function (Used in Rule Engines) ---

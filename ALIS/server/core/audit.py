@@ -119,6 +119,11 @@ class AuditAction(str, Enum):
     SENSITIVITY_CHANGED = "sensitivity_changed"
     SENSITIVE_ACCESS = "sensitive_access"
 
+    # Data Retention & Deletion (E00-S07)
+    ARCHIVE = "archive"
+    HARD_DELETE = "hard_delete"
+    RETENTION_POLICY_APPLIED = "retention_policy_applied"
+
 
 # ============================================================================
 # AUDIT ENTRY (immutable value object)

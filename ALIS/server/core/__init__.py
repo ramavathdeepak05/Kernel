@@ -50,6 +50,11 @@ from .data_classification import (  # E00-S01
     SensitivityLevel, RegulatedDataType, FieldClassification,
     EntityClassificationRegistry, DataMasker, encryption_required,
     initialize_default_classifications,
+    RetentionClass,  # E00-S07
+)
+from .retention_policy import (  # E00-S07
+    ArchivalService, RetentionService, RetentionMatrix,
+    RetentionAuditReport, ArchivalStatus, DeletionStatus,
 )
 
 __all__ = [
@@ -88,5 +93,9 @@ __all__ = [
     "SensitivityLevel", "RegulatedDataType", "FieldClassification",
     "EntityClassificationRegistry", "DataMasker", "encryption_required",
     "initialize_default_classifications",
+    # Data Retention & Deletion (E00-S07)
+    "RetentionClass", "ArchivalService", "RetentionService",
+    "RetentionMatrix", "RetentionAuditReport",
+    "ArchivalStatus", "DeletionStatus",
 ]
 
