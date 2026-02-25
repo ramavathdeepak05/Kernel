@@ -22,6 +22,8 @@ from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel, Field
 
+from .data_classification import SensitivityLevel, RegulatedDataType
+
 
 # --- Enums ---
 
@@ -69,10 +71,22 @@ class BaseEntity(BaseModel):
     """
     Base entity with common fields for all ALIS models.
     Enforces immutable ID and audit timestamps.
+
+    E00-S01: All entities carry sensitivity metadata.
     """
     id: str = Field(default_factory=lambda: str(uuid4()), frozen=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
+
+    # E00-S01: Data Classification (Layer 1 metadata extension)
+    sensitivity_level: SensitivityLevel = Field(
+        default=SensitivityLevel.INTERNAL,
+        description="Data sensitivity classification (E00-S01)",
+    )
+    regulated_data_type: RegulatedDataType = Field(
+        default=RegulatedDataType.NONE,
+        description="Regulated data sub-category (E00-S01)",
+    )
 
     class Config:
         frozen = False  # Allow updates to non-frozen fields
@@ -94,7 +108,12 @@ class User(BaseEntity):
     - [x] Status lifecycle: ACTIVE, SUSPENDED, ARCHIVED
     - [x] No domain-specific fields
     - [x] Soft-delete only (status -> ARCHIVED)
+    - [x] E00-S01: Sensitivity = CONFIDENTIAL, Regulated = PII
     """
+    # E00-S01: User data is CONFIDENTIAL (PII)
+    sensitivity_level: SensitivityLevel = SensitivityLevel.CONFIDENTIAL
+    regulated_data_type: RegulatedDataType = RegulatedDataType.PII
+
     # Identity
     username: str = Field(..., min_length=3, max_length=64)
     email: Optional[str] = None
@@ -171,7 +190,13 @@ class NotificationLog(BaseEntity):
     LAYER: Layer 6 (Resilience)
 
     Tracks all notification send attempts with status, retries, and errors.
+
+    E00-S01: Contains recipient PII (addresses) — CONFIDENTIAL.
     """
+    # E00-S01: Notification logs contain PII
+    sensitivity_level: SensitivityLevel = SensitivityLevel.CONFIDENTIAL
+    regulated_data_type: RegulatedDataType = RegulatedDataType.PII
+
     # Target
     recipient_id: str = Field(..., description="User ID of recipient")
     recipient_address: str = Field(..., description="Email/Phone number")

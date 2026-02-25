@@ -13,6 +13,8 @@ This package contains the foundational platform components:
 - config: System configuration registry
 - tenant_crypto: Tenant-specific encryption (E00-S03)
 - escalation: Privilege escalation & dual control (E00-S04)
+- lockdown: Incident response & lockdown mode (E00-S05)
+- data_classification: Data sensitivity model (E00-S01)
 """
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
@@ -33,11 +35,20 @@ from .security import (
     set_tenant_context, get_current_tenant_id, clear_tenant_context,
 )
 from .config import ConfigRegistry, ConfigCategory, ConfigEntry
-from .exceptions import TenantIsolationError, EscalationDeniedError, DualControlRequiredError
+from .exceptions import (
+    TenantIsolationError, EscalationDeniedError, DualControlRequiredError,
+    LockdownActiveError,  # E00-S05
+)
 from .tenant_crypto import TenantKeyManager
 from .escalation import (
     EscalationService, ElevatedAccessToken, EscalationState,
     DualControlGuard, CriticalOperation
+)
+from .lockdown import LockdownManager, LockdownEvent, LOCKDOWN_IMMUNE_ROLES  # E00-S05
+from .data_classification import (  # E00-S01
+    SensitivityLevel, RegulatedDataType, FieldClassification,
+    EntityClassificationRegistry, DataMasker, encryption_required,
+    initialize_default_classifications,
 )
 
 __all__ = [
@@ -69,5 +80,12 @@ __all__ = [
     "EscalationService", "ElevatedAccessToken", "EscalationState",
     "DualControlGuard", "CriticalOperation",
     "EscalationDeniedError", "DualControlRequiredError",
+    # Incident Response & Lockdown (E00-S05)
+    "LockdownManager", "LockdownEvent", "LockdownActiveError",
+    "LOCKDOWN_IMMUNE_ROLES",
+    # Data Classification & Sensitivity (E00-S01)
+    "SensitivityLevel", "RegulatedDataType", "FieldClassification",
+    "EntityClassificationRegistry", "DataMasker", "encryption_required",
+    "initialize_default_classifications",
 ]
 
