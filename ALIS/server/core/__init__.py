@@ -14,6 +14,7 @@ This package contains the foundational platform components:
 - tenant_crypto: Tenant-specific encryption (E00-S03)
 - escalation: Privilege escalation & dual control (E00-S04)
 - lockdown: Incident response & lockdown mode (E00-S05)
+- diff_tracker: Field-level change tracking (E00-S08)
 - data_classification: Data sensitivity model (E00-S01)
 """
 
@@ -39,6 +40,7 @@ from .config import ConfigRegistry, ConfigCategory, ConfigEntry
 from .exceptions import (
     TenantIsolationError, EscalationDeniedError, DualControlRequiredError,
     LockdownActiveError,  # E00-S05
+    DiffTrackingError,  # E00-S08
 )
 from .tenant_crypto import TenantKeyManager
 from .escalation import (
@@ -55,6 +57,10 @@ from .data_classification import (  # E00-S01
 from .retention_policy import (  # E00-S07
     ArchivalService, RetentionService, RetentionMatrix,
     RetentionAuditReport, ArchivalStatus, DeletionStatus,
+)
+from .diff_tracker import (  # E00-S08
+    compute_and_log_field_diffs, get_decrypted_field_diffs,
+    TRACKED_ENTITIES, is_tracked_entity,
 )
 
 __all__ = [
@@ -97,5 +103,8 @@ __all__ = [
     "RetentionClass", "ArchivalService", "RetentionService",
     "RetentionMatrix", "RetentionAuditReport",
     "ArchivalStatus", "DeletionStatus",
+    # Field-Level Change Tracking (E00-S08)
+    "compute_and_log_field_diffs", "get_decrypted_field_diffs",
+    "TRACKED_ENTITIES", "is_tracked_entity", "DiffTrackingError",
 ]
 

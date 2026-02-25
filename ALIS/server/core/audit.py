@@ -124,6 +124,9 @@ class AuditAction(str, Enum):
     HARD_DELETE = "hard_delete"
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
 
+    # Field-Level Change Tracking (E00-S08)
+    FIELD_CHANGE = "field_change"
+
 
 # ============================================================================
 # AUDIT ENTRY (immutable value object)
