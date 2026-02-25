@@ -153,6 +153,28 @@ class LockdownActiveError(ALISError):
         )
 
 
+class PolicyResolutionError(ALISError):
+    """
+    Raised when the Policy Resolver cannot find an active policy
+    for the requested type/tenant/date (E00-S10 — Layer 4 enforcement).
+
+    This error blocks execution of any rule or institutional decision
+    that requires a governing policy. No module may bypass this check.
+
+    Examples:
+    - No ACTIVATED policy exists for 'attendance_threshold'
+    - Policy effective_from/effective_to does not cover the decision date
+    - Tenant has no policies configured for the requested type
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_E00S10_POLICY_RESOLUTION",
+            details=details,
+            http_status=428  # Precondition Required
+        )
+
+
 # --- E00-S06: AI Boundary Enforcement ---
 
 class AIBoundaryViolationError(ALISError):
