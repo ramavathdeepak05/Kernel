@@ -89,6 +89,10 @@ class AuditAction(str, Enum):
     # AI Gateway (E03-S01)
     AI_INVOCATION = "ai_invocation"
 
+    # AI Boundary Enforcement (E00-S06)
+    AI_PROMPT_INJECTION = "ai_prompt_injection"
+    AI_SCHEMA_REJECTED = "ai_schema_rejected"
+
     # System
     CONFIG_CHANGE = "config_change"
     LOCK_TRIGGERED = "lock_triggered"
@@ -114,6 +118,11 @@ class AuditAction(str, Enum):
     DATA_CLASSIFIED = "data_classified"
     SENSITIVITY_CHANGED = "sensitivity_changed"
     SENSITIVE_ACCESS = "sensitive_access"
+
+    # Data Retention & Deletion (E00-S07)
+    ARCHIVE = "archive"
+    HARD_DELETE = "hard_delete"
+    RETENTION_POLICY_APPLIED = "retention_policy_applied"
 
 
 # ============================================================================
