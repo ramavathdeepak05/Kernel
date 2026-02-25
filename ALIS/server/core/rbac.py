@@ -117,6 +117,12 @@ class Permission(str, Enum):
     RETENTION_MANAGE = "retention:manage"
     HARD_DELETE = "retention:hard_delete"
 
+    # Policy Governance (E00-S09)
+    POLICY_DRAFT = "policy:draft"
+    POLICY_SUBMIT = "policy:submit"
+    POLICY_APPROVE = "policy:approve"
+    POLICY_READ = "policy:read"
+
 
 # --- Role-Permission Mapping ---
 
@@ -157,6 +163,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.OVERRIDE_APPROVE,
         Permission.ESCALATION_REQUEST,   # E00-S04
         Permission.DUAL_CONTROL_APPROVE, # E00-S04
+        Permission.POLICY_READ,          # E00-S09
     ],
     Role.FINANCE_OFFICER: [
         Permission.FEE_READ,
@@ -179,6 +186,10 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.ESCALATION_GRANT,     # E00-S04
         Permission.ESCALATION_REVOKE,    # E00-S04
         Permission.DUAL_CONTROL_APPROVE, # E00-S04
+        Permission.POLICY_DRAFT,    # E00-S09
+        Permission.POLICY_SUBMIT,   # E00-S09
+        Permission.POLICY_APPROVE,  # E00-S09
+        Permission.POLICY_READ,     # E00-S09
     ],
     Role.SUPER_ADMIN: [
         # Super admin has all permissions
