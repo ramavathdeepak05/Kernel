@@ -26,13 +26,14 @@ from .state_registry import (
 )
 from .locks import LockType, LockStatus, check_global_locks, GlobalLockRegistry
 from .overrides import Override, OverrideType, OverrideSeverity, OverrideService
-from .audit import AuditLog, AuditAction, AuditEntry
+from .audit import AuditLog, AuditLedger, AuditAction, AuditEntry
 from .security import (
     PasswordHasher, TokenGenerator, SessionManager, Session,
     FailedLoginTracker, RateLimiter, InputValidator, SecurityException,
     # E00-S03: Tenant Isolation
     TenantMiddleware, TenantContext,
     set_tenant_context, get_current_tenant_id, clear_tenant_context,
+    AuditMiddleware, # E00-S02
 )
 from .config import ConfigRegistry, ConfigCategory, ConfigEntry
 from .exceptions import (
@@ -66,14 +67,14 @@ __all__ = [
     # Overrides
     "Override", "OverrideType", "OverrideSeverity", "OverrideService",
     # Audit
-    "AuditLog", "AuditAction", "AuditEntry",
+    "AuditLog", "AuditLedger", "AuditAction", "AuditEntry",
     # Security
     "PasswordHasher", "TokenGenerator", "SessionManager", "Session",
     "FailedLoginTracker", "RateLimiter", "InputValidator", "SecurityException",
     # Tenant Isolation (E00-S03)
     "TenantMiddleware", "TenantContext", "TenantIsolationError",
     "set_tenant_context", "get_current_tenant_id", "clear_tenant_context",
-    "TenantKeyManager",
+    "TenantKeyManager", "AuditMiddleware",
     # Config
     "ConfigRegistry", "ConfigCategory", "ConfigEntry",
     # Escalation & Dual Control (E00-S04)

@@ -584,3 +584,71 @@ class TenantMiddleware:
         finally:
             # Always clean up the ContextVar
             _current_tenant_id.reset(token)
+
+
+# ============================================================================
+# E00-S02: AUDIT MIDDLEWARE
+# ============================================================================
+# Epic Constraint: "All modules inherit audit middleware"
+# All state-mutating requests (POST, PUT, PATCH, DELETE) are logged.
+# ============================================================================
+
+class AuditMiddleware:
+    """
+    Middleware that ensures all write API requests automatically generate
+    an audit log entry, regardless of whether the business logic explicitly
+    calls the audit logger.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "").upper()
+        # Only mutate actions are globally logged by the middleware
+        # (Read actions are too voluminous, specific reads like PII are logged manually)
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            path = scope.get("path", "")
+            
+            # Extract basic actor details from auth state if present
+            actor_id = "unknown"
+            actor_role = "unknown"
+            if hasattr(scope, 'state') and getattr(scope.state, 'session', None):
+                actor_id = scope.state.session.user_id
+                
+                # Role usually lives on the user or token, but middleware might just
+                # have the session. We use "api_user" as a fallback until the actual
+                # RBAC decorator resolves the true role.
+                actor_role = getattr(scope.state, 'user_role', "api_user")
+
+            # Try to get tenant_id (might not be set if TenantMiddleware runs after, 
+            # ideally AuditMiddleware runs AFTER TenantMiddleware).
+            try:
+                tenant_id = get_current_tenant_id()
+            except Exception:
+                tenant_id = "SYSTEM"
+
+            # Determine action type
+            action = AuditAction.UPDATE
+            if method == "POST":
+                action = AuditAction.CREATE
+            elif method == "DELETE":
+                action = AuditAction.DELETE
+
+            # Log the request attempt
+            AuditLog.log(
+                action=action,
+                actor_id=actor_id,
+                actor_role=actor_role,
+                entity_type="api_route",
+                entity_id=path,
+                tenant_id=tenant_id,
+                metadata={"http_method": method, "trigger": "audit_middleware"}
+            )
+
+        # Proceed with the request
+        await self.app(scope, receive, send)
