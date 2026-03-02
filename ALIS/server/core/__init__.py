@@ -65,6 +65,10 @@ from .diff_tracker import (  # E00-S08
     compute_and_log_field_diffs, get_decrypted_field_diffs,
     TRACKED_ENTITIES, is_tracked_entity,
 )
+from .ai_gateway import (  # E03-S01
+    AIGateway, AIGatewayContext, AIInvocationResult, InstrumentedLLM,
+    AIResponseSchema, AIOutputValidator, PromptInjectionDetector,
+    ConfidenceTier, StateImpact,
 from .policy_service import PolicyService, PolicyStatus  # E00-S09
 from .policy_resolver import (  # E00-S10
     PolicyResolverCache, RequirePolicy, resolve_policy_for_rule,
@@ -114,6 +118,10 @@ __all__ = [
     # Field-Level Change Tracking (E00-S08)
     "compute_and_log_field_diffs", "get_decrypted_field_diffs",
     "TRACKED_ENTITIES", "is_tracked_entity", "DiffTrackingError",
+    # AI Gateway (E03-S01)
+    "AIGateway", "AIGatewayContext", "AIInvocationResult", "InstrumentedLLM",
+    "AIResponseSchema", "AIOutputValidator", "PromptInjectionDetector",
+    "ConfidenceTier", "StateImpact",
     # Policy Governance (E00-S09)
     "PolicyService", "PolicyStatus",
     # Policy Resolver Middleware (E00-S10)
