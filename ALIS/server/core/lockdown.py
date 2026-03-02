@@ -29,7 +29,7 @@ Acceptance Criteria (E00-S05):
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 from uuid import uuid4
 
@@ -53,7 +53,7 @@ class LockdownEvent:
     actor_id: str = ""
     actor_role: str = ""
     reason: str = ""
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sessions_revoked: int = 0  # Number of sessions killed on activation
     metadata: Optional[Dict[str, Any]] = None
 
@@ -179,7 +179,7 @@ class LockdownManager:
 
         # --- Step 1: Flip the flag ---
         cls._active = True
-        cls._activated_at = datetime.utcnow()
+        cls._activated_at = datetime.now(timezone.utc)
         cls._activated_by = actor_id
         cls._activation_reason = reason
 

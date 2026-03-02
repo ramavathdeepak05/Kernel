@@ -28,7 +28,7 @@ domain-specific logic. The engine itself contains NO domain logic.
 
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .state_registry import StateRegistry, WorkflowState, TransitionResult
 from .audit import AuditLog, AuditAction
@@ -281,10 +281,10 @@ class BaseWorkflow(ABC):
         # Execute transition
         previous_state = current.value
         self.instance.current_state = new_state
-        self.instance.updated_at = datetime.utcnow()
+        self.instance.updated_at = datetime.now(timezone.utc)
 
         if new_state in (WorkflowState.COMPLETED, WorkflowState.FAILED, WorkflowState.CLOSED):
-            self.instance.completed_at = datetime.utcnow()
+            self.instance.completed_at = datetime.now(timezone.utc)
 
         # Audit: Log state transition
         self._log_audit(

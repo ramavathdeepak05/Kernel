@@ -29,7 +29,7 @@ Acceptance Criteria:
 """
 
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
 from enum import Enum
@@ -128,7 +128,7 @@ class ApprovalAction:
     approver_id: str = ""
     approver_role: Role = Role.ADMIN
     action: str = "approve"  # "approve" or "reject"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     comment: Optional[str] = None
 
 
@@ -153,7 +153,7 @@ class ApprovalRequest:
 
     # State
     status: ApprovalState = ApprovalState.PENDING
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Requestor
     requested_by: str = ""
@@ -522,7 +522,7 @@ class ApprovalService:
             raise ValueError(result.reason)
 
         request.status = new_state
-        request.resolved_at = datetime.utcnow()
+        request.resolved_at = datetime.now(timezone.utc)
         request.resolution_reason = reason
 
         # Audit: State transition

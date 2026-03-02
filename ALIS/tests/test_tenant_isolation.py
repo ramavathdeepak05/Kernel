@@ -18,6 +18,7 @@ Run with:
 import sys
 import os
 import pytest
+from unittest.mock import patch, MagicMock
 
 # Ensure the ALIS package is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -30,7 +31,7 @@ from server.core.security import (
 from server.core.rbac import Role, Permission, verify_access
 from server.core.exceptions import TenantIsolationError
 from server.core.tenant_crypto import TenantKeyManager, TenantKeyEntry
-from server.core.audit import AuditLog
+from server.core.audit import AuditLog, AuditAction
 
 
 # ============================================================================
@@ -53,6 +54,19 @@ def clean_key_store():
     yield
     TenantKeyManager._keys.clear()
     TenantKeyManager._key_material.clear()
+
+
+@pytest.fixture(autouse=True)
+def mock_db():
+    """Mock database connection for all tests in this module."""
+    with patch("server.db_service.get_db_connection") as mock_get_conn:
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        # default to returning a mock ID for log()
+        mock_cursor.fetchone.return_value = {"id": "test-auto-id", "hash": "prev-hash-123"}
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cursor
+        mock_get_conn.return_value.__enter__.return_value = mock_conn
+        yield mock_get_conn
 
 
 # ============================================================================
@@ -329,16 +343,16 @@ class TestCrossTenantIsolation:
         assert result_b.allowed is True
 
     def test_audit_log_captures_tenant_context(self):
-        """Audit log entries should include org_id for tenant tracking."""
+        """Audit log entries should include tenant_id for tenant tracking."""
         entry = AuditLog.log(
-            action=AuditLog._entries[0].action if AuditLog._entries else "create",
+            action=AuditAction.CREATE,
             actor_id="user-1",
-            actor_type="human",
+            actor_role="human",
             entity_type="test",
             entity_id="test-1",
-            org_id="tenant-A",
+            tenant_id="tenant-A",
         )
-        assert entry.org_id == "tenant-A"
+        assert entry.tenant_id == "tenant-A"
 
 
 # ============================================================================

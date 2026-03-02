@@ -18,7 +18,7 @@ Constraints (from Master Handbook):
 
 from enum import Enum
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -75,7 +75,8 @@ class BaseEntity(BaseModel):
     E00-S01: All entities carry sensitivity metadata.
     """
     id: str = Field(default_factory=lambda: str(uuid4()), frozen=True)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    version: int = Field(default=1, description="Entity version for optimistic locking (Runtime Contract v1.0)")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
 
     # E00-S01: Data Classification (Layer 1 metadata extension)
@@ -138,8 +139,8 @@ class User(BaseEntity):
             raise ValueError("User is already archived.")
         self.status = UserStatus.ARCHIVED
         self.is_deleted = True
-        self.deleted_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.deleted_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
 
 
 # --- E01-S05: Organization & Tenant Isolation ---
@@ -176,8 +177,8 @@ class Organization(BaseEntity):
             raise ValueError("Organization is already archived.")
         self.status = OrganizationStatus.ARCHIVED
         self.is_deleted = True
-        self.deleted_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.deleted_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
 
 
 # --- E02-S03: Notification Log ---
@@ -281,8 +282,8 @@ class Task(BaseEntity):
             raise ValueError(f"Task is already {self.status}")
             
         self.status = TaskStatus.COMPLETED
-        self.completed_at = datetime.utcnow()
-        self.updated_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(timezone.utc)
         # If it was a role-based task, we might want to capture who actually did it
         # effectively "claiming" it. For now, we just mark it done.
 

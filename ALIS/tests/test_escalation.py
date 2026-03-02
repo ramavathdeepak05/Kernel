@@ -8,7 +8,7 @@ Tests:
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from server.core.escalation import (
@@ -90,7 +90,7 @@ class TestEscalationLifecycle:
         assert granted.expires_at is not None
         assert granted.is_active() is True
         # Expiry should be ~30 minutes from now
-        expected_expiry = datetime.utcnow() + timedelta(minutes=30)
+        expected_expiry = datetime.now(timezone.utc) + timedelta(minutes=30)
         assert abs((granted.expires_at - expected_expiry).total_seconds()) < 5
 
     def test_escalation_auto_expires(self):
@@ -109,7 +109,7 @@ class TestEscalationLifecycle:
         )
 
         # Manually set expiry to the past
-        token.expires_at = datetime.utcnow() - timedelta(minutes=1)
+        token.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
 
         # Check-on-use should detect expiry
         result = EscalationService.check_escalation(
@@ -420,7 +420,7 @@ class TestTokenValidation:
         )
 
         # Force expire
-        token.expires_at = datetime.utcnow() - timedelta(seconds=1)
+        token.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
 
         result = EscalationService.check_escalation(
             user_id="faculty_001",

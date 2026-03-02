@@ -16,6 +16,8 @@ This package contains the foundational platform components:
 - lockdown: Incident response & lockdown mode (E00-S05)
 - diff_tracker: Field-level change tracking (E00-S08)
 - data_classification: Data sensitivity model (E00-S01)
+- policy_service: Policy Governance & Registry (E00-S09)
+- policy_resolver: Policy Resolver Middleware (E00-S10)
 """
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
@@ -41,6 +43,7 @@ from .exceptions import (
     TenantIsolationError, EscalationDeniedError, DualControlRequiredError,
     LockdownActiveError,  # E00-S05
     DiffTrackingError,  # E00-S08
+    PolicyResolutionError,  # E00-S10
 )
 from .tenant_crypto import TenantKeyManager
 from .escalation import (
@@ -66,6 +69,10 @@ from .ai_gateway import (  # E03-S01
     AIGateway, AIGatewayContext, AIInvocationResult, InstrumentedLLM,
     AIResponseSchema, AIOutputValidator, PromptInjectionDetector,
     ConfidenceTier, StateImpact,
+from .policy_service import PolicyService, PolicyStatus  # E00-S09
+from .policy_resolver import (  # E00-S10
+    PolicyResolverCache, RequirePolicy, resolve_policy_for_rule,
+    build_policy_context, get_resolver_cache,
 )
 
 __all__ = [
@@ -115,5 +122,10 @@ __all__ = [
     "AIGateway", "AIGatewayContext", "AIInvocationResult", "InstrumentedLLM",
     "AIResponseSchema", "AIOutputValidator", "PromptInjectionDetector",
     "ConfidenceTier", "StateImpact",
+    # Policy Governance (E00-S09)
+    "PolicyService", "PolicyStatus",
+    # Policy Resolver Middleware (E00-S10)
+    "PolicyResolverCache", "RequirePolicy", "resolve_policy_for_rule",
+    "build_policy_context", "get_resolver_cache", "PolicyResolutionError",
 ]
 

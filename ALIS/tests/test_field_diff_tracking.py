@@ -22,58 +22,71 @@ from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock, PropertyMock
 
 # ---------------------------------------------------------------------------
-# Direct-load modules without triggering core/__init__.py
-# (same pattern as test_audit_ledger.py)
+# Direct-load modules inside a module-scoped fixture
 # ---------------------------------------------------------------------------
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
-# 1. Load exceptions.py
-_EXCEPTIONS_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "exceptions.py")
-spec_exc = importlib.util.spec_from_file_location("server.core.exceptions", _EXCEPTIONS_PATH)
-exceptions_mod = importlib.util.module_from_spec(spec_exc)
-sys.modules["server.core.exceptions"] = exceptions_mod
-spec_exc.loader.exec_module(exceptions_mod)
+@pytest.fixture(scope="module", autouse=True)
+def tracking_context():
+    """Setup tracking modules in sys.modules and globals for this module."""
+    _orig_modules = sys.modules.copy()
+    try:
+        # 1. Load exceptions.py
+        _EXCEPTIONS_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "exceptions.py")
+        spec_exc = importlib.util.spec_from_file_location("server.core.exceptions", _EXCEPTIONS_PATH)
+        exceptions_mod = importlib.util.module_from_spec(spec_exc)
+        sys.modules["server.core.exceptions"] = exceptions_mod
+        spec_exc.loader.exec_module(exceptions_mod)
 
-DiffTrackingError = exceptions_mod.DiffTrackingError
-TenantIsolationError = exceptions_mod.TenantIsolationError
+        globals()["DiffTrackingError"] = exceptions_mod.DiffTrackingError
+        globals()["TenantIsolationError"] = exceptions_mod.TenantIsolationError
 
-# 2. Load audit.py
-_AUDIT_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "audit.py")
-spec_audit = importlib.util.spec_from_file_location("server.core.audit", _AUDIT_PATH)
-audit_mod = importlib.util.module_from_spec(spec_audit)
-sys.modules["server.core.audit"] = audit_mod
-spec_audit.loader.exec_module(audit_mod)
+        # 2. Load audit.py
+        _AUDIT_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "audit.py")
+        spec_audit = importlib.util.spec_from_file_location("server.core.audit", _AUDIT_PATH)
+        audit_mod = importlib.util.module_from_spec(spec_audit)
+        sys.modules["server.core.audit"] = audit_mod
+        spec_audit.loader.exec_module(audit_mod)
 
-AuditAction = audit_mod.AuditAction
-AuditEntry = audit_mod.AuditEntry
-AuditLedger = audit_mod.AuditLedger
-compute_entry_hash = audit_mod.compute_entry_hash
+        globals()["AuditAction"] = audit_mod.AuditAction
+        globals()["AuditEntry"] = audit_mod.AuditEntry
+        globals()["AuditLedger"] = audit_mod.AuditLedger
+        globals()["compute_entry_hash"] = audit_mod.compute_entry_hash
 
-# 3. Load tenant_crypto.py (mock its audit import)
-_CRYPTO_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "tenant_crypto.py")
-spec_crypto = importlib.util.spec_from_file_location("server.core.tenant_crypto", _CRYPTO_PATH)
-crypto_mod = importlib.util.module_from_spec(spec_crypto)
-sys.modules["server.core.tenant_crypto"] = crypto_mod
-spec_crypto.loader.exec_module(crypto_mod)
+        # 3. Load tenant_crypto.py
+        _CRYPTO_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "tenant_crypto.py")
+        spec_crypto = importlib.util.spec_from_file_location("server.core.tenant_crypto", _CRYPTO_PATH)
+        crypto_mod = importlib.util.module_from_spec(spec_crypto)
+        sys.modules["server.core.tenant_crypto"] = crypto_mod
+        spec_crypto.loader.exec_module(crypto_mod)
 
-TenantKeyManager = crypto_mod.TenantKeyManager
+        globals()["TenantKeyManager"] = crypto_mod.TenantKeyManager
 
-# 4. Load diff_tracker.py
-_DIFF_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "diff_tracker.py")
-spec_diff = importlib.util.spec_from_file_location("server.core.diff_tracker", _DIFF_PATH)
-diff_mod = importlib.util.module_from_spec(spec_diff)
-sys.modules["server.core.diff_tracker"] = diff_mod
-spec_diff.loader.exec_module(diff_mod)
+        # 4. Load diff_tracker.py
+        _DIFF_PATH = os.path.join(_PROJECT_ROOT, "server", "core", "diff_tracker.py")
+        spec_diff = importlib.util.spec_from_file_location("server.core.diff_tracker", _DIFF_PATH)
+        diff_mod = importlib.util.module_from_spec(spec_diff)
+        sys.modules["server.core.diff_tracker"] = diff_mod
+        spec_diff.loader.exec_module(diff_mod)
 
-# Import the functions we're testing
-_compute_field_diffs = diff_mod._compute_field_diffs
-_encrypt_old_value = diff_mod._encrypt_old_value
-_decrypt_old_value = diff_mod._decrypt_old_value
-compute_and_log_field_diffs = diff_mod.compute_and_log_field_diffs
-get_decrypted_field_diffs = diff_mod.get_decrypted_field_diffs
-TRACKED_ENTITIES = diff_mod.TRACKED_ENTITIES
-is_tracked_entity = diff_mod.is_tracked_entity
-get_tracked_fields = diff_mod.get_tracked_fields
+        # Inject functions
+        globals()["_compute_field_diffs"] = diff_mod._compute_field_diffs
+        globals()["_encrypt_old_value"] = diff_mod._encrypt_old_value
+        globals()["_decrypt_old_value"] = diff_mod._decrypt_old_value
+        globals()["compute_and_log_field_diffs"] = diff_mod.compute_and_log_field_diffs
+        globals()["get_decrypted_field_diffs"] = diff_mod.get_decrypted_field_diffs
+        globals()["TRACKED_ENTITIES"] = diff_mod.TRACKED_ENTITIES
+        globals()["is_tracked_entity"] = diff_mod.is_tracked_entity
+        globals()["get_tracked_fields"] = diff_mod.get_tracked_fields
+
+        yield
+    finally:
+        # Restore sys.modules
+        for mod_name in list(sys.modules.keys()):
+            if mod_name not in _orig_modules:
+                del sys.modules[mod_name]
+            else:
+                sys.modules[mod_name] = _orig_modules[mod_name]
 
 
 # ============================================================================

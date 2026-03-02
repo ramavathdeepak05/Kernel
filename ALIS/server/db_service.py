@@ -447,6 +447,104 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    # --- E00-S09: Policy Registry Table ---
+    policy_registry_table_sql = """
+    CREATE TABLE IF NOT EXISTS policy_registry (
+        id VARCHAR(100) PRIMARY KEY,
+        tenant_id VARCHAR(50) NOT NULL,
+        policy_type VARCHAR(100) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        parameters JSONB NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+        effective_from TIMESTAMP WITH TIME ZONE NOT NULL,
+        effective_to TIMESTAMP WITH TIME ZONE,
+        content_hash VARCHAR(64) NOT NULL,
+        module VARCHAR(50),
+        created_by VARCHAR(100) NOT NULL,
+        submitted_by VARCHAR(100),
+        approved_by VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        submitted_at TIMESTAMP WITH TIME ZONE,
+        approved_at TIMESTAMP WITH TIME ZONE,
+        activated_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_policy_type_version_tenant
+            UNIQUE (tenant_id, policy_type, version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_policy_tenant
+        ON policy_registry(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_policy_type_status
+        ON policy_registry(tenant_id, policy_type, status);
+    CREATE INDEX IF NOT EXISTS idx_policy_effective
+        ON policy_registry(tenant_id, policy_type, effective_from, effective_to);
+    """
+
+    # --- E00-S09: Policy Immutability Guard (Layer 4) ---
+    # Prevents mutation of ACTIVATED or SUPERSEDED policies.
+    # Only status transitions FROM ACTIVATED → SUPERSEDED are allowed.
+    policy_immutability_sql = """
+    CREATE OR REPLACE FUNCTION policy_activated_guard()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        -- Allow status change ACTIVATED → SUPERSEDED (by system)
+        IF OLD.status = 'ACTIVATED' AND NEW.status = 'SUPERSEDED'
+           AND OLD.parameters::text = NEW.parameters::text
+           AND OLD.effective_from = NEW.effective_from
+           AND OLD.content_hash = NEW.content_hash
+        THEN
+            RETURN NEW;
+        END IF;
+
+        -- Block all other mutations on ACTIVATED or SUPERSEDED records
+        IF OLD.status IN ('ACTIVATED', 'SUPERSEDED') THEN
+            RAISE EXCEPTION
+                'E00-S09 VIOLATION: Cannot mutate policy in % status. '
+                'Retroactive policy modification is prohibited.',
+                OLD.status;
+            RETURN NULL;
+        END IF;
+
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_policy_immutability ON policy_registry;
+    CREATE TRIGGER trg_policy_immutability
+        BEFORE UPDATE ON policy_registry
+        FOR EACH ROW
+        EXECUTE FUNCTION policy_activated_guard();
+
+    -- Block DELETE on policy_registry entirely (soft-delete only via SUPERSEDED)
+    CREATE OR REPLACE FUNCTION policy_no_delete_guard()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        RAISE EXCEPTION
+            'E00-S09 VIOLATION: Hard deletion of policies is prohibited.';
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_policy_no_delete ON policy_registry;
+    CREATE TRIGGER trg_policy_no_delete
+        BEFORE DELETE ON policy_registry
+        FOR EACH ROW
+        EXECUTE FUNCTION policy_no_delete_guard();
+    """
+
+    # --- E00-S09: Policy RLS ---
+    policy_rls_sql = """
+    ALTER TABLE policy_registry ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS tenant_isolation_policy ON policy_registry;
+    CREATE POLICY tenant_isolation_policy ON policy_registry
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
@@ -456,11 +554,14 @@ def init_db():
             (audit_ledger_table_sql, None),
             (audit_ledger_immutability_sql, None),
             (rls_policies_sql, None),
+            (policy_registry_table_sql, None),
+            (policy_immutability_sql, None),
+            (policy_rls_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
-            "(search, activity, comments, audit_ledger + RLS policies + "
-            "immutability triggers)."
+            "(search, activity, comments, audit_ledger, policy_registry "
+            "+ RLS policies + immutability triggers)."
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")
