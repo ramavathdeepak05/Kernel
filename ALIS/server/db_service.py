@@ -545,6 +545,52 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    # --- E03-S02: LLM Model Registry Table ---
+    llm_model_registry_table_sql = """
+    CREATE TABLE IF NOT EXISTS llm_model_registry (
+        id VARCHAR(100) PRIMARY KEY,
+        tenant_id VARCHAR(50) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        version VARCHAR(50) NOT NULL,
+        capability VARCHAR(50) NOT NULL,
+        is_active BOOLEAN NOT NULL DEFAULT FALSE,
+        config JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_llm_model_tenant
+        ON llm_model_registry(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_llm_model_capability
+        ON llm_model_registry(tenant_id, capability, is_active);
+
+    -- Partial unique index: only one active model per capability per tenant
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_llm_model_active_capability
+        ON llm_model_registry(tenant_id, capability)
+        WHERE is_active = TRUE;
+    """
+
+    # --- E03-S02: LLM Model Registry RLS ---
+    llm_model_rls_sql = """
+    ALTER TABLE llm_model_registry ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS tenant_isolation_llm_models ON llm_model_registry;
+    CREATE POLICY tenant_isolation_llm_models ON llm_model_registry
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
+    # --- E03-S02: Seed initial model (qwen 1.5 Q8) ---
+    llm_model_seed_sql = """
+    INSERT INTO llm_model_registry (id, tenant_id, name, version, capability, is_active, config)
+    VALUES
+        ('seed-qwen-infer', 'default', 'qwen', '1.5-q8', 'Infer', TRUE, '{"temperature": 0.0}'::jsonb),
+        ('seed-qwen-score', 'default', 'qwen', '1.5-q8', 'Score', TRUE, '{"temperature": 0.0}'::jsonb),
+        ('seed-qwen-plan',  'default', 'qwen', '1.5-q8', 'Plan',  TRUE, '{"temperature": 0.0}'::jsonb)
+    ON CONFLICT (id) DO NOTHING;
+    """
+
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
@@ -557,11 +603,14 @@ def init_db():
             (policy_registry_table_sql, None),
             (policy_immutability_sql, None),
             (policy_rls_sql, None),
+            (llm_model_registry_table_sql, None),
+            (llm_model_rls_sql, None),
+            (llm_model_seed_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
-            "(search, activity, comments, audit_ledger, policy_registry "
-            "+ RLS policies + immutability triggers)."
+            "(search, activity, comments, audit_ledger, policy_registry, "
+            "llm_model_registry + RLS policies + immutability triggers)."
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")
