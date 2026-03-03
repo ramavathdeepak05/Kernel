@@ -55,6 +55,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from .rbac import Role, Permission, verify_access, AccessResult
 from .audit import AuditLog, AuditAction
 from .config import ConfigRegistry
+from .model_registry import ModelRegistry
 from .exceptions import (
     PermissionDeniedError,
     PromptInjectionError,
@@ -697,6 +698,7 @@ class AIGateway:
     def get_llm(
         cls,
         context: AIGatewayContext,
+        capability: Optional[str] = None,
         model_name: Optional[str] = None,
         temperature: float = 0.0
     ) -> InstrumentedLLM:
@@ -705,9 +707,17 @@ class AIGateway:
 
         This is the ONLY way to obtain an LLM instance in ALIS.
 
+        Resolution order (E03-S02 hot-swap):
+        1. Explicit `model_name` override (escape hatch for testing)
+        2. DB-backed ModelRegistry lookup by `capability` + tenant
+        3. Fallback to ConfigRegistry defaults
+
         Args:
             context: AIGatewayContext with actor and tenant information
-            model_name: Optional model override (defaults to config)
+            capability: AI role capability (Infer, Score, Plan, Execute).
+                        When provided, the active model for this
+                        capability is resolved from the Model Registry.
+            model_name: Optional explicit model override (bypasses registry)
             temperature: LLM temperature (default 0.0 for deterministic)
 
         Returns:
@@ -716,16 +726,44 @@ class AIGateway:
         Raises:
             PermissionDeniedError: If actor lacks AI_INVOKE permission
         """
-        # Get config values
+        # Get base config
         base_url = ConfigRegistry.get(
             ConfigRegistry.LLM_BASE_URL,
             "http://localhost:11434"
         )
-        default_model = ConfigRegistry.get(
-            ConfigRegistry.LLM_MODEL_NAME,
-            "llama3"
-        )
-        model = model_name or default_model
+
+        # --- E03-S02: Model Resolution ---
+        model = model_name  # Priority 1: explicit override
+
+        if model is None and capability and context.org_id:
+            # Priority 2: DB-backed Model Registry (hot-swap path)
+            try:
+                resolved = ModelRegistry.get_active_model(
+                    capability=capability,
+                    tenant_id=context.org_id,
+                )
+                if resolved:
+                    model = resolved.ollama_model_tag
+                    # Use per-model temperature if configured
+                    temperature = resolved.config.get(
+                        "temperature", temperature
+                    )
+                    logger.info(
+                        f"E03-S02: Resolved model from registry — "
+                        f"{resolved.ollama_model_tag} for {capability}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"E03-S02: ModelRegistry lookup failed, "
+                    f"falling back to config: {e}"
+                )
+
+        if model is None:
+            # Priority 3: Fallback to ConfigRegistry
+            model = ConfigRegistry.get(
+                ConfigRegistry.LLM_MODEL_NAME,
+                "llama3"
+            )
 
         # Create Ollama LLM (Local only - NO CLOUD)
         llm = OllamaLLM(

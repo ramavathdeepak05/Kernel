@@ -16,6 +16,7 @@ This package contains the foundational platform components:
 - lockdown: Incident response & lockdown mode (E00-S05)
 - diff_tracker: Field-level change tracking (E00-S08)
 - data_classification: Data sensitivity model (E00-S01)
+- model_registry: LLM Model Registry for hot-swap (E03-S02)
 - policy_service: Policy Governance & Registry (E00-S09)
 - policy_resolver: Policy Resolver Middleware (E00-S10)
 """
@@ -70,6 +71,10 @@ from .ai_gateway import (  # E03-S01
     AIResponseSchema, AIOutputValidator, PromptInjectionDetector,
     ConfidenceTier, StateImpact,
 )
+from .model_registry import (  # E03-S02
+    ModelRegistry, ModelCapability, ModelStatus,
+    LLMModelRead, LLMModelRegister, ResolvedModel,
+)
 from .policy_service import PolicyService, PolicyStatus  # E00-S09
 from .policy_resolver import (  # E00-S10
     PolicyResolverCache, RequirePolicy, resolve_policy_for_rule,
@@ -123,6 +128,9 @@ __all__ = [
     "AIGateway", "AIGatewayContext", "AIInvocationResult", "InstrumentedLLM",
     "AIResponseSchema", "AIOutputValidator", "PromptInjectionDetector",
     "ConfidenceTier", "StateImpact",
+    # Model Registry (E03-S02)
+    "ModelRegistry", "ModelCapability", "ModelStatus",
+    "LLMModelRead", "LLMModelRegister", "ResolvedModel",
     # Policy Governance (E00-S09)
     "PolicyService", "PolicyStatus",
     # Policy Resolver Middleware (E00-S10)
