@@ -683,6 +683,46 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    # --- E01-S01: Users Table ---
+    users_table_sql = """
+    CREATE TABLE IF NOT EXISTS users (
+        id          VARCHAR(100) PRIMARY KEY,
+        tenant_id   VARCHAR(50)  NOT NULL,
+        username    VARCHAR(64)  NOT NULL,
+        email       VARCHAR(255),
+        display_name VARCHAR(256),
+        password_hash VARCHAR(200) NOT NULL,
+        role        VARCHAR(50)  NOT NULL DEFAULT 'student',
+        actor_type  VARCHAR(20)  NOT NULL DEFAULT 'human',
+        status      VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+        is_deleted  BOOLEAN      NOT NULL DEFAULT FALSE,
+        deleted_at  TIMESTAMP WITH TIME ZONE,
+        created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMP WITH TIME ZONE,
+        CONSTRAINT uq_users_username_tenant UNIQUE (tenant_id, username)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_users_tenant
+        ON users(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_users_tenant_username
+        ON users(tenant_id, username)
+        WHERE is_deleted = FALSE;
+    CREATE INDEX IF NOT EXISTS idx_users_tenant_role
+        ON users(tenant_id, role)
+        WHERE is_deleted = FALSE;
+    """
+
+    # --- E01-S01: Users RLS ---
+    users_rls_sql = """
+    ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS tenant_isolation_users ON users;
+    CREATE POLICY tenant_isolation_users ON users
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
     # --- E03-S03: Seed Admissions Prompts ---
     prompt_seed_sql = """
     INSERT INTO prompt_registry (
@@ -723,9 +763,100 @@ def init_db():
     ON CONFLICT (id) DO NOTHING;
     """
 
+    # --- E01-S03: Dynamic Role Management Tables ---
+
+    custom_roles_table_sql = """
+    CREATE TABLE IF NOT EXISTS custom_roles (
+        id          VARCHAR(100) PRIMARY KEY,
+        tenant_id   VARCHAR(50)  NOT NULL,
+        module      VARCHAR(20)  NOT NULL,
+        role_name   VARCHAR(100) NOT NULL,
+        description TEXT,
+        status      VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+        created_by  VARCHAR(100) NOT NULL,
+        created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_custom_role_name_tenant UNIQUE (tenant_id, role_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_custom_roles_tenant
+        ON custom_roles(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_custom_roles_tenant_module
+        ON custom_roles(tenant_id, module);
+    CREATE INDEX IF NOT EXISTS idx_custom_roles_tenant_status
+        ON custom_roles(tenant_id, status);
+    """
+
+    custom_role_permissions_table_sql = """
+    CREATE TABLE IF NOT EXISTS custom_role_permissions (
+        id           VARCHAR(100) PRIMARY KEY,
+        tenant_id    VARCHAR(50)  NOT NULL,
+        role_id      VARCHAR(100) NOT NULL REFERENCES custom_roles(id) ON DELETE CASCADE,
+        permission   VARCHAR(100) NOT NULL,
+        status       VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+        requested_by VARCHAR(100) NOT NULL,
+        requested_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        reviewed_by  VARCHAR(100),
+        reviewed_at  TIMESTAMP WITH TIME ZONE,
+        review_note  TEXT,
+        CONSTRAINT uq_custom_role_permission UNIQUE (role_id, permission)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_crp_role_id
+        ON custom_role_permissions(role_id);
+    CREATE INDEX IF NOT EXISTS idx_crp_tenant_status
+        ON custom_role_permissions(tenant_id, status);
+    CREATE INDEX IF NOT EXISTS idx_crp_permission_status
+        ON custom_role_permissions(permission, status);
+    """
+
+    user_custom_roles_table_sql = """
+    CREATE TABLE IF NOT EXISTS user_custom_roles (
+        id          VARCHAR(100) PRIMARY KEY,
+        tenant_id   VARCHAR(50)  NOT NULL,
+        user_id     VARCHAR(100) NOT NULL,
+        role_id     VARCHAR(100) NOT NULL REFERENCES custom_roles(id) ON DELETE CASCADE,
+        assigned_by VARCHAR(100) NOT NULL,
+        assigned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_user_custom_role UNIQUE (user_id, role_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ucr_user_id
+        ON user_custom_roles(user_id);
+    CREATE INDEX IF NOT EXISTS idx_ucr_tenant
+        ON user_custom_roles(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_ucr_role_id
+        ON user_custom_roles(role_id);
+    """
+
+    custom_roles_rls_sql = """
+    ALTER TABLE custom_roles ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_custom_roles ON custom_roles;
+    CREATE POLICY tenant_isolation_custom_roles ON custom_roles
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE custom_role_permissions ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_custom_role_perms ON custom_role_permissions;
+    CREATE POLICY tenant_isolation_custom_role_perms ON custom_role_permissions
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE user_custom_roles ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_user_custom_roles ON user_custom_roles;
+    CREATE POLICY tenant_isolation_user_custom_roles ON user_custom_roles
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
+            (users_table_sql, None),
+            (users_rls_sql, None),
             (search_table_sql, None),
             (activity_table_sql, None),
             (comments_table_sql, None),
@@ -742,12 +873,16 @@ def init_db():
             (prompt_immutability_sql, None),
             (prompt_rls_sql, None),
             (prompt_seed_sql, None),
+            (custom_roles_table_sql, None),
+            (custom_role_permissions_table_sql, None),
+            (user_custom_roles_table_sql, None),
+            (custom_roles_rls_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
-            "(search, activity, comments, audit_ledger, policy_registry, "
-            "llm_model_registry, prompt_registry "
-            "+ RLS policies + immutability triggers)."
+            "(users, search, activity, comments, audit_ledger, policy_registry, "
+            "llm_model_registry, prompt_registry, custom_roles, custom_role_permissions, "
+            "user_custom_roles + RLS policies + immutability triggers)."
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")

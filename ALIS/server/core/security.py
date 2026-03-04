@@ -503,8 +503,9 @@ class TenantMiddleware:
     EXEMPT_PATHS = {
         "/health",
         "/api/auth/login",
-        "/api/auth/register",
+        "/api/auth/bootstrap",
         "/docs",
+        "/redoc",
         "/openapi.json",
     }
 

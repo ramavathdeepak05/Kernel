@@ -20,6 +20,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from server.core.error_handlers import register_exception_handlers
+from server.api.auth_router import router as auth_router
+from server.api.users_router import router as users_router
+from server.api.roles_router import router as roles_router
 from server.api.audit_router import router as audit_router
 from server.api.gateway_router import router as gateway_router
 
@@ -55,6 +58,9 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     # --- Routers ---
+    app.include_router(auth_router)
+    app.include_router(users_router)
+    app.include_router(roles_router)
     app.include_router(audit_router)
     app.include_router(gateway_router)
 

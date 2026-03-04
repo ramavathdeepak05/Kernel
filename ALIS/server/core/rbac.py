@@ -52,6 +52,16 @@ class Role(str, Enum):
     SUPER_ADMIN = "super_admin"
     DEAN_ELEVATED = "dean_elevated"  # E00-S04: Temporary elevated role
 
+    # Module Manager Roles — one per module, created by SUPER_ADMIN
+    M1_MANAGER = "m1_manager"  # Admissions & Marketing
+    M2_MANAGER = "m2_manager"  # Academics
+    M3_MANAGER = "m3_manager"  # Examinations
+    M4_MANAGER = "m4_manager"  # Finance
+    M5_MANAGER = "m5_manager"  # HR & Payroll
+    M6_MANAGER = "m6_manager"  # Student Services
+    M7_MANAGER = "m7_manager"  # Regulatory & Quality
+    M8_MANAGER = "m8_manager"  # Research
+
     # System Roles
     AI_AGENT = "ai_agent"
     SYSTEM = "system"
@@ -122,6 +132,35 @@ class Permission(str, Enum):
     POLICY_SUBMIT = "policy:submit"
     POLICY_APPROVE = "policy:approve"
     POLICY_READ = "policy:read"
+
+    # M5 — HR & Payroll
+    STAFF_READ = "staff:read"
+    STAFF_CREATE = "staff:create"
+    STAFF_UPDATE = "staff:update"
+    LEAVE_APPROVE = "leave:approve"
+    PAYROLL_READ = "payroll:read"
+    PAYROLL_PROCESS = "payroll:process"
+
+    # M6 — Student Services
+    SERVICE_READ = "service:read"
+    SERVICE_MANAGE = "service:manage"
+    HOSTEL_MANAGE = "hostel:manage"
+    TRANSPORT_MANAGE = "transport:manage"
+
+    # M7 — Regulatory & Quality
+    COMPLIANCE_READ = "compliance:read"
+    COMPLIANCE_SUBMIT = "compliance:submit"
+    GRIEVANCE_MANAGE = "grievance:manage"
+
+    # M8 — Research
+    RESEARCH_READ = "research:read"
+    RESEARCH_CREATE = "research:create"
+    RESEARCH_SUBMIT = "research:submit"
+
+    # Dynamic Role Management
+    ROLE_CREATE = "role:create"
+    ROLE_MANAGE = "role:manage"
+    ROLE_APPROVE = "role:approve"
 
 
 # --- Role-Permission Mapping ---
@@ -208,7 +247,154 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         # System has all permissions for internal operations
         *[p for p in Permission]
     ],
+
+    # --- Module Manager Roles ---
+    # Each manager owns their module's permissions + cross-cutting management rights.
+    # SUPER_ADMIN assigns manager roles; managers create dynamic roles within their scope.
+
+    Role.M1_MANAGER: [
+        Permission.STUDENT_READ, Permission.STUDENT_CREATE,
+        Permission.STUDENT_UPDATE, Permission.STUDENT_READ_PII,
+        Permission.USER_READ, Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
+        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M2_MANAGER: [
+        Permission.COURSE_READ, Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
+        Permission.MARKS_READ, Permission.MARKS_ENTRY, Permission.MARKS_FINALIZE,
+        Permission.STUDENT_READ, Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ, Permission.AI_INVOKE,
+        Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M3_MANAGER: [
+        Permission.EXAM_PAPER_READ, Permission.EXAM_PAPER_CREATE,
+        Permission.HALL_TICKET_GENERATE, Permission.RESULT_PUBLISH,
+        Permission.STUDENT_READ, Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
+        Permission.DUAL_CONTROL_APPROVE, Permission.POLICY_READ,
+        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M4_MANAGER: [
+        Permission.FEE_READ, Permission.FEE_CREATE,
+        Permission.PAYMENT_PROCESS, Permission.LEDGER_READ,
+        Permission.STUDENT_READ, Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
+        Permission.DUAL_CONTROL_APPROVE, Permission.POLICY_READ,
+        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M5_MANAGER: [
+        Permission.STAFF_READ, Permission.STAFF_CREATE, Permission.STAFF_UPDATE,
+        Permission.LEAVE_APPROVE, Permission.PAYROLL_READ, Permission.PAYROLL_PROCESS,
+        Permission.USER_READ, Permission.USER_CREATE, Permission.USER_UPDATE,
+        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
+        Permission.DUAL_CONTROL_APPROVE, Permission.POLICY_READ,
+        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M6_MANAGER: [
+        Permission.SERVICE_READ, Permission.SERVICE_MANAGE,
+        Permission.HOSTEL_MANAGE, Permission.TRANSPORT_MANAGE,
+        Permission.STUDENT_READ, Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ, Permission.AI_INVOKE,
+        Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M7_MANAGER: [
+        Permission.COMPLIANCE_READ, Permission.COMPLIANCE_SUBMIT,
+        Permission.GRIEVANCE_MANAGE, Permission.AUDIT_LOG_READ,
+        Permission.USER_READ, Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
+        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
+    Role.M8_MANAGER: [
+        Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
+        Permission.USER_READ, Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
+        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
 }
+
+
+# =============================================================================
+# MODULE ↔ PERMISSION OWNERSHIP MAPS
+# =============================================================================
+# Defines which permissions belong to which module.
+# Module Managers can ONLY grant permissions within their module's scope.
+# Cross-module permission requests require the owning module manager's approval.
+
+MODULE_PERMISSIONS: Dict[str, List[Permission]] = {
+    "M1": [
+        Permission.STUDENT_READ, Permission.STUDENT_CREATE,
+        Permission.STUDENT_UPDATE, Permission.STUDENT_READ_PII,
+    ],
+    "M2": [
+        Permission.COURSE_READ, Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
+        Permission.MARKS_READ, Permission.MARKS_ENTRY, Permission.MARKS_FINALIZE,
+    ],
+    "M3": [
+        Permission.EXAM_PAPER_READ, Permission.EXAM_PAPER_CREATE,
+        Permission.HALL_TICKET_GENERATE, Permission.RESULT_PUBLISH,
+    ],
+    "M4": [
+        Permission.FEE_READ, Permission.FEE_CREATE,
+        Permission.PAYMENT_PROCESS, Permission.LEDGER_READ,
+    ],
+    "M5": [
+        Permission.STAFF_READ, Permission.STAFF_CREATE, Permission.STAFF_UPDATE,
+        Permission.LEAVE_APPROVE, Permission.PAYROLL_READ, Permission.PAYROLL_PROCESS,
+    ],
+    "M6": [
+        Permission.SERVICE_READ, Permission.SERVICE_MANAGE,
+        Permission.HOSTEL_MANAGE, Permission.TRANSPORT_MANAGE,
+    ],
+    "M7": [
+        Permission.COMPLIANCE_READ, Permission.COMPLIANCE_SUBMIT,
+        Permission.GRIEVANCE_MANAGE, Permission.AUDIT_LOG_READ,
+    ],
+    "M8": [
+        Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
+    ],
+}
+
+# Reverse map: permission → owning module
+PERMISSION_TO_MODULE: Dict[Permission, str] = {
+    perm: module
+    for module, perms in MODULE_PERMISSIONS.items()
+    for perm in perms
+}
+
+# Manager role → module it manages
+MANAGER_MODULE: Dict[Role, str] = {
+    Role.M1_MANAGER: "M1",
+    Role.M2_MANAGER: "M2",
+    Role.M3_MANAGER: "M3",
+    Role.M4_MANAGER: "M4",
+    Role.M5_MANAGER: "M5",
+    Role.M6_MANAGER: "M6",
+    Role.M7_MANAGER: "M7",
+    Role.M8_MANAGER: "M8",
+}
+
+# Module → manager role (reverse of above)
+MODULE_MANAGER_ROLE: Dict[str, Role] = {v: k for k, v in MANAGER_MODULE.items()}
+
+# All manager roles as a set — for quick membership checks
+ALL_MANAGER_ROLES = set(MANAGER_MODULE.keys())
+
+
+def get_manager_module(role: Role) -> Optional[str]:
+    """Return the module a manager role owns, or None if not a manager."""
+    return MANAGER_MODULE.get(role)
+
+
+def is_manager_role(role: Role) -> bool:
+    """Return True if the role is a module manager."""
+    return role in ALL_MANAGER_ROLES
+
+
+def get_module_for_permission(permission: Permission) -> Optional[str]:
+    """Return which module owns a permission, or None if it's a platform permission."""
+    return PERMISSION_TO_MODULE.get(permission)
 
 
 # --- Access Check Results ---
