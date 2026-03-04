@@ -683,6 +683,69 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    # --- E02-S02: Approval Requests & Actions Tables ---
+    approval_requests_table_sql = """
+    CREATE TABLE IF NOT EXISTS approval_requests (
+        id               VARCHAR(100) PRIMARY KEY,
+        tenant_id        VARCHAR(50)  NOT NULL,
+        entity_type      VARCHAR(100) NOT NULL,
+        entity_id        VARCHAR(100) NOT NULL,
+        action_type      VARCHAR(100) NOT NULL,
+        config_id        VARCHAR(100) NOT NULL,
+        status           VARCHAR(20)  NOT NULL DEFAULT 'PENDING',
+        requested_by     VARCHAR(100) NOT NULL,
+        required_roles   JSONB        NOT NULL DEFAULT '[]'::jsonb,
+        mode             VARCHAR(20)  NOT NULL DEFAULT 'single',
+        required_count   INTEGER      NOT NULL DEFAULT 1,
+        resolved_at      TIMESTAMP WITH TIME ZONE,
+        resolution_reason TEXT,
+        context          JSONB        NOT NULL DEFAULT '{}'::jsonb,
+        created_at       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ar_tenant_status
+        ON approval_requests(tenant_id, status);
+    CREATE INDEX IF NOT EXISTS idx_ar_entity
+        ON approval_requests(tenant_id, entity_type, entity_id);
+    CREATE INDEX IF NOT EXISTS idx_ar_requested_by
+        ON approval_requests(tenant_id, requested_by);
+    """
+
+    approval_actions_table_sql = """
+    CREATE TABLE IF NOT EXISTS approval_actions (
+        id          VARCHAR(100) PRIMARY KEY,
+        tenant_id   VARCHAR(50)  NOT NULL,
+        request_id  VARCHAR(100) NOT NULL REFERENCES approval_requests(id),
+        actor_id    VARCHAR(100) NOT NULL,
+        actor_role  VARCHAR(50)  NOT NULL,
+        action      VARCHAR(20)  NOT NULL,
+        comment     TEXT,
+        acted_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_approval_actor UNIQUE (request_id, actor_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_aa_request_id
+        ON approval_actions(request_id);
+    CREATE INDEX IF NOT EXISTS idx_aa_tenant_actor
+        ON approval_actions(tenant_id, actor_id);
+    """
+
+    approval_rls_sql = """
+    ALTER TABLE approval_requests ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_approval_requests ON approval_requests;
+    CREATE POLICY tenant_isolation_approval_requests ON approval_requests
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE approval_actions ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_approval_actions ON approval_actions;
+    CREATE POLICY tenant_isolation_approval_actions ON approval_actions
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
     # --- E01-S05: Organizations Table ---
     organizations_table_sql = """
     CREATE TABLE IF NOT EXISTS organizations (
@@ -890,6 +953,9 @@ def init_db():
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
+            (approval_requests_table_sql, None),
+            (approval_actions_table_sql, None),
+            (approval_rls_sql, None),
             (organizations_table_sql, None),
             (organizations_rls_sql, None),
             (users_table_sql, None),
@@ -918,7 +984,8 @@ def init_db():
         logger.info(
             "Database tables initialized with tenant isolation "
             "(users, search, activity, comments, audit_ledger, policy_registry, "
-            "llm_model_registry, prompt_registry, organizations, custom_roles, "
+            "llm_model_registry, prompt_registry, approval_requests, approval_actions, "
+            "organizations, custom_roles, "
             "custom_role_permissions, user_custom_roles "
             "+ RLS policies + immutability triggers)."
         )
