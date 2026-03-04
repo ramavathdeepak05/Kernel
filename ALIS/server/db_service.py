@@ -683,6 +683,41 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    # --- E01-S05: Organizations Table ---
+    organizations_table_sql = """
+    CREATE TABLE IF NOT EXISTS organizations (
+        id          VARCHAR(100) PRIMARY KEY,
+        tenant_id   VARCHAR(50)  NOT NULL,
+        name        VARCHAR(256) NOT NULL,
+        code        VARCHAR(32)  NOT NULL,
+        parent_id   VARCHAR(100) REFERENCES organizations(id),
+        status      VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+        is_deleted  BOOLEAN      NOT NULL DEFAULT FALSE,
+        deleted_at  TIMESTAMP WITH TIME ZONE,
+        created_by  VARCHAR(100) NOT NULL,
+        created_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at  TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_org_code_tenant UNIQUE (tenant_id, code)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_org_tenant
+        ON organizations(tenant_id)
+        WHERE is_deleted = FALSE;
+    CREATE INDEX IF NOT EXISTS idx_org_parent
+        ON organizations(tenant_id, parent_id)
+        WHERE is_deleted = FALSE;
+    """
+
+    organizations_rls_sql = """
+    ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS tenant_isolation_organizations ON organizations;
+    CREATE POLICY tenant_isolation_organizations ON organizations
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
     # --- E01-S01: Users Table ---
     users_table_sql = """
     CREATE TABLE IF NOT EXISTS users (
@@ -855,6 +890,8 @@ def init_db():
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
+            (organizations_table_sql, None),
+            (organizations_rls_sql, None),
             (users_table_sql, None),
             (users_rls_sql, None),
             (search_table_sql, None),
@@ -881,8 +918,9 @@ def init_db():
         logger.info(
             "Database tables initialized with tenant isolation "
             "(users, search, activity, comments, audit_ledger, policy_registry, "
-            "llm_model_registry, prompt_registry, custom_roles, custom_role_permissions, "
-            "user_custom_roles + RLS policies + immutability triggers)."
+            "llm_model_registry, prompt_registry, organizations, custom_roles, "
+            "custom_role_permissions, user_custom_roles "
+            "+ RLS policies + immutability triggers)."
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")
