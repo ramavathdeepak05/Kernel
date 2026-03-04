@@ -591,6 +591,138 @@ def init_db():
     ON CONFLICT (id) DO NOTHING;
     """
 
+    # --- E03-S03: Prompt Registry Table ---
+    prompt_registry_table_sql = """
+    CREATE TABLE IF NOT EXISTS prompt_registry (
+        id VARCHAR(100) PRIMARY KEY,
+        tenant_id VARCHAR(50) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1,
+        content TEXT NOT NULL,
+        format VARCHAR(20) NOT NULL DEFAULT 'jinja2',
+        description TEXT,
+        status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+        content_hash VARCHAR(64) NOT NULL,
+        created_by VARCHAR(100) NOT NULL,
+        created_by_role VARCHAR(50) NOT NULL,
+        activated_by VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        activated_at TIMESTAMP WITH TIME ZONE,
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_prompt_name_version_tenant
+            UNIQUE (tenant_id, name, version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_prompt_tenant
+        ON prompt_registry(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_prompt_name_status
+        ON prompt_registry(tenant_id, name, status);
+    CREATE INDEX IF NOT EXISTS idx_prompt_name_version
+        ON prompt_registry(tenant_id, name, version);
+    """
+
+    # --- E03-S03: Prompt Immutability Guard (Layer 4) ---
+    # Prevents mutation of ACTIVATED or SUPERSEDED prompts.
+    # Only status transition ACTIVATED → SUPERSEDED is allowed.
+    prompt_immutability_sql = """
+    CREATE OR REPLACE FUNCTION prompt_activated_guard()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        -- Allow status change ACTIVATED → SUPERSEDED (by system)
+        IF OLD.status = 'ACTIVATED' AND NEW.status = 'SUPERSEDED'
+           AND OLD.content = NEW.content
+           AND OLD.content_hash = NEW.content_hash
+        THEN
+            RETURN NEW;
+        END IF;
+
+        -- Block all other mutations on ACTIVATED or SUPERSEDED records
+        IF OLD.status IN ('ACTIVATED', 'SUPERSEDED') THEN
+            RAISE EXCEPTION
+                'E03-S03 VIOLATION: Cannot mutate prompt in % status. '
+                'Retroactive prompt modification is prohibited.',
+                OLD.status;
+            RETURN NULL;
+        END IF;
+
+        RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_prompt_immutability ON prompt_registry;
+    CREATE TRIGGER trg_prompt_immutability
+        BEFORE UPDATE ON prompt_registry
+        FOR EACH ROW
+        EXECUTE FUNCTION prompt_activated_guard();
+
+    -- Block DELETE on prompt_registry entirely
+    CREATE OR REPLACE FUNCTION prompt_no_delete_guard()
+    RETURNS TRIGGER AS $$
+    BEGIN
+        RAISE EXCEPTION
+            'E03-S03 VIOLATION: Hard deletion of prompts is prohibited.';
+        RETURN NULL;
+    END;
+    $$ LANGUAGE plpgsql;
+
+    DROP TRIGGER IF EXISTS trg_prompt_no_delete ON prompt_registry;
+    CREATE TRIGGER trg_prompt_no_delete
+        BEFORE DELETE ON prompt_registry
+        FOR EACH ROW
+        EXECUTE FUNCTION prompt_no_delete_guard();
+    """
+
+    # --- E03-S03: Prompt Registry RLS ---
+    prompt_rls_sql = """
+    ALTER TABLE prompt_registry ENABLE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS tenant_isolation_prompts ON prompt_registry;
+    CREATE POLICY tenant_isolation_prompts ON prompt_registry
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
+    # --- E03-S03: Seed Admissions Prompts ---
+    prompt_seed_sql = """
+    INSERT INTO prompt_registry (
+        id, tenant_id, name, version, content, format, description,
+        status, content_hash, created_by, created_by_role,
+        activated_by, activated_at
+    ) VALUES
+    (
+        'seed-eligibility-extract-grades-v1',
+        'default',
+        'eligibility.extract_grades',
+        1,
+        'You are an academic document analyzer for an admissions system.\nExtract all subjects and their marks/grades from the following marksheet text.\n\nReturn ONLY a JSON object with this structure:\n{"subjects": [{"name": "...", "marks": ..., "max_marks": ...}], "aggregate_percentage": ...}\n\nMarksheet Text:\n{{ marksheet_text }}',
+        'jinja2',
+        'Extracts structured grade data from OCR marksheet text for the Eligibility Eval wizard (M1-W3).',
+        'ACTIVATED',
+        '',
+        'system_seed',
+        'SYSTEM',
+        'system_seed',
+        NOW()
+    ),
+    (
+        'seed-eligibility-evaluate-v1',
+        'default',
+        'eligibility.evaluate',
+        1,
+        'You are an admissions eligibility evaluator.\nCompare the extracted grades against the admission criteria.\n\nYou MUST respond with ONLY a JSON object matching this schema:\n{\n  "decision": "<ELIGIBLE | PROVISIONALLY_ELIGIBLE | NOT_ELIGIBLE>",\n  "confidence_score": <0.0 to 1.0>,\n  "confidence_tier": "<HIGH | MEDIUM | LOW>",\n  "state_impact": "Draft",\n  "reasoning": "<explanation>"\n}\n\nRules:\n- confidence_score >= 0.8 → decision = ELIGIBLE\n- 0.5 <= confidence_score < 0.8 → decision = PROVISIONALLY_ELIGIBLE\n- confidence_score < 0.5 → decision = NOT_ELIGIBLE\n- state_impact MUST be ''Draft'' (AI cannot finalize decisions)\n\nExtracted Grades:\n{{ extracted_grades }}\n\nAdmission Criteria:\n{{ admission_criteria }}',
+        'jinja2',
+        'Evaluates applicant eligibility by comparing grades against criteria for the Eligibility Eval wizard (M1-W3).',
+        'ACTIVATED',
+        '',
+        'system_seed',
+        'SYSTEM',
+        'system_seed',
+        NOW()
+    )
+    ON CONFLICT (id) DO NOTHING;
+    """
+
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
@@ -606,11 +738,16 @@ def init_db():
             (llm_model_registry_table_sql, None),
             (llm_model_rls_sql, None),
             (llm_model_seed_sql, None),
+            (prompt_registry_table_sql, None),
+            (prompt_immutability_sql, None),
+            (prompt_rls_sql, None),
+            (prompt_seed_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
             "(search, activity, comments, audit_ledger, policy_registry, "
-            "llm_model_registry + RLS policies + immutability triggers)."
+            "llm_model_registry, prompt_registry "
+            "+ RLS policies + immutability triggers)."
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")

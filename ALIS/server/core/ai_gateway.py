@@ -60,6 +60,8 @@ from .exceptions import (
     PermissionDeniedError,
     PromptInjectionError,
     AISchemaViolationError,
+    PromptNotFoundError,
+    PromptResolutionError,
 )
 
 
@@ -651,6 +653,112 @@ class InstrumentedLLM:
             latency_ms=latency_ms,
             validated_output=validated_output,
         )
+
+    def invoke_with_prompt(
+        self,
+        prompt_name: str,
+        prompt_version: int,
+        variables: Dict[str, Any],
+        validate_schema: bool = False,
+        **kwargs,
+    ) -> AIInvocationResult:
+        """
+        Invoke the LLM using a versioned prompt from the Prompt Registry.
+
+        This is the contract-compliant invocation method per E03-S03
+        and the AI Invocation Contract.
+
+        Flow:
+        1. Validate version (reject "latest" / None)
+        2. Fetch prompt from registry by name + explicit version
+        3. Render Jinja2 template with provided variables
+        4. Compute input_hash on the rendered prompt
+        5. Run injection detection on rendered prompt
+        6. Invoke LLM
+        7. Log prompt_version, model_version, and input_hash to audit
+
+        Args:
+            prompt_name: Registry prompt name (e.g., "eligibility.extract_grades")
+            prompt_version: Explicit integer version ("latest" prohibited)
+            variables: Dict of runtime variables for Jinja2 template
+            validate_schema: If True, validate output against AIResponseSchema
+            **kwargs: Additional arguments passed to the LLM
+
+        Returns:
+            AIInvocationResult with the response or error
+
+        Raises:
+            PromptResolutionError: If version is "latest" or None
+            PromptNotFoundError: If prompt not found in registry
+            PermissionDeniedError: If actor lacks AI_INVOKE permission
+            PromptInjectionError: If injection detected in rendered prompt
+            AISchemaViolationError: If output fails schema validation
+        """
+        from .prompt_registry import PromptRegistry
+
+        # --- Step 0: Strict version validation (Contract Rule #3) ---
+        validated_version = PromptRegistry.assert_valid_version(prompt_version)
+
+        # --- Step 1: Fetch prompt from registry ---
+        tenant_id = self._context.org_id or "default"
+        prompt_record = PromptRegistry.get_prompt(
+            name=prompt_name,
+            version=validated_version,
+            tenant_id=tenant_id,
+        )
+
+        # --- Step 2: Render Jinja2 template ---
+        rendered_prompt = PromptRegistry.render_prompt(
+            template_content=prompt_record["content"],
+            variables=variables,
+        )
+
+        # --- Step 3: Compute input hash for replay verification ---
+        input_hash = hashlib.sha256(
+            rendered_prompt.encode("utf-8")
+        ).hexdigest()
+
+        # --- Step 4: Invoke via existing invoke() method ---
+        # This handles RBAC, lockdown, injection detection, schema
+        # validation, and basic audit logging.
+        result = self.invoke(
+            input_text=rendered_prompt,
+            validate_schema=validate_schema,
+            **kwargs,
+        )
+
+        # --- Step 5: Supplemental audit entry with contract payload ---
+        # The base invoke() already logs AI_INVOCATION. This additional
+        # log records the full Mandatory Invocation Payload per the
+        # AI Invocation Contract.
+        AuditLog.log(
+            action=AuditAction.AI_INVOCATION,
+            actor_id=self._context.actor_id,
+            actor_type=self._context.actor_type,
+            actor_role=(
+                self._context.actor_role.value
+                if self._context.actor_role
+                else None
+            ),
+            entity_type="ai_invocation_contract",
+            entity_id=result.request_id,
+            success=result.success,
+            failure_reason=result.error,
+            org_id=self._context.org_id,
+            module=self._context.module,
+            wizard=self._context.wizard,
+            metadata={
+                "prompt_name": prompt_name,
+                "prompt_version": validated_version,
+                "model_version": self._model_name,
+                "input_hash": input_hash,
+                "content_hash": prompt_record.get("content_hash", ""),
+                "execution_mode": "advisory",
+                "correlation_id": self._context.correlation_id,
+            },
+        )
+
+        return result
 
     def __getattr__(self, name):
         """Proxy all other attributes to the underlying LLM."""

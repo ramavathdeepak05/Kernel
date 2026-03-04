@@ -133,6 +133,11 @@ class AuditAction(str, Enum):
     POLICY_APPROVED = "policy_approved"
     POLICY_ACTIVATED = "policy_activated"
 
+    # Prompt Registry (E03-S03)
+    PROMPT_CREATED = "prompt_created"
+    PROMPT_ACTIVATED = "prompt_activated"
+    PROMPT_SUPERSEDED = "prompt_superseded"
+
 
 # ============================================================================
 # AUDIT ENTRY (immutable value object)

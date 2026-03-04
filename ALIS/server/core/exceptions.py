@@ -231,6 +231,42 @@ class AISchemaViolationError(AIBoundaryViolationError):
         self.code = "ERR_AI_SCHEMA_VIOLATION"
 
 
+class PromptNotFoundError(AIBoundaryViolationError):
+    """
+    Raised when a requested prompt is not found in the Prompt Registry (E03-S03).
+
+    Examples:
+    - Prompt name does not exist for the given tenant
+    - Requested version does not exist
+    - No ACTIVATED version available
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "ERR_PROMPT_NOT_FOUND"
+        self.http_status = 404
+
+
+class PromptResolutionError(AIBoundaryViolationError):
+    """
+    Raised when prompt resolution violates E03-S03 contracts (E03-S03).
+
+    Primary use: Rejecting "latest" prompt resolution requests.
+    Per AI Invocation Contract Rule #3: "Latest prompt resolution is prohibited."
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "ERR_PROMPT_RESOLUTION"
+        self.http_status = 422
+
+
 # --- E00-S08: Field-Level Change Tracking ---
 
 class DiffTrackingError(ALISError):

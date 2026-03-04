@@ -106,17 +106,14 @@ def extract_grades_node(state: EligibilityState) -> dict:
 
     llm = AIGateway.get_llm(context)
 
-    prompt = (
-        "You are an academic document analyzer for an admissions system.\n"
-        "Extract all subjects and their marks/grades from the following "
-        "marksheet text.\n\n"
-        "Return ONLY a JSON object with this structure:\n"
-        '{"subjects": [{"name": "...", "marks": ..., "max_marks": ...}], '
-        '"aggregate_percentage": ...}\n\n'
-        f"Marksheet Text:\n{state['marksheet_text']}"
+    # E03-S03: Fetch prompt from registry instead of inline string.
+    # Template variables are rendered by the AI Gateway via Jinja2.
+    result = llm.invoke_with_prompt(
+        prompt_name="eligibility.extract_grades",
+        prompt_version=1,
+        variables={"marksheet_text": state["marksheet_text"]},
+        validate_schema=False,
     )
-
-    result = llm.invoke(prompt, validate_schema=False)
 
     return {"extracted_grades": result.content or "{}"}
 
@@ -144,28 +141,17 @@ def evaluate_eligibility_node(state: EligibilityState) -> dict:
 
     llm = AIGateway.get_llm(context)
 
-    prompt = (
-        "You are an admissions eligibility evaluator.\n"
-        "Compare the extracted grades against the admission criteria.\n\n"
-        "You MUST respond with ONLY a JSON object matching this schema:\n"
-        "{\n"
-        '  "decision": "<ELIGIBLE | PROVISIONALLY_ELIGIBLE | NOT_ELIGIBLE>",\n'
-        '  "confidence_score": <0.0 to 1.0>,\n'
-        '  "confidence_tier": "<HIGH | MEDIUM | LOW>",\n'
-        '  "state_impact": "Draft",\n'
-        '  "reasoning": "<explanation>"\n'
-        "}\n\n"
-        "Rules:\n"
-        "- confidence_score >= 0.8 → decision = ELIGIBLE\n"
-        "- 0.5 <= confidence_score < 0.8 → decision = PROVISIONALLY_ELIGIBLE\n"
-        "- confidence_score < 0.5 → decision = NOT_ELIGIBLE\n"
-        "- state_impact MUST be 'Draft' (AI cannot finalize decisions)\n\n"
-        f"Extracted Grades:\n{state['extracted_grades']}\n\n"
-        f"Admission Criteria:\n{state['admission_criteria']}"
+    # E03-S03: Fetch prompt from registry instead of inline string.
+    # Template variables are rendered by the AI Gateway via Jinja2.
+    result = llm.invoke_with_prompt(
+        prompt_name="eligibility.evaluate",
+        prompt_version=1,
+        variables={
+            "extracted_grades": state["extracted_grades"],
+            "admission_criteria": state["admission_criteria"],
+        },
+        validate_schema=True,
     )
-
-    # validate_schema=True enforces AIResponseSchema (E00-S06)
-    result = llm.invoke(prompt, validate_schema=True)
 
     # Extract structured fields from validated output
     if result.validated_output:
