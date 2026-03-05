@@ -80,6 +80,7 @@ class BaseWorkflow(ABC):
     workflow_type: str = "base.workflow"  # Must be overridden
     required_locks: List[LockType] = []  # Locks to check before execution
     requires_approval: bool = False  # If True, enters AWAITING_APPROVAL
+    approval_roles: List[str] = []  # Roles allowed to approve this workflow type
 
     # --- Instance State ---
 
@@ -95,6 +96,7 @@ class BaseWorkflow(ABC):
             workflow_type=self.workflow_type,
             context=context,
             current_state=WorkflowState.CREATED,
+            approver_roles=list(self.approval_roles),
         )
         self._decision: Optional[WorkflowDecision] = None
 
@@ -103,6 +105,9 @@ class BaseWorkflow(ABC):
             action=AuditAction.CREATE,
             detail=f"Workflow created: {self.workflow_type}"
         )
+
+        # Persist initial state
+        self._persist()
 
     # --- Public API ---
 
@@ -137,6 +142,7 @@ class BaseWorkflow(ABC):
         try:
             step_result = self._execute_logic(self.context)
             self.instance.step_history.append(step_result)
+            self._persist_step(step_result)
         except Exception as e:
             # Domain logic failed, transition to FAILED
             self._transition_to(WorkflowState.FAILED)
@@ -319,6 +325,9 @@ class BaseWorkflow(ABC):
             metadata={"workflow_type": self.workflow_type}
         )
         self.instance.audit_trail.append(entry.id)
+        
+        # Persist state transition
+        self._persist()
 
     def _set_decision(self, decision: WorkflowDecision) -> None:
         """
@@ -333,3 +342,120 @@ class BaseWorkflow(ABC):
             action=AuditAction.AGENT_DECISION,
             detail=f"Decision: {decision.decision_made}"
         )
+
+        # Persist decision
+        self._persist()
+
+    def _persist(self) -> None:
+        """Persist workflow instance to database."""
+        try:
+            from server.db_service import execute_system_transaction
+            import json
+            
+            def default_serializer(obj):
+                if hasattr(obj, "isoformat"):
+                    return obj.isoformat()
+                if hasattr(obj, "value"):
+                    return obj.value
+                return str(obj)
+            
+            ctx_data = {}
+            if self.context:
+                ctx_data = {
+                    "workflow_id": getattr(self.context, "workflow_id", ""),
+                    "workflow_type": getattr(self.context, "workflow_type", ""),
+                    "actor_id": getattr(self.context, "actor_id", ""),
+                    "actor_type": getattr(self.context, "actor_type", ""),
+                    "actor_role": getattr(self.context, "actor_role", ""),
+                    "entity_type": getattr(self.context, "entity_type", ""),
+                    "entity_id": getattr(self.context, "entity_id", ""),
+                    "tenant_id": getattr(self.context, "tenant_id", ""),
+                    "org_id": getattr(self.context, "org_id", ""),
+                    "data": getattr(self.context, "data", {})
+                }
+                
+            dec_data = None
+            if hasattr(self.instance, "decision") and self.instance.decision:
+                d = self.instance.decision
+                dec_data = {
+                    "decision_made": getattr(d, "decision_made", ""),
+                    "ai_role": getattr(d, "ai_role", ""),
+                    "confidence": getattr(d, "confidence", None),
+                    "authority_required": getattr(d, "authority_required", None),
+                    "proposed_state": getattr(d, "proposed_state", None),
+                    "rationale": getattr(d, "rationale", ""),
+                    "metadata": getattr(d, "metadata", {})
+                }
+                
+            tenant_id = getattr(self.context, "tenant_id", "system")
+            if not tenant_id:
+                tenant_id = "system"
+
+            query = """
+            INSERT INTO workflow_instances (
+                id, tenant_id, workflow_type, current_state,
+                context, decision, approver_roles,
+                created_at, updated_at, completed_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                current_state = EXCLUDED.current_state,
+                decision = EXCLUDED.decision,
+                approver_roles = EXCLUDED.approver_roles,
+                updated_at = EXCLUDED.updated_at,
+                completed_at = EXCLUDED.completed_at
+            """
+            
+            params = (
+                self.instance.id,
+                tenant_id,
+                self.instance.workflow_type,
+                getattr(self.instance.current_state, "value", str(self.instance.current_state)),
+                json.dumps(ctx_data, default=default_serializer),
+                json.dumps(dec_data, default=default_serializer) if dec_data else None,
+                json.dumps(self.instance.approver_roles, default=default_serializer),
+                self.instance.created_at,
+                self.instance.updated_at,
+                self.instance.completed_at
+            )
+
+            execute_system_transaction([(query, params)])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to persist workflow: {e}")
+
+    def _persist_step(self, step_result) -> None:
+        """Persist workflow step to database."""
+        try:
+            from server.db_service import execute_system_transaction
+            import json
+            
+            def default_serializer(obj):
+                if hasattr(obj, "isoformat"):
+                    return obj.isoformat()
+                if hasattr(obj, "value"):
+                    return obj.value
+                return str(obj)
+                
+            tenant_id = getattr(self.context, "tenant_id", "system")
+            if not tenant_id:
+                tenant_id = "system"
+                
+            query = """
+            INSERT INTO workflow_steps (
+                tenant_id, workflow_id, step_name, outcome, message, data
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            """
+            
+            params = (
+                tenant_id,
+                self.instance.id,
+                getattr(step_result, "step_name", "unknown"),
+                getattr(step_result.outcome, "value", str(step_result.outcome)),
+                getattr(step_result, "message", None),
+                json.dumps(getattr(step_result, "data", {}), default=default_serializer)
+            )
+            
+            execute_system_transaction([(query, params)])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to persist workflow step: {e}")

@@ -27,6 +27,7 @@ from server.api.organizations_router import router as organizations_router
 from server.api.approvals_router import router as approvals_router
 from server.api.audit_router import router as audit_router
 from server.api.gateway_router import router as gateway_router
+from server.api.workflows_router import router as workflows_router
 
 
 def create_app() -> FastAPI:
@@ -67,6 +68,7 @@ def create_app() -> FastAPI:
     app.include_router(approvals_router)
     app.include_router(audit_router)
     app.include_router(gateway_router)
+    app.include_router(workflows_router)
 
     # --- Health Check ---
     @app.get("/health", tags=["system"])

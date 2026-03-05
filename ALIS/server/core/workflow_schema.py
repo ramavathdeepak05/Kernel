@@ -48,6 +48,9 @@ class WorkflowContext:
     entity_type: str = ""  # e.g., "student", "payment"
     entity_id: str = ""
 
+    # Tenant
+    tenant_id: str = ""
+
     # Organization
     org_id: Optional[str] = None
 
@@ -135,6 +138,9 @@ class WorkflowInstance:
 
     # Context
     context: Optional[WorkflowContext] = None
+
+    # Roles authorised to approve this instance (set by domain subclass)
+    approver_roles: List[str] = field(default_factory=list)
 
     # History
     step_history: List[StepResult] = field(default_factory=list)

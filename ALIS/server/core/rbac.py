@@ -162,6 +162,9 @@ class Permission(str, Enum):
     ROLE_MANAGE = "role:manage"
     ROLE_APPROVE = "role:approve"
 
+    # System Monitoring (E02-S01)
+    SYSTEM_READ = "system:read"
+
 
 # --- Role-Permission Mapping ---
 
@@ -203,6 +206,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.ESCALATION_REQUEST,   # E00-S04
         Permission.DUAL_CONTROL_APPROVE, # E00-S04
         Permission.POLICY_READ,          # E00-S09
+        Permission.SYSTEM_READ,          # E02-S01
     ],
     Role.FINANCE_OFFICER: [
         Permission.FEE_READ,
@@ -229,6 +233,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.POLICY_SUBMIT,   # E00-S09
         Permission.POLICY_APPROVE,  # E00-S09
         Permission.POLICY_READ,     # E00-S09
+        Permission.SYSTEM_READ,     # E02-S01
     ],
     Role.SUPER_ADMIN: [
         # Super admin has all permissions

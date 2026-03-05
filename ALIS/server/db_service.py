@@ -950,6 +950,53 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    workflows_table_sql = """
+    CREATE TABLE IF NOT EXISTS workflow_instances (
+        id VARCHAR(100) PRIMARY KEY,
+        tenant_id VARCHAR(50) NOT NULL,
+        workflow_type VARCHAR(100) NOT NULL,
+        current_state VARCHAR(50) NOT NULL,
+        context JSONB,
+        decision JSONB,
+        approver_roles JSONB,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        completed_at TIMESTAMP WITH TIME ZONE
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_tenant ON workflow_instances(tenant_id);
+    CREATE INDEX IF NOT EXISTS idx_workflow_type ON workflow_instances(tenant_id, workflow_type);
+    """
+
+    workflow_steps_table_sql = """
+    CREATE TABLE IF NOT EXISTS workflow_steps (
+        id SERIAL PRIMARY KEY,
+        tenant_id VARCHAR(50) NOT NULL,
+        workflow_id VARCHAR(100) NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+        step_name VARCHAR(100) NOT NULL,
+        outcome VARCHAR(50) NOT NULL,
+        message TEXT,
+        data JSONB,
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_workflow_steps_workflow ON workflow_steps(workflow_id);
+    """
+
+    workflows_rls_sql = """
+    ALTER TABLE workflow_instances ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_workflows ON workflow_instances;
+    CREATE POLICY tenant_isolation_workflows ON workflow_instances
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE workflow_steps ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_workflow_steps ON workflow_steps;
+    CREATE POLICY tenant_isolation_workflow_steps ON workflow_steps
+        FOR ALL
+        USING (tenant_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
+    """
+
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
@@ -980,13 +1027,16 @@ def init_db():
             (custom_role_permissions_table_sql, None),
             (user_custom_roles_table_sql, None),
             (custom_roles_rls_sql, None),
+            (workflows_table_sql, None),
+            (workflow_steps_table_sql, None),
+            (workflows_rls_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
             "(users, search, activity, comments, audit_ledger, policy_registry, "
             "llm_model_registry, prompt_registry, approval_requests, approval_actions, "
             "organizations, custom_roles, "
-            "custom_role_permissions, user_custom_roles "
+            "custom_role_permissions, user_custom_roles, workflows "
             "+ RLS policies + immutability triggers)."
         )
     except Exception as e:
