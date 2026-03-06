@@ -152,113 +152,67 @@ def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
 
 @router.post("/login")
 async def login(request: Request, body: LoginRequest) -> JSONResponse:
-    """
-    Authenticate a user and issue a session token.
-
-    Decision: Should this username/password be granted a session for this tenant?
-
-    Flow:
-        1. Rate-limit by IP (20 req/min)
-        2. Lockout check — 5 failed attempts → 15-min block
-        3. Fetch user from DB (tenant-scoped, case-sensitive username)
-        4. Verify password hash
-        5. Assert account is ACTIVE
-        6. Create in-memory session; stamp tenant_id on session
-        7. Audit LOGIN event
-        8. Return opaque token (token value is never logged)
-    """
     ip = request.client.host if request.client else "unknown"
+
+    # Rate-limit check (20 req/min per IP)
+    if not RateLimiter.check(f"login:{ip}", max_requests=20, window_seconds=60):
+        return _err(429, "Too many login attempts. Try again shortly.", "ERR_RATE_LIMITED")
+
     identifier = f"{body.tenant_id}:{body.username}"
 
-    # --- Step 1: Rate limit ---
-    if not RateLimiter.check(identifier=ip, max_requests=20, window_seconds=60):
-        return _err(429, "Too many login attempts — try again in a minute", "ERR_RATE_LIMITED")
-
-    # --- Step 2: Lockout ---
+    # Account lockout check
     if FailedLoginTracker.is_locked_out(identifier):
         remaining = FailedLoginTracker.get_lockout_remaining(identifier)
-        AuditLedger.log(
-            action=AuditAction.ACCESS_DENIED,
-            actor_id=body.username,
-            actor_role="unknown",
-            entity_type="user",
-            entity_id=body.username,
-            tenant_id=body.tenant_id,
-            metadata={"reason": "account_locked", "ip": ip},
-        )
-        retry_after = int(remaining.total_seconds()) if remaining else 900
-        return _err(
-            423,
-            "Account temporarily locked due to repeated failed login attempts",
-            "ERR_ACCOUNT_LOCKED",
-            retry_after_seconds=retry_after,
+        retry_secs = int(remaining.total_seconds()) if remaining else 900
+        return JSONResponse(
+            status_code=423,
+            content={
+                "error": "Account temporarily locked after repeated failures",
+                "code": "ERR_ACCOUNT_LOCKED",
+                "retry_after_seconds": retry_secs,
+            },
         )
 
-    # --- Step 3: Fetch user ---
+    # Fetch user
     rows = execute_query(
         "SELECT id, username, email, display_name, password_hash, role, status, actor_type "
         "FROM users WHERE username = %s AND is_deleted = FALSE",
-        (InputValidator.sanitize_string(body.username),),
+        (body.username,),
         tenant_id=body.tenant_id,
     )
 
-    if not rows:
+    if not rows or not PasswordHasher.verify(body.password, rows[0].get("password_hash") or ""):
         FailedLoginTracker.record_attempt(identifier, success=False, ip_address=ip)
-        # Generic message — never reveal whether the username exists
         return _err(401, "Invalid credentials", "ERR_AUTH_INVALID")
 
     user = rows[0]
 
-    # --- Step 4: Verify password ---
-    if not PasswordHasher.verify(body.password, user["password_hash"]):
-        FailedLoginTracker.record_attempt(identifier, success=False, ip_address=ip)
-        AuditLedger.log(
-            action=AuditAction.ACCESS_DENIED,
-            actor_id=str(user["id"]),
-            actor_role=user["role"],
-            entity_type="user",
-            entity_id=str(user["id"]),
-            tenant_id=body.tenant_id,
-            metadata={"reason": "wrong_password", "ip": ip},
-        )
-        return _err(401, "Invalid credentials", "ERR_AUTH_INVALID")
-
-    # --- Step 5: Status check ---
     if user["status"] != "ACTIVE":
-        return _err(
-            403,
-            f"Account is {user['status'].lower()} — contact your administrator",
-            "ERR_ACCOUNT_INACTIVE",
-        )
+        return _err(403, "Account is not active", "ERR_ACCOUNT_INACTIVE")
 
-    # --- Step 6: Create session ---
     FailedLoginTracker.record_attempt(identifier, success=True, ip_address=ip)
 
-    session, raw_token = SessionManager.create_session(
+    session, token = SessionManager.create_session(
         user_id=str(user["id"]),
         user_agent=request.headers.get("user-agent"),
         ip_address=ip,
     )
-    # Stamp tenant_id so TenantMiddleware can resolve it from the session
-    # on all subsequent authenticated requests
     session.tenant_id = body.tenant_id
 
-    # --- Step 7: Audit ---
     AuditLedger.log(
         action=AuditAction.LOGIN,
         actor_id=str(user["id"]),
         actor_role=user["role"],
-        entity_type="user",
-        entity_id=str(user["id"]),
+        entity_type="session",
+        entity_id=session.id,
         tenant_id=body.tenant_id,
-        metadata={"ip": ip, "session_id": session.id},
+        metadata={"ip": ip, "username": user["username"]},
     )
 
-    # --- Step 8: Return token (raw token is never stored or logged) ---
     return JSONResponse(
         status_code=200,
         content={
-            "token": raw_token,
+            "token": token,
             "session_id": session.id,
             "user_id": str(user["id"]),
             "username": user["username"],
@@ -340,19 +294,13 @@ async def refresh_session(
 async def get_me(
     authorization: Optional[str] = Header(default=None),
 ) -> JSONResponse:
-    """
-    Return the authenticated user's profile.
-
-    Password hash is never included in the response.
-    Uses session.tenant_id for RLS-scoped DB lookup.
-    """
     session, error = _require_session(authorization)
     if error:
         return _err(401, error, "ERR_AUTH_REQUIRED")
 
     user = _fetch_user_by_id(session.user_id, session.tenant_id)
     if not user:
-        return _err(404, "User not found", "ERR_USER_NOT_FOUND")
+        return _err(404, "User account not found", "ERR_USER_NOT_FOUND")
 
     return JSONResponse(
         status_code=200,
@@ -362,9 +310,9 @@ async def get_me(
             "email": user.get("email"),
             "display_name": user.get("display_name"),
             "role": user["role"],
-            "status": user["status"],
+            "status": user.get("status", "ACTIVE"),
             "tenant_id": session.tenant_id,
-            "actor_type": user["actor_type"],
+            "actor_type": user.get("actor_type", "human"),
         },
     )
 
