@@ -41,7 +41,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Request, Header
+from fastapi import APIRouter, Request, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -70,7 +70,7 @@ class UserUpdateRequest(BaseModel):
 
 class RoleChangeRequest(BaseModel):
     """SUPER_ADMIN only — change a user's RBAC role."""
-    role: str = Field(..., description="New role to assign")
+    role: Role = Field(..., description="New role to assign")
 
 
 class AssignCustomRoleRequest(BaseModel):
@@ -150,8 +150,8 @@ async def list_users(
     authorization: Optional[str] = Header(default=None),
     role: Optional[str] = None,
     status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
     """
     List users in the caller's tenant.

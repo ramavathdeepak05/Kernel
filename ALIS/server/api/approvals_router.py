@@ -40,7 +40,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Header
+from fastapi import APIRouter, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -320,8 +320,8 @@ async def list_approval_requests(
     status: Optional[str] = None,
     entity_type: Optional[str] = None,
     entity_id: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
     """
     List approval requests.

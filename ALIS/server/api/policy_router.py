@@ -19,14 +19,55 @@ import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Header
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from server.core.policy_service import PolicyService, PolicyStatus
+from server.core.security import SessionManager
+from server.core.rbac import Role
+from server.db_service import execute_query
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/policy", tags=["Policy Governance (E00-S09)"])
+
+
+# ============================================================================
+# AUTH HELPERS
+# ============================================================================
+
+def _extract_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip()
+
+
+def _require_session(authorization: Optional[str]):
+    token = _extract_token(authorization)
+    if not token:
+        return None, "Missing or malformed Authorization header"
+    session = SessionManager.validate_token(token)
+    if not session:
+        return None, "Token is invalid, expired, or revoked"
+    return session, None
+
+
+def _fetch_caller(session) -> Optional[Dict[str, Any]]:
+    rows = execute_query(
+        "SELECT id, username, role, status FROM users "
+        "WHERE id = %s AND is_deleted = FALSE",
+        (session.user_id,),
+        tenant_id=session.tenant_id,
+    )
+    return rows[0] if rows else None
+
+
+def _err(status: int, message: str, code: str) -> JSONResponse:
+    return JSONResponse(status_code=status, content={"error": message, "code": code})
 
 
 # ============================================================================
@@ -65,18 +106,27 @@ class PolicyResponse(BaseModel):
 # ============================================================================
 
 @router.post("/draft", response_model=PolicyResponse)
-async def create_draft(body: PolicyDraftRequest):
+async def create_draft(
+    body: PolicyDraftRequest,
+    authorization: Optional[str] = Header(default=None),
+):
     """
-    POST /policy/draft
-
-    Create a new policy draft. Requires POLICY_DRAFT permission.
-
-    The caller must provide structured parameters, effective dates,
-    and a policy type.  A version number is auto-assigned.
+    POST /policy/draft — Create a new policy draft. ADMIN / SUPER_ADMIN only.
     """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+    caller = _fetch_caller(session)
+    if not caller:
+        return _err(401, "Caller not found", "ERR_AUTH_REQUIRED")
     try:
-        # TODO: Extract actor_id, actor_role, tenant_id from request.state
-        # once auth middleware is connected.  Using placeholders for now.
+        caller_role = Role(caller["role"])
+    except ValueError:
+        return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
+    if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN):
+        return _err(403, "ADMIN or SUPER_ADMIN role required", "ERR_LAYER5_ACCESS")
+
+    try:
         result = PolicyService.create_draft(
             policy_type=body.policy_type,
             name=body.name,
@@ -84,57 +134,80 @@ async def create_draft(body: PolicyDraftRequest):
             parameters=body.parameters,
             effective_from=body.effective_from,
             effective_to=body.effective_to,
-            created_by="actor_placeholder",
-            actor_role="admin",
-            tenant_id="default_tenant",
+            created_by=session.user_id,
+            actor_role=caller["role"],
+            tenant_id=session.tenant_id,
             module=body.module,
         )
         return PolicyResponse(**result)
     except Exception as e:
-        logger.error(f"Failed to create policy draft: {e}")
+        logger.error("Failed to create policy draft: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/submit", response_model=PolicyResponse)
-async def submit_for_approval(body: PolicyActionRequest):
+async def submit_for_approval(
+    body: PolicyActionRequest,
+    authorization: Optional[str] = Header(default=None),
+):
     """
-    POST /policy/submit
+    POST /policy/submit — Submit a DRAFT policy for approval. ADMIN / SUPER_ADMIN only.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+    caller = _fetch_caller(session)
+    if not caller:
+        return _err(401, "Caller not found", "ERR_AUTH_REQUIRED")
+    try:
+        caller_role = Role(caller["role"])
+    except ValueError:
+        return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
+    if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN):
+        return _err(403, "ADMIN or SUPER_ADMIN role required", "ERR_LAYER5_ACCESS")
 
-    Submit a DRAFT policy for approval. Requires POLICY_SUBMIT permission.
-    The policy is locked from further edits after submission.
-    """
     try:
         result = PolicyService.submit_for_approval(
             policy_id=body.policy_id,
-            submitted_by="actor_placeholder",
-            actor_role="admin",
-            tenant_id="default_tenant",
+            submitted_by=session.user_id,
+            actor_role=caller["role"],
+            tenant_id=session.tenant_id,
         )
         return PolicyResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to submit policy: {e}")
+        logger.error("Failed to submit policy: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/approve", response_model=PolicyResponse)
-async def approve_policy(body: PolicyActionRequest):
+async def approve_policy(
+    body: PolicyActionRequest,
+    authorization: Optional[str] = Header(default=None),
+):
     """
-    POST /policy/approve
-
-    Approve a SUBMITTED policy. Requires POLICY_APPROVE permission
-    (ADMIN / SUPER_ADMIN only).
-
-    If effective_from <= now, the policy is auto-activated and a
-    PolicyActivated event is emitted.
+    POST /policy/approve — Approve a SUBMITTED policy. SUPER_ADMIN only.
     """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+    caller = _fetch_caller(session)
+    if not caller:
+        return _err(401, "Caller not found", "ERR_AUTH_REQUIRED")
+    try:
+        caller_role = Role(caller["role"])
+    except ValueError:
+        return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
+    if caller_role != Role.SUPER_ADMIN:
+        return _err(403, "SUPER_ADMIN role required to approve policies", "ERR_LAYER5_ACCESS")
+
     try:
         result = PolicyService.approve_policy(
             policy_id=body.policy_id,
-            approved_by="actor_placeholder",
-            actor_role="admin",
-            tenant_id="default_tenant",
+            approved_by=session.user_id,
+            actor_role=caller["role"],
+            tenant_id=session.tenant_id,
         )
         return PolicyResponse(**result)
     except PermissionError as e:
@@ -142,27 +215,27 @@ async def approve_policy(body: PolicyActionRequest):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to approve policy: {e}")
+        logger.error("Failed to approve policy: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{policy_id}")
 async def get_policy(
     policy_id: str,
+    authorization: Optional[str] = Header(default=None),
     date: Optional[datetime] = Query(None, description="Temporal query — returns the version active on this date"),
 ):
     """
-    GET /policy/{policy_id}?date=
-
-    Retrieve a policy by ID.  If `date` is provided, returns the
-    version of the same policy_type that was active on that date.
-
-    This is the READ-ONLY API consumed by the Rule Engine.
+    GET /policy/{policy_id}?date= — Retrieve a policy by ID. Any authenticated user.
     """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
     try:
         result = PolicyService.get_policy(
             policy_id=policy_id,
-            tenant_id="default_tenant",
+            tenant_id=session.tenant_id,
             as_of_date=date,
         )
         if not result:
@@ -171,25 +244,27 @@ async def get_policy(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to retrieve policy: {e}")
+        logger.error("Failed to retrieve policy: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/type/{policy_type}")
 async def get_active_by_type(
     policy_type: str,
+    authorization: Optional[str] = Header(default=None),
     date: Optional[datetime] = Query(None, description="Point-in-time resolution"),
 ):
     """
-    GET /policy/type/{policy_type}?date=
-
-    Rule Engine convenience endpoint.  Returns the currently active
-    policy for the given type.
+    GET /policy/type/{policy_type}?date= — Active policy by type. Any authenticated user.
     """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
     try:
         result = PolicyService.get_active_policy_by_type(
             policy_type=policy_type,
-            tenant_id="default_tenant",
+            tenant_id=session.tenant_id,
             as_of_date=date,
         )
         if not result:
@@ -198,26 +273,38 @@ async def get_active_by_type(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to retrieve active policy: {e}")
+        logger.error("Failed to retrieve active policy: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/")
 async def list_policies(
+    authorization: Optional[str] = Header(default=None),
     policy_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
     """
-    GET /policy/
-
-    List policies with optional filters. Requires POLICY_READ permission.
+    GET /policy/ — List policies. ADMIN / SUPER_ADMIN only.
     """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+    caller = _fetch_caller(session)
+    if not caller:
+        return _err(401, "Caller not found", "ERR_AUTH_REQUIRED")
+    try:
+        caller_role = Role(caller["role"])
+    except ValueError:
+        return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
+    if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN):
+        return _err(403, "ADMIN or SUPER_ADMIN role required", "ERR_LAYER5_ACCESS")
+
     try:
         status_enum = PolicyStatus(status) if status else None
         results = PolicyService.list_policies(
-            tenant_id="default_tenant",
+            tenant_id=session.tenant_id,
             policy_type=policy_type,
             status=status_enum,
             limit=limit,
@@ -225,23 +312,37 @@ async def list_policies(
         )
         return {"policies": results, "count": len(results)}
     except Exception as e:
-        logger.error(f"Failed to list policies: {e}")
+        logger.error("Failed to list policies: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/history/{policy_type}")
-async def get_version_history(policy_type: str):
+async def get_version_history(
+    policy_type: str,
+    authorization: Optional[str] = Header(default=None),
+):
     """
-    GET /policy/history/{policy_type}
+    GET /policy/history/{policy_type} — Version history. ADMIN / SUPER_ADMIN only.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+    caller = _fetch_caller(session)
+    if not caller:
+        return _err(401, "Caller not found", "ERR_AUTH_REQUIRED")
+    try:
+        caller_role = Role(caller["role"])
+    except ValueError:
+        return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
+    if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN):
+        return _err(403, "ADMIN or SUPER_ADMIN role required", "ERR_LAYER5_ACCESS")
 
-    Return all versions of a policy type for the admin UI diff viewer.
-    """
     try:
         results = PolicyService.get_version_history(
             policy_type=policy_type,
-            tenant_id="default_tenant",
+            tenant_id=session.tenant_id,
         )
         return {"versions": results, "count": len(results)}
     except Exception as e:
-        logger.error(f"Failed to retrieve version history: {e}")
+        logger.error("Failed to retrieve version history: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
