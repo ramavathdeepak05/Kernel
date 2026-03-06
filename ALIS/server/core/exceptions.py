@@ -361,6 +361,100 @@ class DualControlRequiredError(AuthorityError):
         )
 
 
+# --- E03-S05: Tool Invocation Framework ---
+
+class ToolNotAllowedError(AIBoundaryViolationError):
+    """
+    Raised when an agent invokes a tool not declared in its allowed_tools list.
+
+    Per E03-S05: Undeclared tool invocations are unconditionally rejected.
+    No dynamic tool selection is permitted.
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(message=message, details=details)
+        self.code = "ERR_TOOL_NOT_ALLOWED"
+        self.http_status = 403
+
+
+class ToolNotRegisteredError(AIBoundaryViolationError):
+    """
+    Raised when an agent requests a tool that is not in the Tool Registry.
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(message=message, details=details)
+        self.code = "ERR_TOOL_NOT_REGISTERED"
+        self.http_status = 404
+
+
+class ToolSchemaViolationError(AIBoundaryViolationError):
+    """
+    Raised when a tool's return value fails ToolOutputSchema validation.
+
+    Tools MUST return structured data conforming to ToolOutputSchema.
+    Free-form or untyped returns are rejected.
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(message=message, details=details)
+        self.code = "ERR_TOOL_SCHEMA_VIOLATION"
+        self.http_status = 422
+
+
+class GuardrailViolationError(AIBoundaryViolationError):
+    """
+    Raised when AI output is hard-blocked by a guardrail filter (E03-S08).
+
+    Examples:
+    - Toxic content detected in AI output
+    - Unsafe suggestion (e.g., delete records, bypass auth)
+    - Policy contradiction (output contradicts active institutional policy)
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(message=message, details=details)
+        self.code = "ERR_GUARDRAIL_BLOCKED"
+        self.http_status = 422
+
+
+class HITLRequiredError(ALISError):
+    """
+    Raised when an AI output requires human review before proceeding (E03-S09).
+
+    This is not an error per se — it is a controlled handoff signal.
+    The caller must route the output to the approval/review workflow.
+    """
+    def __init__(
+        self,
+        message: str,
+        hitl_decision: str = "review_required",
+        details: Optional[Dict] = None,
+    ):
+        details = details or {}
+        details["hitl_decision"] = hitl_decision
+        super().__init__(
+            message=message,
+            code="ERR_HITL_REQUIRED",
+            details=details,
+            http_status=202,  # Accepted — processing continues via human review
+        )
+
+
+class ToolWriteAttemptError(AIBoundaryViolationError):
+    """
+    Raised when a tool is registered without read_only=True.
+
+    All tools in ALIS are unconditionally read-only. No tool may
+    mutate database state or perform writes.
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        details = details or {}
+        super().__init__(message=message, details=details)
+        self.code = "ERR_TOOL_WRITE_ATTEMPT"
+        self.http_status = 422
+
+
 # --- Layer 6: Resilience ---
 
 class ResilienceProvisionalError(ALISError):
@@ -375,4 +469,22 @@ class ResilienceProvisionalError(ALISError):
             code="WARN_LAYER6_PROVISIONAL",
             details=details,
             http_status=202  # Accepted (processing continues provisionally)
+        )
+
+
+# --- Common Domain Error ---
+
+class NotFoundError(ALISError):
+    """
+    Raised when a requested entity does not exist or is not visible
+    to the requesting tenant.
+
+    Used by all domain modules as the canonical 404 signal.
+    """
+    def __init__(self, message: str, details: Optional[Dict] = None):
+        super().__init__(
+            message=message,
+            code="ERR_NOT_FOUND",
+            details=details,
+            http_status=404
         )

@@ -1,8 +1,20 @@
 import sys
-import pytest
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+# Exclude standalone verification scripts from pytest collection
+collect_ignore = ["test_e03_s02_model_registry.py"]
+
+# ---------------------------------------------------------------------------
+# Shared test constants
+# ---------------------------------------------------------------------------
+TEST_ORG_ID = "00000000-0000-0000-0000-000000000001"
+TEST_USER_ID = "00000000-0000-0000-0000-000000000002"
+TEST_TENANT = "TEST-TENANT-AUTOUSE"
 
 @pytest.fixture(autouse=True, scope="module")
 def isolate_sys_modules():
@@ -126,3 +138,131 @@ def cleanup_leaked_mocks():
     for mod in to_clean:
         if mod in sys.modules and isinstance(sys.modules[mod], MagicMock):
             del sys.modules[mod]
+
+
+# =============================================================================
+# P0-S07 — FastAPI TestClient + JWT Auth fixtures
+# =============================================================================
+
+def _make_jwt(
+    user_id: str = TEST_USER_ID,
+    org_id: str = TEST_ORG_ID,
+    role: str = "SUPER_ADMIN",
+    email: str = "test@alis.local",
+    expires_minutes: int = 60,
+) -> str:
+    """Generate a real signed JWT for test requests."""
+    from jose import jwt as jose_jwt
+    from server.core.settings import settings
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "org_id": org_id,
+        "role": role,
+        "email": email,
+        "iat": now,
+        "exp": now + timedelta(minutes=expires_minutes),
+    }
+    return jose_jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+@pytest.fixture(scope="session")
+def test_client():
+    """
+    FastAPI TestClient for the full ALIS app.
+    DB and external services are mocked via the autouse fixtures above.
+    Scope=session for speed — reuses the client across all tests.
+    """
+    from fastapi.testclient import TestClient
+    from server.main import app
+    with TestClient(app, raise_server_exceptions=True) as client:
+        yield client
+
+
+@pytest.fixture
+def auth_headers():
+    """
+    Factory fixture: call it with a role to get Authorization headers.
+
+    Usage:
+        def test_something(auth_headers):
+            headers = auth_headers("ADMIN")
+            response = test_client.get("/api/...", headers=headers)
+    """
+    def _make(role: str = "SUPER_ADMIN", org_id: str = TEST_ORG_ID) -> dict:
+        token = _make_jwt(role=role, org_id=org_id)
+        return {"Authorization": f"Bearer {token}"}
+    return _make
+
+
+@pytest.fixture
+def super_admin_headers():
+    """Pre-built headers for SUPER_ADMIN role (most common in tests)."""
+    token = _make_jwt(role="SUPER_ADMIN")
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def student_headers():
+    """Pre-built headers for STUDENT role."""
+    token = _make_jwt(role="STUDENT", user_id=str(uuid.uuid4()))
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def counsellor_headers():
+    """Pre-built headers for COUNSELLOR role."""
+    token = _make_jwt(role="COUNSELLOR")
+    return {"Authorization": f"Bearer {token}"}
+
+
+# =============================================================================
+# Integration test fixtures (require real Postgres — skipped in unit mode)
+# =============================================================================
+
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "integration: requires real Postgres + Redis")
+    config.addinivalue_line("markers", "ai: requires Ollama running with models loaded")
+
+
+@pytest.fixture(scope="session")
+def real_db():
+    """
+    Real Postgres connection for integration tests.
+    Skip automatically if no DB is reachable.
+
+    Usage:
+        @pytest.mark.integration
+        def test_something(real_db):
+            conn = real_db
+            ...
+    """
+    pytest.importorskip("psycopg2")
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from server.core.settings import settings
+
+    try:
+        conn = psycopg2.connect(settings.db_url, cursor_factory=RealDictCursor)
+        conn.autocommit = False
+    except Exception as exc:
+        pytest.skip(f"No Postgres available — skipping integration test: {exc}")
+        return
+
+    yield conn
+
+    conn.rollback()
+    conn.close()
+
+
+@pytest.fixture
+def db_transaction(real_db):
+    """
+    Wraps each integration test in a transaction that is rolled back after.
+    Guarantees test isolation even against a real database.
+    """
+    real_db.execute(f"SET LOCAL alis.current_tenant = '{TEST_ORG_ID}'")
+    yield real_db
+    real_db.rollback()

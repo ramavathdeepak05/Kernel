@@ -41,7 +41,9 @@ def audit_app():
         mock_audit.AuditLedger = mock_ledger_class
         sys.modules["server.core.audit"] = mock_audit
 
-        # 3. Lazy import the router and create the app
+        # 3. Force-reload the router so it picks up mocked sys.modules
+        # (session-level test_client may have cached it with the real imports)
+        sys.modules.pop("server.api.audit_router", None)
         from server.api.audit_router import router
         app = FastAPI()
         app.include_router(router)
@@ -144,3 +146,38 @@ class TestAuditAPI:
         call_args = audit_app.mock_ledger.export_ledger.call_args[1]
         assert call_args["start_time"].isoformat() == "+00:00".join(start_dt.split("Z"))
         assert call_args["end_time"].isoformat() == "+00:00".join(end_dt.split("Z"))
+
+    def test_query_logs_success(self, audit_app):
+        """Query returns list of logs with expected structure."""
+        mock_entry = MagicMock()
+        mock_entry.id = 1
+        mock_entry.tenant_id = "tenant_123"
+        mock_entry.actor_id = "admin"
+        mock_entry.actor_role = "System Administrator"
+        mock_entry.action = "LOGIN"
+        mock_entry.entity_type = "AUTH"
+        mock_entry.entity_id = "admin"
+        mock_entry.metadata = {"ip": "127.0.0.1"}
+        mock_entry.timestamp = MagicMock()
+        mock_entry.timestamp.isoformat.return_value = "2025-01-01T12:00:00Z"
+        mock_entry.previous_hash = "abc"
+        mock_entry.hash = "def"
+
+        audit_app.mock_ledger.query.return_value = [mock_entry]
+
+        response = audit_app.get("/api/v1/audit/logs?limit=10")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["action"] == "LOGIN"
+        assert data[0]["hash"] == "def"
+        
+        audit_app.mock_ledger.query.assert_called_with(
+            tenant_id="tenant_123",
+            actor_id=None,
+            entity_type=None,
+            entity_id=None,
+            action=None,
+            limit=10,
+            offset=0
+        )
