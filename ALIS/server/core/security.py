@@ -36,6 +36,8 @@ from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
 
+import bcrypt as _bcrypt
+
 from .audit import AuditLog, AuditAction
 
 # Note: In production, use bcrypt or argon2
@@ -102,38 +104,40 @@ class Session:
 
 class PasswordHasher:
     """
-    Password hashing utility.
+    Password hashing utility using bcrypt (rounds=12).
 
-    Uses PBKDF2-HMAC-SHA256 with random salt.
-    In production, prefer bcrypt or argon2.
+    New hashes: bcrypt ($2b$ prefix).
+    Legacy hashes (PBKDF2 salt:hex format) are still verified for
+    backward compatibility but new passwords always use bcrypt.
     """
+
+    BCRYPT_ROUNDS = 12
 
     @staticmethod
     def hash(password: str) -> str:
-        """
-        Hash a password.
-
-        Returns: salt:hash format
-        """
-        salt = secrets.token_hex(16)
-        hash_value = hashlib.pbkdf2_hmac(
-            'sha256',
-            password.encode('utf-8'),
-            salt.encode('utf-8'),
-            100000
-        ).hex()
-        return f"{salt}:{hash_value}"
+        """Hash a password with bcrypt. Returns a bcrypt hash string."""
+        return _bcrypt.hashpw(
+            password.encode("utf-8"), _bcrypt.gensalt(rounds=PasswordHasher.BCRYPT_ROUNDS)
+        ).decode("utf-8")
 
     @staticmethod
     def verify(password: str, stored_hash: str) -> bool:
-        """Verify a password against stored hash."""
+        """
+        Verify a password against a stored hash.
+
+        Supports both bcrypt hashes (new) and legacy PBKDF2 salt:hex hashes.
+        """
         try:
-            salt, hash_value = stored_hash.split(":")
+            if stored_hash.startswith("$2"):
+                # bcrypt format
+                return _bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+            # Legacy PBKDF2-HMAC-SHA256 format: "salt:hex_hash"
+            salt, hash_value = stored_hash.split(":", 1)
             new_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                password.encode('utf-8'),
-                salt.encode('utf-8'),
-                100000
+                "sha256",
+                password.encode("utf-8"),
+                salt.encode("utf-8"),
+                100000,
             ).hex()
             return secrets.compare_digest(new_hash, hash_value)
         except Exception:

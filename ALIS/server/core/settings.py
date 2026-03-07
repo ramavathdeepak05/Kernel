@@ -1,0 +1,199 @@
+"""
+ALIS Infrastructure Settings — P0-S06
+
+Single source of truth for all environment/infrastructure configuration.
+Business policy parameters live in ConfigRegistry (config.py).
+This file owns: DB, Redis, MinIO, Ollama, SMTP, JWT, Razorpay, CORS.
+
+Usage:
+    from server.core.settings import settings
+    settings.db_url
+    settings.ollama_base_url
+
+Loaded from environment variables. In production, set via .env file
+mounted into the Docker container. Never commit .env to git.
+"""
+
+from functools import lru_cache
+from typing import List
+
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # -------------------------------------------------------------------------
+    # Application
+    # -------------------------------------------------------------------------
+    app_env: str = Field(default="development", description="development | staging | production")
+    app_secret_key: str = Field(default="change-me-in-production-use-32-char-min")
+    app_debug: bool = Field(default=False)
+    allowed_origins: List[str] = Field(default=["http://localhost:5173", "http://localhost:3000"])
+
+    # -------------------------------------------------------------------------
+    # Database (PostgreSQL)
+    # -------------------------------------------------------------------------
+    db_host: str = Field(default="localhost")
+    db_port: int = Field(default=5432)
+    db_name: str = Field(default="alis_db")
+    db_user: str = Field(default="postgres")
+    db_password: str = Field(default="postgres")
+    db_pool_min: int = Field(default=2)
+    db_pool_max: int = Field(default=20)
+
+    @property
+    def db_url(self) -> str:
+        return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+    @property
+    def db_url_async(self) -> str:
+        return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+    # -------------------------------------------------------------------------
+    # Redis (Celery broker + result backend)
+    # -------------------------------------------------------------------------
+    redis_host: str = Field(default="localhost")
+    redis_port: int = Field(default=6379)
+    redis_db: int = Field(default=0)
+    redis_password: str = Field(default="")
+
+    @property
+    def redis_url(self) -> str:
+        if self.redis_password:
+            return f"redis://:{self.redis_password}@{self.redis_host}:{self.redis_port}/{self.redis_db}"
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+    # -------------------------------------------------------------------------
+    # Celery
+    # -------------------------------------------------------------------------
+    celery_timezone: str = Field(default="Asia/Kolkata")
+    celery_task_serializer: str = Field(default="json")
+    celery_result_expires: int = Field(default=3600)  # seconds
+
+    # -------------------------------------------------------------------------
+    # MinIO (File Storage)
+    # -------------------------------------------------------------------------
+    minio_endpoint: str = Field(default="localhost:9000")
+    minio_access_key: str = Field(default="minioadmin")
+    minio_secret_key: str = Field(default="minioadmin")
+    minio_bucket: str = Field(default="alis-files")
+    minio_secure: bool = Field(default=False)  # True in production with TLS
+
+    # -------------------------------------------------------------------------
+    # Ollama (Local AI)
+    # -------------------------------------------------------------------------
+    ollama_base_url: str = Field(default="http://localhost:11434")
+    ollama_llm_model: str = Field(default="qwen2.5:1.5b-instruct-q8_0")
+    ollama_embed_model: str = Field(default="nomic-embed-text")
+    ollama_timeout_seconds: int = Field(default=120)
+    ollama_max_retries: int = Field(default=3)
+
+    # -------------------------------------------------------------------------
+    # JWT Auth
+    # -------------------------------------------------------------------------
+    jwt_secret_key: str = Field(default="change-me-jwt-secret-32-char-minimum")
+    jwt_algorithm: str = Field(default="HS256")
+    jwt_access_token_expire_minutes: int = Field(default=60)
+    jwt_refresh_token_expire_days: int = Field(default=7)
+
+    # -------------------------------------------------------------------------
+    # Bootstrap
+    # -------------------------------------------------------------------------
+    alis_bootstrap_secret: str = Field(default="")
+    alis_master_key: str = Field(default="")  # For tenant crypto
+
+    # -------------------------------------------------------------------------
+    # SMTP (Email Notifications)
+    # -------------------------------------------------------------------------
+    smtp_host: str = Field(default="localhost")
+    smtp_port: int = Field(default=587)
+    smtp_user: str = Field(default="")
+    smtp_password: str = Field(default="")
+    smtp_from_email: str = Field(default="noreply@alis.local")
+    smtp_from_name: str = Field(default="ALIS Institution")
+    smtp_use_tls: bool = Field(default=True)
+
+    # -------------------------------------------------------------------------
+    # SMS (Pluggable — MSG91 default)
+    # -------------------------------------------------------------------------
+    sms_provider: str = Field(default="")  # "msg91" | "twilio" | "" (disabled)
+    sms_api_key: str = Field(default="")
+    sms_sender_id: str = Field(default="ALIS")
+
+    # -------------------------------------------------------------------------
+    # Razorpay (Payment Gateway)
+    # -------------------------------------------------------------------------
+    razorpay_key_id: str = Field(default="")
+    razorpay_key_secret: str = Field(default="")
+    razorpay_webhook_secret: str = Field(default="")
+    razorpay_currency: str = Field(default="INR")
+
+    # -------------------------------------------------------------------------
+    # PGVector
+    # -------------------------------------------------------------------------
+    pgvector_dimensions: int = Field(default=768)  # nomic-embed-text output size
+
+    # -------------------------------------------------------------------------
+    # Validators
+    # -------------------------------------------------------------------------
+    @field_validator("app_env")
+    @classmethod
+    def validate_env(cls, v: str) -> str:
+        allowed = {"development", "staging", "production"}
+        if v not in allowed:
+            raise ValueError(f"app_env must be one of {allowed}")
+        return v
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Block startup if insecure defaults are used in production."""
+        if self.app_env != "production":
+            return self
+
+        _DEFAULTS = {
+            "jwt_secret_key": "change-me-jwt-secret-32-char-minimum",
+            "app_secret_key": "change-me-in-production-use-32-char-min",
+        }
+        for field_name, default_val in _DEFAULTS.items():
+            val = getattr(self, field_name)
+            if val == default_val:
+                raise ValueError(
+                    f"[SECURITY] {field_name} must be changed from the default value in production. "
+                    f"Set it via the {field_name.upper()} environment variable."
+                )
+            if len(val) < 32:
+                raise ValueError(
+                    f"[SECURITY] {field_name} must be at least 32 characters in production."
+                )
+
+        if not self.alis_master_key:
+            raise ValueError(
+                "[SECURITY] ALIS_MASTER_KEY must be set in production (required for tenant encryption)."
+            )
+
+        return self
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env == "production"
+
+    @property
+    def is_development(self) -> bool:
+        return self.app_env == "development"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """Return cached Settings instance. Use this everywhere."""
+    return Settings()
+
+
+# Module-level singleton — import this directly
+settings = get_settings()

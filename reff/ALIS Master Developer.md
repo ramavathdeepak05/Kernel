@@ -1,3 +1,39 @@
+
+> [!IMPORTANT]
+> **GLOBAL ARCHITECTURE UPDATE: Event-Driven Autonomy**
+> 
+> ALIS has shifted to an Event-Driven Autonomy model, altering the Staff role and standardizing module structure.
+> 
+> **The New Standard Module Contract (5 Elements):**
+> 1. `module_policies` table — configurable rules.
+> 2. `automation_pipeline.py` — Celery task chain for 24/7 autonomous execution.
+> 3. `event_publisher.py` — Domain events this module fires.
+> 4. `event_handlers.py` — Domain events this module reacts to.
+> 5. `review_queue` integration — Exceptions surfaced to staff routing.
+> 
+> **Staff Role Paradigm Shift:**
+> Staff activity is vastly reduced compared to traditional ERPs:
+> - **Rare**: Set policies once per academic year (marks threshold, fee amounts, seat capacity), Handle escalations.
+> - **Daily**: Review exceptions flagged by the system (borderline marks, uncertain docs, capacity conflicts).
+> - **Occasional**: Override specific decisions when human judgment is indispensable.
+> - **Periodic**: Monitor dashboard metrics (Reporting) for system performance.
+> *Everything else (offer letters, invoices, enrollments, hall tickets, results, notifications) is handled by the system 24/7.*
+> 
+> **Revised Full Build Order:**
+> - **Phase 0 (Infrastructure)**: Domain Event Bus, Academic Calendar, Celery Beat.
+> - **E04 Ext (Admissions Autonomous)**: First fully automated module establishing the pattern.
+> - **E05 (Academics)**: Subscribes: StudentEnrolled. Publishes: SemesterStarted/Ended.
+> - **E06 (Examinations)**: Subscribes: AttendanceFinalized. Publishes: ResultsDeclared.
+> - **E07 (Finance)**: Subscribes: StudentEnrolled + events. Publishes: FeePaymentReceived.
+> - **E08 (HR & Staff)**: Publishes: FacultyOnLeave.
+> - **E09 (Student Services)**: Subscribes: StudentEnrolled. Publishes: HostelAllotted.
+> - **E10 (Communication)**: Subscribes to EVERYTHING. Publishes: nothing.
+> - **E11 (Reporting)**: Subscribes to EVERYTHING. Read-only projection.
+> - **E12 (Alumni)**: Subscribes: StudentGraduated.
+> - **Hardening**: Load test the full automated pipeline end-to-end.
+
+---
+
 DOCUMENT AUTHORITY & PRECEDENCE
 This document is the single canonical source of truth for ALIS.
 All architectural decisions, state machines, authority rules, global locks, agent behavior, and implementation patterns MUST conform to this document.
@@ -5,8 +41,8 @@ Any secondary material (PDFs, slides, tickets, diagrams, chats) is explanatory o
 If a conflict exists, THIS DOCUMENT PREVAILS.
 ________________________________________
 SYSTEM SCOPE & OPERATING CONSTRAINTS
-•	Scope: 8 Modules, 77 Wizards (Exhaustive)
-•	Architecture: LangGraph + MCP + Local LLMs
+•	Scope: 9 Modules (M1–M9) + E13 Process Engine
+•	Architecture: FastAPI + Celery + Domain Event Bus
 •	Deployment: Air-gapped / No Cloud Dependencies
 •	Security Model: RBAC+ (Role + Context + Agent Constraints)
 ALIS is an Agentic Operating System for Institutions.
@@ -43,11 +79,12 @@ The Core Architecture
 
 1. The Build Environment
 1.1 The Stack
-• Runtime: Python 3.11+ (FastAPI for Orchestration Layer)
-• Orchestration: `langgraph` (Agents), `langchain` (Utilities)
-• Inference: `Ollama` (running `llama3` or `qwen2.5`)
-• Data: PostgreSQL 16 (Structured), ChromaDB (Vector)
-• Integration: MCP (Model Context Protocol)
+• Runtime: Python 3.11+ (FastAPI for API Layer)
+• Automation: `Celery` + Redis (background tasks, domain event bus)
+• Inference: `Ollama` (running `qwen2.5:1.5b-instruct-q8_0`)
+• Data: PostgreSQL 16 + pgvector (Structured + Vector), MinIO (Object Storage)
+• AI Gateway: `AIGateway` in `server/core/ai_gateway.py` (wraps Ollama HTTP)
+• Embeddings: `nomic-embed-text` via Ollama (768-dim, cosine similarity)
 
 1.2 Project Structure
 Organize your code exactly like this:
@@ -76,7 +113,7 @@ ________________________________________
 The "No-Cloud" Rule
 `import openai` -> Immediate Termination of PR
  `pip install anthropic` -> Forbidden
- `from langchain_community.llms import Ollama` -> Required
+ `AIGateway.invoke()` / `AIGateway.embed()` -> Required (server/core/ai_gateway.py)
 
 ________________________________________
 LAYER 1 — MODULE PURPOSE & AUTHORITY (WHY)
@@ -111,14 +148,18 @@ M6 — Student Services
 Owns: Campus life, discipline, facilities
 Must Not Decide: Academic standing
 Outcome: Safe student operations
-M7 — Regulatory & Quality
-Owns: Compliance, audits, grievances
-Must Not Decide: Academic grading, finance
-Outcome: Legal survivability
-M8 — Research Assistant
-Owns: Research intelligence only
-Must Not Decide: Institutional truth
-Outcome: Augmented research capability
+M7 — Communication Hub
+Owns: Institutional notifications, alerts, messaging
+Must Not Decide: Academic grading, finance, admissions
+Outcome: Reliable delivery of system-generated communications
+M8 — Reporting & Analytics
+Owns: Cross-module reports, analytics dashboards
+Must Not Decide: Any institutional truth (read-only projection)
+Outcome: Timely and accurate reporting for leadership
+M9 — Alumni & Placement
+Owns: Alumni profiles, placement tracking, employer coordination
+Must Not Decide: Academic certification, active student outcomes
+Outcome: Continued institutional engagement and placement success
 ________________________________________
 LAYER 2 — AGENTIC DECISIONS & WIZARDS (HOW)
 Wizards are decision engines, not forms.
@@ -240,26 +281,26 @@ return RuleResult(allowed=len(violations) == 0, violations=violations)
 
 Blueprint B: The AI Agent (Reasoning)
 Use for: Admissions, Regulatory, Research.
-Constraint: Agents NEVER write directly to the DB. They output a "Draft".
+Constraint: Agents NEVER write directly to the DB. They output a "Draft" (state_impact="DRAFT").
 
-#Agents/admissions/eligibility.py
-from typing import TypedDict
-from langgraph.graph import StateGraph, END
-from langchain_community.llms import Ollama
-class AgentState(TypedDict):
-doc_text: str
-rbc_context: Dict  # RBAC+ Context passed in
-draft_verdict: str
-def analyze_node(state: AgentState):
+# server/agents/admissions/eligibility_agent.py
+from server.core.ai_gateway import AIGateway
+from server.core.rbac import verify_access, Role, Permission
+from server.core.data_classification import DataMasker
 
-#Agents are Read-Only observers
+async def evaluate_eligibility(applicant_data: dict, actor_role: Role, tenant_id: str):
+    # Agents are read-only observers — mask PII before passing to LLM
+    masked = DataMasker.mask_for_ai_context(applicant_data)
 
-if not state['rbc_context']['can_view_pii']:
-return {"draft_verdict": "ERROR: PII Masking Active"}
-llm = Ollama(model="llama3")
-response = llm.invoke(f"Analyze: {state['doc_text']}")
-return {"draft_verdict": response}
-#... Graph construction (StateGraph) ...
+    response = await AIGateway.invoke(
+        prompt_id="admissions.eligibility_eval",
+        context=masked,
+        actor_role=actor_role,
+        tenant_id=tenant_id,
+    )
+    # response.state_impact is always "DRAFT" — gateway enforces this
+    # response.confidence_tier routes to AUTO / REVIEW / HITL
+    return response
 
 Blueprint C: RBAC+ Middleware (Security)
 The "Plus" means Context & Agent Constraints.
@@ -379,28 +420,41 @@ MUST NOT DECIDE:
 Institutional Outcome Owned:
 Safe and regulated student life operations.
 ________________________________________
-M7 — Regulatory & Quality
+M7 — Communication Hub
 Layer 1 Authority Contract
 SOLE AUTHORITY:
-•	Compliance submissions
-•	Grievance and RTI handling
-•	Audit freezing
+•	Institutional notifications and alerts
+•	Email/SMS/in-app messaging dispatch
+•	Communication templates and scheduling
 MUST NOT DECIDE:
 •	Academic grading
 •	Financial computation
+•	Admissions merit
 Institutional Outcome Owned:
-Legal survivability and regulatory compliance.
+Reliable delivery of system-generated communications to students and staff.
 ________________________________________
-M8 — Research Assistant
+M8 — Reporting & Analytics
 Layer 1 Authority Contract
 SOLE AUTHORITY:
-•	Research intelligence generation
-•	Knowledge synthesis
+•	Cross-module report generation
+•	Analytics dashboards and projections
+•	Data aggregation for leadership decisions
+MUST NOT DECIDE:
+•	Any institutional truth (read-only projection module)
+Institutional Outcome Owned:
+Timely and accurate reporting for staff and leadership decision-making.
+________________________________________
+M9 — Alumni & Placement
+Layer 1 Authority Contract
+SOLE AUTHORITY:
+•	Alumni profile management post-graduation
+•	Placement tracking and employer coordination
+•	Alumni engagement and reunions
 MUST NOT DECIDE:
 •	Academic certification
-•	Compliance outcomes
+•	Active student outcomes
 Institutional Outcome Owned:
-Augmented research capability without authority over institutional truth.
+Continued institutional engagement and placement success tracking.
 ________________________________________
 LAYER 2 — WIZARDS & DECISIONS (HOW)
 Layer 2 defines how institutional decisions are made.
