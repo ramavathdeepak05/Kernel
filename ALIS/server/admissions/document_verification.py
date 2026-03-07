@@ -43,6 +43,7 @@ from server.fs_service import FileStorageService
 
 from .models import (
     ApplicationDocumentRead,
+    DocumentStatus,
     DocumentType,
     DocumentUploadRequest,
     DocumentVerificationMethod,
@@ -370,14 +371,289 @@ class DocumentVerificationService:
     @classmethod
     def all_required_docs_verified(cls, applicant_id: str, org_id: str) -> bool:
         """
-        Return True if all required document types are uploaded and verified.
+        Return True if all required document types are uploaded and approved.
 
-        Used as a Layer 4 lock check before offer letter generation.
+        Checks doc_status = APPROVED (Stage 3 workflow) first;
+        falls back to is_verified = True for backward compatibility.
         """
         rows = execute_query(
-            "SELECT doc_type, is_verified FROM application_documents "
+            "SELECT doc_type, is_verified, doc_status FROM application_documents "
             "WHERE applicant_id = %s AND org_id = %s",
             (applicant_id, org_id),
         )
-        verified_types = {r["doc_type"] for r in rows if r["is_verified"]}
-        return _REQUIRED_FOR_OFFER.issubset(verified_types)
+        approved_types = {
+            r["doc_type"] for r in rows
+            if r.get("doc_status") == DocumentStatus.APPROVED.value or r["is_verified"]
+        }
+        return _REQUIRED_FOR_OFFER.issubset(approved_types)
+
+    # -------------------------------------------------------------------------
+    # Stage 3: Document Review Workflow
+    # -------------------------------------------------------------------------
+
+    @classmethod
+    def submit_for_review(
+        cls,
+        doc_id: str,
+        org_id: str,
+        actor_id: str,
+    ) -> ApplicationDocumentRead:
+        """
+        Transition doc_status: PENDING → UNDER_REVIEW.
+
+        Called when a staff officer begins reviewing a document.
+        """
+        rows = execute_query(
+            "SELECT doc_status FROM application_documents WHERE id = %s AND org_id = %s",
+            (doc_id, org_id),
+        )
+        if not rows:
+            raise BusinessRuleViolation(message=f"Document '{doc_id}' not found.")
+
+        current = rows[0]["doc_status"]
+        if current not in (DocumentStatus.PENDING.value, None, ""):
+            raise BusinessRuleViolation(
+                message=f"Document must be in PENDING status to start review. Current: {current}",
+            )
+
+        now = datetime.now(timezone.utc)
+        execute_transaction([
+            (
+                "UPDATE application_documents SET doc_status = %s, updated_at = %s "
+                "WHERE id = %s AND org_id = %s",
+                (DocumentStatus.UNDER_REVIEW.value, now, doc_id, org_id),
+            )
+        ])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            entity_type="application_document",
+            entity_id=doc_id,
+            org_id=org_id,
+            module="M1",
+            wizard="Document Verification",
+            success=True,
+            metadata={"doc_status": DocumentStatus.UNDER_REVIEW.value},
+        )
+        return cls.get_document(doc_id, org_id)
+
+    @classmethod
+    def approve_document(
+        cls,
+        doc_id: str,
+        org_id: str,
+        actor_id: str,
+        actor_role: object = None,
+    ) -> ApplicationDocumentRead:
+        """
+        Approve a document: doc_status → APPROVED, is_verified → True.
+
+        Requires at least STAFF role (officer or admin).
+        """
+        now = datetime.now(timezone.utc)
+        execute_transaction([
+            (
+                """
+                UPDATE application_documents
+                SET doc_status = %s,
+                    is_verified = TRUE,
+                    verification_method = %s,
+                    verified_by = %s,
+                    verified_at = %s
+                WHERE id = %s AND org_id = %s
+                """,
+                (
+                    DocumentStatus.APPROVED.value,
+                    DocumentVerificationMethod.MANUAL_OFFICER.value,
+                    actor_id, now,
+                    doc_id, org_id,
+                ),
+            )
+        ])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            entity_type="application_document",
+            entity_id=doc_id,
+            org_id=org_id,
+            module="M1",
+            wizard="Document Verification",
+            success=True,
+            metadata={"doc_status": DocumentStatus.APPROVED.value, "is_verified": True},
+        )
+
+        logger.info("E04-S04: Document approved — doc %s [actor=%s]", doc_id, actor_id)
+        return cls.get_document(doc_id, org_id)
+
+    @classmethod
+    def reject_document(
+        cls,
+        doc_id: str,
+        org_id: str,
+        actor_id: str,
+        rejection_reason: str,
+        allow_reupload: bool = True,
+        reupload_deadline: "datetime | None" = None,
+    ) -> ApplicationDocumentRead:
+        """
+        Reject a document.
+
+        If allow_reupload=True → doc_status = REUPLOAD_REQUESTED.
+        Otherwise → doc_status = REJECTED (terminal).
+        """
+        if not rejection_reason or not rejection_reason.strip():
+            raise BusinessRuleViolation(
+                message="Rejection reason is required when rejecting a document."
+            )
+
+        new_status = (
+            DocumentStatus.REUPLOAD_REQUESTED.value
+            if allow_reupload
+            else DocumentStatus.REJECTED.value
+        )
+        now = datetime.now(timezone.utc)
+
+        execute_transaction([
+            (
+                """
+                UPDATE application_documents
+                SET doc_status = %s,
+                    is_verified = FALSE,
+                    rejection_reason = %s,
+                    reupload_deadline = %s
+                WHERE id = %s AND org_id = %s
+                """,
+                (
+                    new_status,
+                    rejection_reason[:500],
+                    reupload_deadline,
+                    doc_id, org_id,
+                ),
+            )
+        ])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            entity_type="application_document",
+            entity_id=doc_id,
+            org_id=org_id,
+            module="M1",
+            wizard="Document Verification",
+            success=True,
+            metadata={
+                "doc_status": new_status,
+                "rejection_reason": rejection_reason,
+                "allow_reupload": allow_reupload,
+            },
+        )
+
+        logger.info(
+            "E04-S04: Document rejected — doc %s status=%s [actor=%s]",
+            doc_id, new_status, actor_id,
+        )
+        return cls.get_document(doc_id, org_id)
+
+    @classmethod
+    def reupload_document(
+        cls,
+        doc_id: str,
+        file_bytes: bytes,
+        file_name: str,
+        org_id: str,
+        actor_id: str,
+    ) -> ApplicationDocumentRead:
+        """
+        Replace a rejected/reupload-requested document with a new file.
+
+        Increments reupload_count, resets doc_status to PENDING.
+        Max 3 reuploads enforced.
+        """
+        rows = execute_query(
+            "SELECT doc_status, reupload_count, applicant_id, doc_type "
+            "FROM application_documents WHERE id = %s AND org_id = %s",
+            (doc_id, org_id),
+        )
+        if not rows:
+            raise BusinessRuleViolation(message=f"Document '{doc_id}' not found.")
+
+        doc = rows[0]
+        if doc["doc_status"] not in (
+            DocumentStatus.REUPLOAD_REQUESTED.value,
+            DocumentStatus.REJECTED.value,
+        ):
+            raise BusinessRuleViolation(
+                message=f"Document must be in REUPLOAD_REQUESTED or REJECTED status. "
+                        f"Current: {doc['doc_status']}",
+            )
+
+        reupload_count = (doc["reupload_count"] or 0)
+        if reupload_count >= 3:
+            raise BusinessRuleViolation(
+                message="Maximum reupload limit (3) reached for this document.",
+                details={"reupload_count": reupload_count},
+            )
+
+        # Store new file
+        from server.fs_service import FileStorageService
+        fs = FileStorageService()
+        file_meta = fs.upload_file(
+            file_content=file_bytes,
+            filename=file_name,
+            owner_id=actor_id,
+            context={"role": "staff", "entity_type": "application_document", "entity_id": doc_id},
+        )
+        new_path = str(file_meta.get_version().storage_path) if file_meta.get_version() else file_name
+
+        now = datetime.now(timezone.utc)
+        execute_transaction([
+            (
+                """
+                UPDATE application_documents
+                SET file_path = %s,
+                    original_file_name = %s,
+                    doc_status = %s,
+                    is_verified = FALSE,
+                    rejection_reason = NULL,
+                    reupload_count = reupload_count + 1,
+                    reupload_deadline = NULL,
+                    verification_method = NULL,
+                    verification_detail = NULL,
+                    verified_by = NULL,
+                    verified_at = NULL
+                WHERE id = %s AND org_id = %s
+                """,
+                (
+                    new_path, file_name,
+                    DocumentStatus.PENDING.value,
+                    doc_id, org_id,
+                ),
+            )
+        ])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            entity_type="application_document",
+            entity_id=doc_id,
+            org_id=org_id,
+            module="M1",
+            wizard="Document Verification",
+            success=True,
+            metadata={
+                "action": "reupload",
+                "new_reupload_count": reupload_count + 1,
+                "file_name": file_name,
+            },
+        )
+
+        # Trigger AI re-verification on new file
+        cls._run_ai_verification(doc_id, new_path, doc["doc_type"], org_id, actor_id)
+
+        logger.info(
+            "E04-S04: Document reuploaded — doc %s [count=%d actor=%s]",
+            doc_id, reupload_count + 1, actor_id,
+        )
+        return cls.get_document(doc_id, org_id)

@@ -223,7 +223,7 @@ class DocumentUploadRequest(BaseModel):
 
 
 class ApplicationDocumentRead(BaseModel):
-    """Output schema for a document record."""
+    """Output schema for a document record (v2 — includes Stage 3 status workflow)."""
     id: str
     org_id: str
     applicant_id: str
@@ -234,6 +234,15 @@ class ApplicationDocumentRead(BaseModel):
     verification_detail: Optional[str] = None
     verified_by: Optional[str] = None
     verified_at: Optional[datetime] = None
+    # Stage 3 document status workflow
+    doc_status: str = "PENDING"
+    rejection_reason: Optional[str] = None
+    reupload_count: int = 0
+    reupload_deadline: Optional[datetime] = None
+    file_size_bytes: Optional[int] = None
+    file_mime_type: Optional[str] = None
+    original_file_name: Optional[str] = None
+    digilocker_verified: bool = False
     created_at: datetime
 
 

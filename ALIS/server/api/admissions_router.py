@@ -248,6 +248,72 @@ async def list_documents(request: Request, applicant_id: str) -> JSONResponse:
 
 
 # =============================================================================
+# P5: DOCUMENT REVIEW WORKFLOW (Stage 3 — additional endpoints)
+# =============================================================================
+
+@router.post("/documents/{doc_id}/review/start")
+@require_permission(Permission.STUDENT_CREATE)
+async def submit_document_for_review(request: Request, doc_id: str) -> JSONResponse:
+    """Transition doc_status PENDING → UNDER_REVIEW."""
+    doc = DocumentVerificationService.submit_for_review(
+        doc_id=doc_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+
+
+@router.post("/documents/{doc_id}/review/approve")
+@require_permission(Permission.STUDENT_CREATE)
+async def approve_document(request: Request, doc_id: str) -> JSONResponse:
+    """Approve a document (UNDER_REVIEW → APPROVED, is_verified=True)."""
+    doc = DocumentVerificationService.approve_document(
+        doc_id=doc_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+        actor_role=_role(request),
+    )
+    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+
+
+@router.post("/documents/{doc_id}/review/reject")
+@require_permission(Permission.STUDENT_CREATE)
+async def reject_document(request: Request, doc_id: str, body: dict) -> JSONResponse:
+    """Reject a document with a reason. allow_reupload=True → REUPLOAD_REQUESTED."""
+    doc = DocumentVerificationService.reject_document(
+        doc_id=doc_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+        rejection_reason=body.get("rejection_reason", ""),
+        allow_reupload=body.get("allow_reupload", True),
+        reupload_deadline=body.get("reupload_deadline"),
+    )
+    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+
+
+@router.post("/documents/{doc_id}/reupload")
+@require_permission(Permission.STUDENT_CREATE)
+async def reupload_document(request: Request, doc_id: str, body: dict) -> JSONResponse:
+    """Re-upload a rejected document (resets to PENDING, increments reupload_count)."""
+    import base64
+    file_content_b64 = body.get("file_content_base64", "")
+    file_name = body.get("file_name", "document")
+    try:
+        file_bytes = base64.b64decode(file_content_b64)
+    except Exception:
+        return JSONResponse(status_code=422, content={"detail": "Invalid base64 file content"})
+
+    doc = DocumentVerificationService.reupload_document(
+        doc_id=doc_id,
+        file_bytes=file_bytes,
+        file_name=file_name,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+
+
+# =============================================================================
 # P0-S10: COUNSELLOR MANAGEMENT (CRUD + embedding ETL trigger)
 # =============================================================================
 
