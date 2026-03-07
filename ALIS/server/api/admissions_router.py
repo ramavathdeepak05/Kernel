@@ -50,6 +50,16 @@ from server.admissions.models import (
     ReferralCodeCreate,
 )
 from server.admissions.service import ApplicantService
+from server.admissions.application_form import (
+    ApplicationFormService,
+    PersonalDetailsRequest,
+    AddressRequest,
+    AcademicQualificationRequest,
+    EntranceScoreRequest,
+    ProgramPreferencesRequest,
+    DeclarationRequest,
+    ApplicationFeeRequest,
+)
 from server.admissions.lead_service import LeadService, ConsultantService, ReferralCodeService
 from server.admissions.deduplication import LeadDeduplicationService
 from server.admissions.eligibility_service import EligibilityService
@@ -394,6 +404,194 @@ async def enroll_student(
         actor_id=_actor(request),
     )
     return JSONResponse(status_code=201, content=student.model_dump(default=str))
+
+
+# =============================================================================
+# P4: APPLICATION FORM WIZARD (Stage 2)
+# =============================================================================
+
+@router.post("/applications/{applicant_id}/start")
+@require_permission(Permission.STUDENT_CREATE)
+async def start_application_draft(request: Request, applicant_id: str) -> JSONResponse:
+    """Start the application form wizard (assigns Application ID, status → DRAFT)."""
+    draft = ApplicationFormService.start_draft(
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+@router.get("/applications/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_application_draft(request: Request, applicant_id: str) -> JSONResponse:
+    """Get full application form data for an applicant."""
+    draft = ApplicationFormService.get_draft(applicant_id, _org(request))
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+@router.patch("/applications/{applicant_id}/personal")
+@require_permission(Permission.STUDENT_CREATE)
+async def save_personal_details(
+    request: Request, applicant_id: str, body: PersonalDetailsRequest
+) -> JSONResponse:
+    """Step 1: Save personal details (DOB, gender, category, Aadhaar)."""
+    draft = ApplicationFormService.save_personal_details(
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        request=body,
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+@router.patch("/applications/{applicant_id}/address")
+@require_permission(Permission.STUDENT_CREATE)
+async def save_address(
+    request: Request, applicant_id: str, body: AddressRequest
+) -> JSONResponse:
+    """Step 2: Save address information."""
+    draft = ApplicationFormService.save_address(
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        request=body,
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+@router.post("/applications/{applicant_id}/qualifications")
+@require_permission(Permission.STUDENT_CREATE)
+async def add_academic_qualification(
+    request: Request, applicant_id: str, body: AcademicQualificationRequest
+) -> JSONResponse:
+    """Step 3: Add or update an academic qualification record."""
+    body.applicant_id = applicant_id
+    qual = ApplicationFormService.add_academic_qualification(
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=201, content=qual.model_dump(default=str))
+
+
+@router.get("/applications/{applicant_id}/qualifications")
+@require_permission(Permission.STUDENT_READ)
+async def list_academic_qualifications(
+    request: Request, applicant_id: str
+) -> JSONResponse:
+    """Get all academic qualifications for an applicant."""
+    quals = ApplicationFormService.list_academic_qualifications(applicant_id, _org(request))
+    return JSONResponse(
+        status_code=200,
+        content={"qualifications": [q.model_dump(default=str) for q in quals]},
+    )
+
+
+@router.post("/applications/{applicant_id}/entrance-scores")
+@require_permission(Permission.STUDENT_CREATE)
+async def add_entrance_score(
+    request: Request, applicant_id: str, body: EntranceScoreRequest
+) -> JSONResponse:
+    """Step 4: Add an entrance exam score (JEE/NEET/CAT/etc.)."""
+    body.applicant_id = applicant_id
+    score = ApplicationFormService.add_entrance_score(
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=201, content=score.model_dump(default=str))
+
+
+@router.get("/applications/{applicant_id}/entrance-scores")
+@require_permission(Permission.STUDENT_READ)
+async def list_entrance_scores(
+    request: Request, applicant_id: str
+) -> JSONResponse:
+    scores = ApplicationFormService.list_entrance_scores(applicant_id, _org(request))
+    return JSONResponse(
+        status_code=200,
+        content={"scores": [s.model_dump(default=str) for s in scores]},
+    )
+
+
+@router.delete("/applications/{applicant_id}/entrance-scores/{score_id}", status_code=204)
+@require_permission(Permission.STUDENT_CREATE)
+async def delete_entrance_score(
+    request: Request, applicant_id: str, score_id: str
+) -> None:
+    ApplicationFormService.delete_entrance_score(
+        score_id=score_id,
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+
+
+@router.put("/applications/{applicant_id}/preferences")
+@require_permission(Permission.STUDENT_CREATE)
+async def set_program_preferences(
+    request: Request, applicant_id: str, body: ProgramPreferencesRequest
+) -> JSONResponse:
+    """Step 5: Set ordered program preferences (replaces existing)."""
+    body.applicant_id = applicant_id
+    prefs = ApplicationFormService.set_program_preferences(
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content={"preferences": prefs})
+
+
+@router.get("/applications/{applicant_id}/preferences")
+@require_permission(Permission.STUDENT_READ)
+async def get_program_preferences(
+    request: Request, applicant_id: str
+) -> JSONResponse:
+    prefs = ApplicationFormService.get_program_preferences(applicant_id, _org(request))
+    return JSONResponse(status_code=200, content={"preferences": prefs})
+
+
+@router.post("/applications/{applicant_id}/declaration")
+@require_permission(Permission.STUDENT_CREATE)
+async def accept_declaration(
+    request: Request, applicant_id: str, body: DeclarationRequest
+) -> JSONResponse:
+    """Step 7: Accept declaration and provide digital signature."""
+    body.applicant_id = applicant_id
+    draft = ApplicationFormService.accept_declaration(
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        request=body,
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+@router.post("/applications/{applicant_id}/submit")
+@require_permission(Permission.STUDENT_CREATE)
+async def submit_application(request: Request, applicant_id: str) -> JSONResponse:
+    """Submit the application (DRAFT → SUBMITTED). Validates completeness."""
+    draft = ApplicationFormService.submit_application(
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+@router.post("/applications/fee")
+@require_permission(Permission.STUDENT_CREATE)
+async def record_application_fee(
+    request: Request, body: ApplicationFeeRequest
+) -> JSONResponse:
+    """Step 8: Record application fee payment (SUBMITTED → DOCUMENTS_PENDING)."""
+    draft = ApplicationFormService.record_application_fee(
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
 
 
 # =============================================================================
