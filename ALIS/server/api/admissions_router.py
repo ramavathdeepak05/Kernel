@@ -50,6 +50,22 @@ from server.admissions.models import (
     ReferralCodeCreate,
 )
 from server.admissions.service import ApplicantService
+from server.admissions.merit_list import (
+    SeatMatrixService, SeatMatrixCreate,
+    MeritListPolicyService, MeritListPolicyCreate,
+    MeritListService, MeritListGenerateRequest,
+)
+from server.admissions.entrance_test import (
+    AdmissionsTestService, AdmissionsTestCreate,
+    TestSlotService, TestSlotCreate,
+    TestRegistrationService, TestRegistrationCreate,
+    TestScoreService, TestScoreCreate,
+)
+from server.admissions.interview import (
+    InterviewPanelService, InterviewPanelCreate,
+    InterviewScheduleService, InterviewScheduleCreate,
+    InterviewScorecardService, InterviewScorecardCreate,
+)
 from server.admissions.application_form import (
     ApplicationFormService,
     PersonalDetailsRequest,
@@ -658,6 +674,282 @@ async def record_application_fee(
         actor_id=_actor(request),
     )
     return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+
+
+# =============================================================================
+# P8: SEAT MATRIX + MERIT LIST ENGINE (Stage 6)
+# =============================================================================
+
+@router.post("/seats")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def create_seat_matrix(request: Request, body: SeatMatrixCreate) -> JSONResponse:
+    """Define seat counts for a program/batch/category combination."""
+    seat = SeatMatrixService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=seat.model_dump(default=str))
+
+
+@router.get("/seats")
+@require_permission(Permission.STUDENT_READ)
+async def list_seat_matrix(
+    request: Request,
+    program_name: Optional[str] = Query(default=None),
+    intake_batch: Optional[str] = Query(default=None),
+) -> JSONResponse:
+    seats = SeatMatrixService.list(
+        org_id=_org(request), program_name=program_name, intake_batch=intake_batch
+    )
+    return JSONResponse(status_code=200, content={"seats": [s.model_dump(default=str) for s in seats]})
+
+
+@router.post("/merit-policies")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def create_merit_policy(request: Request, body: MeritListPolicyCreate) -> JSONResponse:
+    """Create or update the merit scoring formula for a program/batch."""
+    policy = MeritListPolicyService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=policy.model_dump(default=str))
+
+
+@router.get("/merit-policies/{program_name}/{intake_batch}")
+@require_permission(Permission.STUDENT_READ)
+async def get_merit_policy(request: Request, program_name: str, intake_batch: str) -> JSONResponse:
+    policy = MeritListPolicyService.get(_org(request), program_name, intake_batch)
+    return JSONResponse(status_code=200, content=policy.model_dump(default=str))
+
+
+@router.post("/merit-lists/generate")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def generate_merit_list(request: Request, body: MeritListGenerateRequest) -> JSONResponse:
+    """Generate a ranked merit list for a program/batch/category."""
+    result = MeritListService.generate(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=result)
+
+
+@router.get("/merit-lists/{merit_list_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_merit_list(request: Request, merit_list_id: str) -> JSONResponse:
+    ml = MeritListService.get(merit_list_id, _org(request))
+    return JSONResponse(status_code=200, content=ml.model_dump(default=str))
+
+
+@router.get("/merit-lists/{merit_list_id}/entries")
+@require_permission(Permission.STUDENT_READ)
+async def list_merit_entries(request: Request, merit_list_id: str) -> JSONResponse:
+    entries = MeritListService.list_entries(merit_list_id, _org(request))
+    return JSONResponse(status_code=200, content={"entries": [e.model_dump(default=str) for e in entries]})
+
+
+@router.get("/merit-lists/{merit_list_id}/waitlist")
+@require_permission(Permission.STUDENT_READ)
+async def list_waitlist(request: Request, merit_list_id: str) -> JSONResponse:
+    waitlist = MeritListService.list_waitlist(merit_list_id, _org(request))
+    return JSONResponse(status_code=200, content={"waitlist": [w.model_dump(default=str) for w in waitlist]})
+
+
+@router.patch("/merit-lists/{merit_list_id}/status")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def update_merit_list_status(request: Request, merit_list_id: str, body: dict) -> JSONResponse:
+    """Advance merit list: DRAFT → UNDER_REVIEW → APPROVED → PUBLISHED."""
+    ml = MeritListService.update_status(
+        merit_list_id=merit_list_id, org_id=_org(request),
+        new_status=body.get("status", ""), actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=ml.model_dump(default=str))
+
+
+@router.post("/merit-lists/{merit_list_id}/waitlist/{applicant_id}/activate")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def activate_waitlist_entry(
+    request: Request, merit_list_id: str, applicant_id: str
+) -> JSONResponse:
+    """Activate a waitlist candidate (seat freed by decline/no-show)."""
+    entry = MeritListService.activate_waitlist_entry(
+        merit_list_id=merit_list_id,
+        applicant_id=applicant_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=entry.model_dump(default=str))
+
+
+# =============================================================================
+# P7: ENTRANCE TESTS (Stage 5A)
+# =============================================================================
+
+@router.post("/tests")
+@require_permission(Permission.STUDENT_CREATE)
+async def create_admissions_test(
+    request: Request, body: AdmissionsTestCreate
+) -> JSONResponse:
+    test = AdmissionsTestService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=test.model_dump(default=str))
+
+
+@router.get("/tests")
+@require_permission(Permission.STUDENT_READ)
+async def list_admissions_tests(
+    request: Request,
+    intake_batch: Optional[str] = Query(default=None),
+    program_name: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+) -> JSONResponse:
+    tests = AdmissionsTestService.list(
+        org_id=_org(request), intake_batch=intake_batch,
+        program_name=program_name, status=status,
+    )
+    return JSONResponse(status_code=200, content={"tests": [t.model_dump(default=str) for t in tests]})
+
+
+@router.get("/tests/{test_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_admissions_test(request: Request, test_id: str) -> JSONResponse:
+    return JSONResponse(status_code=200, content=AdmissionsTestService.get(test_id, _org(request)).model_dump(default=str))
+
+
+@router.patch("/tests/{test_id}/status")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def update_test_status(request: Request, test_id: str, body: dict) -> JSONResponse:
+    test = AdmissionsTestService.update_status(
+        test_id=test_id, org_id=_org(request),
+        new_status=body.get("status", ""), actor_id=_actor(request),
+    )
+    return JSONResponse(status_code=200, content=test.model_dump(default=str))
+
+
+@router.post("/tests/{test_id}/slots")
+@require_permission(Permission.STUDENT_CREATE)
+async def add_test_slot(request: Request, test_id: str, body: TestSlotCreate) -> JSONResponse:
+    body.test_id = test_id
+    slot = TestSlotService.add_slot(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=slot.model_dump(default=str))
+
+
+@router.get("/tests/{test_id}/slots")
+@require_permission(Permission.STUDENT_READ)
+async def list_test_slots(request: Request, test_id: str) -> JSONResponse:
+    slots = TestSlotService.list_for_test(test_id, _org(request))
+    return JSONResponse(status_code=200, content={"slots": [s.model_dump(default=str) for s in slots]})
+
+
+@router.post("/tests/registrations")
+@require_permission(Permission.STUDENT_CREATE)
+async def register_for_test(request: Request, body: TestRegistrationCreate) -> JSONResponse:
+    reg = TestRegistrationService.register(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=reg.model_dump(default=str))
+
+
+@router.get("/tests/{test_id}/registrations")
+@require_permission(Permission.STUDENT_READ)
+async def list_test_registrations(request: Request, test_id: str) -> JSONResponse:
+    regs = TestRegistrationService.list_for_test(test_id, _org(request))
+    return JSONResponse(status_code=200, content={"registrations": [r.model_dump(default=str) for r in regs]})
+
+
+@router.post("/tests/registrations/{reg_id}/admit-card")
+@require_permission(Permission.STUDENT_CREATE)
+async def generate_admit_card(request: Request, reg_id: str) -> JSONResponse:
+    reg = TestRegistrationService.generate_admit_card(reg_id, _org(request), _actor(request))
+    return JSONResponse(status_code=200, content=reg.model_dump(default=str))
+
+
+@router.patch("/tests/registrations/{reg_id}/attendance")
+@require_permission(Permission.STUDENT_CREATE)
+async def record_test_attendance(request: Request, reg_id: str, body: dict) -> JSONResponse:
+    reg = TestRegistrationService.record_attendance(
+        reg_id, _org(request), body.get("attendance_status", ""), _actor(request)
+    )
+    return JSONResponse(status_code=200, content=reg.model_dump(default=str))
+
+
+@router.post("/tests/scores")
+@require_permission(Permission.STUDENT_CREATE)
+async def enter_test_score(request: Request, body: TestScoreCreate) -> JSONResponse:
+    score = TestScoreService.enter_score(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=score.model_dump(default=str))
+
+
+@router.get("/tests/{test_id}/scores")
+@require_permission(Permission.STUDENT_READ)
+async def list_test_scores(request: Request, test_id: str) -> JSONResponse:
+    scores = TestScoreService.list_for_test(test_id, _org(request))
+    return JSONResponse(status_code=200, content={"scores": [s.model_dump(default=str) for s in scores]})
+
+
+# =============================================================================
+# P7: INTERVIEW MANAGEMENT (Stage 5B)
+# =============================================================================
+
+@router.post("/interviews/panels")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def create_interview_panel(request: Request, body: InterviewPanelCreate) -> JSONResponse:
+    panel = InterviewPanelService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=panel.model_dump(default=str))
+
+
+@router.get("/interviews/panels")
+@require_permission(Permission.STUDENT_READ)
+async def list_interview_panels(
+    request: Request,
+    intake_batch: Optional[str] = Query(default=None),
+    program_name: Optional[str] = Query(default=None),
+) -> JSONResponse:
+    panels = InterviewPanelService.list(
+        org_id=_org(request), intake_batch=intake_batch, program_name=program_name
+    )
+    return JSONResponse(status_code=200, content={"panels": [p.model_dump(default=str) for p in panels]})
+
+
+@router.post("/interviews/schedules")
+@require_permission(Permission.STUDENT_CREATE)
+async def schedule_interview(request: Request, body: InterviewScheduleCreate) -> JSONResponse:
+    schedule = InterviewScheduleService.schedule(request=body, org_id=_org(request), actor_id=_actor(request))
+    return JSONResponse(status_code=201, content=schedule.model_dump(default=str))
+
+
+@router.get("/interviews/schedules/applicant/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def list_interviews_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+    schedules = InterviewScheduleService.list_for_applicant(applicant_id, _org(request))
+    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(default=str) for s in schedules]})
+
+
+@router.get("/interviews/schedules/panel/{panel_id}")
+@require_permission(Permission.STUDENT_READ)
+async def list_interviews_for_panel(request: Request, panel_id: str) -> JSONResponse:
+    schedules = InterviewScheduleService.list_for_panel(panel_id, _org(request))
+    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(default=str) for s in schedules]})
+
+
+@router.patch("/interviews/schedules/{schedule_id}/attendance")
+@require_permission(Permission.STUDENT_CREATE)
+async def update_interview_attendance(request: Request, schedule_id: str, body: dict) -> JSONResponse:
+    schedule = InterviewScheduleService.update_attendance(
+        schedule_id, _org(request), body.get("attendance_status", ""), _actor(request)
+    )
+    return JSONResponse(status_code=200, content=schedule.model_dump(default=str))
+
+
+@router.post("/interviews/scorecards")
+@require_permission(Permission.STUDENT_CREATE)
+async def submit_scorecard(request: Request, body: InterviewScorecardCreate) -> JSONResponse:
+    """Submit an evaluator's interview scorecard."""
+    scorecard = InterviewScorecardService.submit(
+        request=body, org_id=_org(request), evaluator_id=_actor(request)
+    )
+    return JSONResponse(status_code=201, content=scorecard.model_dump(default=str))
+
+
+@router.get("/interviews/schedules/{schedule_id}/scorecards")
+@require_permission(Permission.STUDENT_READ)
+async def list_scorecards(request: Request, schedule_id: str) -> JSONResponse:
+    scorecards = InterviewScorecardService.list_for_schedule(schedule_id, _org(request))
+    return JSONResponse(status_code=200, content={"scorecards": [s.model_dump(default=str) for s in scorecards]})
+
+
+@router.get("/interviews/schedules/{schedule_id}/aggregate")
+@require_permission(Permission.STUDENT_READ)
+async def get_interview_aggregate(request: Request, schedule_id: str) -> JSONResponse:
+    agg = InterviewScorecardService.get_aggregate_score(schedule_id, _org(request))
+    return JSONResponse(status_code=200, content=agg)
 
 
 # =============================================================================
