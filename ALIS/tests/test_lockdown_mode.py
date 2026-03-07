@@ -28,10 +28,10 @@ from server.core.exceptions import (
 # --- Fixtures ---
 
 @pytest.fixture(autouse=True)
-def reset_services():
+def reset_services(fake_redis_global):
     """Reset all services before each test."""
     LockdownManager._reset()
-    SessionManager._sessions = {}
+    fake_redis_global.flushall()  # clear session/rate state
     AuditLog._entries = []
     ConfigRegistry._configs = {}
     ConfigRegistry.initialize_defaults()
@@ -159,7 +159,6 @@ class TestSessionInvalidation:
 
     def test_sessions_revoked_on_activation(self):
         """Test that all sessions are revoked when lockdown activates."""
-        # Create sessions for different users
         s1, _ = SessionManager.create_session(user_id="student_001")
         s2, _ = SessionManager.create_session(user_id="faculty_001")
         s3, _ = SessionManager.create_session(user_id="admin_001")
@@ -174,10 +173,10 @@ class TestSessionInvalidation:
             reason="Session test",
         )
 
-        # All sessions should be revoked (including admin — force MFA re-auth)
-        assert s1.is_active is False
-        assert s2.is_active is False
-        assert s3.is_active is False
+        # Reload from Redis to check persisted state
+        assert SessionManager.get_session(s1.id).is_active is False
+        assert SessionManager.get_session(s2.id).is_active is False
+        assert SessionManager.get_session(s3.id).is_active is False
         assert event.sessions_revoked == 3
 
     def test_revoke_count_is_accurate(self):
@@ -199,8 +198,8 @@ class TestSessionInvalidation:
         s1, _ = SessionManager.create_session(user_id="user_001")
         s2, _ = SessionManager.create_session(user_id="user_002")
 
-        # Pre-revoke one
-        s1.revoke(reason="Manual revoke")
+        # Pre-revoke one via the proper API (persists to Redis)
+        SessionManager.revoke_session(s1.id, reason="Manual revoke")
 
         event = LockdownManager.activate(
             actor_id="admin_001",

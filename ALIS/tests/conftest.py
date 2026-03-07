@@ -96,6 +96,19 @@ def mock_audit_log(request):
         yield
 
 @pytest.fixture(autouse=True)
+def fake_redis_global():
+    """
+    Patch server.core.security._get_redis with a fakeredis server for all tests.
+    Each test gets a fresh, empty in-memory Redis so security state never leaks.
+    """
+    import fakeredis
+    server = fakeredis.FakeServer()
+    fake_client = fakeredis.FakeRedis(server=server, decode_responses=True)
+    with patch("server.core.security._get_redis", return_value=fake_client):
+        yield fake_client
+
+
+@pytest.fixture(autouse=True)
 def mock_db_global():
     """Globally mock database connections for all tests to prevent OperationalErrors."""
     with patch("server.db_service.get_db_connection") as mock_get_conn:

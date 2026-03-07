@@ -424,19 +424,8 @@ def _revoke_non_admin_sessions(reason: str) -> int:
     """
     from .security import SessionManager
 
-    count = 0
-    for session in list(SessionManager._sessions.values()):
-        if not session.is_active:
-            continue
-
-        # Check if session holder is immune.
-        # In production, we would look up the user's role from a user store.
-        # For now, we rely on the session not carrying role info and revoke
-        # all sessions, then admin re-authenticates (which is the correct
-        # incident response posture — force MFA reauthentication).
-        # Admin sessions are re-created upon login while lockdown is active.
-        session.revoke(reason=reason)
-        count += 1
-
+    # Revoke all sessions via Redis scan — admin re-authenticates on resume.
+    # (Correct incident response posture: force MFA reauthentication for everyone.)
+    count = SessionManager.revoke_all_sessions(reason=reason)
     logger.info("Revoked %d sessions during lockdown activation.", count)
     return count

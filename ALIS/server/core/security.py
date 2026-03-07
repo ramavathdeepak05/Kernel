@@ -32,16 +32,16 @@ import contextvars
 import logging
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 
+import json
+
 import bcrypt as _bcrypt
+import redis as _redis_lib
 
 from .audit import AuditLog, AuditAction
-
-# Note: In production, use bcrypt or argon2
-# from bcrypt import hashpw, checkpw, gensalt
 
 logger = logging.getLogger(__name__)
 
@@ -160,77 +160,116 @@ class TokenGenerator:
         return hashlib.sha256(token.encode()).hexdigest()
 
 
+# --- Redis Helpers ---
+
+_SESS_PREFIX    = "alis:sess:"
+_TOK_PREFIX     = "alis:tok:"
+_USER_SESS_PFX  = "alis:user_sess:"
+_FAIL_PREFIX    = "alis:fail:"
+_LOCKOUT_PREFIX = "alis:lockout:"
+_RATE_PREFIX    = "alis:rate:"
+
+
+def _get_redis() -> "_redis_lib.Redis":
+    """Return a Redis client from the configured URL. Lazy — never called at import time."""
+    from server.core.settings import settings
+    return _redis_lib.from_url(settings.redis_url, decode_responses=True)
+
+
+def _session_to_dict(session: "Session") -> dict:
+    def _fmt(dt: Optional[datetime]) -> Optional[str]:
+        return dt.isoformat() if dt else None
+    return {
+        "id": session.id,
+        "user_id": session.user_id,
+        "token_hash": session.token_hash,
+        "token_type": session.token_type.value,
+        "tenant_id": session.tenant_id,
+        "device_id": session.device_id,
+        "user_agent": session.user_agent,
+        "ip_address": session.ip_address,
+        "created_at": _fmt(session.created_at),
+        "expires_at": _fmt(session.expires_at),
+        "last_activity": _fmt(session.last_activity),
+        "is_active": session.is_active,
+        "revoked_at": _fmt(session.revoked_at),
+        "revoke_reason": session.revoke_reason,
+    }
+
+
+def _dict_to_session(d: dict) -> "Session":
+    def _parse(s: Optional[str]) -> Optional[datetime]:
+        return datetime.fromisoformat(s) if s else None
+    return Session(
+        id=d["id"],
+        user_id=d["user_id"],
+        token_hash=d["token_hash"],
+        token_type=TokenType(d["token_type"]),
+        tenant_id=d.get("tenant_id", ""),
+        device_id=d.get("device_id"),
+        user_agent=d.get("user_agent"),
+        ip_address=d.get("ip_address"),
+        created_at=_parse(d["created_at"]),
+        expires_at=_parse(d["expires_at"]),
+        last_activity=_parse(d.get("last_activity")),
+        is_active=d.get("is_active", True),
+        revoked_at=_parse(d.get("revoked_at")),
+        revoke_reason=d.get("revoke_reason"),
+    )
+
+
 # --- Failed Login Tracker ---
-
-@dataclass
-class LoginAttempt:
-    """Record of a login attempt."""
-    timestamp: datetime
-    success: bool
-    ip_address: Optional[str] = None
-
 
 class FailedLoginTracker:
     """
-    Track failed login attempts for rate limiting.
+    Track failed login attempts for account lockout.
 
-    Implements lockout after MAX_ATTEMPTS failures.
+    Redis-backed — safe for multi-worker deployments.
+    Keys:
+      alis:fail:{identifier}    — INCR counter, TTL = LOCKOUT_SECONDS
+      alis:lockout:{identifier} — sentinel, TTL = remaining lockout
     """
 
     MAX_ATTEMPTS = 5
-    LOCKOUT_DURATION = timedelta(minutes=15)
-
-    _attempts: Dict[str, List[LoginAttempt]] = {}
+    LOCKOUT_SECONDS = 900  # 15 minutes
+    LOCKOUT_DURATION = timedelta(seconds=LOCKOUT_SECONDS)
 
     @classmethod
     def record_attempt(
         cls,
-        identifier: str,  # username or IP
+        identifier: str,
         success: bool,
-        ip_address: Optional[str] = None
+        ip_address: Optional[str] = None,
     ) -> None:
-        """Record a login attempt."""
-        if identifier not in cls._attempts:
-            cls._attempts[identifier] = []
-
-        cls._attempts[identifier].append(LoginAttempt(
-            timestamp=datetime.now(timezone.utc),
-            success=success,
-            ip_address=ip_address
-        ))
-
-        # Keep only recent attempts
-        cutoff = datetime.now(timezone.utc) - cls.LOCKOUT_DURATION
-        cls._attempts[identifier] = [
-            a for a in cls._attempts[identifier]
-            if a.timestamp > cutoff
-        ]
+        try:
+            r = _get_redis()
+            if success:
+                r.delete(_FAIL_PREFIX + identifier)
+                r.delete(_LOCKOUT_PREFIX + identifier)
+                return
+            count = r.incr(_FAIL_PREFIX + identifier)
+            r.expire(_FAIL_PREFIX + identifier, cls.LOCKOUT_SECONDS)
+            if count >= cls.MAX_ATTEMPTS:
+                r.setex(_LOCKOUT_PREFIX + identifier, cls.LOCKOUT_SECONDS, "1")
+        except Exception:
+            logger.exception("FailedLoginTracker.record_attempt Redis error")
 
     @classmethod
     def is_locked_out(cls, identifier: str) -> bool:
-        """Check if identifier is locked out."""
-        attempts = cls._attempts.get(identifier, [])
-        recent_failures = [
-            a for a in attempts
-            if not a.success
-        ]
-        return len(recent_failures) >= cls.MAX_ATTEMPTS
+        try:
+            return _get_redis().exists(_LOCKOUT_PREFIX + identifier) > 0
+        except Exception:
+            logger.exception("FailedLoginTracker.is_locked_out Redis error")
+            return False  # fail open — don't block logins if Redis is down
 
     @classmethod
     def get_lockout_remaining(cls, identifier: str) -> Optional[timedelta]:
-        """Get remaining lockout time."""
-        if not cls.is_locked_out(identifier):
+        try:
+            ttl = _get_redis().ttl(_LOCKOUT_PREFIX + identifier)
+            return timedelta(seconds=ttl) if ttl > 0 else None
+        except Exception:
+            logger.exception("FailedLoginTracker.get_lockout_remaining Redis error")
             return None
-
-        attempts = cls._attempts.get(identifier, [])
-        if not attempts:
-            return None
-
-        oldest_in_window = min(a.timestamp for a in attempts)
-        unlock_time = oldest_in_window + cls.LOCKOUT_DURATION
-        remaining = unlock_time - datetime.now(timezone.utc)
-
-        return remaining if remaining.total_seconds() > 0 else None
 
 
 # --- Session Manager ---
@@ -238,37 +277,57 @@ class FailedLoginTracker:
 class SessionManager:
     """
     Session management service.
+
+    Redis-backed — safe for multi-worker deployments.
+    Keys:
+      alis:sess:{session_id}    — JSON session blob, TTL = seconds until expiry
+      alis:tok:{token_hash}     — session_id string, same TTL (O(1) lookup)
+      alis:user_sess:{user_id}  — SET of session_ids (lazily cleaned up)
     """
 
-    _sessions: Dict[str, Session] = {}
+    @classmethod
+    def _save(cls, r: "_redis_lib.Redis", session: Session) -> None:
+        """Persist a session to Redis with TTL derived from expiry."""
+        ttl = int((session.expires_at - datetime.now(timezone.utc)).total_seconds())
+        if ttl <= 0:
+            return
+        data = json.dumps(_session_to_dict(session))
+        r.setex(_SESS_PREFIX + session.id, ttl, data)
+        r.setex(_TOK_PREFIX + session.token_hash, ttl, session.id)
+        r.sadd(_USER_SESS_PFX + session.user_id, session.id)
+
+    @classmethod
+    def _load(cls, r: "_redis_lib.Redis", session_id: str) -> Optional[Session]:
+        """Load a session from Redis. Returns None if not found."""
+        data = r.get(_SESS_PREFIX + session_id)
+        return _dict_to_session(json.loads(data)) if data else None
 
     @classmethod
     def create_session(
         cls,
         user_id: str,
+        tenant_id: str = "",
         device_id: Optional[str] = None,
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None,
-        expiry_hours: int = 24
-    ) -> tuple[Session, str]:
+        expiry_hours: int = 24,
+    ) -> "tuple[Session, str]":
         """
         Create a new session.
 
-        Returns (session, raw_token) - raw_token is returned only once.
+        Returns (session, raw_token) — raw_token is returned only once.
         """
         token = TokenGenerator.generate_token()
-        token_hash = TokenGenerator.hash_token(token)
-
         session = Session(
             user_id=user_id,
-            token_hash=token_hash,
+            tenant_id=tenant_id,
+            token_hash=TokenGenerator.hash_token(token),
             device_id=device_id,
             user_agent=user_agent,
             ip_address=ip_address,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
         )
-
-        cls._sessions[session.id] = session
+        cls._save(_get_redis(), session)
         return session, token
 
     @classmethod
@@ -278,85 +337,127 @@ class SessionManager:
 
         Returns None if token is invalid, expired, or revoked.
         """
-        token_hash = TokenGenerator.hash_token(token)
+        try:
+            r = _get_redis()
+            token_hash = TokenGenerator.hash_token(token)
+            session_id = r.get(_TOK_PREFIX + token_hash)
+            if not session_id:
+                return None
+            session = cls._load(r, session_id)
+            if session is None or session.is_expired or not session.is_active:
+                return None
+            session.last_activity = datetime.now(timezone.utc)
+            cls._save(r, session)
+            return session
+        except Exception:
+            logger.exception("SessionManager.validate_token Redis error")
+            return None  # fail safe — deny access if Redis is unreachable
 
-        for session in cls._sessions.values():
-            if session.token_hash == token_hash:
-                if session.is_expired or not session.is_active:
-                    return None
-                session.last_activity = datetime.now(timezone.utc)
-                return session
-
-        return None
+    @classmethod
+    def get_session(cls, session_id: str) -> Optional[Session]:
+        """Load a session by ID from Redis. Returns None if not found or expired."""
+        try:
+            return cls._load(_get_redis(), session_id)
+        except Exception:
+            logger.exception("SessionManager.get_session Redis error")
+            return None
 
     @classmethod
     def revoke_session(cls, session_id: str, reason: str = "Manual revocation") -> bool:
         """Revoke a session."""
-        session = cls._sessions.get(session_id)
-        if session:
+        try:
+            r = _get_redis()
+            session = cls._load(r, session_id)
+            if not session:
+                return False
             session.revoke(reason)
+            cls._save(r, session)
             return True
-        return False
+        except Exception:
+            logger.exception("SessionManager.revoke_session Redis error")
+            return False
 
     @classmethod
     def revoke_all_user_sessions(cls, user_id: str, reason: str = "User logout all") -> int:
-        """Revoke all sessions for a user."""
-        count = 0
-        for session in cls._sessions.values():
-            if session.user_id == user_id and session.is_active:
-                session.revoke(reason)
-                count += 1
-        return count
+        """Revoke all active sessions for a user."""
+        try:
+            r = _get_redis()
+            session_ids = r.smembers(_USER_SESS_PFX + user_id)
+            count = 0
+            for sid in session_ids:
+                session = cls._load(r, sid)
+                if session and session.is_active:
+                    session.revoke(reason)
+                    cls._save(r, session)
+                    count += 1
+            return count
+        except Exception:
+            logger.exception("SessionManager.revoke_all_user_sessions Redis error")
+            return 0
+
+    @classmethod
+    def revoke_all_sessions(cls, reason: str = "Mass revocation") -> int:
+        """
+        Revoke every active session in the system.
+
+        Used by lockdown activation. Scans all alis:sess:* keys in Redis.
+        """
+        try:
+            r = _get_redis()
+            count = 0
+            cursor = 0
+            while True:
+                cursor, keys = r.scan(cursor, match=_SESS_PREFIX + "*", count=200)
+                for key in keys:
+                    data = r.get(key)
+                    if not data:
+                        continue
+                    session = _dict_to_session(json.loads(data))
+                    if session.is_active:
+                        session.revoke(reason)
+                        cls._save(r, session)
+                        count += 1
+                if cursor == 0:
+                    break
+            return count
+        except Exception:
+            logger.exception("SessionManager.revoke_all_sessions Redis error")
+            return 0
 
 
 # --- Rate Limiter ---
 
-@dataclass
-class RateLimitEntry:
-    count: int
-    window_start: datetime
-
-
 class RateLimiter:
     """
-    Simple rate limiter.
+    Fixed-window rate limiter.
 
-    Limits requests per identifier within a time window.
+    Redis-backed — safe for multi-worker deployments.
+    Key: alis:rate:{identifier}  — INCR counter, TTL = window_seconds
     """
-
-    _limits: Dict[str, RateLimitEntry] = {}
 
     @classmethod
     def check(
         cls,
         identifier: str,
         max_requests: int = 100,
-        window_seconds: int = 60
+        window_seconds: int = 60,
     ) -> bool:
         """
-        Check if request is allowed.
+        Check if request is within rate limit.
 
         Returns True if allowed, False if rate limited.
+        Fails open (allows request) if Redis is unreachable.
         """
-        now = datetime.now(timezone.utc)
-        entry = cls._limits.get(identifier)
-
-        if entry is None:
-            cls._limits[identifier] = RateLimitEntry(count=1, window_start=now)
-            return True
-
-        window_elapsed = (now - entry.window_start).total_seconds()
-
-        if window_elapsed >= window_seconds:
-            # Reset window
-            cls._limits[identifier] = RateLimitEntry(count=1, window_start=now)
-            return True
-
-        if entry.count >= max_requests:
-            return False
-
-        entry.count += 1
-        return True
+        try:
+            r = _get_redis()
+            key = _RATE_PREFIX + identifier
+            count = r.incr(key)
+            if count == 1:
+                r.expire(key, window_seconds)
+            return count <= max_requests
+        except Exception:
+            logger.exception("RateLimiter.check Redis error — failing open")
+            return True  # fail open — don't block traffic if Redis is down
 
 
 # --- Input Validation ---

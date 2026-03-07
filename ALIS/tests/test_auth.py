@@ -66,13 +66,13 @@ INACTIVE_USER_ROW = {**ACTIVE_USER_ROW, "status": "SUSPENDED"}
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 def _issue_token(user_id: str = USER_ID, tenant: str = TENANT) -> tuple[str, object]:
-    """Create a real in-memory session and return (raw_token, session)."""
+    """Create a real session in fakeredis and return (raw_token, session)."""
     session, token = SessionManager.create_session(
         user_id=user_id,
+        tenant_id=tenant,
         user_agent="pytest",
         ip_address="127.0.0.1",
     )
-    session.tenant_id = tenant
     return token, session
 
 
@@ -83,14 +83,11 @@ def _bearer(token: str) -> dict:
 # ─── fixtures ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def clear_sessions():
-    """Wipe SessionManager and FailedLoginTracker state before each test."""
-    SessionManager._sessions.clear()
-    from server.core.security import FailedLoginTracker
-    FailedLoginTracker._attempts.clear()
+def clear_sessions(fake_redis_global):
+    """Flush fakeredis before/after each auth test for clean session state."""
+    fake_redis_global.flushall()
     yield
-    SessionManager._sessions.clear()
-    FailedLoginTracker._attempts.clear()
+    fake_redis_global.flushall()
 
 
 @pytest.fixture

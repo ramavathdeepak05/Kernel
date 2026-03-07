@@ -194,10 +194,10 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
 
     session, token = SessionManager.create_session(
         user_id=str(user["id"]),
+        tenant_id=body.tenant_id,
         user_agent=request.headers.get("user-agent"),
         ip_address=ip,
     )
-    session.tenant_id = body.tenant_id
 
     AuditLedger.log(
         action=AuditAction.LOGIN,
