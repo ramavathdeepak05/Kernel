@@ -33,28 +33,98 @@ from dataclasses import dataclass
 
 class StudentState(str, Enum):
     """
-    Student lifecycle states as defined in the ALIS Master Handbook.
+    Full admissions lifecycle state machine (Stages 1–10).
+
+    Forward-only. CANCELLED is the single terminal invalidation state.
+
+    Stage 1  — Lead
+    Stage 2  — Application form (draft → submitted → fee)
+    Stage 3  — Documents
+    Stage 4  — Eligibility screening
+    Stage 5  — Assessment (test / interview)
+    Stage 6  — Merit list & selection
+    Stage 7  — Offer letter
+    Stage 8  — Fee payment & seat confirmation
+    Stage 9  — Final document verification
+    Stage 10 — Enrollment
 
     Allowed Transitions:
-        LEAD → APPLIED
-        APPLIED → ELIGIBLE | NOT_ELIGIBLE | PROVISIONALLY_ELIGIBLE
-        ELIGIBLE → ADMITTED
-        PROVISIONALLY_ELIGIBLE → ELIGIBLE | NOT_ELIGIBLE
-        ADMITTED → ENROLLED
-        ANY → ANNULLED
+        LEAD                  → DRAFT | CANCELLED
+        DRAFT                 → SUBMITTED | CANCELLED
+        SUBMITTED             → PENDING_PAYMENT | DOCUMENTS_PENDING | CANCELLED
+        PENDING_PAYMENT       → DOCUMENTS_PENDING | CANCELLED
+        DOCUMENTS_PENDING     → UNDER_DOCUMENT_REVIEW | CANCELLED
+        UNDER_DOCUMENT_REVIEW → DOCUMENTS_VERIFIED | CANCELLED
+        DOCUMENTS_VERIFIED    → ELIGIBLE | NOT_ELIGIBLE | PROVISIONALLY_ELIGIBLE
+        ELIGIBLE              → ASSESSMENT_SCHEDULED | MERIT_LISTED | CANCELLED
+        NOT_ELIGIBLE          → CANCELLED
+        PROVISIONALLY_ELIGIBLE → ELIGIBLE | NOT_ELIGIBLE | CANCELLED
+        ASSESSMENT_SCHEDULED  → ASSESSMENT_COMPLETE | CANCELLED
+        ASSESSMENT_COMPLETE   → MERIT_LISTED | WAITLISTED | NOT_ELIGIBLE | CANCELLED
+        MERIT_LISTED          → OFFER_ISSUED | CANCELLED
+        WAITLISTED            → MERIT_LISTED | CANCELLED
+        OFFER_ISSUED          → OFFER_ACCEPTED | OFFER_DECLINED | CANCELLED
+        OFFER_DECLINED        → CANCELLED
+        OFFER_ACCEPTED        → SEAT_CONFIRMED | CANCELLED
+        SEAT_CONFIRMED        → VERIFICATION_PENDING | CANCELLED
+        VERIFICATION_PENDING  → READY_FOR_ENROLLMENT | CANCELLED
+        READY_FOR_ENROLLMENT  → ENROLLED | CANCELLED
+        ENROLLED              → CANCELLED
+        CANCELLED             → (terminal)
 
-    Forbidden:
-        ENROLLED → APPLIED
-        ADMITTED → ELIGIBLE
+    Legacy aliases kept for pipeline backward-compatibility:
+        APPLIED              = SUBMITTED
+        ADMITTED             = SEAT_CONFIRMED
+        ANNULLED             = CANCELLED
     """
+    # Stage 1
     LEAD = "LEAD"
-    APPLIED = "APPLIED"
+
+    # Stage 2 — Application form
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    PENDING_PAYMENT = "PENDING_PAYMENT"         # application fee unpaid
+
+    # Stage 3 — Documents
+    DOCUMENTS_PENDING = "DOCUMENTS_PENDING"
+    UNDER_DOCUMENT_REVIEW = "UNDER_DOCUMENT_REVIEW"
+    DOCUMENTS_VERIFIED = "DOCUMENTS_VERIFIED"
+
+    # Stage 4 — Eligibility
     ELIGIBLE = "ELIGIBLE"
     NOT_ELIGIBLE = "NOT_ELIGIBLE"
-    PROVISIONALLY_ELIGIBLE = "PROVISIONALLY_ELIGIBLE"
-    ADMITTED = "ADMITTED"
+    PROVISIONALLY_ELIGIBLE = "PROVISIONALLY_ELIGIBLE"   # borderline → staff review
+
+    # Stage 5 — Assessment
+    ASSESSMENT_SCHEDULED = "ASSESSMENT_SCHEDULED"
+    ASSESSMENT_COMPLETE = "ASSESSMENT_COMPLETE"
+
+    # Stage 6 — Merit list
+    MERIT_LISTED = "MERIT_LISTED"
+    WAITLISTED = "WAITLISTED"
+
+    # Stage 7 — Offer
+    OFFER_ISSUED = "OFFER_ISSUED"
+    OFFER_ACCEPTED = "OFFER_ACCEPTED"
+    OFFER_DECLINED = "OFFER_DECLINED"
+
+    # Stage 8 — Payment
+    SEAT_CONFIRMED = "SEAT_CONFIRMED"
+
+    # Stage 9 — Final verification
+    VERIFICATION_PENDING = "VERIFICATION_PENDING"
+    READY_FOR_ENROLLMENT = "READY_FOR_ENROLLMENT"
+
+    # Stage 10 — Enrolled
     ENROLLED = "ENROLLED"
-    ANNULLED = "ANNULLED"  # Forward-only invalidation
+
+    # Terminal — withdrawn at any stage
+    CANCELLED = "CANCELLED"
+
+    # --- Legacy aliases (pipeline backward-compatibility) ---
+    APPLIED = "SUBMITTED"           # maps to SUBMITTED
+    ADMITTED = "SEAT_CONFIRMED"     # maps to SEAT_CONFIRMED
+    ANNULLED = "CANCELLED"          # maps to CANCELLED
 
 
 class ExamState(str, Enum):
@@ -121,23 +191,86 @@ class TransitionResult:
 # --- State Transition Matrices ---
 
 STUDENT_TRANSITIONS: Dict[StudentState, Set[StudentState]] = {
-    StudentState.LEAD: {StudentState.APPLIED, StudentState.ANNULLED},
-    StudentState.APPLIED: {
+    # Stage 1
+    StudentState.LEAD: {
+        StudentState.DRAFT, StudentState.SUBMITTED, StudentState.CANCELLED
+    },
+    # Stage 2
+    StudentState.DRAFT: {
+        StudentState.SUBMITTED, StudentState.CANCELLED
+    },
+    StudentState.SUBMITTED: {
+        StudentState.PENDING_PAYMENT, StudentState.DOCUMENTS_PENDING, StudentState.CANCELLED
+    },
+    StudentState.PENDING_PAYMENT: {
+        StudentState.DOCUMENTS_PENDING, StudentState.CANCELLED
+    },
+    # Stage 3
+    StudentState.DOCUMENTS_PENDING: {
+        StudentState.UNDER_DOCUMENT_REVIEW, StudentState.CANCELLED
+    },
+    StudentState.UNDER_DOCUMENT_REVIEW: {
+        StudentState.DOCUMENTS_VERIFIED, StudentState.CANCELLED
+        # Note: document rejection is handled at document level, not applicant state.
+        # Applicant stays UNDER_DOCUMENT_REVIEW until all docs approved.
+    },
+    # Stage 4
+    StudentState.DOCUMENTS_VERIFIED: {
         StudentState.ELIGIBLE,
         StudentState.NOT_ELIGIBLE,
         StudentState.PROVISIONALLY_ELIGIBLE,
-        StudentState.ANNULLED
+        StudentState.CANCELLED,
     },
-    StudentState.ELIGIBLE: {StudentState.ADMITTED, StudentState.ANNULLED},
-    StudentState.NOT_ELIGIBLE: {StudentState.ANNULLED},
+    StudentState.ELIGIBLE: {
+        StudentState.ASSESSMENT_SCHEDULED,  # if test required
+        StudentState.MERIT_LISTED,          # if no test (direct merit)
+        StudentState.CANCELLED,
+    },
+    StudentState.NOT_ELIGIBLE: {StudentState.CANCELLED},
     StudentState.PROVISIONALLY_ELIGIBLE: {
-        StudentState.ELIGIBLE,
-        StudentState.NOT_ELIGIBLE,
-        StudentState.ANNULLED
+        StudentState.ELIGIBLE, StudentState.NOT_ELIGIBLE, StudentState.CANCELLED
     },
-    StudentState.ADMITTED: {StudentState.ENROLLED, StudentState.ANNULLED},
-    StudentState.ENROLLED: {StudentState.ANNULLED},
-    StudentState.ANNULLED: set(),  # Terminal state, no transitions allowed
+    # Stage 5
+    StudentState.ASSESSMENT_SCHEDULED: {
+        StudentState.ASSESSMENT_COMPLETE, StudentState.CANCELLED
+    },
+    StudentState.ASSESSMENT_COMPLETE: {
+        StudentState.MERIT_LISTED,
+        StudentState.WAITLISTED,
+        StudentState.NOT_ELIGIBLE,
+        StudentState.CANCELLED,
+    },
+    # Stage 6
+    StudentState.MERIT_LISTED: {
+        StudentState.OFFER_ISSUED, StudentState.CANCELLED
+    },
+    StudentState.WAITLISTED: {
+        StudentState.MERIT_LISTED,  # waitlist activation moves to merit
+        StudentState.CANCELLED,
+    },
+    # Stage 7
+    StudentState.OFFER_ISSUED: {
+        StudentState.OFFER_ACCEPTED, StudentState.OFFER_DECLINED, StudentState.CANCELLED
+    },
+    StudentState.OFFER_ACCEPTED: {
+        StudentState.SEAT_CONFIRMED, StudentState.CANCELLED
+    },
+    StudentState.OFFER_DECLINED: {StudentState.CANCELLED},
+    # Stage 8
+    StudentState.SEAT_CONFIRMED: {
+        StudentState.VERIFICATION_PENDING, StudentState.CANCELLED
+    },
+    # Stage 9
+    StudentState.VERIFICATION_PENDING: {
+        StudentState.READY_FOR_ENROLLMENT, StudentState.CANCELLED
+    },
+    StudentState.READY_FOR_ENROLLMENT: {
+        StudentState.ENROLLED, StudentState.CANCELLED
+    },
+    # Stage 10
+    StudentState.ENROLLED: {StudentState.CANCELLED},
+    # Terminal
+    StudentState.CANCELLED: set(),
 }
 
 EXAM_TRANSITIONS: Dict[ExamState, Set[ExamState]] = {
