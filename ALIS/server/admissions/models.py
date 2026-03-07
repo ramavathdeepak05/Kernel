@@ -358,3 +358,220 @@ class StudentRecordRead(BaseModel):
     program: str
     enrolled_at: datetime
     enrollment_audit_id: str
+
+
+# =============================================================================
+# STAGE 1: LEAD CRM
+# =============================================================================
+
+class LeadStatus(str, Enum):
+    """CRM lifecycle states for a lead before conversion."""
+    NEW = "NEW"
+    CONTACTED = "CONTACTED"
+    INTERESTED = "INTERESTED"
+    READY_TO_APPLY = "READY_TO_APPLY"
+    CONVERTED = "CONVERTED"
+    NOT_INTERESTED = "NOT_INTERESTED"
+    UNRESPONSIVE = "UNRESPONSIVE"
+    DISQUALIFIED = "DISQUALIFIED"
+
+
+class LeadActivityType(str, Enum):
+    """Types of CRM activities that can be logged against a lead."""
+    EMAIL_SENT = "EMAIL_SENT"
+    SMS_SENT = "SMS_SENT"
+    CALL_LOGGED = "CALL_LOGGED"
+    NOTE = "NOTE"
+    STATUS_CHANGE = "STATUS_CHANGE"
+    DOCUMENT_SHARED = "DOCUMENT_SHARED"
+    MEETING_SCHEDULED = "MEETING_SCHEDULED"
+    WHATSAPP_SENT = "WHATSAPP_SENT"
+
+
+class LeadCreate(BaseModel):
+    """Input for capturing a new lead."""
+    full_name: str = Field(..., min_length=2, max_length=200)
+    email: str = Field(..., description="Contact email")
+    phone: str = Field(..., min_length=7, max_length=20)
+    city: Optional[str] = None
+    state_region: Optional[str] = None
+    course_interest: Optional[str] = None
+    intake_year: Optional[str] = None
+    source_type: SourceChannel = Field(default=SourceChannel.WEBSITE)
+    source_detail: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+    referred_by_user_id: Optional[str] = None
+    consultant_id: Optional[str] = None
+    referral_code: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        if "@" not in v or "." not in v.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return v.strip().lower()
+
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v: str) -> str:
+        digits = "".join(c for c in v if c.isdigit())
+        if len(digits) < 7:
+            raise ValueError("Phone must contain at least 7 digits")
+        return v.strip()
+
+
+class LeadUpdateRequest(BaseModel):
+    """Input for updating a lead's CRM fields."""
+    status: Optional[LeadStatus] = None
+    assigned_counsellor_id: Optional[str] = None
+    next_followup_at: Optional[datetime] = None
+    course_interest: Optional[str] = None
+    intake_year: Optional[str] = None
+    disqualify_reason: Optional[str] = None
+    note: Optional[str] = Field(
+        default=None,
+        description="Optional note logged as a CRM activity"
+    )
+
+
+class LeadRead(BaseModel):
+    """Output schema for a lead record."""
+    id: str
+    org_id: str
+    full_name: str
+    email: str
+    phone: str
+    city: Optional[str] = None
+    state_region: Optional[str] = None
+    course_interest: Optional[str] = None
+    intake_year: Optional[str] = None
+    source_type: str
+    source_detail: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    referred_by_user_id: Optional[str] = None
+    consultant_id: Optional[str] = None
+    status: str
+    assigned_counsellor_id: Optional[str] = None
+    last_contacted_at: Optional[datetime] = None
+    next_followup_at: Optional[datetime] = None
+    disqualify_reason: Optional[str] = None
+    converted_applicant_id: Optional[str] = None
+    converted_at: Optional[datetime] = None
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class LeadActivityCreate(BaseModel):
+    """Input for logging a CRM activity against a lead."""
+    lead_id: str
+    activity_type: LeadActivityType
+    summary: str = Field(..., min_length=1, max_length=1000)
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+class LeadActivityRead(BaseModel):
+    """Output schema for a lead activity record."""
+    id: str
+    org_id: str
+    lead_id: str
+    activity_type: str
+    summary: str
+    actor_id: str
+    metadata: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+
+class LeadConvertRequest(BaseModel):
+    """Input for converting a lead into an applicant."""
+    lead_id: str
+    intended_program: str = Field(..., min_length=2, max_length=200)
+
+
+# =============================================================================
+# STAGE 1: CONSULTANT MANAGEMENT
+# =============================================================================
+
+class ConsultantStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    TERMINATED = "TERMINATED"
+
+
+class ConsultantCommissionType(str, Enum):
+    FLAT = "FLAT"
+    PERCENTAGE = "PERCENTAGE"
+
+
+class ConsultantCreate(BaseModel):
+    """Input for registering a third-party consultant."""
+    name: str = Field(..., min_length=2, max_length=200)
+    company_name: Optional[str] = None
+    email: str
+    phone: str = Field(..., min_length=7, max_length=20)
+    city: Optional[str] = None
+    state_region: Optional[str] = None
+    commission_type: ConsultantCommissionType = ConsultantCommissionType.FLAT
+    commission_rate: float = Field(default=0.0, ge=0)
+    commission_amount: Optional[float] = Field(default=None, ge=0)
+    portal_user_id: Optional[str] = None
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        if "@" not in v or "." not in v.split("@")[-1]:
+            raise ValueError("Invalid email format")
+        return v.strip().lower()
+
+
+class ConsultantRead(BaseModel):
+    """Output schema for a consultant record."""
+    id: str
+    org_id: str
+    name: str
+    company_name: Optional[str] = None
+    email: str
+    phone: str
+    city: Optional[str] = None
+    state_region: Optional[str] = None
+    status: str
+    commission_type: str
+    commission_rate: float
+    commission_amount: Optional[float] = None
+    portal_user_id: Optional[str] = None
+    agreement_signed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+# =============================================================================
+# STAGE 1: REFERRAL CODES
+# =============================================================================
+
+class ReferralCodeCreate(BaseModel):
+    """Input for generating a referral code."""
+    referrer_type: str = Field(..., description="STUDENT | STAFF | CONSULTANT")
+    referrer_id: str
+    max_uses: Optional[int] = Field(default=None, ge=1)
+    expires_at: Optional[datetime] = None
+
+
+class ReferralCodeRead(BaseModel):
+    """Output schema for a referral code."""
+    id: str
+    org_id: str
+    code: str
+    referrer_type: str
+    referrer_id: str
+    max_uses: Optional[int] = None
+    use_count: int
+    expires_at: Optional[datetime] = None
+    is_active: bool
+    created_at: datetime
