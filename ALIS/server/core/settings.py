@@ -136,6 +136,63 @@ class Settings(BaseSettings):
     razorpay_currency: str = Field(default="INR")
 
     # -------------------------------------------------------------------------
+    # DigiLocker (Indian Government Document Vault)
+    # -------------------------------------------------------------------------
+    digilocker_client_id: str = Field(default="")
+    digilocker_client_secret: str = Field(default="")
+    digilocker_base_url: str = Field(default="https://api.digitallocker.gov.in/public/oauth2/1")
+    digilocker_redirect_uri: str = Field(default="")
+    digilocker_timeout_seconds: int = Field(default=30)
+
+    @property
+    def digilocker_enabled(self) -> bool:
+        return bool(self.digilocker_client_id and self.digilocker_client_secret)
+
+    # -------------------------------------------------------------------------
+    # NTA (National Testing Agency) Score Import
+    # -------------------------------------------------------------------------
+    nta_api_key: str = Field(default="")
+    nta_base_url: str = Field(default="https://api.nta.ac.in/v1")
+    nta_timeout_seconds: int = Field(default=30)
+
+    @property
+    def nta_enabled(self) -> bool:
+        return bool(self.nta_api_key)
+
+    # -------------------------------------------------------------------------
+    # LMS Integration (Moodle / Canvas REST API)
+    # -------------------------------------------------------------------------
+    lms_base_url: str = Field(default="")
+    lms_api_token: str = Field(default="")
+    lms_default_course_category: int = Field(default=1)
+    lms_timeout_seconds: int = Field(default=30)
+
+    @property
+    def lms_enabled(self) -> bool:
+        return bool(self.lms_base_url and self.lms_api_token)
+
+    # -------------------------------------------------------------------------
+    # Email Provisioning (Google Workspace / Microsoft 365)
+    # -------------------------------------------------------------------------
+    email_provider: str = Field(
+        default="",
+        description="GOOGLE | MICROSOFT | SMTP_ONLY (empty = disabled)"
+    )
+    # Google Workspace
+    google_admin_email: str = Field(default="")
+    google_service_account_json: str = Field(default="")
+    google_domain: str = Field(default="")
+    # Microsoft 365
+    ms_tenant_id: str = Field(default="")
+    ms_client_id: str = Field(default="")
+    ms_client_secret: str = Field(default="")
+    ms_domain: str = Field(default="")
+
+    @property
+    def email_provision_enabled(self) -> bool:
+        return self.email_provider in ("GOOGLE", "MICROSOFT")
+
+    # -------------------------------------------------------------------------
     # PGVector
     # -------------------------------------------------------------------------
     pgvector_dimensions: int = Field(default=768)  # nomic-embed-text output size

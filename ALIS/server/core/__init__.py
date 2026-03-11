@@ -75,10 +75,24 @@ from .model_registry import (  # E03-S02
     ModelRegistry, ModelCapability, ModelStatus,
     LLMModelRead, LLMModelRegister, ResolvedModel,
 )
+from .tool_registry import (  # E03-S05
+    BaseTool, ToolOutputSchema, ToolRegistry, ToolInvoker,
+)
 from .policy_service import PolicyService, PolicyStatus  # E00-S09
 from .policy_resolver import (  # E00-S10
     PolicyResolverCache, RequirePolicy, resolve_policy_for_rule,
     build_policy_context, get_resolver_cache,
+)
+from .guardrails import (  # E03-S08
+    AIGuardrails, GuardrailResult, GuardrailViolation,
+    ToxicityFilter, HallucinationDetector,
+    PolicyContradictionDetector, UnsafeSuggestionBlocker,
+)
+from .hitl import (  # E03-S09
+    HITLEnforcer, HITLResult, HITLDisposition,
+)
+from .ai_observability import (  # E03-S10
+    AIObservabilityService, InvocationMetrics, ModelMetrics,
 )
 
 __all__ = [
@@ -131,10 +145,20 @@ __all__ = [
     # Model Registry (E03-S02)
     "ModelRegistry", "ModelCapability", "ModelStatus",
     "LLMModelRead", "LLMModelRegister", "ResolvedModel",
+    # Tool Invocation Framework (E03-S05)
+    "BaseTool", "ToolOutputSchema", "ToolRegistry", "ToolInvoker",
     # Policy Governance (E00-S09)
     "PolicyService", "PolicyStatus",
     # Policy Resolver Middleware (E00-S10)
     "PolicyResolverCache", "RequirePolicy", "resolve_policy_for_rule",
     "build_policy_context", "get_resolver_cache", "PolicyResolutionError",
+    # AI Guardrails (E03-S08)
+    "AIGuardrails", "GuardrailResult", "GuardrailViolation",
+    "ToxicityFilter", "HallucinationDetector",
+    "PolicyContradictionDetector", "UnsafeSuggestionBlocker",
+    # HITL Enforcement (E03-S09)
+    "HITLEnforcer", "HITLResult", "HITLDisposition",
+    # AI Observability (E03-S10)
+    "AIObservabilityService", "InvocationMetrics", "ModelMetrics",
 ]
 

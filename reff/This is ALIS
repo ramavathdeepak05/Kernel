@@ -1,0 +1,537 @@
+> [!IMPORTANT]
+> **GLOBAL ARCHITECTURE UPDATE: Event-Driven Autonomy**
+> 
+> ALIS has shifted to an Event-Driven Autonomy model, altering the Staff role and standardizing module structure.
+> 
+> **The New Standard Module Contract (5 Elements):**
+> 1. `module_policies` table — configurable rules.
+> 2. `automation_pipeline.py` — Celery task chain for 24/7 autonomous execution.
+> 3. `event_publisher.py` — Domain events this module fires.
+> 4. `event_handlers.py` — Domain events this module reacts to.
+> 5. `review_queue` integration — Exceptions surfaced to staff routing.
+> 
+> **Staff Role Paradigm Shift:**
+> Staff activity is vastly reduced compared to traditional ERPs:
+> - **Rare**: Set policies once per academic year (marks threshold, fee amounts, seat capacity), Handle escalations.
+> - **Daily**: Review exceptions flagged by the system (borderline marks, uncertain docs, capacity conflicts).
+> - **Occasional**: Override specific decisions when human judgment is indispensable.
+> - **Periodic**: Monitor dashboard metrics (Reporting) for system performance.
+> *Everything else (offer letters, invoices, enrollments, hall tickets, results, notifications) is handled by the system 24/7.*
+> 
+> **Revised Full Build Order:**
+> - **Phase 0 (Infrastructure)**: Domain Event Bus, Academic Calendar, Celery Beat.
+> - **E04 Ext (Admissions Autonomous)**: First fully automated module establishing the pattern.
+> - **E05 (Academics)**: Subscribes: StudentEnrolled. Publishes: SemesterStarted/Ended.
+> - **E06 (Examinations)**: Subscribes: AttendanceFinalized. Publishes: ResultsDeclared.
+> - **E07 (Finance)**: Subscribes: StudentEnrolled + events. Publishes: FeePaymentReceived.
+> - **E08 (HR & Staff)**: Publishes: FacultyOnLeave.
+> - **E09 (Student Services)**: Subscribes: StudentEnrolled. Publishes: HostelAllotted.
+> - **E10 (Communication)**: Subscribes to EVERYTHING. Publishes: nothing.
+> - **E11 (Reporting)**: Subscribes to EVERYTHING. Read-only projection.
+> - **E12 (Alumni)**: Subscribes: StudentGraduated.
+> - **Hardening**: Load test the full automated pipeline end-to-end.
+
+---
+
+ALIS
+Automated Lecturer & Institutional System
+Technical Architecture & Product Specification
+Version: 1.0
+Prepared for: Engineering Leadership (CTO / Senior Developers)
+Author: QUAICU
+
+1. Executive Overview
+ALIS (Automated Lecturer & Institutional System) is an AI-assisted institutional operating system designed for universities.
+
+Traditional university ERPs act as passive record-keeping systems. They store data but require humans to perform most operational and intellectual tasks.
+
+ALIS is fundamentally different.
+
+It is designed as an active institutional engine capable of:
+
+• generating academic artifacts
+• analyzing institutional data
+• enforcing policy constraints
+• orchestrating workflows
+• automating operational decisions
+• maintaining full governance and audit integrity
+
+However, AI in ALIS never directly controls the system.
+All final decisions are enforced by deterministic institutional logic.
+
+This ensures the system remains:
+
+• legally auditable
+• deterministic
+• policy-compliant
+• enterprise-safe
+
+2. Core Philosophy
+ALIS is built around four fundamental principles.
+
+2.1 AI Is Advisory, Not Authoritative
+AI may:
+
+• analyze
+• suggest
+• generate drafts
+• extract information
+
+AI may NOT:
+
+• mutate database state
+• execute irreversible operations
+• bypass policy rules
+• override authority
+
+2.2 Deterministic Governance
+All institutional decisions are governed by:
+
+• policy registry
+• rule engine
+• state machine
+• authority enforcement
+
+This guarantees deterministic behavior.
+
+2.3 Replayable Institutional History
+Every action in ALIS must be reproducible.
+
+This is achieved by logging:
+
+• model version
+• prompt version
+• policy version
+• inputs
+• outputs
+• actor identity
+
+This enables complete forensic replay of institutional decisions.
+
+2.4 Modular Institutional Architecture
+Universities operate across multiple domains.
+
+ALIS is therefore organized into independent modules, each responsible for a domain of institutional operations.
+
+Modules communicate through event-driven orchestration.
+
+3. ALIS Functional Scope
+ALIS currently contains 8 modules and 77 operational wizards.
+
+Each wizard represents a specific operational capability.
+
+4. ALIS Modules
+Module 1 — Admissions & Marketing
+Purpose: Convert prospective students into enrolled students.
+
+Key capabilities:
+
+• lead capture
+• lead scoring
+• telecalling management
+• application verification
+• entrance exam orchestration
+• merit list generation
+• scholarship approvals
+• provisional admission
+
+Example automation:
+
+AI can:
+
+• analyze application documents
+• score applicant potential
+• flag fraudulent submissions
+
+But eligibility decisions are enforced by deterministic policy rules.
+
+Module 2 — Academics
+Purpose: Manage curriculum and academic delivery.
+
+Key capabilities:
+
+• AI-generated courses from UGC syllabus
+• faculty allocation
+• timetable generation
+• student enrollment
+• attendance monitoring
+• lesson plan generation
+• assignment grading assistance
+• mentorship logging
+
+AI assists in academic content generation and analysis.
+
+Module 3 — Examinations
+Purpose: Manage institutional certification workflows.
+
+Capabilities:
+
+• exam scheduling
+• hall ticket generation
+• question paper generation
+• invigilator allocation
+• script barcoding
+• automated grading assistance
+• revaluation handling
+• transcript generation
+
+Module 4 — Finance
+Purpose: Institutional treasury management.
+
+Capabilities:
+
+• fee structure configuration
+• invoice generation
+• payment reconciliation
+• defaulter tracking
+• payroll processing
+• vendor payments
+• budget allocation
+
+Module 5 — HR & Administration
+Purpose: Staff lifecycle management.
+
+Capabilities:
+
+• recruitment
+• onboarding
+• leave management
+• biometric sync
+• performance appraisal
+• staff service records
+• administrative circulars
+
+Module 6 — Student Services
+Purpose: Manage student campus life.
+
+Capabilities:
+
+• hostel allocation
+• mess management
+• gate pass system
+• transport planning
+• library operations
+• maintenance tickets
+• disciplinary cases
+• placement management
+• alumni tracking
+
+Module 7 — Regulatory & Quality
+Purpose: Institutional compliance.
+
+Capabilities:
+
+• AQAR accreditation reports
+• RTI responses
+• grievance management
+• system audit logs
+
+Module 8 — Research Assistant
+Purpose: AI-assisted academic research.
+
+Capabilities:
+
+• research paper ingestion
+• semantic search
+• literature gap analysis
+• citation generation
+• methodology validation
+• research monitoring
+
+5. Wizard Architecture
+Each operational capability is implemented as a Wizard.
+
+A wizard is a controlled workflow step that can:
+
+• collect inputs
+• validate rules
+• call AI agents
+• emit system events
+
+Wizards do not directly invoke other wizards.
+
+Instead they emit events which orchestrators consume.
+
+6. Event-Driven Workflow Architecture
+ALIS uses event-driven orchestration.
+
+Example:
+
+Student submits application
+↓
+Wizard emits APPLICATION_SUBMITTED
+↓
+Admissions Orchestrator receives event
+↓
+AI agents analyze application
+↓
+Eligibility rule engine evaluates result
+↓
+APPLICATION_EVALUATED event emitted
+This ensures:
+
+• modular workflows
+• traceable transitions
+• cross-module automation
+
+7. Orchestrator Architecture
+ALIS uses module-based orchestration.
+
+Each module contains its own orchestrator.
+
+Examples:
+
+• Admissions Orchestrator
+• Academics Orchestrator
+• Exams Orchestrator
+
+There is also a lightweight Global Event Supervisor that handles institution-wide events.
+
+Example global events:
+
+• semester start
+• semester end
+• policy updates
+• financial deadlines
+
+8. AI Architecture
+AI operates through a central AI Gateway.
+
+Flow:
+
+Wizard / Orchestrator
+↓
+AI Gateway
+↓
+Agent Runtime
+↓
+Tool Invocation
+↓
+Local LLM Runtime
+AI never interacts with the database directly.
+
+9. AI Agents
+Agents are defined actors with specific capabilities.
+
+Examples:
+
+• CourseBuilderAgent
+• QuestionPaperAgent
+• FeedbackSynthesizerAgent
+
+Each agent has:
+
+• allowed tools
+• allowed modules
+• model tier
+• execution mode
+
+Agents cannot write to the database.
+
+10. Prompt Registry
+All prompts are stored in a versioned Prompt Registry.
+
+No prompt may be hardcoded in application code.
+
+Prompt lifecycle:
+
+DRAFT → REVIEW → ACTIVE → DEPRECATED
+Prompts are rendered using Jinja2 templates.
+
+11. AI Invocation Contract
+Every AI execution must include:
+
+• agent_id
+• prompt_version
+• model_version
+• toolset_version
+• tenant_id
+• invoked_by
+• policy_version
+• input_hash
+• timestamp
+
+This guarantees replayable AI decisions.
+
+12. Tool Invocation Framework
+Agents interact with the system through deterministic tools.
+
+Example tools:
+
+• retrieve applicant data
+• fetch academic policy
+• validate grading rubric
+
+Tools must:
+
+• be read-only
+• deterministic
+• stateless
+
+13. RAG Architecture
+ALIS uses Retrieval Augmented Generation for institutional knowledge.
+
+Sources include:
+
+• academic policies
+• regulatory guidelines
+• course material
+• research papers
+
+Pipeline:
+
+Query
+↓
+Embedding
+↓
+Vector database
+↓
+Context retrieval
+↓
+LLM reasoning
+14. Security Model
+ALIS enforces strict governance through:
+
+• RBAC
+• policy registry
+• authority middleware
+• immutable audit logs
+
+AI outputs must always pass through the rule engine.
+
+15. Audit Architecture
+All operations produce immutable logs.
+
+Example logged fields:
+
+• actor_id
+• event_type
+• entity_id
+• timestamp
+• policy_version
+• model_version
+• prompt_version
+
+Audit logs are stored in PostgreSQL.
+
+16. Infrastructure Architecture
+ALIS is designed for on-prem deployment.
+
+Typical deployment:
+
+Application Server
+PostgreSQL Database
+Vector Database
+AI Gateway
+Local LLM Runtime
+GPU Inference Server
+17. Hardware Model
+Recommended baseline for mid-sized university:
+
+• 4U rack server
+• 2 GPUs (48GB VRAM recommended)
+• 128GB system RAM
+• NVMe storage
+
+LLM runtime examples:
+
+• vLLM
+• Ollama
+• llama.cpp
+
+18. AI Model Strategy
+ALIS uses a tiered model pool.
+
+Example:
+
+Tier 1 – Lightweight reasoning
+(Qwen 1.5B)
+
+Tier 2 – Deep reasoning
+(LLaMA 7B)
+
+Modules select model tiers based on task complexity.
+
+19. Policy Management
+Institutional rules are managed via a Policy Registry.
+
+Example policies:
+
+• attendance threshold
+• grading rules
+• scholarship caps
+• eligibility criteria
+
+Policies are versioned and enforced by the rule engine.
+
+20. Configuration Boundary
+Universities may configure:
+
+• policies
+• workflows
+• grading formulas
+• financial rules
+
+They cannot modify:
+
+• core system logic
+• audit architecture
+• state machines
+
+21. AI Safety Model
+AI is constrained through:
+
+• read-only architecture
+• tool access restrictions
+• structured outputs
+• human-in-the-loop enforcement
+
+22. Development Stack
+Current stack:
+
+Backend
+FastAPI (Python)
+
+Database
+PostgreSQL
+
+Vector DB
+Qdrant / PGVector
+
+Inference
+Local LLM runtime
+
+Prompt Engine
+Jinja2
+
+23. Observability
+System observability includes:
+
+• agent execution logs
+• system metrics
+• error tracking
+• AI invocation metrics
+
+24. Future Extensibility
+ALIS is designed to support:
+
+• partner-developed modules
+• custom institutional algorithms
+• plugin agents
+
+Extensions must operate within controlled runtime boundaries.
+
+25. Summary
+ALIS represents a new class of institutional software:
+
+A governed AI operating system for universities.
+
+It combines:
+
+• deterministic governance
+• modular orchestration
+• AI assistance
+• strict auditability
+
+This architecture enables universities to automate operational complexity while preserving full institutional control.
+

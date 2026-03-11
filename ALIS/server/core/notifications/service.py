@@ -20,7 +20,7 @@ Acceptance Criteria:
 - [x] No direct notifications from modules
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import logging
 
@@ -266,6 +266,49 @@ class NotificationDispatcher:
             and log.retry_count < log.max_retries
         ]
     
+    @classmethod
+    def dispatch(
+        cls,
+        template_key: str,
+        recipient_id: str,
+        recipient_email: str,
+        context: Dict[str, Any],
+        org_id: Optional[str] = None,
+        channel: str = "EMAIL",
+        **kwargs: Any,
+    ) -> dict:
+        """
+        Class-method entry point used by all ALIS modules.
+        Routes to DB-backed NotificationLogService (E10) when available,
+        falls back to legacy in-memory send otherwise.
+        """
+        try:
+            from server.communication.notification_log import NotificationLogService
+            return NotificationLogService.dispatch(
+                template_key=template_key,
+                recipient_id=recipient_id,
+                recipient_email=recipient_email,
+                context=context,
+                org_id=org_id,
+                channel=channel,
+                _subject_override=kwargs.get("_subject_override"),
+                _body_override=kwargs.get("_body_override"),
+            )
+        except Exception as exc:
+            logger.warning("NotificationDispatcher.dispatch fallback to legacy: %s", exc)
+            dispatcher = get_dispatcher()
+            logs = dispatcher.send(
+                template_id=template_key,
+                recipient_id=recipient_id,
+                recipient_address=recipient_email,
+                context=context,
+                org_id=org_id,
+            )
+            return {
+                "log_id": logs[0].id if logs else None,
+                "status": logs[0].status.value if logs else "FAILED",
+            }
+
     def _audit_send(self, log: NotificationLog, result: ChannelResult) -> None:
         """Log audit entry for notification send attempt."""
         AuditLog.log(
@@ -296,3 +339,4 @@ def get_dispatcher() -> NotificationDispatcher:
     if _dispatcher is None:
         _dispatcher = NotificationDispatcher()
     return _dispatcher
+

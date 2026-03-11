@@ -62,6 +62,7 @@ from .exceptions import (
     AISchemaViolationError,
     PromptNotFoundError,
     PromptResolutionError,
+    GuardrailViolationError,
 )
 
 
@@ -476,6 +477,10 @@ class AIInvocationResult:
     # E00-S06: Validated structured output (populated when validate_schema=True)
     validated_output: Optional[AIResponseSchema] = None
 
+    # E03-S08: Guardrail result (always populated on successful invocation)
+    guardrail_violations: int = 0
+    guardrail_blocked: bool = False
+
 
 # =============================================================================
 # INSTRUMENTED LLM WRAPPER
@@ -606,6 +611,42 @@ class InstrumentedLLM:
                 content, context=self._context
             )
 
+        # --- Step 2.6: E03-S08 — Post-Generation Guardrails ---
+        guardrail_violations = 0
+        guardrail_blocked = False
+        if success and content:
+            from .guardrails import AIGuardrails
+            gr_result = AIGuardrails.check_output(
+                output=content,
+                input_context=input_text,
+                tenant_id=self._context.org_id or "default",
+                actor_id=self._context.actor_id,
+                actor_role=(
+                    self._context.actor_role.value
+                    if self._context.actor_role else None
+                ),
+                module=self._context.module,
+                wizard=self._context.wizard,
+                request_id=request_id,
+            )
+            guardrail_violations = len(gr_result.violations)
+            guardrail_blocked = gr_result.blocked
+            if gr_result.blocked:
+                raise GuardrailViolationError(
+                    message="AI output blocked by guardrails (E03-S08)",
+                    details={
+                        "violations": [
+                            {
+                                "filter": v.filter_name,
+                                "severity": v.severity,
+                                "detail": v.detail,
+                            }
+                            for v in gr_result.violations
+                        ],
+                        "fallback": gr_result.fallback_response,
+                    },
+                )
+
         # --- Step 3: Calculate Metrics ---
         end_time = datetime.now(timezone.utc)
         latency_ms = (end_time - start_time).total_seconds() * 1000
@@ -652,6 +693,8 @@ class InstrumentedLLM:
             model=self._model_name,
             latency_ms=latency_ms,
             validated_output=validated_output,
+            guardrail_violations=guardrail_violations,
+            guardrail_blocked=guardrail_blocked,
         )
 
     def invoke_with_prompt(
@@ -873,11 +916,40 @@ class AIGateway:
                 "llama3"
             )
 
+        # --- Resource Limit Parameters (E03-S02) ---
+        # Extracted from the resolved model's config JSONB.
+        # Only known OllamaLLM resource params are forwarded — unknown
+        # keys are ignored to avoid breaking the constructor.
+        _RESOURCE_LIMIT_KEYS = {
+            "num_ctx",     # Context window size (tokens)
+            "num_gpu",     # Number of GPU layers to offload
+            "num_thread",  # CPU threads for inference
+            "keep_alive",  # Duration to keep model loaded (e.g. "5m")
+            "timeout",     # Request timeout (seconds)
+        }
+        resource_kwargs: dict = {}
+        if capability and context.org_id:
+            # Re-use the already-resolved config if available
+            try:
+                resolved_for_limits = ModelRegistry.get_active_model(
+                    capability=capability,
+                    tenant_id=context.org_id,
+                )
+                if resolved_for_limits:
+                    resource_kwargs = {
+                        k: v
+                        for k, v in resolved_for_limits.config.items()
+                        if k in _RESOURCE_LIMIT_KEYS
+                    }
+            except Exception:
+                pass  # Non-fatal; gateway falls back to Ollama defaults
+
         # Create Ollama LLM (Local only - NO CLOUD)
         llm = OllamaLLM(
             base_url=base_url,
             model=model,
-            temperature=temperature
+            temperature=temperature,
+            **resource_kwargs,
         )
 
         # Wrap with instrumentation

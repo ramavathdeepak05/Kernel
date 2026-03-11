@@ -83,6 +83,7 @@ class AuditAction(str, Enum):
     OVERRIDE_EXECUTED = "override_executed"
 
     # AI Agent
+    AGENT_EXECUTION = "agent_execution"   # E03-S04: agent run start/complete
     AGENT_DECISION = "agent_decision"
     AGENT_TOOL_CALL = "agent_tool_call"
 
@@ -92,6 +93,15 @@ class AuditAction(str, Enum):
     # AI Boundary Enforcement (E00-S06)
     AI_PROMPT_INJECTION = "ai_prompt_injection"
     AI_SCHEMA_REJECTED = "ai_schema_rejected"
+
+    # AI Guardrails (E03-S08)
+    GUARDRAIL_BLOCKED = "guardrail_blocked"
+    GUARDRAIL_WARNING = "guardrail_warning"
+
+    # Human-in-the-Loop (E03-S09)
+    HITL_REVIEW_REQUIRED = "hitl_review_required"
+    HITL_ESCALATED = "hitl_escalated"
+    HITL_AUTO_PROCEED = "hitl_auto_proceed"
 
     # System
     CONFIG_CHANGE = "config_change"

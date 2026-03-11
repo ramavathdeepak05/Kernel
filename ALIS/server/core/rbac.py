@@ -59,8 +59,9 @@ class Role(str, Enum):
     M4_MANAGER = "m4_manager"  # Finance
     M5_MANAGER = "m5_manager"  # HR & Payroll
     M6_MANAGER = "m6_manager"  # Student Services
-    M7_MANAGER = "m7_manager"  # Regulatory & Quality
-    M8_MANAGER = "m8_manager"  # Research
+    M7_MANAGER = "m7_manager"  # Communication Hub
+    M8_MANAGER = "m8_manager"  # Reporting & Analytics
+    M9_MANAGER = "m9_manager"  # Alumni & Placement
 
     # System Roles
     AI_AGENT = "ai_agent"
@@ -147,7 +148,23 @@ class Permission(str, Enum):
     HOSTEL_MANAGE = "hostel:manage"
     TRANSPORT_MANAGE = "transport:manage"
 
-    # M7 — Regulatory & Quality
+    # M7 — Communication Hub (E10)
+    NOTIFICATION_READ = "notification:read"
+    NOTIFICATION_MANAGE = "notification:manage"
+    ANNOUNCEMENT_CREATE = "announcement:create"
+    BULK_MESSAGE = "bulk_message:send"
+
+    # M8 — Reporting & Analytics (E11)
+    REPORT_READ   = "report:read"
+    REPORT_CREATE = "report:create"
+    REPORT_EXPORT = "report:export"
+
+    # M9 — Alumni & Placement (E12)
+    ALUMNI_READ     = "alumni:read"
+    ALUMNI_MANAGE   = "alumni:manage"
+    PLACEMENT_MANAGE = "placement:manage"
+
+    # M10 — Regulatory & Quality
     COMPLIANCE_READ = "compliance:read"
     COMPLIANCE_SUBMIT = "compliance:submit"
     GRIEVANCE_MANAGE = "grievance:manage"
@@ -156,6 +173,10 @@ class Permission(str, Enum):
     RESEARCH_READ = "research:read"
     RESEARCH_CREATE = "research:create"
     RESEARCH_SUBMIT = "research:submit"
+
+    # E13 — Dynamic Process Engine
+    PROCESS_READ   = "process:read"
+    PROCESS_MANAGE = "process:manage"
 
     # Dynamic Role Management
     ROLE_CREATE = "role:create"
@@ -174,12 +195,16 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.COURSE_READ,
         Permission.MARKS_READ,
         Permission.FEE_READ,
+        Permission.NOTIFICATION_READ,  # E10
+        Permission.SERVICE_READ,       # E09
+        Permission.ALUMNI_READ,        # E12 — students can browse job board & drives
     ],
     Role.FACULTY: [
         Permission.STUDENT_READ,
         Permission.COURSE_READ,
         Permission.MARKS_READ,
         Permission.MARKS_ENTRY,
+        Permission.NOTIFICATION_READ,  # E10
     ],
     Role.HOD: [
         Permission.STUDENT_READ,
@@ -207,6 +232,10 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.DUAL_CONTROL_APPROVE, # E00-S04
         Permission.POLICY_READ,          # E00-S09
         Permission.SYSTEM_READ,          # E02-S01
+        Permission.REPORT_READ,          # E11
+        Permission.REPORT_EXPORT,        # E11
+        Permission.PROCESS_READ,         # E13
+        Permission.PROCESS_MANAGE,       # E13
     ],
     Role.FINANCE_OFFICER: [
         Permission.FEE_READ,
@@ -234,6 +263,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.POLICY_APPROVE,  # E00-S09
         Permission.POLICY_READ,     # E00-S09
         Permission.SYSTEM_READ,     # E02-S01
+        Permission.PROCESS_READ,    # E13
+        Permission.PROCESS_MANAGE,  # E13
     ],
     Role.SUPER_ADMIN: [
         # Super admin has all permissions
@@ -263,6 +294,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.USER_READ, Permission.OVERRIDE_REQUEST,
         Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
         Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.PROCESS_READ, Permission.PROCESS_MANAGE,  # E13
     ],
     Role.M2_MANAGER: [
         Permission.COURSE_READ, Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
@@ -305,13 +337,26 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
     ],
     Role.M7_MANAGER: [
+        # M7 = Communication Hub (E10)
+        Permission.NOTIFICATION_READ, Permission.NOTIFICATION_MANAGE,
+        Permission.ANNOUNCEMENT_CREATE, Permission.BULK_MESSAGE,
         Permission.COMPLIANCE_READ, Permission.COMPLIANCE_SUBMIT,
         Permission.GRIEVANCE_MANAGE, Permission.AUDIT_LOG_READ,
         Permission.USER_READ, Permission.OVERRIDE_REQUEST,
         Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
         Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
     ],
+    Role.M9_MANAGER: [
+        # M9 = Alumni & Placement (E12)
+        Permission.ALUMNI_READ, Permission.ALUMNI_MANAGE, Permission.PLACEMENT_MANAGE,
+        Permission.STUDENT_READ, Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ, Permission.AI_INVOKE,
+        Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+    ],
     Role.M8_MANAGER: [
+        # M8 = Reporting & Analytics (E11)
+        Permission.REPORT_READ, Permission.REPORT_CREATE, Permission.REPORT_EXPORT,
         Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
         Permission.USER_READ, Permission.OVERRIDE_REQUEST,
         Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
@@ -359,6 +404,9 @@ MODULE_PERMISSIONS: Dict[str, List[Permission]] = {
     "M8": [
         Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
     ],
+    "M10": [
+        Permission.PROCESS_READ, Permission.PROCESS_MANAGE,  # E13 — Dynamic Process Engine
+    ],
 }
 
 # Reverse map: permission → owning module
@@ -378,6 +426,7 @@ MANAGER_MODULE: Dict[Role, str] = {
     Role.M6_MANAGER: "M6",
     Role.M7_MANAGER: "M7",
     Role.M8_MANAGER: "M8",
+    Role.M9_MANAGER: "M9",
 }
 
 # Module → manager role (reverse of above)

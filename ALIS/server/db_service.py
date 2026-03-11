@@ -30,7 +30,6 @@ Usage:
     result = execute_system_query("SELECT count(*) FROM pg_stat_activity")
 """
 
-import os
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
@@ -56,14 +55,15 @@ def get_db_pool():
     global _pg_pool
     if _pg_pool is None and psycopg2:
         try:
+            from server.core.settings import settings
             _pg_pool = psycopg2.pool.SimpleConnectionPool(
-                minconn=1,
-                maxconn=20,
-                user=os.getenv("DB_USER", "postgres"),
-                password=os.getenv("DB_PASSWORD", "postgres"),
-                host=os.getenv("DB_HOST", "localhost"),
-                port=os.getenv("DB_PORT", "5432"),
-                database=os.getenv("DB_NAME", "alis_db")
+                minconn=settings.db_pool_min,
+                maxconn=settings.db_pool_max,
+                user=settings.db_user,
+                password=settings.db_password,
+                host=settings.db_host,
+                port=settings.db_port,
+                database=settings.db_name,
             )
             logger.info("Database connection pool initialized.")
         except Exception as e:
@@ -585,9 +585,9 @@ def init_db():
     llm_model_seed_sql = """
     INSERT INTO llm_model_registry (id, tenant_id, name, version, capability, is_active, config)
     VALUES
-        ('seed-qwen-infer', 'default', 'qwen', '1.5-q8', 'Infer', TRUE, '{"temperature": 0.0}'::jsonb),
-        ('seed-qwen-score', 'default', 'qwen', '1.5-q8', 'Score', TRUE, '{"temperature": 0.0}'::jsonb),
-        ('seed-qwen-plan',  'default', 'qwen', '1.5-q8', 'Plan',  TRUE, '{"temperature": 0.0}'::jsonb)
+        ('seed-qwen-infer', 'default', 'qwen', '1.5-q8', 'Infer', TRUE, '{"temperature": 0.0, "num_ctx": 4096, "num_gpu": 35, "num_thread": 8, "keep_alive": "5m"}'::jsonb),
+        ('seed-qwen-score', 'default', 'qwen', '1.5-q8', 'Score', TRUE, '{"temperature": 0.0, "num_ctx": 4096, "num_gpu": 35, "num_thread": 8, "keep_alive": "5m"}'::jsonb),
+        ('seed-qwen-plan',  'default', 'qwen', '1.5-q8', 'Plan',  TRUE, '{"temperature": 0.0, "num_ctx": 4096, "num_gpu": 35, "num_thread": 8, "keep_alive": "5m"}'::jsonb)
     ON CONFLICT (id) DO NOTHING;
     """
 
@@ -997,6 +997,171 @@ def init_db():
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
+    # =========================================================================
+    # E04: Admissions Tables
+    # =========================================================================
+
+    admissions_tables_sql = """
+    CREATE TABLE IF NOT EXISTS applicants (
+        id                  VARCHAR(100) PRIMARY KEY,
+        org_id              VARCHAR(50)  NOT NULL,
+        name                VARCHAR(200) NOT NULL,
+        email               VARCHAR(255) NOT NULL,
+        phone               VARCHAR(30)  NOT NULL,
+        intended_program    VARCHAR(200) NOT NULL,
+        source_channel      VARCHAR(50)  NOT NULL DEFAULT 'website',
+        status              VARCHAR(50)  NOT NULL DEFAULT 'APPLIED',
+        metadata            JSONB        NOT NULL DEFAULT '{}',
+        created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        UNIQUE (org_id, email),
+        UNIQUE (org_id, phone)
+    );
+
+    CREATE TABLE IF NOT EXISTS lead_merge_log (
+        id                  VARCHAR(100) PRIMARY KEY,
+        org_id              VARCHAR(50)  NOT NULL,
+        primary_id          VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        merged_id           VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        similarity_score    NUMERIC(6,4) NOT NULL,
+        method              VARCHAR(30)  NOT NULL,
+        justification       TEXT,
+        merged_by           VARCHAR(100) NOT NULL,
+        created_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS application_documents (
+        id                  VARCHAR(100) PRIMARY KEY,
+        org_id              VARCHAR(50)  NOT NULL,
+        applicant_id        VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        doc_type            VARCHAR(50)  NOT NULL,
+        file_path           TEXT         NOT NULL,
+        is_verified         BOOLEAN      NOT NULL DEFAULT FALSE,
+        verification_method VARCHAR(50),
+        verification_detail TEXT,
+        verified_by         VARCHAR(100),
+        verified_at         TIMESTAMPTZ,
+        created_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS counsellor_assignments (
+        id                  VARCHAR(100) PRIMARY KEY,
+        org_id              VARCHAR(50)  NOT NULL,
+        applicant_id        VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        counsellor_id       VARCHAR(100) NOT NULL,
+        method              VARCHAR(30)  NOT NULL,
+        similarity_score    NUMERIC(6,4),
+        assigned_by         VARCHAR(100) NOT NULL,
+        created_at          TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        UNIQUE (org_id, applicant_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS offer_letters (
+        id                  VARCHAR(100) PRIMARY KEY,
+        org_id              VARCHAR(50)  NOT NULL,
+        applicant_id        VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        program_name        VARCHAR(200) NOT NULL,
+        academic_year       VARCHAR(10)  NOT NULL,
+        template_version    INTEGER      NOT NULL DEFAULT 1,
+        content_hash        VARCHAR(64)  NOT NULL,
+        pdf_path            TEXT         NOT NULL,
+        issued_at           TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        is_valid            BOOLEAN      NOT NULL DEFAULT TRUE
+    );
+
+    CREATE TABLE IF NOT EXISTS admission_records (
+        id                  VARCHAR(100) PRIMARY KEY,
+        org_id              VARCHAR(50)  NOT NULL,
+        applicant_id        VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        registration_number VARCHAR(50)  NOT NULL UNIQUE,
+        payment_reference   VARCHAR(100) NOT NULL,
+        fee_amount          NUMERIC(12,2) NOT NULL,
+        admitted_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+        admitted_by         VARCHAR(100) NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS intake_quality_scores (
+        id              VARCHAR(100) PRIMARY KEY,
+        org_id          VARCHAR(50)  NOT NULL,
+        batch_id        VARCHAR(100) NOT NULL,
+        program         VARCHAR(200),
+        quality_score   NUMERIC(6,4) NOT NULL,
+        factors         JSONB        NOT NULL DEFAULT '{}',
+        alert_triggered BOOLEAN      NOT NULL DEFAULT FALSE,
+        scored_at       TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS students (
+        id              VARCHAR(100) PRIMARY KEY,
+        org_id          VARCHAR(50)  NOT NULL,
+        applicant_id    VARCHAR(100) NOT NULL REFERENCES applicants(id),
+        roll_number     VARCHAR(50)  NOT NULL UNIQUE,
+        name            VARCHAR(200) NOT NULL,
+        email           VARCHAR(255) NOT NULL,
+        phone           VARCHAR(30)  NOT NULL,
+        program         VARCHAR(200) NOT NULL,
+        enrolled_at     TIMESTAMPTZ  NOT NULL DEFAULT now()
+    );
+    """
+
+    admissions_rls_sql = """
+    ALTER TABLE applicants ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_applicants ON applicants;
+    CREATE POLICY tenant_isolation_applicants ON applicants
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE lead_merge_log ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_lead_merge ON lead_merge_log;
+    CREATE POLICY tenant_isolation_lead_merge ON lead_merge_log
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE application_documents ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_app_docs ON application_documents;
+    CREATE POLICY tenant_isolation_app_docs ON application_documents
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE counsellor_assignments ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_counsellor ON counsellor_assignments;
+    CREATE POLICY tenant_isolation_counsellor ON counsellor_assignments
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE offer_letters ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_offer_letters ON offer_letters;
+    CREATE POLICY tenant_isolation_offer_letters ON offer_letters
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE admission_records ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_admission_records ON admission_records;
+    CREATE POLICY tenant_isolation_admission_records ON admission_records
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE intake_quality_scores ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_intake_scores ON intake_quality_scores;
+    CREATE POLICY tenant_isolation_intake_scores ON intake_quality_scores
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+
+    ALTER TABLE students ENABLE ROW LEVEL SECURITY;
+    DROP POLICY IF EXISTS tenant_isolation_students ON students;
+    CREATE POLICY tenant_isolation_students ON students
+        FOR ALL
+        USING (org_id = current_setting('alis.current_tenant', true))
+        WITH CHECK (org_id = current_setting('alis.current_tenant', true));
+    """
+
     try:
         execute_system_transaction([
             (tenant_session_var_sql, None),
@@ -1030,13 +1195,19 @@ def init_db():
             (workflows_table_sql, None),
             (workflow_steps_table_sql, None),
             (workflows_rls_sql, None),
+            # E04: Admissions
+            (admissions_tables_sql, None),
+            (admissions_rls_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
             "(users, search, activity, comments, audit_ledger, policy_registry, "
             "llm_model_registry, prompt_registry, approval_requests, approval_actions, "
             "organizations, custom_roles, "
-            "custom_role_permissions, user_custom_roles, workflows "
+            "custom_role_permissions, user_custom_roles, workflows, "
+            "applicants, lead_merge_log, application_documents, "
+            "counsellor_assignments, offer_letters, admission_records, "
+            "intake_quality_scores, students "
             "+ RLS policies + immutability triggers)."
         )
     except Exception as e:

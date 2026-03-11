@@ -46,6 +46,9 @@ from server.admissions.models import (
     LeadUpdateRequest,
     LeadActivityCreate,
     OfferLetterGenerateRequest,
+    OfferAcceptRequest,
+    OfferDeclineRequest,
+    OfferRevokeRequest,
     AdmissionConfirmRequest,
     ReferralCodeCreate,
 )
@@ -77,6 +80,7 @@ from server.admissions.application_form import (
     ApplicationFeeRequest,
 )
 from server.admissions.lead_service import LeadService, ConsultantService, ReferralCodeService
+from server.admissions.eligibility_criteria import EligibilityCriteriaService, EligibilityCriteria
 from server.admissions.deduplication import LeadDeduplicationService
 from server.admissions.eligibility_service import EligibilityService
 from server.admissions.document_verification import DocumentVerificationService
@@ -86,6 +90,23 @@ from server.admissions.offer_letter import OfferLetterService
 from server.admissions.confirmation import AdmissionConfirmationService
 from server.admissions.intake_quality import IntakeQualityService
 from server.admissions.enrollment_handover import EnrollmentHandoverService
+from server.admissions.payment_v2 import (
+    DemandDraftService, DemandDraftCreate,
+    RefundRequestService, RefundRequestCreate,
+)
+from server.admissions.final_verification import (
+    FinalVerificationService, FinalVerificationCreate,
+    VerificationItemCreate,
+    DiscrepancyService, DiscrepancyCreate,
+)
+from server.admissions.enrollment_provisioning import (
+    EnrollmentProvisioningService,
+    EnrollmentInitiateRequest,
+    LMSProvisionRequest,
+    EmailProvisionRequest,
+    LibraryProvisionRequest,
+    ERPSyncRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -333,7 +354,7 @@ async def reupload_document(request: Request, doc_id: str, body: dict) -> JSONRe
 # P0-S10: COUNSELLOR MANAGEMENT (CRUD + embedding ETL trigger)
 # =============================================================================
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 class CounsellorCreateRequest(BaseModel):
     name: str
@@ -419,7 +440,7 @@ async def assign_counsellor(
 
 
 # =============================================================================
-# E04-S06: OFFER LETTER GENERATION WIZARD
+# P9: OFFER LETTER v2 (Stage 7)
 # =============================================================================
 
 @router.post("/offers/generate")
@@ -427,13 +448,122 @@ async def assign_counsellor(
 async def generate_offer_letter(
     request: Request, body: OfferLetterGenerateRequest
 ) -> JSONResponse:
-    """Generate a PDF offer letter for an eligible applicant."""
+    """Generate a PDF offer letter (with acceptance deadline + fee structure)."""
     letter = OfferLetterService.generate(
         request=body,
         org_id=_org(request),
         actor_id=_actor(request),
     )
     return JSONResponse(status_code=201, content=letter.model_dump(default=str))
+
+
+@router.get("/offers/applicant/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_offer_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+    """Get the current valid offer letter for an applicant."""
+    letter = OfferLetterService.get_for_applicant(applicant_id, _org(request))
+    if not letter:
+        return JSONResponse(
+            content={"detail": f"No active offer for applicant '{applicant_id}'."},
+            status_code=404,
+        )
+    return JSONResponse(content=letter.model_dump(default=str))
+
+
+@router.get("/offers/{letter_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_offer_letter(request: Request, letter_id: str) -> JSONResponse:
+    """Get an offer letter by ID."""
+    letter = OfferLetterService.get(letter_id, _org(request))
+    return JSONResponse(content=letter.model_dump(default=str))
+
+
+@router.post("/offers/{letter_id}/accept")
+@require_permission(Permission.STUDENT_CREATE)
+async def accept_offer(
+    request: Request, letter_id: str, body: OfferAcceptRequest
+) -> JSONResponse:
+    """Applicant accepts their offer. Transitions → OFFER_ACCEPTED → SEAT_CONFIRMED."""
+    letter = OfferLetterService.accept(
+        letter_id=letter_id,
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=letter.model_dump(default=str))
+
+
+@router.post("/offers/{letter_id}/decline")
+@require_permission(Permission.STUDENT_CREATE)
+async def decline_offer(
+    request: Request, letter_id: str, body: OfferDeclineRequest
+) -> JSONResponse:
+    """Applicant declines their offer. Triggers waitlist cascade."""
+    letter = OfferLetterService.decline(
+        letter_id=letter_id,
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=letter.model_dump(default=str))
+
+
+@router.post("/offers/{letter_id}/revoke")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def revoke_offer(
+    request: Request, letter_id: str, body: OfferRevokeRequest
+) -> JSONResponse:
+    """Staff revokes a previously issued offer (requires OVERRIDE_APPROVE)."""
+    letter = OfferLetterService.revoke(
+        letter_id=letter_id,
+        request=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=letter.model_dump(default=str))
+
+
+@router.post("/offers/{letter_id}/delivery")
+@require_permission(Permission.STUDENT_CREATE)
+async def update_offer_delivery(
+    request: Request, letter_id: str, body: dict
+) -> JSONResponse:
+    """Update delivery status (SENT / OPENED / BOUNCED)."""
+    status = body.get("status", "")
+    letter = OfferLetterService.mark_delivery(
+        letter_id=letter_id,
+        org_id=_org(request),
+        status=status,
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=letter.model_dump(default=str))
+
+
+@router.post("/offers/{letter_id}/reminder")
+@require_permission(Permission.STUDENT_CREATE)
+async def mark_offer_reminder(
+    request: Request, letter_id: str, body: dict
+) -> JSONResponse:
+    """Mark a T-3 or T-1 day reminder as sent."""
+    reminder_type = body.get("reminder_type", "")
+    OfferLetterService.mark_reminder(
+        letter_id=letter_id,
+        org_id=_org(request),
+        reminder_type=reminder_type,
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content={"letter_id": letter_id, "reminder_type": reminder_type})
+
+
+@router.post("/offers/expire-overdue")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def expire_overdue_offers(request: Request) -> JSONResponse:
+    """Batch-expire all PENDING offers past their acceptance deadline."""
+    result = OfferLetterService.expire_overdue(
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=result)
 
 
 # =============================================================================
@@ -1184,6 +1314,67 @@ async def deactivate_policy(request: Request, key: str) -> None:
 
 
 # =============================================================================
+# P6: ELIGIBILITY CRITERIA MANAGEMENT (Stage 4)
+# =============================================================================
+
+@router.post("/eligibility/criteria")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def set_eligibility_criteria(request: Request, body: EligibilityCriteria) -> JSONResponse:
+    """Create or replace eligibility criteria for a program (and optional batch)."""
+    result = EligibilityCriteriaService.set_criteria(
+        criteria=body,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=result.model_dump(), status_code=201)
+
+
+@router.get("/eligibility/criteria")
+@require_permission(Permission.STUDENT_READ)
+async def list_eligibility_criteria(request: Request) -> JSONResponse:
+    """List all eligibility criteria for this org."""
+    results = EligibilityCriteriaService.list_criteria(org_id=_org(request))
+    return JSONResponse(content={"criteria": [c.model_dump() for c in results], "total": len(results)})
+
+
+@router.get("/eligibility/criteria/{program_name}")
+@require_permission(Permission.STUDENT_READ)
+async def get_eligibility_criteria(
+    request: Request,
+    program_name: str,
+    intake_batch: Optional[str] = None,
+) -> JSONResponse:
+    """Get eligibility criteria for a specific program (and optional batch)."""
+    criteria = EligibilityCriteriaService.get_criteria(
+        org_id=_org(request),
+        program_name=program_name,
+        intake_batch=intake_batch,
+    )
+    if not criteria:
+        return JSONResponse(
+            content={"detail": f"No criteria configured for '{program_name}'."},
+            status_code=404,
+        )
+    return JSONResponse(content=criteria.model_dump())
+
+
+@router.delete("/eligibility/criteria/{program_name}", status_code=204)
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def delete_eligibility_criteria(
+    request: Request,
+    program_name: str,
+    intake_batch: Optional[str] = None,
+) -> None:
+    """Deactivate eligibility criteria for a program (soft delete)."""
+    EligibilityCriteriaService.delete_criteria(
+        org_id=_org(request),
+        program_name=program_name,
+        actor_id=_actor(request),
+        intake_batch=intake_batch,
+    )
+
+
+# =============================================================================
 # E04-S12: REVIEW QUEUE
 # =============================================================================
 
@@ -1238,3 +1429,435 @@ async def decide_review_item(
         actor_id=_actor(request),
     ))
     return JSONResponse(content=item)
+
+
+# =============================================================================
+# P10: PAYMENT v2 — Demand Draft & Refunds (Stage 8)
+# =============================================================================
+
+class DDRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=5, max_length=500)
+
+
+class RefundReviewRequest(BaseModel):
+    decision: str = Field(..., description="APPROVED | REJECTED")
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+
+class RefundProcessRequest(BaseModel):
+    gateway_refund_id: str = Field(..., min_length=1)
+
+
+# --- Demand Draft ---
+
+@router.post("/payments/dd")
+@require_permission(Permission.STUDENT_CREATE)
+async def submit_demand_draft(request: Request, body: DemandDraftCreate) -> JSONResponse:
+    """Applicant submits DD details as proof of fee payment."""
+    dd = DemandDraftService.submit(body, _org(request), _actor(request))
+    return JSONResponse(content=dd.model_dump(default=str), status_code=201)
+
+
+@router.get("/payments/dd/applicant/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def list_demand_drafts(
+    request: Request,
+    applicant_id: str,
+    status: Optional[str] = None,
+) -> JSONResponse:
+    """List all DDs submitted by an applicant."""
+    dds = DemandDraftService.list_for_applicant(applicant_id, _org(request), status)
+    return JSONResponse(content={"dds": [d.model_dump(default=str) for d in dds], "total": len(dds)})
+
+
+@router.get("/payments/dd/{dd_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_demand_draft(request: Request, dd_id: str) -> JSONResponse:
+    """Get a demand draft by ID."""
+    dd = DemandDraftService.get(dd_id, _org(request))
+    return JSONResponse(content=dd.model_dump(default=str))
+
+
+@router.post("/payments/dd/{dd_id}/verify")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def verify_demand_draft(request: Request, dd_id: str) -> JSONResponse:
+    """Staff verifies a DD → transitions applicant to VERIFICATION_PENDING."""
+    dd = DemandDraftService.verify(dd_id, _org(request), _actor(request))
+    return JSONResponse(content=dd.model_dump(default=str))
+
+
+@router.post("/payments/dd/{dd_id}/reject")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def reject_demand_draft(request: Request, dd_id: str, body: DDRejectRequest) -> JSONResponse:
+    """Staff rejects a DD with a reason. Applicant must resubmit."""
+    dd = DemandDraftService.reject(dd_id, _org(request), _actor(request), body.reason)
+    return JSONResponse(content=dd.model_dump(default=str))
+
+
+# --- Refund Requests ---
+
+@router.post("/payments/refunds")
+@require_permission(Permission.STUDENT_CREATE)
+async def submit_refund_request(request: Request, body: RefundRequestCreate) -> JSONResponse:
+    """Applicant submits a refund request. Amount calculated from policy slabs."""
+    ref = RefundRequestService.submit(body, _org(request), _actor(request))
+    return JSONResponse(content=ref.model_dump(default=str), status_code=201)
+
+
+@router.get("/payments/refunds/pending")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def list_pending_refunds(request: Request) -> JSONResponse:
+    """List all REQUESTED / UNDER_REVIEW refund requests for staff."""
+    refs = RefundRequestService.list_pending_review(_org(request))
+    return JSONResponse(content={"refunds": [r.model_dump(default=str) for r in refs], "total": len(refs)})
+
+
+@router.get("/payments/refunds/applicant/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def list_refunds_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+    """List refund requests for a specific applicant."""
+    refs = RefundRequestService.list_for_applicant(applicant_id, _org(request))
+    return JSONResponse(content={"refunds": [r.model_dump(default=str) for r in refs], "total": len(refs)})
+
+
+@router.get("/payments/refunds/{request_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_refund_request(request: Request, request_id: str) -> JSONResponse:
+    """Get a refund request by ID."""
+    ref = RefundRequestService.get(request_id, _org(request))
+    return JSONResponse(content=ref.model_dump(default=str))
+
+
+@router.post("/payments/refunds/{request_id}/review")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def review_refund_request(
+    request: Request, request_id: str, body: RefundReviewRequest
+) -> JSONResponse:
+    """Staff approves or rejects a refund request."""
+    ref = RefundRequestService.review(
+        request_id=request_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+        decision=body.decision,
+        notes=body.notes,
+    )
+    return JSONResponse(content=ref.model_dump(default=str))
+
+
+@router.post("/payments/refunds/{request_id}/process")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def process_refund(
+    request: Request, request_id: str, body: RefundProcessRequest
+) -> JSONResponse:
+    """Finance records completed refund with gateway reference → PROCESSED."""
+    ref = RefundRequestService.process(
+        request_id=request_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+        gateway_refund_id=body.gateway_refund_id,
+    )
+    return JSONResponse(content=ref.model_dump(default=str))
+
+
+# =============================================================================
+# P11: FINAL VERIFICATION (Stage 9)
+# =============================================================================
+
+class VerificationStartRequest(BaseModel):
+    assigned_officer: Optional[str] = None
+
+
+class VerificationClearRequest(BaseModel):
+    notes: Optional[str] = None
+
+
+class VerificationUndertakingRequest(BaseModel):
+    notes: str = Field(..., min_length=10)
+
+
+class VerificationRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=10)
+
+
+class DiscrepancyResolveRequest(BaseModel):
+    resolution: str = Field(..., min_length=5)
+
+
+class DiscrepancyEscalateRequest(BaseModel):
+    escalate_to: str = Field(..., min_length=1)
+
+
+# P12 — Enrollment Provisioning inline request models
+class EnrollmentCompleteRequest(BaseModel):
+    pass  # no body needed — service reads provisioning state
+
+
+class WelcomeEmailRequest(BaseModel):
+    parent: bool = False
+
+
+@router.post("/verification")
+@require_permission(Permission.STUDENT_CREATE)
+async def initiate_verification(
+    request: Request, body: FinalVerificationCreate
+) -> JSONResponse:
+    """Initiate a final verification session for a VERIFICATION_PENDING applicant."""
+    ver = FinalVerificationService.initiate(body, _org(request), _actor(request))
+    return JSONResponse(content=ver.model_dump(default=str), status_code=201)
+
+
+@router.get("/verification/applicant/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_verification_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+    """Get the verification record for an applicant."""
+    ver = FinalVerificationService.get_for_applicant(applicant_id, _org(request))
+    if not ver:
+        return JSONResponse(
+            content={"detail": f"No verification record for applicant '{applicant_id}'."},
+            status_code=404,
+        )
+    return JSONResponse(content=ver.model_dump(default=str))
+
+
+@router.get("/verification/{verification_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_verification(request: Request, verification_id: str) -> JSONResponse:
+    ver = FinalVerificationService.get(verification_id, _org(request))
+    return JSONResponse(content=ver.model_dump(default=str))
+
+
+@router.post("/verification/{verification_id}/start")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def start_verification(
+    request: Request, verification_id: str, body: VerificationStartRequest
+) -> JSONResponse:
+    """Officer starts the verification session → IN_PROGRESS."""
+    ver = FinalVerificationService.start(
+        verification_id, _org(request), _actor(request), body.assigned_officer
+    )
+    return JSONResponse(content=ver.model_dump(default=str))
+
+
+@router.post("/verification/{verification_id}/check")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def check_document(
+    request: Request, verification_id: str, body: VerificationItemCreate
+) -> JSONResponse:
+    """Record the outcome of checking a single document."""
+    item = FinalVerificationService.check_document(
+        verification_id, body, _org(request), _actor(request)
+    )
+    return JSONResponse(content=item.model_dump(default=str), status_code=201)
+
+
+@router.get("/verification/{verification_id}/items")
+@require_permission(Permission.STUDENT_READ)
+async def list_verification_items(request: Request, verification_id: str) -> JSONResponse:
+    items = FinalVerificationService.list_items(verification_id, _org(request))
+    return JSONResponse(content={"items": [i.model_dump(default=str) for i in items], "total": len(items)})
+
+
+@router.post("/verification/{verification_id}/clear")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def clear_verification(
+    request: Request, verification_id: str, body: VerificationClearRequest
+) -> JSONResponse:
+    """All docs verified → VERIFIED → applicant READY_FOR_ENROLLMENT."""
+    ver = FinalVerificationService.clear(
+        verification_id, _org(request), _actor(request), body.notes
+    )
+    return JSONResponse(content=ver.model_dump(default=str))
+
+
+@router.post("/verification/{verification_id}/clear-with-undertaking")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def clear_with_undertaking(
+    request: Request, verification_id: str, body: VerificationUndertakingRequest
+) -> JSONResponse:
+    """Minor issues cleared on undertaking → CLEARED_WITH_UNDERTAKING → READY_FOR_ENROLLMENT."""
+    ver = FinalVerificationService.clear_with_undertaking(
+        verification_id, _org(request), _actor(request), body.notes
+    )
+    return JSONResponse(content=ver.model_dump(default=str))
+
+
+@router.post("/verification/{verification_id}/reject")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def reject_verification(
+    request: Request, verification_id: str, body: VerificationRejectRequest
+) -> JSONResponse:
+    """Critical discrepancy → REJECTED → applicant CANCELLED."""
+    ver = FinalVerificationService.reject(
+        verification_id, _org(request), _actor(request), body.reason
+    )
+    return JSONResponse(content=ver.model_dump(default=str))
+
+
+@router.post("/verification/{verification_id}/discrepancies")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def raise_discrepancy(
+    request: Request, verification_id: str, body: DiscrepancyCreate
+) -> JSONResponse:
+    """Raise a document discrepancy against a verification session."""
+    disc = DiscrepancyService.raise_discrepancy(
+        verification_id, body, _org(request), _actor(request)
+    )
+    return JSONResponse(content=disc.model_dump(default=str), status_code=201)
+
+
+@router.get("/verification/{verification_id}/discrepancies")
+@require_permission(Permission.STUDENT_READ)
+async def list_discrepancies(
+    request: Request, verification_id: str, status: Optional[str] = None
+) -> JSONResponse:
+    discs = DiscrepancyService.list_discrepancies(verification_id, _org(request), status)
+    return JSONResponse(content={"discrepancies": [d.model_dump(default=str) for d in discs], "total": len(discs)})
+
+
+@router.post("/verification/discrepancies/{discrepancy_id}/resolve")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def resolve_discrepancy(
+    request: Request, discrepancy_id: str, body: DiscrepancyResolveRequest
+) -> JSONResponse:
+    disc = DiscrepancyService.resolve_discrepancy(
+        discrepancy_id, _org(request), _actor(request), body.resolution
+    )
+    return JSONResponse(content=disc.model_dump(default=str))
+
+
+@router.post("/verification/discrepancies/{discrepancy_id}/escalate")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def escalate_discrepancy(
+    request: Request, discrepancy_id: str, body: DiscrepancyEscalateRequest
+) -> JSONResponse:
+    disc = DiscrepancyService.escalate_discrepancy(
+        discrepancy_id, _org(request), _actor(request), body.escalate_to
+    )
+    return JSONResponse(content=disc.model_dump(default=str))
+
+
+# =============================================================================
+# P12 — Enrollment Provisioning (Stage 10)
+# =============================================================================
+
+@router.post("/enrollment")
+@require_permission(Permission.STUDENT_CREATE)
+async def initiate_enrollment(
+    request: Request, body: EnrollmentInitiateRequest
+) -> JSONResponse:
+    """Initiate enrollment provisioning — assign roll number, create record."""
+    prov = EnrollmentProvisioningService.initiate(body, _org(request), _actor(request))
+    return JSONResponse(content=prov.model_dump(default=str), status_code=201)
+
+
+@router.get("/enrollment/applicant/{applicant_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_enrollment_for_applicant(
+    request: Request, applicant_id: str
+) -> JSONResponse:
+    prov = EnrollmentProvisioningService.get_for_applicant(applicant_id, _org(request))
+    if not prov:
+        return JSONResponse(content={"detail": "No provisioning record found."}, status_code=404)
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.get("/enrollment/{provisioning_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_enrollment(
+    request: Request, provisioning_id: str
+) -> JSONResponse:
+    prov = EnrollmentProvisioningService.get(provisioning_id, _org(request))
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/lms")
+@require_permission(Permission.STUDENT_CREATE)
+async def provision_lms(
+    request: Request, provisioning_id: str, body: LMSProvisionRequest
+) -> JSONResponse:
+    """Record LMS account creation."""
+    prov = EnrollmentProvisioningService.provision_lms(
+        provisioning_id, body, _org(request), _actor(request)
+    )
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/email")
+@require_permission(Permission.STUDENT_CREATE)
+async def provision_email(
+    request: Request, provisioning_id: str, body: EmailProvisionRequest
+) -> JSONResponse:
+    """Assign university email address."""
+    prov = EnrollmentProvisioningService.provision_email(
+        provisioning_id, body, _org(request), _actor(request)
+    )
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/library")
+@require_permission(Permission.STUDENT_CREATE)
+async def provision_library(
+    request: Request, provisioning_id: str, body: LibraryProvisionRequest
+) -> JSONResponse:
+    """Register student with library system."""
+    prov = EnrollmentProvisioningService.provision_library(
+        provisioning_id, body, _org(request), _actor(request)
+    )
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/id-card")
+@require_permission(Permission.STUDENT_CREATE)
+async def dispatch_id_card(
+    request: Request, provisioning_id: str
+) -> JSONResponse:
+    """Mark ID card as dispatched."""
+    prov = EnrollmentProvisioningService.dispatch_id_card(
+        provisioning_id, _org(request), _actor(request)
+    )
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/erp")
+@require_permission(Permission.STUDENT_CREATE)
+async def sync_erp(
+    request: Request, provisioning_id: str, body: ERPSyncRequest
+) -> JSONResponse:
+    """Sync student record to ERP system."""
+    prov = EnrollmentProvisioningService.sync_erp(
+        provisioning_id, body, _org(request), _actor(request)
+    )
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/welcome-email")
+@require_permission(Permission.STUDENT_CREATE)
+async def mark_welcome_email(
+    request: Request, provisioning_id: str, body: WelcomeEmailRequest
+) -> JSONResponse:
+    """Mark welcome email (student or parent) as sent."""
+    prov = EnrollmentProvisioningService.mark_welcome_email_sent(
+        provisioning_id, _org(request), _actor(request), parent=body.parent
+    )
+    return JSONResponse(content=prov.model_dump(default=str))
+
+
+@router.post("/enrollment/{provisioning_id}/complete")
+@require_permission(Permission.STUDENT_CREATE)
+async def complete_enrollment(
+    request: Request, provisioning_id: str
+) -> JSONResponse:
+    """Complete enrollment — create student record, transition to ENROLLED."""
+    student = EnrollmentProvisioningService.complete(
+        provisioning_id, _org(request), _actor(request)
+    )
+    return JSONResponse(content=student.model_dump(default=str), status_code=201)
+
+
+@router.get("/students/{student_id}")
+@require_permission(Permission.STUDENT_READ)
+async def get_student(
+    request: Request, student_id: str
+) -> JSONResponse:
+    student = EnrollmentProvisioningService.get_student(student_id, _org(request))
+    return JSONResponse(content=student.model_dump(default=str))

@@ -179,6 +179,7 @@ class ConfigRegistry:
     # E03-S01: AI Gateway Config Keys
     LLM_BASE_URL = "ai.llm.base_url"
     LLM_MODEL_NAME = "ai.llm.model_name"
+    LLM_EMBED_MODEL = "ai.llm.embed_model"
 
     # E00-S04: Escalation & Dual Control Config Keys
     ESCALATION_DEFAULT_TTL = "escalation.default_ttl_minutes"
@@ -293,7 +294,14 @@ class ConfigRegistry:
                 key=cls.LLM_MODEL_NAME,
                 category=ConfigCategory.SYSTEM,
                 description="Default LLM model name",
-                current_value="llama3",
+                current_value="qwen2.5:1.5b-instruct-q8_0",
+                value_type="string"
+            ),
+            ConfigEntry(
+                key=cls.LLM_EMBED_MODEL,
+                category=ConfigCategory.SYSTEM,
+                description="Embedding model name (for PGVector/RAG)",
+                current_value="nomic-embed-text",
                 value_type="string"
             ),
             # E00-S04: Escalation & Dual Control Defaults

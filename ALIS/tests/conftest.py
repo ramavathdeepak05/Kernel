@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Exclude standalone verification scripts from pytest collection
-collect_ignore = ["test_e03_s02_model_registry.py"]
+collect_ignore = ["test_e03_s02_model_registry.py", "test_document_service.py"]
 
 # ---------------------------------------------------------------------------
 # Shared test constants

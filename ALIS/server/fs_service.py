@@ -5,37 +5,34 @@ MODULE: Shared Services (E02)
 LAYER: Cross-cutting (Infrastructure)
 ENTITY: FileMetadata, FileVersion
 
-This module implements secure, versioned file storage for all ALIS modules.
-
-Must Align With:
-- Tenant isolation
-- Audit requirements
-- No direct filesystem access by modules
+Provides secure, versioned file storage backed by MinIO (S3-compatible).
+All modules MUST use this service — direct filesystem access is forbidden.
 
 Acceptance Criteria:
 - [x] Versioned uploads (v1, v2, ...)
 - [x] Immutable previous versions
 - [x] Access controlled via RBAC+
-- [x] Secure storage abstraction
-- [x] No direct filesystem access by modules
+- [x] MinIO object storage (survives container restarts)
+- [x] SHA-256 integrity verification on every read
 
 Layer Compliance:
-- Layer 4: Global Locks checked before operations (if applicable)
 - Layer 5: RBAC+ enforced for all access
 - Audit: All operations logged
 """
 
 import hashlib
-import os
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from io import BytesIO
 from typing import Optional, Dict, Any, List
 
+from minio import Minio
+from minio.error import S3Error
 from pydantic import BaseModel, Field
 
-from core.audit import AuditLog, AuditAction
-from core.rbac import verify_access, Role, Permission
+from server.core.audit import AuditLog, AuditAction
+from server.core.rbac import verify_access, Role, Permission
+from server.core.settings import settings
 
 
 # =============================================================================
@@ -44,27 +41,18 @@ from core.rbac import verify_access, Role, Permission
 
 class FileStorageError(Exception):
     """Base exception for file storage errors."""
-    pass
 
 
 class FileNotFoundError(FileStorageError):
     """Raised when a requested file does not exist."""
-    pass
 
 
 class VersionNotFoundError(FileStorageError):
     """Raised when a requested version does not exist."""
-    pass
 
 
 class AccessDeniedError(FileStorageError):
     """Raised when access is denied by RBAC+."""
-    pass
-
-
-class ImmutabilityViolationError(FileStorageError):
-    """Raised when an operation would violate immutability of previous versions."""
-    pass
 
 
 # =============================================================================
@@ -72,79 +60,56 @@ class ImmutabilityViolationError(FileStorageError):
 # =============================================================================
 
 class FileVersion(BaseModel):
-    """
-    Represents a specific version of a file.
-    
-    Immutable after creation - uses frozen=True via Config.
-    """
-    version: int = Field(..., ge=1, description="Version number (1, 2, 3, ...)")
-    storage_path: str = Field(..., description="Absolute path to the stored file")
+    """Represents a specific version of a file. Immutable after creation."""
+    version: int = Field(..., ge=1)
+    storage_path: str = Field(..., description="MinIO object key")
     file_hash: str = Field(..., description="SHA-256 hash of file content")
-    size_bytes: int = Field(..., ge=0, description="File size in bytes")
-    created_by: str = Field(..., description="User ID who created this version")
+    size_bytes: int = Field(..., ge=0)
+    created_by: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    
+
     class Config:
-        frozen = True  # Immutable after creation
+        frozen = True
 
 
 class FileMetadata(BaseModel):
-    """
-    Represents a file entity with all its versions.
-    
-    The file entity tracks the logical file, while versions
-    represent the physical storage of each revision.
-    """
+    """Represents a file entity with all its versions."""
     file_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    filename: str = Field(..., description="Original filename")
-    content_type: Optional[str] = Field(None, description="MIME type if known")
-    owner_id: str = Field(..., description="User ID who owns this file")
-    entity_id: Optional[str] = Field(None, description="Related entity ID (student_id, etc.)")
-    entity_type: Optional[str] = Field(None, description="Related entity type")
-    
-    current_version: int = Field(default=1, ge=1, description="Latest version number")
+    filename: str
+    content_type: Optional[str] = None
+    owner_id: str
+    entity_id: Optional[str] = None
+    entity_type: Optional[str] = None
+    current_version: int = Field(default=1, ge=1)
     versions: List[FileVersion] = Field(default_factory=list)
-    
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = None
-    
+
     def get_version(self, version: Optional[int] = None) -> Optional[FileVersion]:
-        """Get a specific version or the latest."""
-        if version is None:
-            version = self.current_version
+        target = version if version is not None else self.current_version
         for v in self.versions:
-            if v.version == version:
+            if v.version == target:
                 return v
         return None
 
 
 # =============================================================================
-# IN-MEMORY STORAGE (Development Only)
+# IN-MEMORY METADATA STORE (replaced by DB in a future story)
 # =============================================================================
 
 class _FileMetadataStore:
-    """
-    In-memory storage for file metadata.
-    
-    In production, this will be replaced by a database backend.
-    """
     _files: Dict[str, FileMetadata] = {}
-    
+
     @classmethod
     def save(cls, metadata: FileMetadata) -> None:
         cls._files[metadata.file_id] = metadata
-    
+
     @classmethod
     def get(cls, file_id: str) -> Optional[FileMetadata]:
         return cls._files.get(file_id)
-    
-    @classmethod
-    def exists(cls, file_id: str) -> bool:
-        return file_id in cls._files
-    
+
     @classmethod
     def clear(cls) -> None:
-        """Clear all stored files (for testing only)."""
         cls._files.clear()
 
 
@@ -154,91 +119,52 @@ class _FileMetadataStore:
 
 class FileStorageService:
     """
-    Centralized file storage service for ALIS.
-    
-    Provides secure, versioned file storage with RBAC+ access control
-    and full audit logging. Modules MUST use this service for all
-    file operations - direct filesystem access is forbidden.
-    
-    Usage:
-        service = FileStorageService()
-        
-        # Upload a new file
-        metadata = service.upload_file(
-            file_content=b"...",
-            filename="document.pdf",
-            owner_id="user_123",
-            context={"role": Role.FACULTY}
-        )
-        
-        # Update (create new version)
-        new_version = service.update_file(
-            file_id=metadata.file_id,
-            file_content=b"...",
-            updated_by="user_123",
-            context={"role": Role.FACULTY}
-        )
-        
-        # Retrieve file content
-        content = service.get_file(
-            file_id=metadata.file_id,
-            user_id="user_123",
-            context={"role": Role.FACULTY}
-        )
+    Centralized file storage service backed by MinIO.
+
+    Object key format: {entity_type}/{entity_id}/{file_id}_v{version}
+    Falls back to: uploads/{file_id}_v{version} when no entity context.
     """
-    
-    # Default storage directory
-    DEFAULT_STORAGE_DIR = Path("storage/files")
-    
-    # RBAC Permission for file operations
-    # Note: In a full implementation, these would be added to rbac.py
-    FILE_READ_PERMISSION = Permission.STUDENT_READ  # Placeholder
-    FILE_WRITE_PERMISSION = Permission.STUDENT_UPDATE  # Placeholder
-    
-    def __init__(self, storage_dir: Optional[Path] = None):
-        """
-        Initialize the file storage service.
-        
-        Args:
-            storage_dir: Custom storage directory (defaults to storage/files)
-        """
-        self.storage_dir = storage_dir or self.DEFAULT_STORAGE_DIR
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
-    
-    def _compute_hash(self, data: bytes) -> str:
-        """Compute SHA-256 hash of file content."""
-        return hashlib.sha256(data).hexdigest()
-    
-    def _get_storage_path(self, file_id: str, version: int) -> Path:
-        """
-        Generate storage path for a file version.
-        
-        Organizes files by year/month for scalability.
-        Format: storage/files/{year}/{month}/{file_id}_v{version}
-        """
-        now = datetime.now(timezone.utc)
-        year_month_dir = self.storage_dir / str(now.year) / f"{now.month:02d}"
-        year_month_dir.mkdir(parents=True, exist_ok=True)
-        return year_month_dir / f"{file_id}_v{version}"
-    
-    def _check_access(
+
+    FILE_READ_PERMISSION = Permission.STUDENT_READ
+    FILE_WRITE_PERMISSION = Permission.STUDENT_UPDATE
+
+    def _minio(self) -> Minio:
+        """Return a configured MinIO client."""
+        endpoint = settings.minio_endpoint.replace("http://", "").replace("https://", "")
+        secure = settings.minio_endpoint.startswith("https://")
+        return Minio(
+            endpoint,
+            access_key=settings.minio_access_key,
+            secret_key=settings.minio_secret_key,
+            secure=secure,
+        )
+
+    def _ensure_bucket(self, client: Minio) -> None:
+        if not client.bucket_exists(settings.minio_bucket):
+            client.make_bucket(settings.minio_bucket)
+
+    def _object_key(
         self,
-        actor_role: Role,
-        permission: Permission,
-        context: Optional[Dict] = None
-    ) -> None:
-        """
-        Check RBAC+ access.
-        
-        Raises:
-            AccessDeniedError: If access is denied
-        """
+        file_id: str,
+        version: int,
+        entity_type: Optional[str] = None,
+        entity_id: Optional[str] = None,
+    ) -> str:
+        prefix = f"{entity_type}/{entity_id}" if entity_type and entity_id else "uploads"
+        return f"{prefix}/{file_id}_v{version}"
+
+    def _compute_hash(self, data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def _check_access(self, actor_role: Role, permission: Permission, context: Optional[Dict] = None) -> None:
         result = verify_access(actor_role, permission, context)
         if not result.allowed:
-            raise AccessDeniedError(
-                f"Access denied: {result.reason}"
-            )
-    
+            raise AccessDeniedError(f"Access denied: {result.reason}")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def upload_file(
         self,
         file_content: bytes,
@@ -249,55 +175,33 @@ class FileStorageService:
         entity_type: Optional[str] = None,
         content_type: Optional[str] = None,
     ) -> FileMetadata:
-        """
-        Upload a new file (creates v1).
-        
-        Args:
-            file_content: Raw bytes of the file
-            filename: Original filename
-            owner_id: User ID uploading the file
-            context: RBAC+ context (must include 'role')
-            entity_id: Optional related entity ID
-            entity_type: Optional related entity type
-            content_type: Optional MIME type
-            
-        Returns:
-            FileMetadata with version 1 created
-            
-        Raises:
-            AccessDeniedError: If RBAC+ denies access
-        """
-        # Extract role from context
+        """Upload a new file (creates v1) to MinIO."""
         actor_role = context.get("role", Role.STUDENT)
-        
-        # RBAC+ Check (Layer 5)
         self._check_access(actor_role, self.FILE_WRITE_PERMISSION, context)
-        
-        # Generate file ID
+
         file_id = str(uuid.uuid4())
         version = 1
-        
-        # Compute hash and size
         file_hash = self._compute_hash(file_content)
         size_bytes = len(file_content)
-        
-        # Determine storage path
-        storage_path = self._get_storage_path(file_id, version)
-        
-        # Write file to storage
-        with open(storage_path, "wb") as f:
-            f.write(file_content)
-        
-        # Create version record
+        object_key = self._object_key(file_id, version, entity_type, entity_id)
+
+        client = self._minio()
+        self._ensure_bucket(client)
+        client.put_object(
+            settings.minio_bucket,
+            object_key,
+            BytesIO(file_content),
+            length=size_bytes,
+            content_type=content_type or "application/octet-stream",
+        )
+
         file_version = FileVersion(
             version=version,
-            storage_path=str(storage_path.absolute()),
+            storage_path=object_key,
             file_hash=file_hash,
             size_bytes=size_bytes,
             created_by=owner_id,
         )
-        
-        # Create metadata record
         metadata = FileMetadata(
             file_id=file_id,
             filename=filename,
@@ -308,11 +212,8 @@ class FileStorageService:
             current_version=version,
             versions=[file_version],
         )
-        
-        # Save metadata
         _FileMetadataStore.save(metadata)
-        
-        # Audit log
+
         AuditLog.log(
             action=AuditAction.CREATE,
             actor_id=owner_id,
@@ -326,13 +227,13 @@ class FileStorageService:
                 "version": version,
                 "file_hash": file_hash,
                 "size_bytes": size_bytes,
+                "object_key": object_key,
                 "related_entity_id": entity_id,
                 "related_entity_type": entity_type,
             },
         )
-        
         return metadata
-    
+
     def update_file(
         self,
         file_id: str,
@@ -340,59 +241,36 @@ class FileStorageService:
         updated_by: str,
         context: Dict[str, Any],
     ) -> FileVersion:
-        """
-        Update a file by creating a new version.
-        
-        Previous versions remain immutable and accessible.
-        
-        Args:
-            file_id: ID of the file to update
-            file_content: New file content
-            updated_by: User ID making the update
-            context: RBAC+ context (must include 'role')
-            
-        Returns:
-            The newly created FileVersion
-            
-        Raises:
-            FileNotFoundError: If file doesn't exist
-            AccessDeniedError: If RBAC+ denies access
-        """
-        # Extract role from context
+        """Create a new version of an existing file."""
         actor_role = context.get("role", Role.STUDENT)
-        
-        # RBAC+ Check (Layer 5)
         self._check_access(actor_role, self.FILE_WRITE_PERMISSION, context)
-        
-        # Get existing metadata
+
         metadata = _FileMetadataStore.get(file_id)
         if metadata is None:
             raise FileNotFoundError(f"File not found: {file_id}")
-        
-        # Compute new version number
+
         new_version_num = metadata.current_version + 1
-        
-        # Compute hash and size
         file_hash = self._compute_hash(file_content)
         size_bytes = len(file_content)
-        
-        # Determine storage path for new version
-        storage_path = self._get_storage_path(file_id, new_version_num)
-        
-        # Write file to storage (new path, old versions untouched)
-        with open(storage_path, "wb") as f:
-            f.write(file_content)
-        
-        # Create new version record
+        object_key = self._object_key(file_id, new_version_num, metadata.entity_type, metadata.entity_id)
+
+        client = self._minio()
+        self._ensure_bucket(client)
+        client.put_object(
+            settings.minio_bucket,
+            object_key,
+            BytesIO(file_content),
+            length=size_bytes,
+            content_type=metadata.content_type or "application/octet-stream",
+        )
+
         new_version = FileVersion(
             version=new_version_num,
-            storage_path=str(storage_path.absolute()),
+            storage_path=object_key,
             file_hash=file_hash,
             size_bytes=size_bytes,
             created_by=updated_by,
         )
-        
-        # Update metadata (create new object to maintain immutability pattern)
         updated_metadata = FileMetadata(
             file_id=metadata.file_id,
             filename=metadata.filename,
@@ -405,11 +283,8 @@ class FileStorageService:
             created_at=metadata.created_at,
             updated_at=datetime.now(timezone.utc),
         )
-        
-        # Save updated metadata
         _FileMetadataStore.save(updated_metadata)
-        
-        # Audit log
+
         AuditLog.log(
             action=AuditAction.UPDATE,
             actor_id=updated_by,
@@ -420,16 +295,10 @@ class FileStorageService:
             module="E02",
             previous_state=f"v{metadata.current_version}",
             new_state=f"v{new_version_num}",
-            metadata={
-                "filename": metadata.filename,
-                "version": new_version_num,
-                "file_hash": file_hash,
-                "size_bytes": size_bytes,
-            },
+            metadata={"filename": metadata.filename, "version": new_version_num, "file_hash": file_hash},
         )
-        
         return new_version
-    
+
     def get_file(
         self,
         file_id: str,
@@ -437,55 +306,27 @@ class FileStorageService:
         context: Dict[str, Any],
         version: Optional[int] = None,
     ) -> bytes:
-        """
-        Retrieve file content.
-        
-        Args:
-            file_id: ID of the file
-            user_id: User requesting the file
-            context: RBAC+ context (must include 'role')
-            version: Specific version to retrieve (defaults to latest)
-            
-        Returns:
-            File content as bytes
-            
-        Raises:
-            FileNotFoundError: If file doesn't exist
-            VersionNotFoundError: If requested version doesn't exist
-            AccessDeniedError: If RBAC+ denies access
-        """
-        # Extract role from context
+        """Retrieve file content from MinIO with integrity check."""
         actor_role = context.get("role", Role.STUDENT)
-        
-        # RBAC+ Check (Layer 5)
         self._check_access(actor_role, self.FILE_READ_PERMISSION, context)
-        
-        # Get metadata
+
         metadata = _FileMetadataStore.get(file_id)
         if metadata is None:
             raise FileNotFoundError(f"File not found: {file_id}")
-        
-        # Get requested version
+
         file_version = metadata.get_version(version)
         if file_version is None:
-            raise VersionNotFoundError(
-                f"Version {version} not found for file {file_id}"
-            )
-        
-        # Read file content
-        storage_path = Path(file_version.storage_path)
-        if not storage_path.exists():
-            raise FileNotFoundError(
-                f"Physical file missing: {file_version.storage_path}"
-            )
-        
-        with open(storage_path, "rb") as f:
-            content = f.read()
-        
-        # Verify integrity
+            raise VersionNotFoundError(f"Version {version} not found for file {file_id}")
+
+        client = self._minio()
+        try:
+            response = client.get_object(settings.minio_bucket, file_version.storage_path)
+            content = response.read()
+        except S3Error as e:
+            raise FileNotFoundError(f"Object not found in MinIO: {file_version.storage_path}") from e
+
         actual_hash = self._compute_hash(content)
         if actual_hash != file_version.file_hash:
-            # Log integrity violation
             AuditLog.log(
                 action=AuditAction.READ,
                 actor_id=user_id,
@@ -495,17 +336,10 @@ class FileStorageService:
                 success=False,
                 failure_reason="Integrity check failed: hash mismatch",
                 module="E02",
-                metadata={
-                    "expected_hash": file_version.file_hash,
-                    "actual_hash": actual_hash,
-                    "version": file_version.version,
-                },
+                metadata={"expected_hash": file_version.file_hash, "actual_hash": actual_hash},
             )
-            raise FileStorageError(
-                f"File integrity check failed for {file_id} v{file_version.version}"
-            )
-        
-        # Audit log (successful read)
+            raise FileStorageError(f"File integrity check failed for {file_id} v{file_version.version}")
+
         AuditLog.log(
             action=AuditAction.READ,
             actor_id=user_id,
@@ -514,95 +348,35 @@ class FileStorageService:
             entity_id=file_id,
             action_detail=f"Read file: {metadata.filename} (v{file_version.version})",
             module="E02",
-            metadata={
-                "version": file_version.version,
-            },
+            metadata={"version": file_version.version},
         )
-        
         return content
-    
-    def get_metadata(
-        self,
-        file_id: str,
-        user_id: str,
-        context: Dict[str, Any],
-    ) -> FileMetadata:
-        """
-        Get file metadata (all versions).
-        
-        Args:
-            file_id: ID of the file
-            user_id: User requesting metadata
-            context: RBAC+ context
-            
-        Returns:
-            FileMetadata with all version information
-            
-        Raises:
-            FileNotFoundError: If file doesn't exist
-            AccessDeniedError: If RBAC+ denies access
-        """
-        # Extract role from context
+
+    def get_metadata(self, file_id: str, user_id: str, context: Dict[str, Any]) -> FileMetadata:
+        """Get file metadata (all versions)."""
         actor_role = context.get("role", Role.STUDENT)
-        
-        # RBAC+ Check
         self._check_access(actor_role, self.FILE_READ_PERMISSION, context)
-        
-        # Get metadata
         metadata = _FileMetadataStore.get(file_id)
         if metadata is None:
             raise FileNotFoundError(f"File not found: {file_id}")
-        
         return metadata
-    
-    def list_versions(
-        self,
-        file_id: str,
-        user_id: str,
-        context: Dict[str, Any],
-    ) -> List[FileVersion]:
-        """
-        List all versions of a file.
-        
-        Args:
-            file_id: ID of the file
-            user_id: User requesting version list
-            context: RBAC+ context
-            
-        Returns:
-            List of FileVersion objects
-        """
-        metadata = self.get_metadata(file_id, user_id, context)
-        return list(metadata.versions)
-    
-    def verify_integrity(
-        self,
-        file_id: str,
-        version: Optional[int] = None,
-    ) -> bool:
-        """
-        Verify file integrity by comparing stored hash.
-        
-        Args:
-            file_id: ID of the file
-            version: Specific version (defaults to latest)
-            
-        Returns:
-            True if file is intact, False otherwise
-        """
+
+    def list_versions(self, file_id: str, user_id: str, context: Dict[str, Any]) -> List[FileVersion]:
+        """List all versions of a file."""
+        return list(self.get_metadata(file_id, user_id, context).versions)
+
+    def verify_integrity(self, file_id: str, version: Optional[int] = None) -> bool:
+        """Verify file integrity against stored hash."""
         metadata = _FileMetadataStore.get(file_id)
         if metadata is None:
             return False
-        
         file_version = metadata.get_version(version)
         if file_version is None:
             return False
-        
-        storage_path = Path(file_version.storage_path)
-        if not storage_path.exists():
+        client = self._minio()
+        try:
+            response = client.get_object(settings.minio_bucket, file_version.storage_path)
+            actual_hash = self._compute_hash(response.read())
+            return actual_hash == file_version.file_hash
+        except S3Error:
             return False
-        
-        with open(storage_path, "rb") as f:
-            actual_hash = self._compute_hash(f.read())
-        
-        return actual_hash == file_version.file_hash

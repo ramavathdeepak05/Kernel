@@ -273,19 +273,36 @@ class CounsellorAssignmentRead(BaseModel):
 
 
 # =============================================================================
-# E04-S06: OFFER LETTER
+# P9: OFFER LETTER v2
 # =============================================================================
 
 class OfferLetterGenerateRequest(BaseModel):
-    """Input for generating an offer letter."""
+    """Input for generating an offer letter (v2)."""
     applicant_id: str
     program_name: str
     academic_year: str = Field(..., pattern=r"^\d{4}-\d{4}$")
     template_version: int = Field(default=1, ge=1)
+    # P9 additions
+    acceptance_deadline_days: int = Field(
+        default=7, ge=1, le=60,
+        description="Days from issuance by which applicant must accept/decline"
+    )
+    fee_structure: dict = Field(
+        default_factory=dict,
+        description='{"tuition": 120000, "hostel": 60000, "other": 5000}'
+    )
+    conditions: list = Field(
+        default_factory=list,
+        description="List of conditions applicant must acknowledge"
+    )
+    merit_list_entry_id: Optional[str] = Field(
+        default=None,
+        description="Link to the merit list entry that triggered this offer"
+    )
 
 
 class OfferLetterRead(BaseModel):
-    """Output schema for an offer letter record."""
+    """Output schema for an offer letter record (v2)."""
     id: str
     org_id: str
     applicant_id: str
@@ -296,6 +313,41 @@ class OfferLetterRead(BaseModel):
     pdf_path: str
     issued_at: datetime
     is_valid: bool
+    # P9 fields
+    expires_at: Optional[datetime] = None
+    accepted_at: Optional[datetime] = None
+    declined_at: Optional[datetime] = None
+    acceptance_status: str = "PENDING"  # PENDING | ACCEPTED | DECLINED | EXPIRED
+    digital_signature_ref: Optional[str] = None
+    merit_list_entry_id: Optional[str] = None
+    delivery_status: str = "PENDING"   # PENDING | SENT | OPENED | BOUNCED
+    email_opened_at: Optional[datetime] = None
+    t3_reminder_sent: bool = False
+    t1_reminder_sent: bool = False
+    fee_structure: Optional[dict] = None
+
+
+class OfferAcceptRequest(BaseModel):
+    """Applicant accepts their offer."""
+    applicant_id: str
+    digital_signature_ref: Optional[str] = Field(
+        default=None,
+        description="Reference ID of digital signature if e-signed"
+    )
+
+
+class OfferDeclineRequest(BaseModel):
+    """Applicant declines their offer."""
+    applicant_id: str
+    reason: Optional[str] = Field(
+        default=None, max_length=1000,
+        description="Optional reason for declining"
+    )
+
+
+class OfferRevokeRequest(BaseModel):
+    """Staff revokes a previously issued offer."""
+    reason: str = Field(..., min_length=10, max_length=1000)
 
 
 # =============================================================================

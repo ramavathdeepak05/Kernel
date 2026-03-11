@@ -128,6 +128,62 @@ async def export_audit_ledger(
 
 
 # ============================================================================
+# GET /api/v1/audit/logs  —  Audit Ledger Query
+# ============================================================================
+
+@router.get("/logs")
+@require_permission(Permission.AUDIT_LOG_READ)
+async def get_audit_logs(
+    request: Request,
+    actor_id: Optional[str] = Query(None, description="Filter by actor ID"),
+    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
+    entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
+    action: Optional[str] = Query(None, description="Filter by action (e.g. login, create)"),
+    limit: int = Query(50, le=500, description="Max entries to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
+) -> JSONResponse:
+    """
+    Query the audit ledger for the current tenant.
+
+    Returns:
+        200: List of audit entries (JSON).
+
+    Access:
+        Requires ``audit_log:read`` permission (ADMIN, SUPER_ADMIN).
+    """
+    tenant_id = get_current_tenant_id()
+    
+    logs = AuditLedger.query(
+        tenant_id=tenant_id,
+        actor_id=actor_id,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        action=action,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Convert AuditEntry objects to dicts for JSON serialization
+    serialized = []
+    for entry in logs:
+        serialized.append({
+            "id": entry.id,
+            "tenant_id": entry.tenant_id,
+            "actor_id": entry.actor_id,
+            "actor_role": entry.actor_role,
+            "action": entry.action,
+            "entity_type": entry.entity_type,
+            "entity_id": entry.entity_id,
+            "metadata": entry.metadata,
+            "timestamp": entry.timestamp.isoformat(),
+            "previous_hash": entry.previous_hash,
+            "hash": entry.hash,
+        })
+
+    return JSONResponse(content=serialized)
+
+
+# ============================================================================
 # HELPERS
 # ============================================================================
 

@@ -18,6 +18,8 @@ Acceptance Criteria (E03-S02):
 - [x] Model registry (model name, version, capability)
 - [x] Hot-swap support (model upgrades without refactor)
 - [x] Deterministic configuration
+- [x] Resource limits enforced (num_ctx, num_gpu, num_thread, keep_alive, timeout
+      stored in config JSONB and forwarded to OllamaLLM at invocation time)
 """
 
 from uuid import uuid4

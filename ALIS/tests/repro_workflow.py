@@ -14,13 +14,13 @@ import sys
 from pathlib import Path
 
 # Add server to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / "server"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.state_registry import WorkflowState, StateRegistry
-from core.workflow_schema import WorkflowContext, StepResult, StepOutcome, WorkflowDecision
-from core.workflow import BaseWorkflow, GlobalLockViolationError, IllegalTransitionError
-from core.locks import GlobalLockRegistry, LockType, LockStatus
-from core.audit import AuditLog, AuditAction
+from server.core.state_registry import WorkflowState, StateRegistry
+from server.core.workflow_schema import WorkflowContext, StepResult, StepOutcome, WorkflowDecision
+from server.core.workflow import BaseWorkflow, GlobalLockViolationError, IllegalStateTransitionError
+from server.core.locks import GlobalLockRegistry, LockType, LockStatus
+from server.core.audit import AuditLog, AuditAction
 
 
 # --- Test Workflow Implementations ---

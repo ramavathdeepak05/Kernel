@@ -14,11 +14,13 @@ Must Align With:
 Blueprint: Rule Engine pattern (deterministic send behavior)
 """
 
-from abc import ABC, abstractmethod
-from typing import Optional
-from dataclasses import dataclass
-from enum import Enum
 import logging
+import smtplib
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Optional
 
 from ..config import ConfigRegistry
 
@@ -87,43 +89,50 @@ class EmailChannel(BaseChannel):
         self,
         recipient: str,
         subject: Optional[str],
-        body: str
+        body: str,
     ) -> ChannelResult:
-        """Send email notification."""
+        """Send email via SMTP (reads credentials from Pydantic Settings)."""
         if not self.is_enabled():
-            return ChannelResult(
-                success=False,
-                error_message="Email channel is disabled"
-            )
-        
+            return ChannelResult(success=False, error_message="Email channel is disabled")
+
+        from server.core.settings import settings
+
+        # In development with no SMTP host set, fall back to console logging
+        if not settings.smtp_host or settings.smtp_host == "localhost" and not settings.smtp_user:
+            logger.info("[EMAIL-DEV] To: %s | Subject: %s | %s...", recipient, subject, body[:120])
+            return ChannelResult(success=True, provider_response="LOGGED (dev mode)")
+
         try:
-            # TODO: Replace with actual SMTP implementation
-            # smtp_host = ConfigRegistry.get(ConfigRegistry.NOTIFICATION_EMAIL_SMTP_HOST)
-            # smtp_port = ConfigRegistry.get(ConfigRegistry.NOTIFICATION_EMAIL_SMTP_PORT)
-            
-            # For now, log the email (development mode)
-            logger.info(
-                f"[EMAIL] To: {recipient} | Subject: {subject} | Body: {body[:100]}..."
-            )
-            
-            return ChannelResult(
-                success=True,
-                provider_response="LOGGED (dev mode)"
-            )
-            
-        except Exception as e:
-            logger.error(f"[EMAIL] Failed to send to {recipient}: {str(e)}")
-            return ChannelResult(
-                success=False,
-                error_message=str(e)
-            )
-    
+            msg = MIMEMultipart("alternative")
+            msg["From"] = f"{settings.smtp_from_name} <{settings.smtp_from_email}>"
+            msg["To"] = recipient
+            msg["Subject"] = subject or ""
+            msg.attach(MIMEText(body, "html" if body.lstrip().startswith("<") else "plain"))
+
+            if settings.smtp_use_tls:
+                server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15)
+                server.starttls()
+            else:
+                server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=15)
+
+            if settings.smtp_user and settings.smtp_password:
+                server.login(settings.smtp_user, settings.smtp_password)
+
+            server.sendmail(settings.smtp_from_email, [recipient], msg.as_string())
+            server.quit()
+
+            logger.info("[EMAIL] Sent to %s | Subject: %s", recipient, subject)
+            return ChannelResult(success=True, provider_response="SMTP OK")
+
+        except smtplib.SMTPException as exc:
+            logger.error("[EMAIL] SMTP error sending to %s: %s", recipient, exc)
+            return ChannelResult(success=False, error_message=str(exc))
+        except Exception as exc:
+            logger.error("[EMAIL] Unexpected error sending to %s: %s", recipient, exc)
+            return ChannelResult(success=False, error_message=str(exc))
+
     def is_enabled(self) -> bool:
-        """Check if email is enabled in config."""
-        return ConfigRegistry.get(
-            ConfigRegistry.NOTIFICATION_EMAIL_ENABLED,
-            default=True
-        )
+        return ConfigRegistry.get(ConfigRegistry.NOTIFICATION_EMAIL_ENABLED, default=True)
 
 
 # --- SMS Channel ---

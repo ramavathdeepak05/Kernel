@@ -1,25 +1,28 @@
 """
-E04-S03 — Eligibility Evaluation Wizard (Orchestrator)
+E04-S03 + P6 — Eligibility Evaluation Wizard (Orchestrator)
 
 MODULE: M1 — Admissions & Marketing
 LAYER: Layer 2 (AI) + Layer 3 (Transitions) + Layer 4 (Locks)
 ENTITY: Applicant
 
-Orchestrates the eligibility evaluation workflow:
-    1. Validate applicant is APPLIED (Layer 3 pre-condition)
-    2. Check for required documents (Layer 4 lock)
-    3. Invoke the LangGraph eligibility agent via AI Gateway
-    4. Map AI confidence → proposed state
-    5. Execute state transition (Layer 3 authority)
-    6. Audit log result
+Orchestrates the eligibility evaluation workflow (P6-enhanced):
+    1. Validate applicant is APPLIED/SUBMITTED (Layer 3 pre-condition)
+    2. Run deterministic rule engine (P6) — subject, board, % threshold, category relaxation
+    3. If clear PASS/FAIL → execute transition immediately (no AI needed)
+    4. If PROVISIONAL/BORDERLINE → invoke the LangGraph eligibility agent via AI Gateway
+    5. Map AI confidence → proposed state
+    6. Execute state transition (Layer 3 authority)
+    7. Audit log result
 
 The AI agent produces ONLY a draft — the orchestrator owns the
 state transition. "AI proposes, rules enforce."
 
-Acceptance Criteria (E04-S03):
-    - [x] API: POST /eligibility/evaluate
-    - [x] AI agent must not mutate state directly
-    - [x] Transition executed by orchestrator
+P6 Enhancement:
+    - Deterministic rule check before AI (performance + cost saving)
+    - Category relaxations applied (SC/ST get 5%, OBC 3%, EWS 3%, PWD 5%)
+    - Required subject validation (e.g., PCM for B.Tech)
+    - Board whitelist enforcement
+    - Entrance score threshold check
 """
 
 from __future__ import annotations
@@ -34,12 +37,25 @@ from server.core.state_registry import StudentState
 from server.db_service import execute_query
 
 from .service import ApplicantService
+from .eligibility_criteria import EligibilityCriteriaService, EligibilityRuleEngine
 
 logger = logging.getLogger(__name__)
 
 # Confidence thresholds (mirror eligibility.py agent)
 _HIGH_THRESHOLD = 0.8
 _MEDIUM_THRESHOLD = 0.5
+
+
+def _verdict_to_score(verdict: Any) -> float:
+    """Convert a rule engine EligibilityVerdictDetail to a numeric 0–1 score."""
+    mapping = {
+        "ELIGIBLE": 1.0,
+        "PROVISIONALLY_ELIGIBLE": 0.6,
+        "NOT_ELIGIBLE": 0.0,
+        "NEEDS_AI_REVIEW": 0.5,
+    }
+    v = getattr(verdict, "verdict", "NEEDS_AI_REVIEW")
+    return mapping.get(v, 0.5)
 
 
 class EligibilityService:
@@ -86,7 +102,8 @@ class EligibilityService:
 
         # --- Pre-condition: Applicant must be APPLIED ---
         rows = execute_query(
-            "SELECT status FROM applicants WHERE id = %s AND org_id = %s",
+            "SELECT status, intended_program, intake_batch FROM applicants "
+            "WHERE id = %s AND org_id = %s",
             (applicant_id, org_id),
         )
         if not rows:
@@ -103,7 +120,60 @@ class EligibilityService:
                 details={"applicant_id": applicant_id, "status": current_status},
             )
 
-        # --- Build AI Gateway context ---
+        program_name = rows[0].get("intended_program", "")
+        intake_batch = rows[0].get("intake_batch")
+
+        # --- P6: Load criteria + run deterministic rule engine first ---
+        criteria = EligibilityCriteriaService.get_criteria(org_id, program_name, intake_batch)
+        rule_verdict = EligibilityRuleEngine.evaluate(applicant_id, org_id, criteria)
+
+        # --- Short-circuit for clear PASS or FAIL (no AI needed) ---
+        _direct_map = {
+            "ELIGIBLE": StudentState.ELIGIBLE,
+            "NOT_ELIGIBLE": StudentState.NOT_ELIGIBLE,
+        }
+        if rule_verdict.verdict in _direct_map:
+            target_state = _direct_map[rule_verdict.verdict]
+            updated = ApplicantService.transition_state(
+                applicant_id=applicant_id,
+                org_id=org_id,
+                to_state=target_state,
+                actor_id=actor_id,
+                reason=(
+                    f"Deterministic rule engine: {rule_verdict.verdict} "
+                    f"(pct={rule_verdict.applicant_percentage}, "
+                    f"eff_min={rule_verdict.effective_min_percentage})"
+                ),
+                metadata={
+                    "engine": "deterministic",
+                    "rule_verdict": rule_verdict.verdict,
+                    "pass_reasons": rule_verdict.pass_reasons,
+                    "fail_reasons": rule_verdict.fail_reasons,
+                    "warnings": rule_verdict.warnings,
+                    "criteria_applied": rule_verdict.criteria_applied,
+                },
+            )
+            logger.info(
+                "E04-S03 P6: Rule engine short-circuit [applicant=%s, verdict=%s, new_status=%s]",
+                applicant_id, rule_verdict.verdict, updated.status,
+            )
+            return {
+                "applicant_id": applicant_id,
+                "eligibility_score": _verdict_to_score(rule_verdict),
+                "confidence_tier": "HIGH",
+                "proposed_state": rule_verdict.verdict,
+                "new_status": updated.status,
+                "agent_request_id": None,
+                "rule_engine": {
+                    "verdict": rule_verdict.verdict,
+                    "pass_reasons": rule_verdict.pass_reasons,
+                    "fail_reasons": rule_verdict.fail_reasons,
+                    "warnings": rule_verdict.warnings,
+                },
+            }
+
+        # --- PROVISIONALLY_ELIGIBLE → escalate to AI agent ---
+        # Build AI Gateway context
         try:
             role = Role(actor_role) if actor_role else Role.SYSTEM
         except (ValueError, TypeError):
@@ -118,21 +188,54 @@ class EligibilityService:
             wizard="Eligibility Eval",
         )
 
-        # --- Invoke AI agent (Layer 2 — advisory draft only) ---
+        # Enrich input with rule engine context so AI has deterministic context
         result = AdmissionsAgentRegistry.execute(
             agent_name="eligibility_evaluator_v1",
             context=context,
             input_data={
                 "marksheet_text": marksheet_text,
                 "admission_criteria": admission_criteria,
+                "rule_engine_context": {
+                    "verdict": rule_verdict.verdict,
+                    "category": rule_verdict.category,
+                    "effective_min_percentage": rule_verdict.effective_min_percentage,
+                    "applicant_percentage": rule_verdict.applicant_percentage,
+                    "pass_reasons": rule_verdict.pass_reasons,
+                    "warnings": rule_verdict.warnings,
+                },
             },
         )
 
         if not result.success or not result.content:
-            raise BusinessRuleViolation(
-                message=f"Eligibility agent failed: {result.error}",
-                details={"agent_error": result.error},
+            # AI failed — fall back to PROVISIONALLY_ELIGIBLE rule verdict
+            logger.warning(
+                "E04-S03: AI agent failed (err=%s); applying rule engine verdict=%s",
+                result.error, rule_verdict.verdict,
             )
+            updated = ApplicantService.transition_state(
+                applicant_id=applicant_id,
+                org_id=org_id,
+                to_state=StudentState.PROVISIONALLY_ELIGIBLE,
+                actor_id=actor_id,
+                reason="AI agent unavailable — rule engine borderline → PROVISIONALLY_ELIGIBLE",
+                metadata={
+                    "engine": "deterministic_fallback",
+                    "rule_verdict": rule_verdict.verdict,
+                    "ai_error": result.error,
+                },
+            )
+            return {
+                "applicant_id": applicant_id,
+                "eligibility_score": _verdict_to_score(rule_verdict),
+                "confidence_tier": "LOW",
+                "proposed_state": "PROVISIONALLY_ELIGIBLE",
+                "new_status": updated.status,
+                "agent_request_id": None,
+                "rule_engine": {
+                    "verdict": rule_verdict.verdict,
+                    "warnings": rule_verdict.warnings,
+                },
+            }
 
         # --- Parse agent output ---
         try:
@@ -166,6 +269,7 @@ class EligibilityService:
                     "eligibility_score": eligibility_score,
                     "confidence_tier": confidence_tier,
                     "agent_request_id": result.request_id,
+                    "rule_engine_verdict": rule_verdict.verdict,
                 },
             )
             new_status = updated.status
@@ -184,6 +288,7 @@ class EligibilityService:
                     "decision": "manual_review_required",
                     "eligibility_score": eligibility_score,
                     "confidence_tier": confidence_tier,
+                    "rule_engine_verdict": rule_verdict.verdict,
                     "note": "Low confidence — no auto-transition. Human review required.",
                 },
             )
@@ -201,4 +306,8 @@ class EligibilityService:
             "proposed_state": proposed_state_str,
             "new_status": new_status,
             "agent_request_id": result.request_id,
+            "rule_engine": {
+                "verdict": rule_verdict.verdict,
+                "warnings": rule_verdict.warnings,
+            },
         }

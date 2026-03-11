@@ -41,6 +41,7 @@ from server.core.exceptions import (
     AISchemaViolationError,
     ALISError,
 )
+from server.core.ai_observability import AIObservabilityService
 
 # Module-scoped agent registries — import per module
 from server.agents.admissions.registry import AdmissionsAgentRegistry
@@ -283,6 +284,77 @@ async def list_module_agents(request: Request, module: str) -> JSONResponse:
         content={
             "module": module,
             "agents": agents,
+        },
+    )
+
+
+# =============================================================================
+# GET /api/v1/ai/metrics — AI Observability (E03-S10)
+# =============================================================================
+
+@router.get("/metrics")
+@require_permission(Permission.AI_INVOKE)
+async def get_ai_metrics(
+    request: Request,
+    org_id: str,
+    window_hours: int = 24,
+    module: Optional[str] = None,
+) -> JSONResponse:
+    """
+    Retrieve aggregated AI usage metrics for a tenant.
+
+    Metrics are derived from the immutable audit ledger — no separate
+    telemetry store. Tenant-scoped; callers only receive their own metrics.
+
+    Query params:
+        org_id:       Required. Tenant to scope metrics to.
+        window_hours: Look-back window in hours (default 24, max 168).
+        module:       Optional module filter (M1, M2, …).
+
+    Returns:
+        InvocationMetrics JSON — does NOT include tenant_id.
+    """
+    # Clamp window to 7 days max to prevent expensive full-table scans
+    window_hours = max(1, min(window_hours, 168))
+
+    metrics = AIObservabilityService.get_metrics(
+        tenant_id=org_id,
+        window_hours=window_hours,
+        module=module,
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "window_start": metrics.window_start.isoformat(),
+            "window_end": metrics.window_end.isoformat(),
+            "window_hours": window_hours,
+            "invocations": {
+                "total": metrics.total_invocations,
+                "successful": metrics.successful_invocations,
+                "failed": metrics.failed_invocations,
+                "failure_rate": round(metrics.failure_rate, 4),
+            },
+            "latency_ms": {
+                "avg": round(metrics.avg_latency_ms, 2),
+                "p95": round(metrics.p95_latency_ms, 2),
+                "max": round(metrics.max_latency_ms, 2),
+            },
+            "guardrails": {
+                "blocks": metrics.guardrail_blocks,
+                "warnings": metrics.guardrail_warnings,
+            },
+            "hitl": {
+                "reviews": metrics.hitl_reviews,
+                "escalations": metrics.hitl_escalations,
+                "auto_proceeds": metrics.hitl_auto_proceeds,
+            },
+            "safety": {
+                "injection_attempts": metrics.injection_attempts,
+                "schema_rejections": metrics.schema_rejections,
+            },
+            "model_usage": metrics.model_usage,
+            "agent_executions": metrics.agent_executions,
         },
     )
 

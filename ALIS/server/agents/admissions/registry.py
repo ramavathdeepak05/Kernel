@@ -18,7 +18,7 @@ Registered Agents:
     - eligibility_evaluator_v1  — Eligibility Eval Wizard (M1-W3)
 """
 
-from typing import Dict, Any, List, Callable, Optional
+from typing import Dict, Any, List, Callable, Optional, Tuple
 from dataclasses import dataclass, field
 
 from server.core.ai_gateway import (
@@ -26,6 +26,7 @@ from server.core.ai_gateway import (
     AIGatewayContext,
     AIInvocationResult,
 )
+from server.core.audit import AuditLog, AuditAction
 
 
 # =============================================================================
@@ -38,13 +39,21 @@ class AgentMeta:
     Metadata for a module-scoped AI agent.
 
     Per Module-Scoped AI Agent Model v1.0 Sec. 5 — Versioning.
+    Per E03-S04: Agents are constrained, named actors with explicit scopes.
+
+    Fields:
+        allowed_tools: Exhaustive list of read-only tool names this agent
+                       may invoke. DB write tools are structurally absent —
+                       agents interact with data only through the AI Gateway
+                       and declared read-only tools.
     """
     agent_id: str
     module: str
     model_version: str
     prompt_version: str
-    invocation_class: str  # EVALUATIVE, GENERATIVE, ANALYTICAL
+    invocation_class: str       # EVALUATIVE, GENERATIVE, ANALYTICAL
     authorization_policy: str
+    allowed_tools: Tuple[str, ...] = ()   # E03-S04: declared tool scope
     description: str = ""
 
 
@@ -74,6 +83,11 @@ class AdmissionsAgentRegistry:
             prompt_version="v1",
             invocation_class="EVALUATIVE",
             authorization_policy="admissions_officer_or_system",
+            allowed_tools=(
+                "tool.rag.retriever",    # Semantic search over institutional docs
+                "tool.policy.lookup",    # Fetch admission criteria from policy store
+                "tool.scoring.structured",  # Compute weighted eligibility score
+            ),
             description=(
                 "Evaluates applicant eligibility by analyzing uploaded "
                 "marksheets via OCR + LLM grading against admission criteria."
@@ -113,6 +127,7 @@ class AdmissionsAgentRegistry:
                 "prompt_version": meta.prompt_version,
                 "invocation_class": meta.invocation_class,
                 "authorization_policy": meta.authorization_policy,
+                "allowed_tools": list(meta.allowed_tools),
                 "description": meta.description,
             }
             for meta in cls._agents.values()
@@ -154,8 +169,54 @@ class AdmissionsAgentRegistry:
                 f"Agent '{agent_name}' is registered but has no executor."
             )
 
-        return executor(
+        meta = cls._agents[agent_name]
+
+        # E03-S04: Log agent execution start
+        AuditLog.log(
+            action=AuditAction.AGENT_EXECUTION,
+            actor_id=context.actor_id,
+            actor_type=context.actor_type,
+            actor_role=context.actor_role.value if context.actor_role else None,
+            entity_type="ai_agent",
+            entity_id=meta.agent_id,
+            org_id=context.org_id,
+            module=context.module,
+            wizard=context.wizard,
+            metadata={
+                "phase": "start",
+                "invocation_class": meta.invocation_class,
+                "allowed_tools": list(meta.allowed_tools),
+                "model_version": meta.model_version,
+                "prompt_version": meta.prompt_version,
+                "request_id": context.request_id,
+            },
+        )
+
+        result = executor(
             context=context,
             input_data=input_data,
             model_override=model_override,
         )
+
+        # E03-S04: Log agent execution completion
+        AuditLog.log(
+            action=AuditAction.AGENT_EXECUTION,
+            actor_id=context.actor_id,
+            actor_type=context.actor_type,
+            actor_role=context.actor_role.value if context.actor_role else None,
+            entity_type="ai_agent",
+            entity_id=meta.agent_id,
+            org_id=context.org_id,
+            module=context.module,
+            wizard=context.wizard,
+            success=result.success,
+            failure_reason=result.error,
+            metadata={
+                "phase": "complete",
+                "request_id": context.request_id,
+                "latency_ms": result.latency_ms,
+                "model": result.model,
+            },
+        )
+
+        return result

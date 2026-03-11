@@ -220,16 +220,32 @@ class TestEligibilityService:
 
     def test_evaluate_returns_eligible_state(self):
         from server.admissions.eligibility_service import EligibilityService
+        from server.admissions.eligibility_criteria import EligibilityVerdictDetail
 
-        applied_row = {**APPLICANT_ROW, "status": "APPLIED"}
+        applied_row = {**APPLICANT_ROW, "status": "APPLIED",
+                       "intended_program": "B.Tech CS", "intake_batch": "2025"}
         mock_transitioned = MagicMock()
         mock_transitioned.status = "ELIGIBLE"
 
-        with patch(f"{ELIG}.execute_query", return_value=[applied_row]), \
-             patch("server.agents.admissions.registry.AdmissionsAgentRegistry.execute",
-                   return_value=self._agent_result("ELIGIBLE", 0.90)), \
-             patch("server.admissions.service.ApplicantService.transition_state",
-                   return_value=mock_transitioned):
+        rule_verdict = EligibilityVerdictDetail(
+            verdict="ELIGIBLE",
+            pass_reasons=["80% >= threshold"],
+            fail_reasons=[],
+            warnings=[],
+            category="GENERAL",
+            effective_min_percentage=50.0,
+            applicant_percentage=80.0,
+            applicant_board="CBSE",
+            entrance_score_used=None,
+            criteria_applied="B.Tech CS",
+        )
+
+        with (
+            patch(f"{ELIG}.execute_query", return_value=[applied_row]),
+            patch(f"{ELIG}.EligibilityCriteriaService.get_criteria", return_value=None),
+            patch(f"{ELIG}.EligibilityRuleEngine.evaluate", return_value=rule_verdict),
+            patch(f"{ELIG}.ApplicantService.transition_state", return_value=mock_transitioned),
+        ):
             result = EligibilityService.evaluate(
                 applicant_id=APPLICANT_ID,
                 org_id=TENANT,
@@ -239,7 +255,9 @@ class TestEligibilityService:
                 actor_role="registrar",
             )
 
-        assert "eligibility_score" in result or "proposed_state" in result or result is not None
+        assert result["new_status"] == "ELIGIBLE"
+        assert result["proposed_state"] == "ELIGIBLE"
+        assert result["confidence_tier"] == "HIGH"
 
     def test_evaluate_applicant_not_found_raises(self):
         from server.admissions.eligibility_service import EligibilityService
