@@ -121,19 +121,36 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = Field(default=True)
 
     # -------------------------------------------------------------------------
-    # SMS (Pluggable — MSG91 default)
+    # SMS (Pluggable — MSG91 / Twilio)
     # -------------------------------------------------------------------------
-    sms_provider: str = Field(default="")  # "msg91" | "twilio" | "" (disabled)
+    sms_provider: str = Field(default="MSG91")  # MSG91 | TWILIO
     sms_api_key: str = Field(default="")
     sms_sender_id: str = Field(default="ALIS")
+    sms_gateway_enabled: bool = Field(default=False)
+    sms_timeout_seconds: int = Field(default=10)
+    # MSG91
+    msg91_auth_key: str = Field(default="")
+    msg91_otp_template_id: str = Field(default="")
+    msg91_sender_id: str = Field(default="ALISUN")
+    # Twilio
+    twilio_account_sid: str = Field(default="")
+    twilio_auth_token: str = Field(default="")
+    twilio_verify_service_sid: str = Field(default="")
+    twilio_from_number: str = Field(default="")
 
     # -------------------------------------------------------------------------
-    # Razorpay (Payment Gateway)
+    # Payment Gateway (Razorpay primary, PayU fallback)
     # -------------------------------------------------------------------------
+    payment_gateway_enabled: bool = Field(default=False)
+    payment_gateway_provider: str = Field(default="RAZORPAY")  # RAZORPAY | PAYU
+    payment_gateway_timeout_seconds: int = Field(default=30)
     razorpay_key_id: str = Field(default="")
     razorpay_key_secret: str = Field(default="")
     razorpay_webhook_secret: str = Field(default="")
     razorpay_currency: str = Field(default="INR")
+    # PayU
+    payu_merchant_key: str = Field(default="")
+    payu_merchant_salt: str = Field(default="")
 
     # -------------------------------------------------------------------------
     # DigiLocker (Indian Government Document Vault)
@@ -191,6 +208,21 @@ class Settings(BaseSettings):
     @property
     def email_provision_enabled(self) -> bool:
         return self.email_provider in ("GOOGLE", "MICROSOFT")
+
+    # -------------------------------------------------------------------------
+    # Document Storage (S3 / Azure Blob / Local)
+    # -------------------------------------------------------------------------
+    storage_provider: str = Field(default="LOCAL")  # S3 | AZURE_BLOB | LOCAL
+    storage_bucket: str = Field(default="alis-documents")
+    storage_region: str = Field(default="ap-south-1")
+    alis_data_dir: str = Field(default="data")
+    # AWS S3
+    aws_access_key_id: str = Field(default="")
+    aws_secret_access_key: str = Field(default="")
+    # Azure Blob
+    azure_storage_connection_string: str = Field(default="")
+    azure_storage_account_name: str = Field(default="")
+    azure_storage_account_key: str = Field(default="")
 
     # -------------------------------------------------------------------------
     # PGVector

@@ -47,6 +47,7 @@ from server.api.communication_router import router as communication_router      
 from server.api.reporting_router import router as reporting_router                 # E11
 from server.api.alumni_router import router as alumni_router                       # E12
 from server.api.process_engine_router import router as process_engine_router       # E13
+from server.api.integrations_router import router as integrations_router           # P14
 from server.tools import register_all_tools
 
 
@@ -162,6 +163,7 @@ def create_app() -> FastAPI:
     app.include_router(reporting_router)         # E11
     app.include_router(alumni_router)            # E12
     app.include_router(process_engine_router)    # E13
+    app.include_router(integrations_router)      # P14
 
     # --- Health & Readiness ---
     @app.get("/health", tags=["system"])

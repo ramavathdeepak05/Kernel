@@ -598,7 +598,10 @@ def require_permission(permission: Permission):
         async def get_students(request: Request):
             ...
     """
+    import functools
+
     def decorator(func):
+        @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             # In real implementation, extract role from request/session
             # This is a placeholder for the middleware pattern
