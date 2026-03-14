@@ -1861,3 +1861,111 @@ async def get_student(
 ) -> JSONResponse:
     student = EnrollmentProvisioningService.get_student(student_id, _org(request))
     return JSONResponse(content=student.model_dump(mode="json"))
+
+
+# =============================================================================
+# DASHBOARD AGGREGATES
+# =============================================================================
+
+@router.get("/pipeline-summary")
+@require_permission(Permission.STUDENT_READ)
+async def get_pipeline_summary(request: Request) -> JSONResponse:
+    """Return lead/application counts per pipeline stage for the dashboard."""
+    from server.db_service import execute_query
+
+    org = _org(request)
+
+    # Lead stage counts
+    lead_rows = execute_query(
+        """
+        SELECT status, COUNT(*) AS cnt
+        FROM leads
+        WHERE org_id = %s
+        GROUP BY status
+        """,
+        (org,),
+    )
+    lead_counts: dict = {r["status"]: int(r["cnt"]) for r in (lead_rows or [])}
+
+    # Application stage counts
+    app_rows = execute_query(
+        """
+        SELECT status, COUNT(*) AS cnt
+        FROM applicants
+        WHERE org_id = %s
+        GROUP BY status
+        """,
+        (org,),
+    )
+    app_counts: dict = {r["status"]: int(r["cnt"]) for r in (app_rows or [])}
+
+    stages = [
+        {"stage": "leads",        "label": "Leads",            "count": sum(lead_counts.values()),            "color": "#6366f1"},
+        {"stage": "contacted",    "label": "Contacted",        "count": lead_counts.get("CONTACTED", 0),      "color": "#8b5cf6"},
+        {"stage": "interested",   "label": "Interested",       "count": lead_counts.get("INTERESTED", 0),     "color": "#a78bfa"},
+        {"stage": "applied",      "label": "Applied",          "count": app_counts.get("APPLIED", 0),         "color": "#3b82f6"},
+        {"stage": "documents",    "label": "Docs Review",      "count": app_counts.get("DOCUMENTS_PENDING", 0) + app_counts.get("DOCUMENTS_UNDER_REVIEW", 0), "color": "#06b6d4"},
+        {"stage": "eligibility",  "label": "Eligibility",      "count": app_counts.get("ELIGIBILITY_CHECK", 0), "color": "#10b981"},
+        {"stage": "entrance_test","label": "Entrance Test",    "count": app_counts.get("ENTRANCE_TEST", 0),    "color": "#f59e0b"},
+        {"stage": "interview",    "label": "Interview",        "count": app_counts.get("INTERVIEW", 0),        "color": "#f97316"},
+        {"stage": "offer",        "label": "Offer Issued",     "count": app_counts.get("OFFER_ISSUED", 0),     "color": "#ef4444"},
+        {"stage": "enrolled",     "label": "Enrolled",         "count": app_counts.get("ENROLLED", 0),         "color": "#22c55e"},
+    ]
+    return JSONResponse(content=stages)
+
+
+@router.get("/review-queue")
+@require_permission(Permission.STUDENT_READ)
+async def get_review_queue(request: Request) -> JSONResponse:
+    """Return up to 20 actionable items for the admissions review dashboard."""
+    from server.db_service import execute_query
+
+    org = _org(request)
+
+    rows = execute_query(
+        """
+        SELECT
+            id,
+            name        AS title,
+            intended_program AS subtitle,
+            status,
+            created_at
+        FROM applicants
+        WHERE org_id = %s
+          AND status IN (
+            'APPLIED', 'DOCUMENTS_PENDING', 'DOCUMENTS_UNDER_REVIEW',
+            'ELIGIBILITY_CHECK', 'ENTRANCE_TEST', 'INTERVIEW',
+            'OFFER_ISSUED', 'OFFER_ACCEPTED'
+          )
+        ORDER BY created_at DESC
+        LIMIT 20
+        """,
+        (org,),
+    )
+
+    STATUS_URGENCY = {
+        "DOCUMENTS_UNDER_REVIEW": "high",
+        "ELIGIBILITY_CHECK":      "high",
+        "OFFER_ISSUED":           "high",
+        "INTERVIEW":              "medium",
+        "ENTRANCE_TEST":          "medium",
+        "DOCUMENTS_PENDING":      "low",
+        "APPLIED":                "low",
+        "OFFER_ACCEPTED":         "low",
+    }
+
+    items = []
+    for r in (rows or []):
+        status = r["status"]
+        items.append({
+            "id":             str(r["id"]),
+            "type":           "application",
+            "title":          r["title"] or "Applicant",
+            "subtitle":       r["subtitle"] or "",
+            "confidence":     0.85,
+            "urgency":        STATUS_URGENCY.get(status, "low"),
+            "application_id": str(r["id"]),
+            "status":         status,
+            "created_at":     r["created_at"].isoformat() if r["created_at"] else None,
+        })
+    return JSONResponse(content=items)
