@@ -87,13 +87,28 @@ class Settings(BaseSettings):
     minio_secure: bool = Field(default=False)  # True in production with TLS
 
     # -------------------------------------------------------------------------
-    # Ollama (Local AI)
+    # Ollama (Local AI — used when LLM_API_KEY is not set)
     # -------------------------------------------------------------------------
     ollama_base_url: str = Field(default="http://localhost:11434")
     ollama_llm_model: str = Field(default="qwen2.5:1.5b-instruct-q8_0")
     ollama_embed_model: str = Field(default="nomic-embed-text")
     ollama_timeout_seconds: int = Field(default=120)
     ollama_max_retries: int = Field(default=3)
+
+    # -------------------------------------------------------------------------
+    # External LLM API (OpenAI-compatible — overrides Ollama when set)
+    # Supports: NVIDIA NIM, OpenAI, any OpenAI-compatible endpoint
+    # -------------------------------------------------------------------------
+    llm_api_key: str = Field(default="")
+    llm_api_base_url: str = Field(default="")
+    llm_api_model: str = Field(default="meta/llama-3.2-3b-instruct")
+    llm_api_temperature: float = Field(default=0.2)
+    llm_api_max_tokens: int = Field(default=1024)
+
+    @property
+    def use_external_llm(self) -> bool:
+        """True when an external OpenAI-compatible API is configured."""
+        return bool(self.llm_api_key and self.llm_api_base_url)
 
     # -------------------------------------------------------------------------
     # JWT Auth

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-P0-S16 — ALIS Seed Data Script
+P0-S16 -- ALIS Seed Data Script
 
 Bootstraps a fresh ALIS instance with:
   1. Default organisation
@@ -14,10 +14,10 @@ Run AFTER alembic upgrade head:
     python scripts/seed.py
 
 Environment variables (from .env):
-    SEED_ORG_NAME      — default: "Demo Institution"
-    SEED_ORG_SLUG      — default: "demo"
-    SEED_ADMIN_EMAIL   — default: "admin@demo.edu"
-    SEED_ADMIN_PASSWORD — default: "Admin@1234"  (CHANGE IN PRODUCTION)
+    SEED_ORG_NAME      -- default: "Demo Institution"
+    SEED_ORG_SLUG      -- default: "demo"
+    SEED_ADMIN_EMAIL   -- default: "admin@demo.edu"
+    SEED_ADMIN_PASSWORD -- default: "Admin@1234"  (CHANGE IN PRODUCTION)
 """
 
 import json
@@ -31,11 +31,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from passlib.context import CryptContext
+import bcrypt as _bcrypt_lib
 
 from server.core.settings import settings
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def _hash_password(password: str) -> str:
+    return _bcrypt_lib.hashpw(password.encode(), _bcrypt_lib.gensalt()).decode()
+
+
+class _PwdCompat:
+    def hash(self, secret: str) -> str:
+        return _hash_password(secret)
+
+
+_pwd = _PwdCompat()
 
 # ---------------------------------------------------------------------------
 # Config (override via env vars)
@@ -106,7 +116,7 @@ def seed(conn: psycopg2.extensions.connection) -> None:
     # ----------------------------------------------------------------
     # 1. Organisation
     # ----------------------------------------------------------------
-    print(f"  → Organisation: {ORG_NAME} ({ORG_SLUG})")
+    print(f"  -> Organisation: {ORG_NAME} ({ORG_SLUG})")
     cur.execute("SELECT id FROM organisations WHERE slug = %s", (ORG_SLUG,))
     existing_org = cur.fetchone()
     if existing_org:
@@ -126,29 +136,29 @@ def seed(conn: psycopg2.extensions.connection) -> None:
     # ----------------------------------------------------------------
     # 2. SUPER_ADMIN user
     # ----------------------------------------------------------------
-    print(f"  → SUPER_ADMIN: {ADMIN_EMAIL}")
+    print(f"  -> SUPER_ADMIN: {ADMIN_EMAIL}")
     cur.execute(
-        "SELECT id FROM users WHERE org_id = %s AND email = %s",
+        "SELECT id FROM users WHERE tenant_id = %s AND email = %s",
         (org_id, ADMIN_EMAIL),
     )
     if cur.fetchone():
-        print("    Already exists — skipping")
+        print("    Already exists -- skipping")
     else:
         admin_id = str(uuid.uuid4())
         pw_hash = _pwd.hash(ADMIN_PASSWORD)
         cur.execute(
             """
-            INSERT INTO users (id, org_id, email, name, role, status, password_hash)
-            VALUES (%s, %s, %s, 'System Administrator', 'SUPER_ADMIN', 'ACTIVE', %s)
+            INSERT INTO users (id, tenant_id, username, email, display_name, role, status, password_hash, actor_type)
+            VALUES (%s, %s, %s, %s, 'System Administrator', 'SUPER_ADMIN', 'ACTIVE', %s, 'human')
             """,
-            (admin_id, org_id, ADMIN_EMAIL, pw_hash),
+            (admin_id, org_id, ADMIN_EMAIL, ADMIN_EMAIL, pw_hash),
         )
         print(f"    Created: {admin_id}")
 
     # ----------------------------------------------------------------
     # 3. Institution policies
     # ----------------------------------------------------------------
-    print("  → Institution policies")
+    print("  -> Institution policies")
     # institution_policies table created by E04-S10 migration.
     # For now store as org metadata key if table doesn't exist yet.
     try:
@@ -179,19 +189,19 @@ def seed(conn: psycopg2.extensions.connection) -> None:
         conn.rollback()  # clear the error
         # Re-start the transaction
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        print("    institution_policies table not yet created (runs in E04-S10 migration) — skipping")
+        print("    institution_policies table not yet created (runs in E04-S10 migration) -- skipping")
 
     # ----------------------------------------------------------------
     # 4. Academic calendar (current year, single semester)
     # ----------------------------------------------------------------
-    print("  → Academic calendar")
+    print("  -> Academic calendar")
     academic_year = f"{date.today().year}-{date.today().year + 1}"
     cur.execute(
         "SELECT id FROM academic_calendars WHERE org_id = %s AND academic_year = %s",
         (org_id, academic_year),
     )
     if cur.fetchone():
-        print(f"    Calendar {academic_year} already exists — skipping")
+        print(f"    Calendar {academic_year} already exists -- skipping")
     else:
         cal_id = str(uuid.uuid4())
         cur.execute(
@@ -222,25 +232,25 @@ def seed(conn: psycopg2.extensions.connection) -> None:
         print(f"    Created calendar {academic_year} with {len(phases)} phases")
 
     conn.commit()
-    print("\n  Done. ✓")
+    print("\n  Done. OK")
 
 
 def main() -> None:
-    print(f"\nALIS Seed Script — {ORG_NAME}")
+    print(f"\nALIS Seed Script -- {ORG_NAME}")
     print("=" * 50)
     print(f"  DB: {settings.db_url.replace(settings.db_password, '***')}")
 
     try:
         conn = psycopg2.connect(settings.db_url)
     except Exception as exc:
-        print(f"\n  ERROR: Cannot connect to database — {exc}")
+        print(f"\n  ERROR: Cannot connect to database -- {exc}")
         sys.exit(1)
 
     try:
         seed(conn)
     except Exception as exc:
         conn.rollback()
-        print(f"\n  ERROR: Seed failed — {exc}")
+        print(f"\n  ERROR: Seed failed -- {exc}")
         raise
     finally:
         conn.close()

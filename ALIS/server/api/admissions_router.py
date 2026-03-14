@@ -139,14 +139,14 @@ async def create_applicant(request: Request, body: ApplicantCreate) -> JSONRespo
         org_id=_org(request),
         created_by=_actor(request),
     )
-    return JSONResponse(status_code=201, content=applicant.model_dump(default=str))
+    return JSONResponse(status_code=201, content=applicant.model_dump(mode="json"))
 
 
 @router.get("/applicants/{applicant_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_applicant(request: Request, applicant_id: str) -> JSONResponse:
     applicant = ApplicantService.get_applicant(applicant_id, _org(request))
-    return JSONResponse(status_code=200, content=applicant.model_dump(default=str))
+    return JSONResponse(status_code=200, content=applicant.model_dump(mode="json"))
 
 
 @router.get("/applicants")
@@ -162,7 +162,7 @@ async def list_applicants(
     )
     return JSONResponse(
         status_code=200,
-        content={"applicants": [a.model_dump(default=str) for a in applicants]},
+        content={"applicants": [a.model_dump(mode="json") for a in applicants]},
     )
 
 
@@ -179,7 +179,7 @@ async def merge_leads(request: Request, body: LeadMergeRequest) -> JSONResponse:
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=log.model_dump(default=str))
+    return JSONResponse(status_code=200, content=log.model_dump(mode="json"))
 
 
 @router.get("/leads/{applicant_id}/duplicates")
@@ -252,7 +252,7 @@ async def upload_document(
         org_id=_org(request),
         uploaded_by=_actor(request),
     )
-    return JSONResponse(status_code=201, content=doc.model_dump(default=str))
+    return JSONResponse(status_code=201, content=doc.model_dump(mode="json"))
 
 
 @router.post("/documents/{doc_id}/override")
@@ -269,7 +269,7 @@ async def override_document_verification(
         is_verified=body.get("is_verified", False),
         justification=body.get("justification", ""),
     )
-    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+    return JSONResponse(status_code=200, content=doc.model_dump(mode="json"))
 
 
 @router.get("/documents/{applicant_id}")
@@ -280,7 +280,7 @@ async def list_documents(request: Request, applicant_id: str) -> JSONResponse:
     )
     return JSONResponse(
         status_code=200,
-        content={"documents": [d.model_dump(default=str) for d in docs]},
+        content={"documents": [d.model_dump(mode="json") for d in docs]},
     )
 
 
@@ -297,7 +297,7 @@ async def submit_document_for_review(request: Request, doc_id: str) -> JSONRespo
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+    return JSONResponse(status_code=200, content=doc.model_dump(mode="json"))
 
 
 @router.post("/documents/{doc_id}/review/approve")
@@ -310,7 +310,7 @@ async def approve_document(request: Request, doc_id: str) -> JSONResponse:
         actor_id=_actor(request),
         actor_role=_role(request),
     )
-    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+    return JSONResponse(status_code=200, content=doc.model_dump(mode="json"))
 
 
 @router.post("/documents/{doc_id}/review/reject")
@@ -325,7 +325,7 @@ async def reject_document(request: Request, doc_id: str, body: dict) -> JSONResp
         allow_reupload=body.get("allow_reupload", True),
         reupload_deadline=body.get("reupload_deadline"),
     )
-    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+    return JSONResponse(status_code=200, content=doc.model_dump(mode="json"))
 
 
 @router.post("/documents/{doc_id}/reupload")
@@ -347,7 +347,7 @@ async def reupload_document(request: Request, doc_id: str, body: dict) -> JSONRe
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=doc.model_dump(default=str))
+    return JSONResponse(status_code=200, content=doc.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -436,7 +436,7 @@ async def assign_counsellor(
         actor_id=_actor(request),
         actor_role=_role(request),
     )
-    return JSONResponse(status_code=201, content=assignment.model_dump(default=str))
+    return JSONResponse(status_code=201, content=assignment.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -454,7 +454,7 @@ async def generate_offer_letter(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=letter.model_dump(default=str))
+    return JSONResponse(status_code=201, content=letter.model_dump(mode="json"))
 
 
 @router.get("/offers/applicant/{applicant_id}")
@@ -467,7 +467,7 @@ async def get_offer_for_applicant(request: Request, applicant_id: str) -> JSONRe
             content={"detail": f"No active offer for applicant '{applicant_id}'."},
             status_code=404,
         )
-    return JSONResponse(content=letter.model_dump(default=str))
+    return JSONResponse(content=letter.model_dump(mode="json"))
 
 
 @router.get("/offers/{letter_id}")
@@ -475,7 +475,7 @@ async def get_offer_for_applicant(request: Request, applicant_id: str) -> JSONRe
 async def get_offer_letter(request: Request, letter_id: str) -> JSONResponse:
     """Get an offer letter by ID."""
     letter = OfferLetterService.get(letter_id, _org(request))
-    return JSONResponse(content=letter.model_dump(default=str))
+    return JSONResponse(content=letter.model_dump(mode="json"))
 
 
 @router.post("/offers/{letter_id}/accept")
@@ -490,7 +490,7 @@ async def accept_offer(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(content=letter.model_dump(default=str))
+    return JSONResponse(content=letter.model_dump(mode="json"))
 
 
 @router.post("/offers/{letter_id}/decline")
@@ -505,7 +505,7 @@ async def decline_offer(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(content=letter.model_dump(default=str))
+    return JSONResponse(content=letter.model_dump(mode="json"))
 
 
 @router.post("/offers/{letter_id}/revoke")
@@ -520,7 +520,7 @@ async def revoke_offer(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(content=letter.model_dump(default=str))
+    return JSONResponse(content=letter.model_dump(mode="json"))
 
 
 @router.post("/offers/{letter_id}/delivery")
@@ -536,7 +536,7 @@ async def update_offer_delivery(
         status=status,
         actor_id=_actor(request),
     )
-    return JSONResponse(content=letter.model_dump(default=str))
+    return JSONResponse(content=letter.model_dump(mode="json"))
 
 
 @router.post("/offers/{letter_id}/reminder")
@@ -581,7 +581,7 @@ async def confirm_admission(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=record.model_dump(default=str))
+    return JSONResponse(status_code=201, content=record.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -597,7 +597,7 @@ async def score_intake(request: Request, body: IntakeScoreRequest) -> JSONRespon
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=score.model_dump(default=str))
+    return JSONResponse(status_code=200, content=score.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -615,7 +615,7 @@ async def enroll_student(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=student.model_dump(default=str))
+    return JSONResponse(status_code=201, content=student.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -631,7 +631,7 @@ async def start_application_draft(request: Request, applicant_id: str) -> JSONRe
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 @router.get("/applications/{applicant_id}")
@@ -639,7 +639,7 @@ async def start_application_draft(request: Request, applicant_id: str) -> JSONRe
 async def get_application_draft(request: Request, applicant_id: str) -> JSONResponse:
     """Get full application form data for an applicant."""
     draft = ApplicationFormService.get_draft(applicant_id, _org(request))
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 @router.patch("/applications/{applicant_id}/personal")
@@ -654,7 +654,7 @@ async def save_personal_details(
         request=body,
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 @router.patch("/applications/{applicant_id}/address")
@@ -669,7 +669,7 @@ async def save_address(
         request=body,
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 @router.post("/applications/{applicant_id}/qualifications")
@@ -684,7 +684,7 @@ async def add_academic_qualification(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=qual.model_dump(default=str))
+    return JSONResponse(status_code=201, content=qual.model_dump(mode="json"))
 
 
 @router.get("/applications/{applicant_id}/qualifications")
@@ -696,7 +696,7 @@ async def list_academic_qualifications(
     quals = ApplicationFormService.list_academic_qualifications(applicant_id, _org(request))
     return JSONResponse(
         status_code=200,
-        content={"qualifications": [q.model_dump(default=str) for q in quals]},
+        content={"qualifications": [q.model_dump(mode="json") for q in quals]},
     )
 
 
@@ -712,7 +712,7 @@ async def add_entrance_score(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=score.model_dump(default=str))
+    return JSONResponse(status_code=201, content=score.model_dump(mode="json"))
 
 
 @router.get("/applications/{applicant_id}/entrance-scores")
@@ -723,7 +723,7 @@ async def list_entrance_scores(
     scores = ApplicationFormService.list_entrance_scores(applicant_id, _org(request))
     return JSONResponse(
         status_code=200,
-        content={"scores": [s.model_dump(default=str) for s in scores]},
+        content={"scores": [s.model_dump(mode="json") for s in scores]},
     )
 
 
@@ -777,7 +777,7 @@ async def accept_declaration(
         request=body,
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 @router.post("/applications/{applicant_id}/submit")
@@ -789,7 +789,7 @@ async def submit_application(request: Request, applicant_id: str) -> JSONRespons
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 @router.post("/applications/fee")
@@ -803,7 +803,7 @@ async def record_application_fee(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=draft.model_dump(default=str))
+    return JSONResponse(status_code=200, content=draft.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -815,7 +815,7 @@ async def record_application_fee(
 async def create_seat_matrix(request: Request, body: SeatMatrixCreate) -> JSONResponse:
     """Define seat counts for a program/batch/category combination."""
     seat = SeatMatrixService.create(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=seat.model_dump(default=str))
+    return JSONResponse(status_code=201, content=seat.model_dump(mode="json"))
 
 
 @router.get("/seats")
@@ -828,7 +828,7 @@ async def list_seat_matrix(
     seats = SeatMatrixService.list(
         org_id=_org(request), program_name=program_name, intake_batch=intake_batch
     )
-    return JSONResponse(status_code=200, content={"seats": [s.model_dump(default=str) for s in seats]})
+    return JSONResponse(status_code=200, content={"seats": [s.model_dump(mode="json") for s in seats]})
 
 
 @router.post("/merit-policies")
@@ -836,14 +836,14 @@ async def list_seat_matrix(
 async def create_merit_policy(request: Request, body: MeritListPolicyCreate) -> JSONResponse:
     """Create or update the merit scoring formula for a program/batch."""
     policy = MeritListPolicyService.create(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=policy.model_dump(default=str))
+    return JSONResponse(status_code=201, content=policy.model_dump(mode="json"))
 
 
 @router.get("/merit-policies/{program_name}/{intake_batch}")
 @require_permission(Permission.STUDENT_READ)
 async def get_merit_policy(request: Request, program_name: str, intake_batch: str) -> JSONResponse:
     policy = MeritListPolicyService.get(_org(request), program_name, intake_batch)
-    return JSONResponse(status_code=200, content=policy.model_dump(default=str))
+    return JSONResponse(status_code=200, content=policy.model_dump(mode="json"))
 
 
 @router.post("/merit-lists/generate")
@@ -858,21 +858,21 @@ async def generate_merit_list(request: Request, body: MeritListGenerateRequest) 
 @require_permission(Permission.STUDENT_READ)
 async def get_merit_list(request: Request, merit_list_id: str) -> JSONResponse:
     ml = MeritListService.get(merit_list_id, _org(request))
-    return JSONResponse(status_code=200, content=ml.model_dump(default=str))
+    return JSONResponse(status_code=200, content=ml.model_dump(mode="json"))
 
 
 @router.get("/merit-lists/{merit_list_id}/entries")
 @require_permission(Permission.STUDENT_READ)
 async def list_merit_entries(request: Request, merit_list_id: str) -> JSONResponse:
     entries = MeritListService.list_entries(merit_list_id, _org(request))
-    return JSONResponse(status_code=200, content={"entries": [e.model_dump(default=str) for e in entries]})
+    return JSONResponse(status_code=200, content={"entries": [e.model_dump(mode="json") for e in entries]})
 
 
 @router.get("/merit-lists/{merit_list_id}/waitlist")
 @require_permission(Permission.STUDENT_READ)
 async def list_waitlist(request: Request, merit_list_id: str) -> JSONResponse:
     waitlist = MeritListService.list_waitlist(merit_list_id, _org(request))
-    return JSONResponse(status_code=200, content={"waitlist": [w.model_dump(default=str) for w in waitlist]})
+    return JSONResponse(status_code=200, content={"waitlist": [w.model_dump(mode="json") for w in waitlist]})
 
 
 @router.patch("/merit-lists/{merit_list_id}/status")
@@ -883,7 +883,7 @@ async def update_merit_list_status(request: Request, merit_list_id: str, body: d
         merit_list_id=merit_list_id, org_id=_org(request),
         new_status=body.get("status", ""), actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=ml.model_dump(default=str))
+    return JSONResponse(status_code=200, content=ml.model_dump(mode="json"))
 
 
 @router.post("/merit-lists/{merit_list_id}/waitlist/{applicant_id}/activate")
@@ -898,7 +898,7 @@ async def activate_waitlist_entry(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=entry.model_dump(default=str))
+    return JSONResponse(status_code=200, content=entry.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -911,7 +911,7 @@ async def create_admissions_test(
     request: Request, body: AdmissionsTestCreate
 ) -> JSONResponse:
     test = AdmissionsTestService.create(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=test.model_dump(default=str))
+    return JSONResponse(status_code=201, content=test.model_dump(mode="json"))
 
 
 @router.get("/tests")
@@ -926,13 +926,13 @@ async def list_admissions_tests(
         org_id=_org(request), intake_batch=intake_batch,
         program_name=program_name, status=status,
     )
-    return JSONResponse(status_code=200, content={"tests": [t.model_dump(default=str) for t in tests]})
+    return JSONResponse(status_code=200, content={"tests": [t.model_dump(mode="json") for t in tests]})
 
 
 @router.get("/tests/{test_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_admissions_test(request: Request, test_id: str) -> JSONResponse:
-    return JSONResponse(status_code=200, content=AdmissionsTestService.get(test_id, _org(request)).model_dump(default=str))
+    return JSONResponse(status_code=200, content=AdmissionsTestService.get(test_id, _org(request)).model_dump(mode="json"))
 
 
 @router.patch("/tests/{test_id}/status")
@@ -942,7 +942,7 @@ async def update_test_status(request: Request, test_id: str, body: dict) -> JSON
         test_id=test_id, org_id=_org(request),
         new_status=body.get("status", ""), actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=test.model_dump(default=str))
+    return JSONResponse(status_code=200, content=test.model_dump(mode="json"))
 
 
 @router.post("/tests/{test_id}/slots")
@@ -950,35 +950,35 @@ async def update_test_status(request: Request, test_id: str, body: dict) -> JSON
 async def add_test_slot(request: Request, test_id: str, body: TestSlotCreate) -> JSONResponse:
     body.test_id = test_id
     slot = TestSlotService.add_slot(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=slot.model_dump(default=str))
+    return JSONResponse(status_code=201, content=slot.model_dump(mode="json"))
 
 
 @router.get("/tests/{test_id}/slots")
 @require_permission(Permission.STUDENT_READ)
 async def list_test_slots(request: Request, test_id: str) -> JSONResponse:
     slots = TestSlotService.list_for_test(test_id, _org(request))
-    return JSONResponse(status_code=200, content={"slots": [s.model_dump(default=str) for s in slots]})
+    return JSONResponse(status_code=200, content={"slots": [s.model_dump(mode="json") for s in slots]})
 
 
 @router.post("/tests/registrations")
 @require_permission(Permission.STUDENT_CREATE)
 async def register_for_test(request: Request, body: TestRegistrationCreate) -> JSONResponse:
     reg = TestRegistrationService.register(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=reg.model_dump(default=str))
+    return JSONResponse(status_code=201, content=reg.model_dump(mode="json"))
 
 
 @router.get("/tests/{test_id}/registrations")
 @require_permission(Permission.STUDENT_READ)
 async def list_test_registrations(request: Request, test_id: str) -> JSONResponse:
     regs = TestRegistrationService.list_for_test(test_id, _org(request))
-    return JSONResponse(status_code=200, content={"registrations": [r.model_dump(default=str) for r in regs]})
+    return JSONResponse(status_code=200, content={"registrations": [r.model_dump(mode="json") for r in regs]})
 
 
 @router.post("/tests/registrations/{reg_id}/admit-card")
 @require_permission(Permission.STUDENT_CREATE)
 async def generate_admit_card(request: Request, reg_id: str) -> JSONResponse:
     reg = TestRegistrationService.generate_admit_card(reg_id, _org(request), _actor(request))
-    return JSONResponse(status_code=200, content=reg.model_dump(default=str))
+    return JSONResponse(status_code=200, content=reg.model_dump(mode="json"))
 
 
 @router.patch("/tests/registrations/{reg_id}/attendance")
@@ -987,21 +987,21 @@ async def record_test_attendance(request: Request, reg_id: str, body: dict) -> J
     reg = TestRegistrationService.record_attendance(
         reg_id, _org(request), body.get("attendance_status", ""), _actor(request)
     )
-    return JSONResponse(status_code=200, content=reg.model_dump(default=str))
+    return JSONResponse(status_code=200, content=reg.model_dump(mode="json"))
 
 
 @router.post("/tests/scores")
 @require_permission(Permission.STUDENT_CREATE)
 async def enter_test_score(request: Request, body: TestScoreCreate) -> JSONResponse:
     score = TestScoreService.enter_score(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=score.model_dump(default=str))
+    return JSONResponse(status_code=201, content=score.model_dump(mode="json"))
 
 
 @router.get("/tests/{test_id}/scores")
 @require_permission(Permission.STUDENT_READ)
 async def list_test_scores(request: Request, test_id: str) -> JSONResponse:
     scores = TestScoreService.list_for_test(test_id, _org(request))
-    return JSONResponse(status_code=200, content={"scores": [s.model_dump(default=str) for s in scores]})
+    return JSONResponse(status_code=200, content={"scores": [s.model_dump(mode="json") for s in scores]})
 
 
 # =============================================================================
@@ -1012,7 +1012,7 @@ async def list_test_scores(request: Request, test_id: str) -> JSONResponse:
 @require_permission(Permission.OVERRIDE_APPROVE)
 async def create_interview_panel(request: Request, body: InterviewPanelCreate) -> JSONResponse:
     panel = InterviewPanelService.create(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=panel.model_dump(default=str))
+    return JSONResponse(status_code=201, content=panel.model_dump(mode="json"))
 
 
 @router.get("/interviews/panels")
@@ -1025,28 +1025,28 @@ async def list_interview_panels(
     panels = InterviewPanelService.list(
         org_id=_org(request), intake_batch=intake_batch, program_name=program_name
     )
-    return JSONResponse(status_code=200, content={"panels": [p.model_dump(default=str) for p in panels]})
+    return JSONResponse(status_code=200, content={"panels": [p.model_dump(mode="json") for p in panels]})
 
 
 @router.post("/interviews/schedules")
 @require_permission(Permission.STUDENT_CREATE)
 async def schedule_interview(request: Request, body: InterviewScheduleCreate) -> JSONResponse:
     schedule = InterviewScheduleService.schedule(request=body, org_id=_org(request), actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=schedule.model_dump(default=str))
+    return JSONResponse(status_code=201, content=schedule.model_dump(mode="json"))
 
 
 @router.get("/interviews/schedules/applicant/{applicant_id}")
 @require_permission(Permission.STUDENT_READ)
 async def list_interviews_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
     schedules = InterviewScheduleService.list_for_applicant(applicant_id, _org(request))
-    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(default=str) for s in schedules]})
+    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(mode="json") for s in schedules]})
 
 
 @router.get("/interviews/schedules/panel/{panel_id}")
 @require_permission(Permission.STUDENT_READ)
 async def list_interviews_for_panel(request: Request, panel_id: str) -> JSONResponse:
     schedules = InterviewScheduleService.list_for_panel(panel_id, _org(request))
-    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(default=str) for s in schedules]})
+    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(mode="json") for s in schedules]})
 
 
 @router.patch("/interviews/schedules/{schedule_id}/attendance")
@@ -1055,7 +1055,7 @@ async def update_interview_attendance(request: Request, schedule_id: str, body: 
     schedule = InterviewScheduleService.update_attendance(
         schedule_id, _org(request), body.get("attendance_status", ""), _actor(request)
     )
-    return JSONResponse(status_code=200, content=schedule.model_dump(default=str))
+    return JSONResponse(status_code=200, content=schedule.model_dump(mode="json"))
 
 
 @router.post("/interviews/scorecards")
@@ -1065,14 +1065,14 @@ async def submit_scorecard(request: Request, body: InterviewScorecardCreate) -> 
     scorecard = InterviewScorecardService.submit(
         request=body, org_id=_org(request), evaluator_id=_actor(request)
     )
-    return JSONResponse(status_code=201, content=scorecard.model_dump(default=str))
+    return JSONResponse(status_code=201, content=scorecard.model_dump(mode="json"))
 
 
 @router.get("/interviews/schedules/{schedule_id}/scorecards")
 @require_permission(Permission.STUDENT_READ)
 async def list_scorecards(request: Request, schedule_id: str) -> JSONResponse:
     scorecards = InterviewScorecardService.list_for_schedule(schedule_id, _org(request))
-    return JSONResponse(status_code=200, content={"scorecards": [s.model_dump(default=str) for s in scorecards]})
+    return JSONResponse(status_code=200, content={"scorecards": [s.model_dump(mode="json") for s in scorecards]})
 
 
 @router.get("/interviews/schedules/{schedule_id}/aggregate")
@@ -1095,7 +1095,7 @@ async def create_lead(request: Request, body: LeadCreate) -> JSONResponse:
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=lead.model_dump(default=str))
+    return JSONResponse(status_code=201, content=lead.model_dump(mode="json"))
 
 
 @router.get("/leads")
@@ -1118,7 +1118,7 @@ async def list_leads(
     )
     return JSONResponse(
         status_code=200,
-        content={"leads": [l.model_dump(default=str) for l in leads], "total": len(leads)},
+        content={"leads": [l.model_dump(mode="json") for l in leads], "total": len(leads)},
     )
 
 
@@ -1126,7 +1126,7 @@ async def list_leads(
 @require_permission(Permission.STUDENT_READ)
 async def get_lead(request: Request, lead_id: str) -> JSONResponse:
     lead = LeadService.get(lead_id, _org(request))
-    return JSONResponse(status_code=200, content=lead.model_dump(default=str))
+    return JSONResponse(status_code=200, content=lead.model_dump(mode="json"))
 
 
 @router.patch("/leads/{lead_id}")
@@ -1141,7 +1141,7 @@ async def update_lead(
         request=body,
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=lead.model_dump(default=str))
+    return JSONResponse(status_code=200, content=lead.model_dump(mode="json"))
 
 
 @router.post("/leads/{lead_id}/activities")
@@ -1156,7 +1156,7 @@ async def log_lead_activity(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=activity.model_dump(default=str))
+    return JSONResponse(status_code=201, content=activity.model_dump(mode="json"))
 
 
 @router.get("/leads/{lead_id}/activities")
@@ -1165,7 +1165,7 @@ async def list_lead_activities(request: Request, lead_id: str) -> JSONResponse:
     activities = LeadService.list_activities(lead_id, _org(request))
     return JSONResponse(
         status_code=200,
-        content={"activities": [a.model_dump(default=str) for a in activities]},
+        content={"activities": [a.model_dump(mode="json") for a in activities]},
     )
 
 
@@ -1196,7 +1196,7 @@ async def create_consultant(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=consultant.model_dump(default=str))
+    return JSONResponse(status_code=201, content=consultant.model_dump(mode="json"))
 
 
 @router.get("/consultants-ext")
@@ -1213,7 +1213,7 @@ async def list_consultants_ext(
     )
     return JSONResponse(
         status_code=200,
-        content={"consultants": [c.model_dump(default=str) for c in consultants]},
+        content={"consultants": [c.model_dump(mode="json") for c in consultants]},
     )
 
 
@@ -1221,7 +1221,7 @@ async def list_consultants_ext(
 @require_permission(Permission.STUDENT_READ)
 async def get_consultant_ext(request: Request, consultant_id: str) -> JSONResponse:
     consultant = ConsultantService.get(consultant_id, _org(request))
-    return JSONResponse(status_code=200, content=consultant.model_dump(default=str))
+    return JSONResponse(status_code=200, content=consultant.model_dump(mode="json"))
 
 
 @router.patch("/consultants-ext/{consultant_id}/status")
@@ -1236,7 +1236,7 @@ async def update_consultant_status(
         new_status=body.get("status", ""),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=200, content=consultant.model_dump(default=str))
+    return JSONResponse(status_code=200, content=consultant.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -1254,14 +1254,14 @@ async def create_referral_code(
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content=code.model_dump(default=str))
+    return JSONResponse(status_code=201, content=code.model_dump(mode="json"))
 
 
 @router.get("/referral-codes/{code}")
 @require_permission(Permission.STUDENT_READ)
 async def get_referral_code(request: Request, code: str) -> JSONResponse:
     rc = ReferralCodeService.get_by_code(code, _org(request))
-    return JSONResponse(status_code=200, content=rc.model_dump(default=str))
+    return JSONResponse(status_code=200, content=rc.model_dump(mode="json"))
 
 
 @router.delete("/referral-codes/{code}", status_code=204)
@@ -1455,7 +1455,7 @@ class RefundProcessRequest(BaseModel):
 async def submit_demand_draft(request: Request, body: DemandDraftCreate) -> JSONResponse:
     """Applicant submits DD details as proof of fee payment."""
     dd = DemandDraftService.submit(body, _org(request), _actor(request))
-    return JSONResponse(content=dd.model_dump(default=str), status_code=201)
+    return JSONResponse(content=dd.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/payments/dd/applicant/{applicant_id}")
@@ -1467,7 +1467,7 @@ async def list_demand_drafts(
 ) -> JSONResponse:
     """List all DDs submitted by an applicant."""
     dds = DemandDraftService.list_for_applicant(applicant_id, _org(request), status)
-    return JSONResponse(content={"dds": [d.model_dump(default=str) for d in dds], "total": len(dds)})
+    return JSONResponse(content={"dds": [d.model_dump(mode="json") for d in dds], "total": len(dds)})
 
 
 @router.get("/payments/dd/{dd_id}")
@@ -1475,7 +1475,7 @@ async def list_demand_drafts(
 async def get_demand_draft(request: Request, dd_id: str) -> JSONResponse:
     """Get a demand draft by ID."""
     dd = DemandDraftService.get(dd_id, _org(request))
-    return JSONResponse(content=dd.model_dump(default=str))
+    return JSONResponse(content=dd.model_dump(mode="json"))
 
 
 @router.post("/payments/dd/{dd_id}/verify")
@@ -1483,7 +1483,7 @@ async def get_demand_draft(request: Request, dd_id: str) -> JSONResponse:
 async def verify_demand_draft(request: Request, dd_id: str) -> JSONResponse:
     """Staff verifies a DD → transitions applicant to VERIFICATION_PENDING."""
     dd = DemandDraftService.verify(dd_id, _org(request), _actor(request))
-    return JSONResponse(content=dd.model_dump(default=str))
+    return JSONResponse(content=dd.model_dump(mode="json"))
 
 
 @router.post("/payments/dd/{dd_id}/reject")
@@ -1491,7 +1491,7 @@ async def verify_demand_draft(request: Request, dd_id: str) -> JSONResponse:
 async def reject_demand_draft(request: Request, dd_id: str, body: DDRejectRequest) -> JSONResponse:
     """Staff rejects a DD with a reason. Applicant must resubmit."""
     dd = DemandDraftService.reject(dd_id, _org(request), _actor(request), body.reason)
-    return JSONResponse(content=dd.model_dump(default=str))
+    return JSONResponse(content=dd.model_dump(mode="json"))
 
 
 # --- Refund Requests ---
@@ -1501,7 +1501,7 @@ async def reject_demand_draft(request: Request, dd_id: str, body: DDRejectReques
 async def submit_refund_request(request: Request, body: RefundRequestCreate) -> JSONResponse:
     """Applicant submits a refund request. Amount calculated from policy slabs."""
     ref = RefundRequestService.submit(body, _org(request), _actor(request))
-    return JSONResponse(content=ref.model_dump(default=str), status_code=201)
+    return JSONResponse(content=ref.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/payments/refunds/pending")
@@ -1509,7 +1509,7 @@ async def submit_refund_request(request: Request, body: RefundRequestCreate) -> 
 async def list_pending_refunds(request: Request) -> JSONResponse:
     """List all REQUESTED / UNDER_REVIEW refund requests for staff."""
     refs = RefundRequestService.list_pending_review(_org(request))
-    return JSONResponse(content={"refunds": [r.model_dump(default=str) for r in refs], "total": len(refs)})
+    return JSONResponse(content={"refunds": [r.model_dump(mode="json") for r in refs], "total": len(refs)})
 
 
 @router.get("/payments/refunds/applicant/{applicant_id}")
@@ -1517,7 +1517,7 @@ async def list_pending_refunds(request: Request) -> JSONResponse:
 async def list_refunds_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
     """List refund requests for a specific applicant."""
     refs = RefundRequestService.list_for_applicant(applicant_id, _org(request))
-    return JSONResponse(content={"refunds": [r.model_dump(default=str) for r in refs], "total": len(refs)})
+    return JSONResponse(content={"refunds": [r.model_dump(mode="json") for r in refs], "total": len(refs)})
 
 
 @router.get("/payments/refunds/{request_id}")
@@ -1525,7 +1525,7 @@ async def list_refunds_for_applicant(request: Request, applicant_id: str) -> JSO
 async def get_refund_request(request: Request, request_id: str) -> JSONResponse:
     """Get a refund request by ID."""
     ref = RefundRequestService.get(request_id, _org(request))
-    return JSONResponse(content=ref.model_dump(default=str))
+    return JSONResponse(content=ref.model_dump(mode="json"))
 
 
 @router.post("/payments/refunds/{request_id}/review")
@@ -1541,7 +1541,7 @@ async def review_refund_request(
         decision=body.decision,
         notes=body.notes,
     )
-    return JSONResponse(content=ref.model_dump(default=str))
+    return JSONResponse(content=ref.model_dump(mode="json"))
 
 
 @router.post("/payments/refunds/{request_id}/process")
@@ -1556,7 +1556,7 @@ async def process_refund(
         actor_id=_actor(request),
         gateway_refund_id=body.gateway_refund_id,
     )
-    return JSONResponse(content=ref.model_dump(default=str))
+    return JSONResponse(content=ref.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -1603,7 +1603,7 @@ async def initiate_verification(
 ) -> JSONResponse:
     """Initiate a final verification session for a VERIFICATION_PENDING applicant."""
     ver = FinalVerificationService.initiate(body, _org(request), _actor(request))
-    return JSONResponse(content=ver.model_dump(default=str), status_code=201)
+    return JSONResponse(content=ver.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/verification/applicant/{applicant_id}")
@@ -1616,14 +1616,14 @@ async def get_verification_for_applicant(request: Request, applicant_id: str) ->
             content={"detail": f"No verification record for applicant '{applicant_id}'."},
             status_code=404,
         )
-    return JSONResponse(content=ver.model_dump(default=str))
+    return JSONResponse(content=ver.model_dump(mode="json"))
 
 
 @router.get("/verification/{verification_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_verification(request: Request, verification_id: str) -> JSONResponse:
     ver = FinalVerificationService.get(verification_id, _org(request))
-    return JSONResponse(content=ver.model_dump(default=str))
+    return JSONResponse(content=ver.model_dump(mode="json"))
 
 
 @router.post("/verification/{verification_id}/start")
@@ -1635,7 +1635,7 @@ async def start_verification(
     ver = FinalVerificationService.start(
         verification_id, _org(request), _actor(request), body.assigned_officer
     )
-    return JSONResponse(content=ver.model_dump(default=str))
+    return JSONResponse(content=ver.model_dump(mode="json"))
 
 
 @router.post("/verification/{verification_id}/check")
@@ -1647,14 +1647,14 @@ async def check_document(
     item = FinalVerificationService.check_document(
         verification_id, body, _org(request), _actor(request)
     )
-    return JSONResponse(content=item.model_dump(default=str), status_code=201)
+    return JSONResponse(content=item.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/verification/{verification_id}/items")
 @require_permission(Permission.STUDENT_READ)
 async def list_verification_items(request: Request, verification_id: str) -> JSONResponse:
     items = FinalVerificationService.list_items(verification_id, _org(request))
-    return JSONResponse(content={"items": [i.model_dump(default=str) for i in items], "total": len(items)})
+    return JSONResponse(content={"items": [i.model_dump(mode="json") for i in items], "total": len(items)})
 
 
 @router.post("/verification/{verification_id}/clear")
@@ -1666,7 +1666,7 @@ async def clear_verification(
     ver = FinalVerificationService.clear(
         verification_id, _org(request), _actor(request), body.notes
     )
-    return JSONResponse(content=ver.model_dump(default=str))
+    return JSONResponse(content=ver.model_dump(mode="json"))
 
 
 @router.post("/verification/{verification_id}/clear-with-undertaking")
@@ -1678,7 +1678,7 @@ async def clear_with_undertaking(
     ver = FinalVerificationService.clear_with_undertaking(
         verification_id, _org(request), _actor(request), body.notes
     )
-    return JSONResponse(content=ver.model_dump(default=str))
+    return JSONResponse(content=ver.model_dump(mode="json"))
 
 
 @router.post("/verification/{verification_id}/reject")
@@ -1690,7 +1690,7 @@ async def reject_verification(
     ver = FinalVerificationService.reject(
         verification_id, _org(request), _actor(request), body.reason
     )
-    return JSONResponse(content=ver.model_dump(default=str))
+    return JSONResponse(content=ver.model_dump(mode="json"))
 
 
 @router.post("/verification/{verification_id}/discrepancies")
@@ -1702,7 +1702,7 @@ async def raise_discrepancy(
     disc = DiscrepancyService.raise_discrepancy(
         verification_id, body, _org(request), _actor(request)
     )
-    return JSONResponse(content=disc.model_dump(default=str), status_code=201)
+    return JSONResponse(content=disc.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/verification/{verification_id}/discrepancies")
@@ -1711,7 +1711,7 @@ async def list_discrepancies(
     request: Request, verification_id: str, status: Optional[str] = None
 ) -> JSONResponse:
     discs = DiscrepancyService.list_discrepancies(verification_id, _org(request), status)
-    return JSONResponse(content={"discrepancies": [d.model_dump(default=str) for d in discs], "total": len(discs)})
+    return JSONResponse(content={"discrepancies": [d.model_dump(mode="json") for d in discs], "total": len(discs)})
 
 
 @router.post("/verification/discrepancies/{discrepancy_id}/resolve")
@@ -1722,7 +1722,7 @@ async def resolve_discrepancy(
     disc = DiscrepancyService.resolve_discrepancy(
         discrepancy_id, _org(request), _actor(request), body.resolution
     )
-    return JSONResponse(content=disc.model_dump(default=str))
+    return JSONResponse(content=disc.model_dump(mode="json"))
 
 
 @router.post("/verification/discrepancies/{discrepancy_id}/escalate")
@@ -1733,7 +1733,7 @@ async def escalate_discrepancy(
     disc = DiscrepancyService.escalate_discrepancy(
         discrepancy_id, _org(request), _actor(request), body.escalate_to
     )
-    return JSONResponse(content=disc.model_dump(default=str))
+    return JSONResponse(content=disc.model_dump(mode="json"))
 
 
 # =============================================================================
@@ -1747,7 +1747,7 @@ async def initiate_enrollment(
 ) -> JSONResponse:
     """Initiate enrollment provisioning — assign roll number, create record."""
     prov = EnrollmentProvisioningService.initiate(body, _org(request), _actor(request))
-    return JSONResponse(content=prov.model_dump(default=str), status_code=201)
+    return JSONResponse(content=prov.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/enrollment/applicant/{applicant_id}")
@@ -1758,7 +1758,7 @@ async def get_enrollment_for_applicant(
     prov = EnrollmentProvisioningService.get_for_applicant(applicant_id, _org(request))
     if not prov:
         return JSONResponse(content={"detail": "No provisioning record found."}, status_code=404)
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.get("/enrollment/{provisioning_id}")
@@ -1767,7 +1767,7 @@ async def get_enrollment(
     request: Request, provisioning_id: str
 ) -> JSONResponse:
     prov = EnrollmentProvisioningService.get(provisioning_id, _org(request))
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/lms")
@@ -1779,7 +1779,7 @@ async def provision_lms(
     prov = EnrollmentProvisioningService.provision_lms(
         provisioning_id, body, _org(request), _actor(request)
     )
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/email")
@@ -1791,7 +1791,7 @@ async def provision_email(
     prov = EnrollmentProvisioningService.provision_email(
         provisioning_id, body, _org(request), _actor(request)
     )
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/library")
@@ -1803,7 +1803,7 @@ async def provision_library(
     prov = EnrollmentProvisioningService.provision_library(
         provisioning_id, body, _org(request), _actor(request)
     )
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/id-card")
@@ -1815,7 +1815,7 @@ async def dispatch_id_card(
     prov = EnrollmentProvisioningService.dispatch_id_card(
         provisioning_id, _org(request), _actor(request)
     )
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/erp")
@@ -1827,7 +1827,7 @@ async def sync_erp(
     prov = EnrollmentProvisioningService.sync_erp(
         provisioning_id, body, _org(request), _actor(request)
     )
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/welcome-email")
@@ -1839,7 +1839,7 @@ async def mark_welcome_email(
     prov = EnrollmentProvisioningService.mark_welcome_email_sent(
         provisioning_id, _org(request), _actor(request), parent=body.parent
     )
-    return JSONResponse(content=prov.model_dump(default=str))
+    return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.post("/enrollment/{provisioning_id}/complete")
@@ -1851,7 +1851,7 @@ async def complete_enrollment(
     student = EnrollmentProvisioningService.complete(
         provisioning_id, _org(request), _actor(request)
     )
-    return JSONResponse(content=student.model_dump(default=str), status_code=201)
+    return JSONResponse(content=student.model_dump(mode="json"), status_code=201)
 
 
 @router.get("/students/{student_id}")
@@ -1860,4 +1860,4 @@ async def get_student(
     request: Request, student_id: str
 ) -> JSONResponse:
     student = EnrollmentProvisioningService.get_student(student_id, _org(request))
-    return JSONResponse(content=student.model_dump(default=str))
+    return JSONResponse(content=student.model_dump(mode="json"))

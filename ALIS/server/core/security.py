@@ -632,22 +632,21 @@ class TenantMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Extract tenant_id from request state (set by auth middleware)
-        # In production, the auth middleware validates the token and sets
-        # request.state.session which contains .tenant_id
-        # For this middleware, we check the X-Tenant-ID header as fallback,
-        # but the primary source is the authenticated session.
+        # Extract tenant_id from the Bearer token (primary) or X-Tenant-ID header (fallback)
         tenant_id = None
 
-        # Try to get from request state (set by auth middleware upstream)
-        if hasattr(scope, 'state'):
-            session = getattr(scope.state, 'session', None)
-            if session and hasattr(session, 'tenant_id'):
+        headers = dict(scope.get("headers", []))
+
+        # Primary: validate Bearer token → get tenant_id from Redis session
+        auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="ignore")
+        if auth_header.startswith("Bearer "):
+            raw_token = auth_header[7:].strip()
+            session = SessionManager.validate_token(raw_token)
+            if session and session.tenant_id:
                 tenant_id = session.tenant_id
 
-        # Fallback: check X-Tenant-ID header (validated against session)
+        # Fallback: X-Tenant-ID header (for internal service calls / tests)
         if not tenant_id:
-            headers = dict(scope.get("headers", []))
             tenant_header = headers.get(b"x-tenant-id", b"").decode("utf-8", errors="ignore")
             if tenant_header:
                 tenant_id = tenant_header
@@ -684,12 +683,21 @@ class TenantMiddleware:
             return
 
         # Set the ContextVar for the duration of this request
-        token = _current_tenant_id.set(tenant_id)
+        ctx_token = _current_tenant_id.set(tenant_id)
+
+        # Also set on scope state so request.state.tenant_id is available in route handlers.
+        # Starlette's HTTPConnection.state does State(scope["state"]) — so scope["state"]
+        # must remain a plain dict (Starlette wraps it in State automatically).
+        if "state" not in scope:
+            scope["state"] = {}
+        if isinstance(scope["state"], dict):
+            scope["state"]["tenant_id"] = tenant_id
+
         try:
             await self.app(scope, receive, send)
         finally:
             # Always clean up the ContextVar
-            _current_tenant_id.reset(token)
+            _current_tenant_id.reset(ctx_token)
 
 
 # ============================================================================

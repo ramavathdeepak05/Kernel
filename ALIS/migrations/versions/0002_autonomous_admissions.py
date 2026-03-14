@@ -36,7 +36,8 @@ def upgrade() -> None:
 
     op.execute("ALTER TABLE institution_policies ENABLE ROW LEVEL SECURITY")
     op.execute("""
-        CREATE POLICY IF NOT EXISTS institution_policies_tenant_isolation
+        DROP POLICY IF EXISTS institution_policies_tenant_isolation ON institution_policies;
+            CREATE POLICY institution_policies_tenant_isolation
         ON institution_policies
         USING (org_id::text = current_setting('alis.current_tenant', TRUE))
     """)
@@ -68,7 +69,8 @@ def upgrade() -> None:
 
     op.execute("ALTER TABLE review_items ENABLE ROW LEVEL SECURITY")
     op.execute("""
-        CREATE POLICY IF NOT EXISTS review_items_tenant_isolation
+        DROP POLICY IF EXISTS review_items_tenant_isolation ON review_items;
+            CREATE POLICY review_items_tenant_isolation
         ON review_items
         USING (org_id::text = current_setting('alis.current_tenant', TRUE))
     """)

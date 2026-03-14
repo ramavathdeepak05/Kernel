@@ -52,6 +52,13 @@ from langchain_ollama import OllamaLLM
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
+# External LLM support (OpenAI-compatible: NVIDIA NIM, OpenAI, etc.)
+try:
+    from langchain_openai import ChatOpenAI
+    _OPENAI_AVAILABLE = True
+except ImportError:
+    _OPENAI_AVAILABLE = False
+
 from .rbac import Role, Permission, verify_access, AccessResult
 from .audit import AuditLog, AuditAction
 from .config import ConfigRegistry
@@ -839,10 +846,9 @@ class AIGateway:
 
     # Forbidden imports (for static analysis / linting)
     _FORBIDDEN_IMPORTS = [
-        "openai",
         "anthropic",
-        "langchain_openai",
         "langchain_anthropic",
+        # openai / langchain_openai are permitted — used via external LLM API config
     ]
 
     @classmethod
@@ -944,13 +950,33 @@ class AIGateway:
             except Exception:
                 pass  # Non-fatal; gateway falls back to Ollama defaults
 
-        # Create Ollama LLM (Local only - NO CLOUD)
-        llm = OllamaLLM(
-            base_url=base_url,
-            model=model,
-            temperature=temperature,
-            **resource_kwargs,
-        )
+        # --- LLM Backend Selection ---
+        # If external API is configured (NVIDIA NIM / OpenAI-compatible), use it.
+        # Otherwise fall back to local Ollama.
+        from .settings import get_settings
+        _settings = get_settings()
+
+        if _settings.use_external_llm and _OPENAI_AVAILABLE:
+            logger.info(
+                f"AI Gateway: using external LLM backend — "
+                f"{_settings.llm_api_base_url} / {_settings.llm_api_model}"
+            )
+            llm = ChatOpenAI(
+                base_url=_settings.llm_api_base_url,
+                api_key=_settings.llm_api_key,
+                model=_settings.llm_api_model,
+                temperature=temperature or _settings.llm_api_temperature,
+                max_tokens=_settings.llm_api_max_tokens,
+                streaming=False,
+            )
+        else:
+            # Local Ollama (default)
+            llm = OllamaLLM(
+                base_url=base_url,
+                model=model,
+                temperature=temperature,
+                **resource_kwargs,
+            )
 
         # Wrap with instrumentation
         return InstrumentedLLM(

@@ -23,11 +23,11 @@ import urllib.request
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
 from server.core.error_handlers import register_exception_handlers
+from server.core.security import TenantMiddleware
 from server.api.auth_router import router as auth_router
 from server.api.users_router import router as users_router
 from server.api.roles_router import router as roles_router
@@ -51,17 +51,31 @@ from server.api.integrations_router import router as integrations_router        
 from server.tools import register_all_tools
 
 
-class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Adds secure HTTP response headers to every response."""
+class SecurityHeadersMiddleware:
+    """Adds secure HTTP response headers to every response (raw ASGI — preserves ContextVars)."""
 
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
-        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        return response
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers += [
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"x-xss-protection", b"1; mode=block"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                    (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
+                ]
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def create_app() -> FastAPI:
@@ -89,10 +103,17 @@ def create_app() -> FastAPI:
     # --- Security Headers ---
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # --- Tenant Isolation (Layer 4 Invariant) ---
+    app.add_middleware(TenantMiddleware)
+
     # --- CORS ---
     # In production restrict to explicit methods/headers; dev keeps wildcard for convenience.
     cors_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] if settings.is_production else ["*"]
-    cors_headers = ["Authorization", "Content-Type", "Accept", "X-Request-ID"] if settings.is_production else ["*"]
+    cors_headers = (
+        ["Authorization", "Content-Type", "Accept", "X-Request-ID", "X-Tenant-ID"]
+        if settings.is_production
+        else ["*"]
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,

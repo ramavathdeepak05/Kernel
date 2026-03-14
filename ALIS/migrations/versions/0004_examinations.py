@@ -149,7 +149,7 @@ def upgrade() -> None:
                   "semester_results", "transcripts", "reeval_requests"]:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(f"""
-            CREATE POLICY IF NOT EXISTS {table}_tenant_isolation
+            CREATE POLICY {table}_tenant_isolation
             ON {table}
             USING (org_id::text = current_setting('alis.current_tenant', TRUE))
         """)
