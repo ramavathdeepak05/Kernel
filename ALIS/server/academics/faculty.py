@@ -67,7 +67,7 @@ class FacultyAssignmentService:
     def get(cls, org_id: str, assignment_id: str) -> dict:
         rows = execute_query(
             """
-            SELECT fa.*, u.name AS faculty_name, c.name AS course_name, c.code AS course_code
+            SELECT fa.*, u.display_name AS faculty_name, c.name AS course_name, c.code AS course_code
             FROM faculty_assignments fa
             JOIN users u ON u.id = fa.faculty_id
             JOIN courses c ON c.id = fa.course_id
@@ -97,7 +97,7 @@ class FacultyAssignmentService:
     def list_for_course(cls, org_id: str, course_id: str, academic_year: str) -> list[dict]:
         rows = execute_query(
             """
-            SELECT fa.*, u.name AS faculty_name, u.email
+            SELECT fa.*, u.display_name AS faculty_name, u.email
             FROM faculty_assignments fa
             JOIN users u ON u.id = fa.faculty_id
             WHERE fa.course_id = %s AND fa.academic_year = %s AND fa.org_id = %s

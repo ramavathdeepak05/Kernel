@@ -60,7 +60,7 @@ class TimetableService:
         rows = execute_query(
             """
             SELECT ts.*, c.name AS course_name, c.code AS course_code,
-                   u.name AS faculty_name
+                   u.display_name AS faculty_name
             FROM timetable_slots ts
             JOIN courses c ON c.id = ts.course_id
             LEFT JOIN users u ON u.id = ts.faculty_id
@@ -77,7 +77,7 @@ class TimetableService:
                    course_id: str | None = None, faculty_id: str | None = None) -> list[dict]:
         """Return full weekly timetable, optionally filtered by course or faculty."""
         sql = """
-            SELECT ts.*, c.name AS course_name, c.code, u.name AS faculty_name
+            SELECT ts.*, c.name AS course_name, c.code, u.display_name AS faculty_name
             FROM timetable_slots ts
             JOIN courses c ON c.id = ts.course_id
             LEFT JOIN users u ON u.id = ts.faculty_id

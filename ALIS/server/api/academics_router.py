@@ -28,14 +28,32 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/academics", tags=["academics"])
 
 
+def _jsonify(obj):
+    """Recursively convert Decimal/date/datetime to JSON-safe types."""
+    from decimal import Decimal
+    from datetime import datetime, date
+    if isinstance(obj, dict):
+        return {k: _jsonify(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_jsonify(i) for i in obj]
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    from datetime import time as _time
+    if isinstance(obj, _time):
+        return obj.strftime("%H:%M")
+    return obj
+
+
 def _org(r: Request) -> str:
-    return r.state.org_id
+    return getattr(r.state, "tenant_id", "default")
 
 def _actor(r: Request) -> str:
-    return r.state.user_id
+    return getattr(r.state, "user_id", "anonymous")
 
 def _role(r: Request) -> str:
-    return getattr(r.state, "role", "STUDENT")
+    return getattr(r.state, "user_role", "STUDENT")
 
 
 # =============================================================================
@@ -46,20 +64,20 @@ def _role(r: Request) -> str:
 @require_permission(Permission.STUDENT_CREATE)
 async def create_program(request: Request, body: ProgramCreate) -> JSONResponse:
     result = ProgramService.create(org_id=_org(request), req=body, actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=result)
+    return JSONResponse(status_code=201, content=_jsonify(result))
 
 
 @router.get("/programs")
 @require_permission(Permission.STUDENT_READ)
 async def list_programs(request: Request) -> JSONResponse:
     items = ProgramService.list(org_id=_org(request))
-    return JSONResponse(content={"programs": items, "total": len(items)})
+    return JSONResponse(content=_jsonify({"programs": items, "total": len(items)}))
 
 
 @router.get("/programs/{program_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_program(request: Request, program_id: str) -> JSONResponse:
-    return JSONResponse(content=ProgramService.get(org_id=_org(request), program_id=program_id))
+    return JSONResponse(content=_jsonify(ProgramService.get(org_id=_org(request), program_id=program_id)))
 
 
 @router.patch("/programs/{program_id}")
@@ -67,7 +85,7 @@ async def get_program(request: Request, program_id: str) -> JSONResponse:
 async def update_program(request: Request, program_id: str, body: dict) -> JSONResponse:
     result = ProgramService.update(org_id=_org(request), program_id=program_id,
                                    updates=body, actor_id=_actor(request))
-    return JSONResponse(content=result)
+    return JSONResponse(content=_jsonify(result))
 
 
 # =============================================================================
@@ -78,7 +96,7 @@ async def update_program(request: Request, program_id: str, body: dict) -> JSONR
 @require_permission(Permission.STUDENT_CREATE)
 async def create_course(request: Request, body: CourseCreate) -> JSONResponse:
     result = CourseService.create(org_id=_org(request), req=body, actor_id=_actor(request))
-    return JSONResponse(status_code=201, content=result)
+    return JSONResponse(status_code=201, content=_jsonify(result))
 
 
 @router.get("/courses")
@@ -86,13 +104,13 @@ async def create_course(request: Request, body: CourseCreate) -> JSONResponse:
 async def list_courses(request: Request, program_id: Optional[str] = None,
                        semester: Optional[int] = None) -> JSONResponse:
     items = CourseService.list(org_id=_org(request), program_id=program_id, semester=semester)
-    return JSONResponse(content={"courses": items, "total": len(items)})
+    return JSONResponse(content=_jsonify({"courses": items, "total": len(items)}))
 
 
 @router.get("/courses/{course_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_course(request: Request, course_id: str) -> JSONResponse:
-    return JSONResponse(content=CourseService.get(org_id=_org(request), course_id=course_id))
+    return JSONResponse(content=_jsonify(CourseService.get(org_id=_org(request), course_id=course_id)))
 
 
 # =============================================================================
@@ -170,7 +188,7 @@ async def add_timetable_slot(request: Request, body: TimetableSlotCreate) -> JSO
     result = TimetableService.add_slot(
         org_id=_org(request), req=body, actor_id=_actor(request)
     )
-    return JSONResponse(status_code=201, content=result)
+    return JSONResponse(status_code=201, content=_jsonify(result))
 
 
 @router.get("/timetable")
@@ -182,7 +200,7 @@ async def get_timetable(request: Request, academic_year: str = "",
         org_id=_org(request), academic_year=academic_year,
         course_id=course_id, faculty_id=faculty_id
     )
-    return JSONResponse(content={"slots": slots, "total": len(slots)})
+    return JSONResponse(content=_jsonify({"slots": slots, "total": len(slots)}))
 
 
 @router.delete("/timetable/{slot_id}", status_code=204)
@@ -224,7 +242,7 @@ async def get_student_attendance(request: Request, student_id: str,
         org_id=_org(request), student_id=student_id,
         course_id=course_id, academic_year=academic_year
     )
-    return JSONResponse(content=result)
+    return JSONResponse(content=_jsonify(result))
 
 
 @router.get("/attendance/course/{course_id}")
@@ -234,7 +252,7 @@ async def get_course_attendance(request: Request, course_id: str,
     result = AttendanceService.get_course_summary(
         org_id=_org(request), course_id=course_id, academic_year=academic_year
     )
-    return JSONResponse(content={"summary": result, "total": len(result)})
+    return JSONResponse(content=_jsonify({"summary": result, "total": len(result)}))
 
 
 # =============================================================================
@@ -248,7 +266,7 @@ async def get_at_risk_students(request: Request, academic_year: str = "",
     result = AttendanceAnalyticsService.get_at_risk_students(
         org_id=_org(request), academic_year=academic_year, course_id=course_id
     )
-    return JSONResponse(content={"at_risk": result, "total": len(result)})
+    return JSONResponse(content=_jsonify({"at_risk": result, "total": len(result)}))
 
 
 @router.get("/analytics/insights")
@@ -259,4 +277,4 @@ async def get_ai_insights(request: Request, academic_year: str = "",
         org_id=_org(request), academic_year=academic_year,
         course_id=course_id, actor_id=_actor(request)
     )
-    return JSONResponse(content=result)
+    return JSONResponse(content=_jsonify(result))
