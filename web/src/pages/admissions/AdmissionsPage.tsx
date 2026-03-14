@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   AlertTriangle,
   Bot,
@@ -13,10 +13,15 @@ import {
   XCircle,
   ChevronRight,
   Filter,
+  Settings,
+  Save,
+  RotateCcw,
+  Info,
 } from "lucide-react";
 import { useReviewQueue, usePipelineSummary, useDocumentReviewQueue, useEntranceTests, useMeritLists, useOffers, useLeads, useApplications } from "@/hooks/use-admissions";
 import { STATUS_LABELS, STATUS_COLORS } from "@/types/admissions";
 import { cn, formatDate } from "@/lib/utils";
+import { policiesApi, type InstitutionPolicy } from "@/services/admissions";
 
 // ── Sparkline component ──────────────────────────────────────
 
@@ -294,7 +299,7 @@ function FutureItemsSection() {
 
 // ── Tab content views ────────────────────────────────────────
 
-type TabId = "inbox" | "leads" | "applications" | "documents" | "tests" | "merit" | "offers" | "enrollment";
+type TabId = "inbox" | "leads" | "applications" | "documents" | "tests" | "merit" | "offers" | "enrollment" | "settings";
 
 function TabNav({ active, onChange }: { active: TabId; onChange: (t: TabId) => void }) {
   const tabs: { id: TabId; label: string }[] = [
@@ -306,6 +311,7 @@ function TabNav({ active, onChange }: { active: TabId; onChange: (t: TabId) => v
     { id: "merit", label: "Merit List" },
     { id: "offers", label: "Offers" },
     { id: "enrollment", label: "Enrollment" },
+    { id: "settings", label: "Policy Rules" },
   ];
 
   return (
@@ -495,6 +501,285 @@ function EnrollmentTab() {
   );
 }
 
+// ── Policy / Rules Wizard ────────────────────────────────────
+
+const POLICY_META: Record<string, { label: string; description: string; type: "number" | "boolean"; unit?: string; min?: number; max?: number; step?: number }> = {
+  "admissions.eligibility.min_academic_percentage": {
+    label: "Min Academic Percentage",
+    description: "Minimum aggregate % required for eligibility. Applicants below this are auto-rejected.",
+    type: "number", unit: "%", min: 0, max: 100, step: 1,
+  },
+  "admissions.eligibility.review_band_lower": {
+    label: "Review Band Lower Threshold",
+    description: "Applicants between this % and min academic % are flagged for manual review instead of auto-reject.",
+    type: "number", unit: "%", min: 0, max: 100, step: 1,
+  },
+  "admissions.eligibility.min_entrance_score": {
+    label: "Min Entrance Test Score",
+    description: "Minimum score required on entrance test. Scores below this fail eligibility.",
+    type: "number", unit: "pts", min: 0, max: 100, step: 1,
+  },
+  "admissions.eligibility.docs_required_for_offer": {
+    label: "Documents Required Before Offer",
+    description: "When enabled, offer letters are only generated after all documents are approved.",
+    type: "boolean",
+  },
+  "admissions.counsellor.max_load": {
+    label: "Max Counsellor Lead Load",
+    description: "Maximum number of leads a single counsellor can be assigned at once.",
+    type: "number", unit: "leads", min: 1, max: 200, step: 1,
+  },
+  "admissions.offer_letter.validity_days": {
+    label: "Offer Letter Validity",
+    description: "Number of days an offer letter remains valid before it auto-expires.",
+    type: "number", unit: "days", min: 1, max: 180, step: 1,
+  },
+  "finance.fee.overdue_grace_days": {
+    label: "Fee Overdue Grace Period",
+    description: "Days after fee deadline before the payment is considered overdue and triggers escalation.",
+    type: "number", unit: "days", min: 0, max: 60, step: 1,
+  },
+  "academics.attendance.min_percentage": {
+    label: "Min Attendance Percentage",
+    description: "Minimum attendance % required. Students below this are flagged for academic review.",
+    type: "number", unit: "%", min: 0, max: 100, step: 1,
+  },
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+  admissions: "Admissions & Eligibility",
+  finance: "Finance & Fees",
+  academics: "Academics",
+  general: "General",
+};
+
+function PolicyTab() {
+  const [policies, setPolicies] = useState<InstitutionPolicy[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, number | boolean | string>>({});
+  const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [saved, setSaved] = useState<Record<string, boolean>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsLoading(true);
+    policiesApi.list()
+      .then((res) => {
+        setPolicies(res.policies);
+        const initial: Record<string, number | boolean | string> = {};
+        res.policies.forEach((p) => { initial[p.key] = p.value; });
+        setDrafts(initial);
+        setIsLoading(false);
+      })
+      .catch((e) => { setError(e.message); setIsLoading(false); });
+  }, []);
+
+  const handleChange = (key: string, val: number | boolean | string) => {
+    setDrafts((d) => ({ ...d, [key]: val }));
+    setSaved((s) => ({ ...s, [key]: false }));
+  };
+
+  const handleSave = async (policy: InstitutionPolicy) => {
+    setSaving((s) => ({ ...s, [policy.key]: true }));
+    try {
+      await policiesApi.upsert(policy.key, drafts[policy.key] ?? policy.value, policy.description, policy.category);
+      setSaved((s) => ({ ...s, [policy.key]: true }));
+      setPolicies((ps) => ps.map((p) => p.key === policy.key ? { ...p, value: drafts[p.key] ?? p.value } : p));
+      setTimeout(() => setSaved((s) => ({ ...s, [policy.key]: false })), 2000);
+    } catch {
+      // keep dirty state
+    } finally {
+      setSaving((s) => ({ ...s, [policy.key]: false }));
+    }
+  };
+
+  const handleReset = (policy: InstitutionPolicy) => {
+    setDrafts((d) => ({ ...d, [policy.key]: policy.value }));
+    setSaved((s) => ({ ...s, [policy.key]: false }));
+  };
+
+  if (isLoading) return (
+    <div className="space-y-3">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="skeleton-dark h-20 rounded-xl" />
+      ))}
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex items-center gap-2 p-4 rounded-xl" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)", color: "#f87171" }}>
+      <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+      <span className="text-[12px]">{error}</span>
+    </div>
+  );
+
+  // Group by category
+  const groups = policies.reduce<Record<string, InstitutionPolicy[]>>((acc, p) => {
+    (acc[p.category] ??= []).push(p);
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start gap-3 p-4 rounded-xl" style={{ background: "rgba(129,140,248,0.06)", border: "1px solid rgba(129,140,248,0.12)" }}>
+        <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "#818cf8" }} />
+        <div>
+          <p className="text-[12px] font-semibold" style={{ color: "#c7d2fe" }}>Institution Policy Engine</p>
+          <p className="text-[11px] mt-0.5" style={{ color: "#64748b" }}>
+            These thresholds drive the autonomous admissions pipeline. Changes take effect immediately — no code deployment needed.
+            All edits are audit-logged with actor ID.
+          </p>
+        </div>
+      </div>
+
+      {Object.entries(groups).map(([category, catPolicies]) => (
+        <div key={category}>
+          {/* Category header */}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "#818cf8" }}>
+              {CATEGORY_LABELS[category] ?? category}
+            </span>
+            <div className="flex-1 h-px" style={{ background: "rgba(129,140,248,0.12)" }} />
+          </div>
+
+          <div className="space-y-2">
+            {catPolicies.map((policy) => {
+              const meta = POLICY_META[policy.key];
+              const draft = drafts[policy.key] ?? policy.value;
+              const isDirty = draft !== policy.value;
+              const isSaving = saving[policy.key];
+              const isSaved = saved[policy.key];
+
+              return (
+                <div
+                  key={policy.key}
+                  className="p-4 rounded-xl transition-all"
+                  style={{
+                    background: isDirty ? "rgba(129,140,248,0.06)" : "rgba(255,255,255,0.025)",
+                    border: `1px solid ${isDirty ? "rgba(129,140,248,0.2)" : "rgba(255,255,255,0.06)"}`,
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    {/* Left: label + description */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[12px] font-semibold" style={{ color: "#e2e8f0" }}>
+                          {meta?.label ?? policy.key}
+                        </span>
+                        {isDirty && (
+                          <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                            style={{ background: "rgba(251,191,36,0.12)", color: "#fbbf24", border: "1px solid rgba(251,191,36,0.2)" }}>
+                            unsaved
+                          </span>
+                        )}
+                        {isSaved && (
+                          <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                            style={{ background: "rgba(34,197,94,0.12)", color: "#22c55e", border: "1px solid rgba(34,197,94,0.2)" }}>
+                            saved
+                          </span>
+                        )}
+                      </div>
+                      {meta?.description && (
+                        <p className="text-[11px]" style={{ color: "#64748b" }}>{meta.description}</p>
+                      )}
+                      <p className="text-[10px] mt-1 font-mono" style={{ color: "#334155" }}>{policy.key}</p>
+                    </div>
+
+                    {/* Right: control */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {meta?.type === "boolean" ? (
+                        <button
+                          onClick={() => handleChange(policy.key, !draft)}
+                          className="relative flex-shrink-0 transition-all"
+                          style={{ width: 40, height: 22 }}
+                        >
+                          <div
+                            className="absolute inset-0 rounded-full transition-all"
+                            style={{
+                              background: draft ? "rgba(129,140,248,0.4)" : "rgba(255,255,255,0.08)",
+                              border: `1px solid ${draft ? "rgba(129,140,248,0.5)" : "rgba(255,255,255,0.1)"}`,
+                            }}
+                          />
+                          <div
+                            className="absolute top-[3px] transition-all rounded-full"
+                            style={{
+                              width: 16, height: 16,
+                              background: draft ? "#818cf8" : "#475569",
+                              left: draft ? 21 : 3,
+                            }}
+                          />
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={meta?.min}
+                            max={meta?.max}
+                            step={meta?.step ?? 1}
+                            value={draft as number}
+                            onChange={(e) => handleChange(policy.key, Number(e.target.value))}
+                            className="text-[13px] font-semibold text-center rounded-lg px-2 py-1 w-20 transition-all"
+                            style={{
+                              background: "rgba(255,255,255,0.05)",
+                              border: "1px solid rgba(255,255,255,0.1)",
+                              color: "#e2e8f0",
+                              outline: "none",
+                            }}
+                          />
+                          {meta?.unit && (
+                            <span className="text-[11px]" style={{ color: "#475569" }}>{meta.unit}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Action buttons */}
+                      <button
+                        onClick={() => handleSave(policy)}
+                        disabled={!isDirty || isSaving}
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold transition-all"
+                        style={{
+                          background: isDirty ? "rgba(129,140,248,0.15)" : "transparent",
+                          border: `1px solid ${isDirty ? "rgba(129,140,248,0.3)" : "rgba(255,255,255,0.05)"}`,
+                          color: isDirty ? "#818cf8" : "#334155",
+                          cursor: isDirty ? "pointer" : "default",
+                        }}
+                      >
+                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                        Save
+                      </button>
+                      {isDirty && (
+                        <button
+                          onClick={() => handleReset(policy)}
+                          className="p-1.5 rounded-lg transition-all"
+                          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", color: "#475569" }}
+                          title="Reset to saved value"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Footer: last updated */}
+                  <div className="flex items-center gap-2 mt-2 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
+                    <span className="text-[10px]" style={{ color: "#334155" }}>
+                      Last updated by <span style={{ color: "#475569" }}>{policy.updated_by}</span>
+                      {policy.updated_at && (
+                        <> · {formatDate(policy.updated_at)}</>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Main export ──────────────────────────────────────────────
 
 export default function AdmissionsPage() {
@@ -580,6 +865,7 @@ export default function AdmissionsPage() {
         {activeTab === "merit" && <MeritTab />}
         {activeTab === "offers" && <OffersTab />}
         {activeTab === "enrollment" && <EnrollmentTab />}
+        {activeTab === "settings" && <PolicyTab />}
       </div>
     </div>
   );

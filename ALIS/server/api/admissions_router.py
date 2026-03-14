@@ -1287,8 +1287,14 @@ class PolicyUpsertRequest(BaseModel):
 @require_permission(Permission.STUDENT_READ)
 async def list_policies(request: Request, category: Optional[str] = None) -> JSONResponse:
     """List all institution policies for this org."""
+    import json
+    from datetime import datetime
     rows = PolicyStore.get_all(org_id=_org(request), category=category)
-    return JSONResponse(content={"policies": rows, "total": len(rows)})
+    # Serialize datetime fields to ISO strings
+    clean = []
+    for r in rows:
+        clean.append({k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in r.items()})
+    return JSONResponse(content={"policies": clean, "total": len(clean)})
 
 
 @router.put("/policies/{key:path}")

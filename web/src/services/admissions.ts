@@ -323,6 +323,34 @@ export const enrollmentApi = {
     ),
 };
 
+// ─── Institution Policies ────────────────────────────────────
+
+export interface InstitutionPolicy {
+  id: string;
+  org_id: string;
+  key: string;
+  value: number | boolean | string;
+  description: string;
+  category: string;
+  is_active: boolean;
+  updated_by: string;
+  updated_at: string;
+}
+
+export const policiesApi = {
+  list: (category?: string) => {
+    const q = category ? `?category=${category}` : "";
+    return apiFetch<{ policies: InstitutionPolicy[]; total: number }>(`/admissions/policies${q}`);
+  },
+  upsert: (key: string, value: number | boolean | string, description = "", category = "general") =>
+    apiFetch<InstitutionPolicy>(`/admissions/policies/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ key, value, description, category }),
+    }),
+  deactivate: (key: string) =>
+    apiFetch<void>(`/admissions/policies/${key}`, { method: "DELETE" }),
+};
+
 // ─── Legacy compat ───────────────────────────────────────────
 
 export const admissionsApi = {
