@@ -106,7 +106,7 @@ class StaffAttendanceService:
     def get_daily_roster(cls, org_id: str, date: str) -> list[dict]:
         rows = execute_query(
             """
-            SELECT sa.*, u.name AS staff_name, sp.department, sp.employee_code
+            SELECT sa.*, u.display_name AS staff_name, sp.department, sp.employee_code
             FROM staff_attendance sa
             JOIN staff_profiles sp ON sp.id = sa.staff_id
             JOIN users u ON u.id = sp.user_id

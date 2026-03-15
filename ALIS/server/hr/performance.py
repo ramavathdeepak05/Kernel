@@ -98,8 +98,8 @@ class PerformanceReviewService:
     def get(cls, org_id: str, review_id: str) -> dict:
         rows = execute_query(
             """
-            SELECT pr.*, u.name AS staff_name, sp.employee_code, sp.designation,
-                   ru.name AS reviewer_name
+            SELECT pr.*, u.display_name AS staff_name, sp.employee_code, sp.designation,
+                   ru.display_name AS reviewer_name
             FROM performance_reviews pr
             JOIN staff_profiles sp ON sp.id = pr.staff_id
             JOIN users u ON u.id = sp.user_id
@@ -124,7 +124,7 @@ class PerformanceReviewService:
     def list_pending(cls, org_id: str) -> list[dict]:
         rows = execute_query(
             """
-            SELECT pr.*, u.name AS staff_name, sp.department
+            SELECT pr.*, u.display_name AS staff_name, sp.department
             FROM performance_reviews pr
             JOIN staff_profiles sp ON sp.id = pr.staff_id
             JOIN users u ON u.id = sp.user_id

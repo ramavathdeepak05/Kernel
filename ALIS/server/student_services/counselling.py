@@ -76,7 +76,7 @@ class CounsellingService:
                    {note_col}
                    cs.follow_up_date, cs.is_confidential, cs.created_at,
                    s.name AS student_name, s.roll_number,
-                   u.name AS counsellor_name
+                   u.display_name AS counsellor_name
             FROM counselling_sessions cs
             JOIN students s ON s.id = cs.student_id
             JOIN users u ON u.id = cs.counsellor_id
@@ -96,7 +96,7 @@ class CounsellingService:
             f"""
             SELECT cs.id, cs.session_date, cs.session_type, cs.duration_mins,
                    {note_col} cs.follow_up_date, cs.is_confidential,
-                   u.name AS counsellor_name
+                   u.display_name AS counsellor_name
             FROM counselling_sessions cs
             JOIN users u ON u.id = cs.counsellor_id
             WHERE cs.student_id = %s AND cs.org_id = %s
@@ -183,7 +183,7 @@ class CounsellingService:
     @classmethod
     def list_referrals(cls, org_id: str, status: str | None = None) -> list[dict]:
         sql = """
-            SELECT cr.*, s.name AS student_name, u.name AS referred_by_name
+            SELECT cr.*, s.name AS student_name, u.display_name AS referred_by_name
             FROM counselling_referrals cr
             JOIN students s ON s.id = cr.student_id
             JOIN users u ON u.id = cr.referred_by

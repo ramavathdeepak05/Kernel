@@ -198,7 +198,7 @@ class LeaveService:
         rows = execute_query(
             """
             SELECT lr.*, lt.name AS leave_type_name, lt.is_paid,
-                   sp.employee_code, u.name AS staff_name
+                   sp.employee_code, u.display_name AS staff_name
             FROM leave_requests lr
             JOIN leave_types lt ON lt.id = lr.leave_type_id
             JOIN staff_profiles sp ON sp.id = lr.staff_id
@@ -231,7 +231,7 @@ class LeaveService:
     def list_pending(cls, org_id: str) -> list[dict]:
         rows = execute_query(
             """
-            SELECT lr.*, lt.name AS leave_type_name, u.name AS staff_name, sp.department
+            SELECT lr.*, lt.name AS leave_type_name, u.display_name AS staff_name, sp.department
             FROM leave_requests lr
             JOIN leave_types lt ON lt.id = lr.leave_type_id
             JOIN staff_profiles sp ON sp.id = lr.staff_id

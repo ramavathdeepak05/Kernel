@@ -35,7 +35,7 @@ class HostelService:
     @classmethod
     def get_block(cls, org_id: str, block_id: str) -> dict:
         rows = execute_query(
-            "SELECT b.*, u.name AS warden_name FROM hostel_blocks b LEFT JOIN users u ON u.id = b.warden_id WHERE b.id = %s AND b.org_id = %s",
+            "SELECT b.*, u.display_name AS warden_name FROM hostel_blocks b LEFT JOIN users u ON u.id = b.warden_id WHERE b.id = %s AND b.org_id = %s",
             (block_id, org_id),
         )
         if not rows:
@@ -45,7 +45,7 @@ class HostelService:
     @classmethod
     def list_blocks(cls, org_id: str) -> list[dict]:
         rows = execute_query(
-            "SELECT b.*, u.name AS warden_name FROM hostel_blocks b LEFT JOIN users u ON u.id = b.warden_id WHERE b.org_id = %s AND b.is_active = TRUE ORDER BY b.name",
+            "SELECT b.*, u.display_name AS warden_name FROM hostel_blocks b LEFT JOIN users u ON u.id = b.warden_id WHERE b.org_id = %s AND b.is_active = TRUE ORDER BY b.name",
             (org_id,),
         )
         return [dict(r) for r in rows]

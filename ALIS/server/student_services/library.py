@@ -230,7 +230,7 @@ class LibraryService:
     def list_overdue(cls, org_id: str) -> list[dict]:
         rows = execute_query(
             """
-            SELECT lb.*, b.title, b.author, u.name AS borrower_name, u.email
+            SELECT lb.*, b.title, b.author, u.display_name AS borrower_name, u.email
             FROM library_borrowings lb
             JOIN library_books b ON b.id = lb.book_id
             JOIN users u ON u.id = lb.borrower_id

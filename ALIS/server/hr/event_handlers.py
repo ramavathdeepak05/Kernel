@@ -28,7 +28,7 @@ def on_leave_requested(event: dict) -> None:
         # Find HOD / reporting manager
         staff_rows = execute_query(
             """
-            SELECT sp.reporting_to, u.name AS staff_name, sp.department
+            SELECT sp.reporting_to, u.display_name AS staff_name, sp.department
             FROM staff_profiles sp
             JOIN users u ON u.id = sp.user_id
             WHERE sp.id = %s AND sp.org_id = %s

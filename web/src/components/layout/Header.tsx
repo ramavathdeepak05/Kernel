@@ -8,7 +8,11 @@ const MODULE_OPTIONS = [
   { id: "academics", label: "Academics", path: "/academics", badge: "E05" },
   { id: "examinations", label: "Examinations", path: "/examinations", badge: "E06" },
   { id: "finance", label: "Finance", path: "/finance", badge: "E07" },
-  { id: "hr", label: "HR & Staff", path: "/hr", badge: "E08" },
+  { id: "hr",            label: "HR & Staff",         path: "/hr",            badge: "E08" },
+  { id: "students",      label: "Student Services",   path: "/students",      badge: "E09" },
+  { id: "communications",label: "Communication Hub",  path: "/communications",badge: "E10" },
+  { id: "reports",       label: "Reports & Analytics",path: "/reports",       badge: "E11" },
+  { id: "alumni",        label: "Alumni & Placement", path: "/alumni",        badge: "E12" },
 ];
 
 interface HeaderProps {
@@ -38,11 +42,11 @@ export default function Header({ currentModule = "Admissions", onModuleChange }:
           <div
             className="w-7 h-7 rounded-lg flex items-center justify-center font-bold text-[13px]"
             style={{
-              background: "linear-gradient(135deg, rgba(129,140,248,0.3) 0%, rgba(167,139,250,0.3) 100%)",
-              border: "1px solid rgba(129,140,248,0.3)",
-              color: "#818cf8",
+              background: "#1D9E75",
+              border: "0.5px solid rgba(29,158,117,0.4)",
+              color: "#fff",
               fontFamily: "var(--font-family-sans)",
-              boxShadow: "0 0 16px rgba(129,140,248,0.15)",
+              
             }}
           >
             A
@@ -99,7 +103,7 @@ export default function Header({ currentModule = "Admissions", onModuleChange }:
                 >
                   <span className="text-[12px] font-medium">{mod.label}</span>
                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-                    style={{ background: "rgba(129,140,248,0.1)", color: "#818cf8", border: "1px solid rgba(129,140,248,0.2)" }}>
+                    style={{ background: "rgba(129,140,248,0.1)", color: "#fff", border: "1px solid rgba(129,140,248,0.2)" }}>
                     {mod.badge}
                   </span>
                 </button>
@@ -153,7 +157,7 @@ export default function Header({ currentModule = "Admissions", onModuleChange }:
         {/* Role chip */}
         {user?.role && (
           <div className="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider"
-            style={{ background: "rgba(129,140,248,0.08)", color: "#818cf8", border: "1px solid rgba(129,140,248,0.15)" }}>
+            style={{ background: "rgba(129,140,248,0.08)", color: "#fff", border: "1px solid rgba(129,140,248,0.15)" }}>
             {user.role.replace(/_/g, " ")}
           </div>
         )}

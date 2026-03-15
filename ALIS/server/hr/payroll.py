@@ -254,7 +254,7 @@ class PayslipService:
     def get(cls, org_id: str, payslip_id: str) -> dict:
         rows = execute_query(
             """
-            SELECT p.*, u.name AS staff_name, sp.employee_code, sp.designation
+            SELECT p.*, u.display_name AS staff_name, sp.employee_code, sp.designation
             FROM payslips p
             JOIN staff_profiles sp ON sp.id = p.staff_id
             JOIN users u ON u.id = sp.user_id

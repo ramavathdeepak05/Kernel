@@ -52,10 +52,27 @@ router = APIRouter(prefix="/api/v1/exams", tags=["examinations"])
 
 
 def _org(r: Request) -> str:
-    return r.state.org_id
+    return getattr(r.state, "tenant_id", "default")
 
 def _actor(r: Request) -> str:
-    return r.state.user_id
+    return getattr(r.state, "user_id", "anonymous")
+
+
+def _jsonify(obj):
+    """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from decimal import Decimal
+    from datetime import datetime, date, time as _time
+    if isinstance(obj, dict):
+        return {k: _jsonify(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_jsonify(i) for i in obj]
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, _time):
+        return obj.strftime("%H:%M")
+    return obj
 
 
 # ──────────────────────────────────────────────────────────────
@@ -78,13 +95,13 @@ async def list_schedules(
     exam_type: Optional[str] = Query(None),
 ) -> JSONResponse:
     items = ExamScheduleService.list(_org(request), academic_year, semester, exam_type)
-    return JSONResponse(content={"schedules": items, "total": len(items)})
+    return JSONResponse(content=_jsonify({"schedules": items, "total": len(items)}))
 
 
 @router.get("/schedules/{schedule_id}")
 @require_permission(Permission.EXAM_PAPER_READ)
 async def get_schedule(request: Request, schedule_id: str) -> JSONResponse:
-    return JSONResponse(content=ExamScheduleService.get(_org(request), schedule_id))
+    return JSONResponse(content=_jsonify(ExamScheduleService.get(_org(request), schedule_id)))
 
 
 @router.patch("/schedules/{schedule_id}/status")
@@ -119,7 +136,7 @@ async def get_hall_tickets(
     request: Request, student_id: str, academic_year: str = Query(...)
 ) -> JSONResponse:
     items = HallTicketService.get_for_student(_org(request), student_id, academic_year)
-    return JSONResponse(content={"hall_tickets": items})
+    return JSONResponse(content=_jsonify({"hall_tickets": items}))
 
 
 # ──────────────────────────────────────────────────────────────
@@ -142,7 +159,7 @@ async def get_student_grades(
     semester: Optional[int] = Query(None),
 ) -> JSONResponse:
     items = GradeService.get_student_grades(_org(request), student_id, academic_year, semester)
-    return JSONResponse(content={"grades": items, "total": len(items)})
+    return JSONResponse(content=_jsonify({"grades": items, "total": len(items)}))
 
 
 # ──────────────────────────────────────────────────────────────
@@ -187,7 +204,7 @@ async def get_student_results(request: Request, student_id: str) -> JSONResponse
         (student_id, _org(request)),
     )
     items = [dict(r) for r in rows]
-    return JSONResponse(content={"results": items, "total": len(items)})
+    return JSONResponse(content=_jsonify({"results": items, "total": len(items)}))
 
 
 # ──────────────────────────────────────────────────────────────
@@ -210,7 +227,7 @@ async def generate_transcript(request: Request, body: dict) -> JSONResponse:
 @require_permission(Permission.MARKS_READ)
 async def list_transcripts(request: Request, student_id: str) -> JSONResponse:
     items = TranscriptService.list_for_student(_org(request), student_id)
-    return JSONResponse(content={"transcripts": items})
+    return JSONResponse(content=_jsonify({"transcripts": items}))
 
 
 # ──────────────────────────────────────────────────────────────
@@ -233,14 +250,14 @@ async def submit_reeval(request: Request, body: ReEvalRequest) -> JSONResponse:
 @require_permission(Permission.MARKS_FINALIZE)
 async def list_pending_reeval(request: Request) -> JSONResponse:
     items = ReEvalService.list_pending(_org(request))
-    return JSONResponse(content={"reeval_requests": items, "total": len(items)})
+    return JSONResponse(content=_jsonify({"reeval_requests": items, "total": len(items)}))
 
 
 @router.get("/reeval/student/{student_id}")
 @require_permission(Permission.MARKS_READ)
 async def list_student_reeval(request: Request, student_id: str) -> JSONResponse:
     items = ReEvalService.list_for_student(_org(request), student_id)
-    return JSONResponse(content={"reeval_requests": items})
+    return JSONResponse(content=_jsonify({"reeval_requests": items}))
 
 
 @router.post("/reeval/{reeval_id}/decide")
@@ -260,7 +277,7 @@ async def decide_reeval(
 @require_permission(Permission.MARKS_READ)
 async def course_analytics(request: Request, exam_schedule_id: str) -> JSONResponse:
     return JSONResponse(
-        content=GradeAnalyticsService.get_course_statistics(_org(request), exam_schedule_id)
+        content=_jsonify(GradeAnalyticsService.get_course_statistics(_org(request), exam_schedule_id))
     )
 
 
@@ -272,7 +289,7 @@ async def semester_analytics(
     semester: int = Query(...),
 ) -> JSONResponse:
     return JSONResponse(
-        content=GradeAnalyticsService.get_semester_statistics(_org(request), academic_year, semester)
+        content=_jsonify(GradeAnalyticsService.get_semester_statistics(_org(request), academic_year, semester))
     )
 
 
@@ -280,7 +297,7 @@ async def semester_analytics(
 @require_permission(Permission.MARKS_READ)
 async def student_performance_trend(request: Request, student_id: str) -> JSONResponse:
     items = GradeAnalyticsService.get_student_performance_trend(_org(request), student_id)
-    return JSONResponse(content={"trend": items})
+    return JSONResponse(content=_jsonify({"trend": items}))
 
 
 @router.get("/analytics/semester/ai-insights")
@@ -291,5 +308,5 @@ async def semester_ai_insights(
     semester: int = Query(...),
 ) -> JSONResponse:
     return JSONResponse(
-        content=GradeAnalyticsService.generate_ai_insights(_org(request), academic_year, semester)
+        content=_jsonify(GradeAnalyticsService.generate_ai_insights(_org(request), academic_year, semester))
     )

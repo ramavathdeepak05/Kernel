@@ -65,10 +65,26 @@ router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
 
 def _org(r: Request) -> str:
-    return r.state.org_id
+    return getattr(r.state, "tenant_id", "default")
 
 def _actor(r: Request) -> str:
-    return r.state.user_id
+    return getattr(r.state, "user_id", "anonymous")
+n
+def _jsonify(obj):
+    """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from decimal import Decimal
+    from datetime import datetime, date, time as _time
+    if isinstance(obj, dict):
+        return {k: _jsonify(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_jsonify(i) for i in obj]
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    if isinstance(obj, _time):
+        return obj.strftime("%H:%M")
+    return obj
 
 
 # ──────────────────────────────────────────────────────────────
