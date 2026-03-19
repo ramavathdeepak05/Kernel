@@ -2,8 +2,28 @@
 ## Implementation Reference for E15–E20
 ### QUAICU Pvt. Ltd. | Confidential
 
+**Last updated:** 2026-03-20
+
 This file contains full implementation specs for the product gaps identified
-as missing from ALIS v1. Read the relevant section before building each epic.
+as missing from ALIS v1. Items marked ✅ are fully built and deployed.
+
+---
+
+## Build Status Summary
+
+| Gap | Backend | Frontend | Status |
+|---|---|---|---|
+| E15 — PhD / Doctoral Research | ✅ phd_service, plagiarism_service, phd_router | ✅ PhDPage | **DONE** |
+| E17 — Re-admission & Credit Transfer | ✅ readmission_service, credit_transfer_service | ✅ ReadmissionPage | **DONE** |
+| E18 — Convocation Management | ✅ convocation_service, convocation_router | ✅ ConvocationPage | **DONE** |
+| E19 — Quota Seat Matrix Engine | ✅ seat_matrix_service, admissions_router | ✅ SeatMatrixPage | **DONE** |
+| E20 — OBE / CO-PO Mapping | ✅ obe_service, academics_router | ✅ OBEPage | **DONE** |
+| Duplicate Student Detection | ✅ deduplication_service | ❌ No FE page | Backend only |
+| Tally / Busy Export | ✅ tally_export.py, finance_router | ❌ No FE trigger | Backend only |
+| Regional Languages (6) | — | ✅ i18n/ (EN/TE/HI/KN/TA/MR) | **DONE** |
+| Offline PWA | ✅ bulk-sync endpoint | ✅ Dexie + Workbox | **DONE** |
+| GST e-Invoice / IRN | ✅ einvoice_service, finance_router | ❌ No FE trigger | Backend only |
+| Load Testing Baseline | ✅ infra/loadtest/locustfile.py | — | **DONE** |
 
 ---
 
@@ -25,7 +45,7 @@ as missing from ALIS v1. Read the relevant section before building each epic.
 
 ## E15 — PhD / Doctoral Research Module
 
-**Status:** NOT BUILT. Build after E14.
+**Status:** ✅ BUILT (P27). `server/phd/phd_service.py` + `plagiarism_service.py` + `api/phd_router.py` + migration `0026_phd_module`. Frontend: `web/src/pages/phd/PhDPage.tsx`. Spec below retained as reference.
 
 PhD is a milestone-based program, not semester-based. A scholar's lifecycle spans
 3–6 years with structured checkpoints mandated by UGC Regulations 2022.
@@ -220,6 +240,8 @@ PHD_EVENTS = [
 
 ## E17 — Re-admission & Credit Transfer
 
+**Status:** ✅ BUILT (P27). `server/admissions/readmission_service.py` + `credit_transfer_service.py` + migration `0027_readmission`. Frontend: `web/src/pages/admissions/ReadmissionPage.tsx`. Spec retained as reference.
+
 ### Re-admission
 
 A student who was detained or voluntarily withdrew can apply to re-join. They retain credit for semesters already completed.
@@ -279,6 +301,8 @@ CREATE TABLE credit_transfer_applications (
 
 ## E18 — Convocation Management
 
+**Status:** ✅ BUILT (P27). `server/convocation/convocation_service.py` + `api/convocation_router.py` + migration `0028_convocation`. Frontend: `web/src/pages/convocation/ConvocationPage.tsx`. Spec retained as reference.
+
 Convocation is a high-visibility, high-pressure annual event.
 
 ```sql
@@ -329,6 +353,8 @@ CREATE TABLE convocation_registrations (
 ---
 
 ## E19 — Quota Seat Matrix Engine
+
+**Status:** ✅ BUILT (P27). `server/admissions/seat_matrix_service.py` + admissions_router. Frontend: `web/src/pages/admissions/SeatMatrixPage.tsx`. Spec retained as reference.
 
 The current `seat counter - 1` approach is insufficient. AICTE and state counseling bodies audit quota-wise seat utilisation.
 
@@ -427,6 +453,8 @@ async def activate_next_waitlist_candidate(
 
 ## Duplicate Student Detection & Merge
 
+**Status:** ✅ Backend built (P27). `server/admissions/deduplication_service.py` — Jaro-Winkler scoring, dual-auth merge flow. ❌ No frontend page yet. Spec retained as reference.
+
 Over time, duplicate student records accumulate (re-applicants, data entry errors, system migrations).
 
 ### Detection
@@ -514,6 +542,8 @@ class StudentMergeWorkflow:
 
 ## Tally / Busy Accounting Export
 
+**Status:** ✅ Backend built (P27). `server/finance/tally_export.py` — Tally XML + Busy CSV, feature-flagged. Routes wired in `finance_router.py`. ❌ No frontend trigger yet. Spec retained as reference.
+
 Accounts teams use Tally or Busy. ALIS must produce clean exports — not replace these tools.
 
 ### Tally XML Export (TallyPrime format)
@@ -576,6 +606,8 @@ class TallyExportService:
 
 ## Regional Language Support
 
+**Status:** ✅ BUILT (P27). `web/src/i18n/` — en.json, te.json, hi.json, kn.json, ta.json, mr.json. `react-i18next` wired. Language preference stored per user. Spec retained as reference.
+
 **Strategy:** Internationalise student-facing and parent-facing UI only. Admin/staff interface remains English. Use `react-i18next` on the frontend.
 
 **Priority languages (by institution geography):**
@@ -626,6 +658,8 @@ web/src/
 ---
 
 ## Offline / Low-Bandwidth PWA
+
+**Status:** ✅ BUILT (P28). `web/src/views/AttendanceMarking/offline-store.ts` (Dexie), `sync.ts` (background sync), Workbox runtime caching in vite.config.ts. Route: `/attendance/mark/:sessionId`. Spec retained as reference.
 
 **Scope:** Faculty attendance marking only. This is the highest-value offline use case.
 All other ALIS functionality requires connectivity.
@@ -694,6 +728,8 @@ export async function syncPendingMarks(tenantId: string, authToken: string) {
 ---
 
 ## GST e-Invoice / IRN Generation
+
+**Status:** ✅ Backend built (P27). `server/finance/einvoice_service.py` + migration `0031_einvoice` (`irn` column on `student_invoices`). Route: `POST /finance/invoices/{id}/generate-irn`. ❌ No frontend trigger. Activate by setting `NIC_EINVOICE_*` env vars. Spec retained as reference.
 
 From April 2025, all GSTIN-registered entities above ₹5 crore annual turnover must generate e-Invoices (Invoice Reference Numbers) for B2B transactions via the GST portal.
 
@@ -781,6 +817,8 @@ class EInvoiceService:
 ---
 
 ## Load Testing Baseline
+
+**Status:** ✅ BUILT (P27). `infra/loadtest/locustfile.py` — RegistrarUser + StudentUser scenarios. Targets: 200 concurrent p95<500ms, 2000 concurrent (result day) p95<2s. Run: `locust -f infra/loadtest/locustfile.py`. Spec retained as reference.
 
 Before any pilot go-live, establish the system's capacity limits.
 

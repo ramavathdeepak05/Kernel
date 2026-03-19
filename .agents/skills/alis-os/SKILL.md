@@ -241,45 +241,76 @@ NEVER process a payment webhook without idempotency check first
 
 ## Current build status — what exists, what doesn't
 
-| Epic | Module | Status |
-|---|---|---|
-| E01–E13 | Core platform (Auth through Dynamic Process Engine) | ✅ All complete |
-| **E14** | **Regulatory & Accreditation** | ❌ Not built |
-| **E15** | **PhD / Doctoral Research** | ❌ Not built |
-| **E16** | **Parent / Guardian Portal** | ❌ Not built — go-live blocker |
-| **E17** | **Re-admission & Credit Transfer** | ❌ Not built |
-| **E18** | **Convocation Management** | ❌ Not built |
-| **E19** | **Quota Seat Matrix Engine** | ❌ Not built |
-| **E20** | **OBE / CO-PO Mapping** | ❌ Not built |
-| **E21** | **DPDP Consent Management** | ❌ Not built — go-live blocker |
-| **PAA** | **Policy Authoring Agent** | ❌ Not built |
-| **FE** | **React Frontend** | In progress (P15) |
-| **Go-live blockers** | MFA, WhatsApp, Observability, Fee Versioning, Data Migration, Shadow Mode | ❌ Not built |
+**Last updated:** 2026-03-20 | Migrations 0001–0034 complete | P22–P29 done
 
-**846 tests passing.** Do not break this. Run the full test suite before every commit.
+| Epic | Module | Backend | Frontend | Status |
+|---|---|---|---|---|
+| E01 | Auth + RBAC + MFA/TOTP | ✅ | ✅ Login UI | **GA** |
+| E02 | Workflow Engine + Quorum | ✅ | ✅ WorkflowsPage | **GA** |
+| E03 | AI Gateway + RAG + PGVector | ✅ | ✅ Agent rail wired | **GA** |
+| E04 | Admissions (10-stage pipeline) | ✅ | ✅ Full pipeline Kanban | **GA** |
+| E05 | Academics | ✅ | ✅ AcademicsPage | **GA** |
+| E06 | Examinations & Grades | ✅ | ✅ ExaminationsPage | **GA** |
+| E07 | Finance | ✅ | ✅ FinancePage | **GA** |
+| E08 | HR & Staff | ✅ | ✅ HRPage | **GA** |
+| E09 | Student Services | ✅ | ✅ StudentServicesPage | **GA** |
+| E10 | Communication Hub | ✅ | ✅ CommunicationHubPage | **GA** |
+| E11 | Reporting & Analytics | ✅ | ✅ ReportsPage | **GA** |
+| E12 | Alumni & Placement | ✅ | ✅ AlumniPage | **GA** |
+| E13 | Dynamic Process Engine | ✅ | ✅ ProcessEnginePage | **GA** |
+| E14 | Regulatory / NAAC / NIRF | ✅ | ✅ RegulatoryPage | **GA** |
+| E15 | PhD / Doctoral Research | ✅ | ✅ PhDPage | **GA** |
+| E16 | Parent / Guardian Portal | ✅ | ✅ GuardianPortalPage | **GA** |
+| E17 | Re-admission & Credit Transfer | ✅ | ✅ ReadmissionPage | **GA** |
+| E18 | Convocation Management | ✅ | ✅ ConvocationPage | **GA** |
+| E19 | Quota Seat Matrix Engine | ✅ | ✅ SeatMatrixPage | **GA** |
+| E20 | OBE / CO-PO Mapping | ✅ | ✅ OBEPage | **GA** |
+| E21 | DPDP Consent Management | ✅ | ✅ ConsentPage | **GA** |
+| PAA | Policy Authoring Agent | ✅ policy_authoring_agent.py | ⚠️ "Draft with AI" btn pending | Needs FE wire-up |
+| Desktop | WiFi Attendance (Electron) | ✅ wifi_attendance_router | ✅ NSIS installer built | **GA** |
+| PWA | Offline Attendance (PWA) | ✅ bulk-sync endpoint | ✅ Dexie + Workbox | **GA** |
+| Infra | Monitoring (Prometheus/Loki/Grafana) | ✅ Full stack | — | **GA** |
+| Infra | Backup + DR (pg_dump cron) | ✅ backup.sh + tasks | — | **GA** |
+| Infra | Load testing (Locust) | ✅ locustfile.py | — | **GA** |
+| Platform | Multi-campus model | ✅ migration + campus_service | ❌ No FE page | Needs FE |
+| Platform | GST e-Invoice / IRN | ✅ einvoice_service | ❌ No FE trigger | Needs FE |
+| Platform | Tally / Busy export | ✅ tally_export.py | ❌ No FE trigger | Needs FE |
+| Platform | Duplicate student detection | ✅ deduplication_service | ❌ No FE | Needs FE |
+| Platform | API versioning (v1/v2) | ✅ api_versioning.py | — | **GA** |
+| Platform | Regional languages (6) | — | ✅ i18n/ (EN/TE/HI/KN/TA/MR) | **GA** |
 
-**Build order for go-live readiness:**
-1. Fix P0 bugs (connection pool, Vault, LLM model tier) — see §14
-2. Go-live blockers in this order: E21 (DPDP) → MFA → Observability → Fee Versioning → WhatsApp → E16 (Parent Portal) → Data Migration tooling → Shadow Mode
-3. Then: E14 → E19 → E15 → E17 → E18 → E20 → PAA
+**846 tests passing** (covers E01–E14 era). P15–P34 features have no dedicated tests yet — write these next.
+
+**Remaining work (priority order):**
+1. PAA "Draft with AI" button in PolicyStudioPage (small FE wire-up)
+2. Multi-campus UI page (`web/src/pages/admin/CampusPage.tsx`)
+3. E2E tests for P22–P29 features (PhD, Convocation, OBE, WiFi attendance, etc.)
+4. Live integrations: DigiLocker, WhatsApp Cloud API, Razorpay webhooks, Drillbit, NIC e-Invoice
+5. ILL (Institutional Logic Layer) — sandboxed custom algorithm execution (not yet designed)
 
 ---
 
-## Known P0 bugs — fix these before adding features
+## Known P0 bugs — status
 
-These are in production-blocking state. Address them in the order listed.
+All original P0 bugs have been resolved. Current production-blocking items:
 
-**1. Connection pool — CRITICAL DATA CORRUPTION RISK**
-`psycopg2.pool.SimpleConnectionPool` is not async-safe. Under concurrent load, two coroutines can share a connection. File: `ALIS/server/db_service.py`. Migrate to `asyncpg.create_pool()`. The `execute_query` / `execute_transaction` helpers are the correct abstraction — only the driver underneath changes.
+**✅ FIXED — Connection pool**
+`db_service.py` now uses `asyncpg.create_pool()` for all FastAPI async handlers (`execute_query_async` / `execute_transaction_async`). `ThreadedConnectionPool` retained for Celery sync workers only — correct pattern.
 
-**2. LLM model tier — WRONG MODEL FOR DRAFTING**
-`qwen2.5:1.5b` is used for all tasks including offer letters and parent alerts. Pull `llama3.1:8b` via Ollama. Route `DRAFTING` and `GENERATION` task classes to 8B. Keep 1.5B for `EXTRACTION` only.
+**✅ FIXED — LLM model tier**
+`llm_router.py` + `settings.py` implement 3-tier routing: `EXTRACTION→qwen2.5:1.5b`, `GENERATION→qwen2.5:7b`, `REASONING→qwen2.5:14b`. All agents call `get_model_for_task(LLMTaskClass.X)` — never read model names directly.
 
-**3. HashiCorp Vault — MISSING FOR QUESTION PAPERS**
-Exam question papers require AES-256 encryption with CoE-only decrypt access and a full access audit log. HashiCorp Vault is not yet in the Docker Compose stack. Add it before any exam module goes to a pilot institution.
+**✅ FIXED — HashiCorp Vault**
+Vault 1.17 service added to `docker-compose.yml`. `vault_client.py` in `server/core/`. `hvac==2.3.0` in `requirements.txt`. Settings expose `vault_addr`, `vault_token`, `vault_transit_mount`.
 
-**4. RBAC scope on role assignments — VERIFY MIGRATION 0001**
-Check that `role_assignments` has a `scope_id` column. Without it, HODs get institution-wide access instead of department-scoped. If missing, add it in a new migration before onboarding any multi-department institution.
+**✅ FIXED — RBAC scope_id**
+Migration `0015_rbac_scope_and_event_hardening.py` adds `scope_id` to `role_assignments`. HODs are now department-scoped.
+
+**⚠️ OPEN — E2E tests for P15–P34**
+846 tests cover E01–E14 era only. PhD, Convocation, OBE, WiFi attendance, offline PWA, and all P22–P29 features have zero dedicated test coverage. Write before pilot deployment.
+
+**⚠️ OPEN — Live integrations (stubs only)**
+DigiLocker, WhatsApp Cloud API, Razorpay webhooks, Drillbit plagiarism, NIC e-Invoice — all implemented as stubs. Activate by setting the corresponding env vars (keys are already defined in `settings.py`).
 
 ---
 
