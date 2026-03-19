@@ -9,11 +9,11 @@ export default defineConfig({
     react(),
     electron([
       {
-        // Main process entry
-        entry: 'src/main/index.ts',
+        // Main process entry — absolute path so it's not affected by root setting
+        entry: path.resolve(__dirname, 'src/main/index.ts'),
         vite: {
           build: {
-            outDir: 'dist-electron/main',
+            outDir: path.resolve(__dirname, 'dist-electron/main'),
             rollupOptions: { external: ['electron'] },
           },
         },
@@ -24,7 +24,7 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(__dirname, './src/renderer') },
   },
-  root: 'src/renderer',
+  root: path.resolve(__dirname, 'src/renderer'),
   build: {
     outDir: path.resolve(__dirname, 'dist-renderer'),
     emptyOutDir: true,
