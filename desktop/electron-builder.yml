@@ -3,8 +3,10 @@ productName: ALIS Attendance
 copyright: Copyright © 2026 QUAICU Pvt. Ltd.
 
 directories:
-  output: release
+  output: dist
   buildResources: assets
+
+asar: false
 
 files:
   - dist-electron/**/*
@@ -17,6 +19,8 @@ win:
       arch:
         - x64
   icon: assets/icon.ico
+  signingHashAlgorithms: []
+  sign: false
 
 nsis:
   oneClick: false
