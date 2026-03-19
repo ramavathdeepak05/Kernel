@@ -1975,3 +1975,162 @@ async def get_review_queue(request: Request) -> JSONResponse:
             "created_at":     r["created_at"].isoformat() if r["created_at"] else None,
         })
     return JSONResponse(content=items)
+
+
+# ---------------------------------------------------------------------------
+# E17 — Re-admission & Credit Transfer Routes (P22)
+# ---------------------------------------------------------------------------
+
+@router.post("/readmission")
+async def submit_readmission(request: Request, body: dict) -> JSONResponse:
+    """Submit a re-admission application."""
+    from server.admissions.readmission_service import ReadmissionService
+    try:
+        result = ReadmissionService.submit_application(
+            org_id=_org(request),
+            applicant_name=body["applicant_name"],
+            applicant_email=body["applicant_email"],
+            program_id=body["program_id"],
+            gap_from=body["gap_from"],
+            gap_to=body["gap_to"],
+            semesters_completed=body.get("semesters_completed", 0),
+            gap_reason=body["gap_reason"],
+            previous_roll_number=body.get("previous_roll_number"),
+            previous_institution=body.get("previous_institution"),
+            applicant_phone=body.get("applicant_phone"),
+        )
+        return JSONResponse(content=result, status_code=201)
+    except Exception as exc:
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+
+
+@router.get("/readmission")
+async def list_readmissions(
+    request: Request,
+    status: Optional[str] = None,
+    program_id: Optional[str] = None,
+) -> JSONResponse:
+    from server.admissions.readmission_service import ReadmissionService
+    result = ReadmissionService.list_applications(_org(request), status=status, program_id=program_id)
+    return JSONResponse(content={"applications": result, "total": len(result)})
+
+
+@router.get("/readmission/{application_id}")
+async def get_readmission(request: Request, application_id: str) -> JSONResponse:
+    from server.admissions.readmission_service import ReadmissionService
+    result = ReadmissionService.get_application(application_id, _org(request))
+    return JSONResponse(content=result)
+
+
+@router.post("/readmission/{application_id}/review")
+async def start_readmission_review(request: Request, application_id: str) -> JSONResponse:
+    from server.admissions.readmission_service import ReadmissionService
+    result = ReadmissionService.start_review(application_id, _org(request), _actor(request))
+    return JSONResponse(content=result)
+
+
+@router.post("/readmission/{application_id}/approve")
+async def approve_readmission(request: Request, application_id: str, body: dict) -> JSONResponse:
+    from server.admissions.readmission_service import ReadmissionService
+    result = ReadmissionService.approve(application_id, _org(request), _actor(request), review_notes=body.get("notes"))
+    return JSONResponse(content=result)
+
+
+@router.post("/readmission/{application_id}/reject")
+async def reject_readmission(request: Request, application_id: str, body: dict) -> JSONResponse:
+    from server.admissions.readmission_service import ReadmissionService
+    result = ReadmissionService.reject(application_id, _org(request), _actor(request), review_notes=body.get("notes", ""))
+    return JSONResponse(content=result)
+
+
+@router.post("/credit-transfer")
+async def submit_credit_transfer(request: Request, body: dict) -> JSONResponse:
+    """Submit a credit transfer request."""
+    from server.admissions.credit_transfer_service import CreditTransferService
+    result = CreditTransferService.submit_request(
+        org_id=_org(request),
+        student_id=body["student_id"],
+        source_institution=body["source_institution"],
+        source_course_code=body["source_course_code"],
+        source_course_name=body["source_course_name"],
+        source_credits=body["source_credits"],
+        readmission_id=body.get("readmission_id"),
+    )
+    return JSONResponse(content=result, status_code=201)
+
+
+@router.post("/credit-transfer/{request_id}/ai-draft")
+async def generate_credit_transfer_ai_draft(request: Request, request_id: str) -> JSONResponse:
+    from server.admissions.credit_transfer_service import CreditTransferService
+    result = await CreditTransferService.generate_ai_draft(request_id, _org(request), _actor(request))
+    return JSONResponse(content=result)
+
+
+@router.post("/credit-transfer/{request_id}/decide")
+async def decide_credit_transfer(request: Request, request_id: str, body: dict) -> JSONResponse:
+    from server.admissions.credit_transfer_service import CreditTransferService
+    result = await CreditTransferService.review_and_decide(
+        request_id=request_id,
+        org_id=_org(request),
+        decision=body["decision"],
+        decided_by=_actor(request),
+        notes=body.get("notes"),
+        target_course_id=body.get("target_course_id"),
+        credits_awarded=body.get("credits_awarded"),
+    )
+    return JSONResponse(content=result)
+
+
+@router.get("/credit-transfer")
+async def list_credit_transfers(
+    request: Request,
+    student_id: Optional[str] = None,
+    readmission_id: Optional[str] = None,
+    status: Optional[str] = None,
+) -> JSONResponse:
+    from server.admissions.credit_transfer_service import CreditTransferService
+    result = CreditTransferService.list_requests(
+        _org(request), student_id=student_id, readmission_id=readmission_id, status=status
+    )
+    return JSONResponse(content={"requests": result, "total": len(result)})
+
+
+# ---------------------------------------------------------------------------
+# Student Deduplication Routes (P22 — distinct from lead dedup)
+# ---------------------------------------------------------------------------
+
+@router.get("/students/duplicates")
+async def find_student_duplicates(
+    request: Request,
+    threshold: float = 0.90,
+) -> JSONResponse:
+    """Find potential duplicate student records using Jaro-Winkler composite scoring."""
+    from server.admissions.deduplication_service import StudentDeduplicationService
+    result = StudentDeduplicationService.find_duplicates(_org(request), threshold=threshold)
+    return JSONResponse(content={"duplicates": result, "total": len(result)})
+
+
+@router.post("/students/merge/initiate")
+async def initiate_student_merge(request: Request, body: dict) -> JSONResponse:
+    """Initiate dual-auth merge workflow (Registrar + Super Admin required)."""
+    from server.admissions.deduplication_service import StudentDeduplicationService
+    result = StudentDeduplicationService.initiate_merge(
+        primary_id=body["primary_id"],
+        duplicate_id=body["duplicate_id"],
+        org_id=_org(request),
+        initiator_id=_actor(request),
+    )
+    return JSONResponse(content=result, status_code=202)
+
+
+@router.post("/students/merge/execute")
+async def execute_student_merge(request: Request, body: dict) -> JSONResponse:
+    """Execute the student merge (called after dual-auth approval)."""
+    from server.admissions.deduplication_service import StudentDeduplicationService
+    result = StudentDeduplicationService.execute_merge(
+        primary_id=body["primary_id"],
+        duplicate_id=body["duplicate_id"],
+        org_id=_org(request),
+        approver_id=_actor(request),
+    )
+    return JSONResponse(content=result)

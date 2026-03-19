@@ -123,6 +123,67 @@ async def verify_otp(request: Request, body: SMSVerifyRequest) -> JSONResponse:
     result = client.verify_otp(phone=body.phone, otp=body.otp, request_id=body.request_id)
     return JSONResponse({"is_valid": result.is_valid, "phone": result.phone, "error": result.error})
 
+@router.post("/lms/provision/{student_id}")
+@require_permission(Permission.STUDENT_CREATE)
+async def lms_provision_student(request: Request, student_id: str) -> JSONResponse:
+    """
+    Manually trigger Moodle provisioning for a single student.
+
+    Requires ADMIN permission. Idempotent — safe to call multiple times;
+    if the account already exists in Moodle it will be updated rather than
+    duplicated.
+    """
+    from server.integrations.lms_service import MoodleLMSService
+    org_id   = getattr(request.state, "tenant_id", "default")
+    actor_id = getattr(request.state, "user_id", "anonymous")
+    service  = MoodleLMSService()
+    if not service.is_enabled():
+        raise HTTPException(status_code=503, detail="LMS integration not configured. Set LMS_BASE_URL and LMS_API_TOKEN.")
+    result = service.provision_student(org_id=org_id, student_id=student_id, actor_id=actor_id)
+    return JSONResponse(result)
+
+
+@router.get("/lms/status/{student_id}")
+@require_permission(Permission.STUDENT_READ)
+async def lms_student_status(request: Request, student_id: str) -> JSONResponse:
+    """
+    Check whether a student has an active Moodle account and return
+    their last grade-sync timestamp.
+    """
+    from server.db_service import execute_query
+    from server.integrations.lms_service import MoodleLMSService
+    org_id = getattr(request.state, "tenant_id", "default")
+
+    service = MoodleLMSService()
+    if not service.is_enabled():
+        return JSONResponse({
+            "student_id": student_id,
+            "lms_enabled": False,
+            "detail": "LMS not configured",
+        })
+
+    # Grade sync record tells us we've provisioned + synced before
+    rows = execute_query(
+        "SELECT moodle_user_id, synced_at FROM lms_grade_sync WHERE org_id=%s AND student_id=%s",
+        (org_id, student_id),
+    )
+    if rows:
+        return JSONResponse({
+            "student_id":     student_id,
+            "lms_enabled":    True,
+            "provisioned":    True,
+            "moodle_user_id": rows[0]["moodle_user_id"],
+            "last_synced_at": str(rows[0]["synced_at"]) if rows[0]["synced_at"] else None,
+        })
+
+    return JSONResponse({
+        "student_id":  student_id,
+        "lms_enabled": True,
+        "provisioned": False,
+        "detail":      "No LMS provisioning record found; call POST /lms/provision/{student_id}",
+    })
+
+
 @router.get("/storage/presign")
 @require_permission(Permission.STUDENT_CREATE)
 async def get_presigned_upload_url(

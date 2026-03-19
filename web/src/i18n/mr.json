@@ -1,0 +1,57 @@
+{
+  "_comment": "TODO: translate — Marathi stub (values marked with (mr) prefix for identification)",
+  "portal": {
+    "title": "(mr) Guardian Portal",
+    "phone_prompt": "(mr) Enter your registered mobile number",
+    "send_otp": "(mr) Send OTP",
+    "verify_otp": "(mr) Verify OTP",
+    "resend_otp": "(mr) Resend OTP",
+    "otp_sent": "(mr) OTP sent to {{phone}}"
+  },
+  "dashboard": {
+    "attendance": "(mr) Attendance",
+    "pending_dues": "(mr) Pending Dues",
+    "next_exam": "(mr) Next Exam",
+    "upcoming_exams": "(mr) Upcoming Exams",
+    "communication_history": "(mr) Communication History",
+    "consent_management": "(mr) Consent Management",
+    "revoke": "(mr) Revoke",
+    "active": "(mr) Active",
+    "revoked": "(mr) Revoked"
+  },
+  "student": {
+    "my_attendance": "(mr) My Attendance",
+    "my_exams": "(mr) My Exams",
+    "my_results": "(mr) My Results",
+    "my_dues": "(mr) My Dues",
+    "hall_ticket": "(mr) Hall Ticket"
+  },
+  "common": {
+    "loading": "(mr) Loading...",
+    "save": "(mr) Save",
+    "cancel": "(mr) Cancel",
+    "submit": "(mr) Submit",
+    "approve": "(mr) Approve",
+    "reject": "(mr) Reject",
+    "view": "(mr) View",
+    "download": "(mr) Download",
+    "logout": "(mr) Log out",
+    "back": "(mr) Back",
+    "search": "(mr) Search",
+    "filter": "(mr) Filter"
+  },
+  "nav": {
+    "dashboard": "(mr) Dashboard",
+    "admissions": "(mr) Admissions",
+    "academics": "(mr) Academics",
+    "examinations": "(mr) Examinations",
+    "finance": "(mr) Finance",
+    "hr": "(mr) HR & Staff",
+    "student_services": "(mr) Student Services",
+    "regulatory": "(mr) Regulatory",
+    "reports": "(mr) Reports",
+    "settings": "(mr) Settings",
+    "phd": "(mr) PhD & Research",
+    "convocation": "(mr) Convocation"
+  }
+}

@@ -1,63 +1,58 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
-// Outlet used by ProtectedRoute
 import { queryClient } from "./lib/queryClient";
 import { useAuthStore } from "./store/authStore";
 import { useEffect } from "react";
 
-import AppLayout from "./layouts/AppLayout";
+// New three-column ALIS shell (FE-1)
+import { ALISShell } from "./shell/ALISShell";
+
+// Public layouts (unchanged)
 import PortalLayout from "./layouts/PortalLayout";
 
+// Auth
 import LoginPage from "./pages/auth/LoginPage";
-import DashboardPage from "./pages/dashboard/DashboardPage";
-import AdmissionsPage from "./pages/admissions/AdmissionsPage";
-import AcademicsPage from "./pages/academics/AcademicsPage";
-import ExaminationsPage from "./pages/examinations/ExaminationsPage";
-import FinancePage from "./pages/finance/FinancePage";
-import HRPage from "./pages/hr/HRPage";
 
+// Public portal pages
 import PortalHomePage from "./pages/portal/PortalHomePage";
 import ApplicationWizardPage from "./pages/portal/ApplicationWizardPage";
 import ApplicationStatusPage from "./pages/portal/ApplicationStatusPage";
 import OfferLetterPage from "./pages/portal/OfferLetterPage";
 
+// Role dashboards (new views layer)
+import { RegistrarDashboard } from "./views/RegistrarDashboard";
+import { FacultyDashboard } from "./views/FacultyDashboard";
+import { StudentDashboard } from "./views/StudentDashboard";
+import { FinanceDashboard } from "./views/FinanceDashboard";
+import { HODDashboard } from "./views/HODDashboard";
+import { ExamControllerDashboard } from "./views/ExamControllerDashboard";
+import { SeatMatrixPage } from "./pages/admissions/SeatMatrixPage";
+
+// Module pages (existing)
+import AdmissionsPage from "./pages/admissions/AdmissionsPage";
+import AcademicsPage from "./pages/academics/AcademicsPage";
+import ExaminationsPage from "./pages/examinations/ExaminationsPage";
+import FinancePage from "./pages/finance/FinancePage";
+import HRPage from "./pages/hr/HRPage";
 import StudentServicesPage from "./pages/student-services/StudentServicesPage";
-import { MessageSquare, BarChart3, GraduationCap, Shield } from "lucide-react";
+import CommunicationHubPage from "./pages/communications/CommunicationHubPage";
+import ReportsPage from "./pages/reports/ReportsPage";
+import AlumniPage from "./pages/alumni/AlumniPage";
 
-function PlaceholderPage({ icon: Icon, code, title, desc, tags }: {
-  icon: React.ElementType; code: string; title: string; desc: string; tags?: string;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full text-center fade-up-1">
-      <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5"
-        style={{ background: "rgba(29,158,117,0.08)", border: "0.5px solid rgba(29,158,117,0.2)" }}>
-        <Icon className="w-7 h-7" style={{ color: "#1D9E75" }} />
-      </div>
-      <div className="text-[9px] font-medium uppercase tracking-[0.15em] mb-2" style={{ color: "#1D9E75" }}>{code}</div>
-      <h1 className="text-xl font-medium mb-2" style={{ color: "#e2e8f0" }}>{title}</h1>
-      <p className="text-[13px]" style={{ color: "#64748b" }}>{desc}</p>
-      {tags && (
-        <div className="mt-4 px-4 py-2 rounded-lg text-[11px]"
-          style={{ background: "rgba(29,158,117,0.05)", border: "0.5px solid rgba(29,158,117,0.12)", color: "#475569" }}>
-          {tags}
-        </div>
-      )}
-    </div>
-  );
-}
+// P22 new pages
+import { RegulatoryPage } from './pages/regulatory/RegulatoryPage';
+import { PolicyStudioPage } from './pages/admin/PolicyStudioPage';
+import { AdmissionsModulePage } from './pages/admissions/AdmissionsModulePage';
+import { PhDPage } from './pages/phd/PhDPage';
+import { ReadmissionPage } from './pages/admissions/ReadmissionPage';
+import { ConvocationPage } from './pages/convocation/ConvocationPage';
+import { OBEPage } from './pages/academics/OBEPage';
+import { GuardianPortalPage } from './pages/portal/GuardianPortalPage';
 
-function CommunicationHubPage() {
-  return <PlaceholderPage icon={MessageSquare} code="E10" title="Communication Hub" desc="Backend complete · Frontend in next sprint" tags="Bulk email · SMS · WhatsApp · Templates · Campaigns" />;
-}
-function ReportingPage() {
-  return <PlaceholderPage icon={BarChart3} code="E11" title="Reports & Analytics" desc="Backend complete · Frontend in next sprint" tags="Dashboards · Exports · Scheduled · NAAC · Custom" />;
-}
-function AlumniPage() {
-  return <PlaceholderPage icon={GraduationCap} code="E12" title="Alumni & Placement" desc="Backend complete · Frontend in next sprint" tags="Alumni DB · Job board · Placement stats · Events" />;
-}
-function SecurityPage() {
-  return <PlaceholderPage icon={Shield} code="SEC" title="Security & audit" desc="Audit ledger active" tags="RBAC · Sessions · Audit log · Compliance · 2FA" />;
-}
+// P23 new pages
+import { WorkflowsPage } from './pages/workflows/WorkflowsPage';
+import { ProcessEnginePage } from './pages/process-engine/ProcessEnginePage';
+import { ConsentPage } from './pages/consent/ConsentPage';
 
 function ProtectedRoute() {
   const { isAuthenticated, hydrate } = useAuthStore();
@@ -94,27 +89,50 @@ export default function App() {
             <Route path="offer" element={<OfferLetterPage />} />
           </Route>
 
-          {/* Protected app */}
+          {/* Protected app — three-column ALIS shell */}
           <Route element={<ProtectedRoute />}>
-            <Route element={<AppLayout />}>
-              <Route path="/" element={<Navigate to="/admissions" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
+            <Route element={<ALISShell />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+
+              {/* Role dashboards */}
+              <Route path="/dashboard" element={<RegistrarDashboard />} />
+              <Route path="/dashboard/faculty" element={<FacultyDashboard />} />
+              <Route path="/dashboard/student" element={<StudentDashboard />} />
+              <Route path="/dashboard/finance" element={<FinanceDashboard />} />
+              <Route path="/dashboard/hod" element={<HODDashboard />} />
+              <Route path="/dashboard/exam-controller" element={<ExamControllerDashboard />} />
+
+              {/* Module pages */}
               <Route path="/admissions" element={<AdmissionsPage />} />
+              <Route path="/admissions/seat-matrix" element={<SeatMatrixPage />} />
               <Route path="/academics" element={<AcademicsPage />} />
               <Route path="/examinations" element={<ExaminationsPage />} />
               <Route path="/finance" element={<FinancePage />} />
               <Route path="/hr" element={<HRPage />} />
               <Route path="/students" element={<StudentServicesPage />} />
-
               <Route path="/communications" element={<CommunicationHubPage />} />
-              <Route path="/reports" element={<ReportingPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
               <Route path="/alumni" element={<AlumniPage />} />
-              <Route path="/security" element={<SecurityPage />} />
+              <Route path="/regulatory" element={<RegulatoryPage />} />
+              <Route path="/admin/policies" element={<PolicyStudioPage />} />
+              <Route path="/admissions/pipeline" element={<AdmissionsModulePage />} />
+              <Route path="/admissions/readmission" element={<ReadmissionPage />} />
+              <Route path="/phd" element={<PhDPage />} />
+              <Route path="/convocation" element={<ConvocationPage />} />
+              <Route path="/academics/obe" element={<OBEPage />} />
+
+              {/* P23 new pages */}
+              <Route path="/workflows" element={<WorkflowsPage />} />
+              <Route path="/process-engine" element={<ProcessEnginePage />} />
+              <Route path="/consent" element={<ConsentPage />} />
             </Route>
           </Route>
 
+          {/* Guardian portal — standalone, no shell */}
+          <Route path="/guardian" element={<GuardianPortalPage />} />
+
           {/* Fallback */}
-          <Route path="*" element={<Navigate to="/admissions" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

@@ -179,15 +179,27 @@ async def create_api_key(
 @router.post("/api/v1/webhooks/razorpay")
 async def razorpay_webhook(request: Request) -> JSONResponse:
     """
-    Razorpay payment webhook.
-    Verifies HMAC-SHA256 signature, then on payment.captured:
-      1. Looks up applicant by Razorpay order_id stored in applicant metadata
-      2. Calls AdmissionConfirmationService.confirm()
-      3. Queues advance_pipeline → triggers enrollment
+    Razorpay payment webhook — E04-S15 (admissions intake).
+
+    Security: HMAC-SHA256 signature verified against RAZORPAY_WEBHOOK_SECRET
+    before any processing.
+
+    Idempotency: deduplicates via payment_webhook_log UNIQUE(gateway, event_id).
+    Razorpay guarantees at-least-once delivery; duplicate deliveries are
+    detected and ack'd with 200 immediately without re-processing.
+
+    Flow on payment.captured:
+      1. Signature verified
+      2. Idempotency check — if already PROCESSED → return 200 duplicate
+      3. Insert RECEIVED record atomically in payment_webhook_log
+      4. Look up applicant by razorpay order_id
+      5. Call AdmissionConfirmationService.confirm()
+      6. Queue advance_pipeline → enrollment
+      7. Mark PROCESSED in payment_webhook_log
     """
     body_bytes = await request.body()
 
-    # Verify signature
+    # ── 1. Signature verification ────────────────────────────────────────────
     signature = request.headers.get("x-razorpay-signature", "")
     if not _verify_razorpay_signature(body_bytes, signature):
         logger.warning("razorpay_webhook: signature verification failed")
@@ -198,36 +210,83 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    event = payload.get("event")
-    logger.info("razorpay_webhook: received event=%s", event)
+    event      = payload.get("event")
+    payment    = payload.get("payload", {}).get("payment", {}).get("entity", {})
+    payment_id = payment.get("id") or payload.get("id") or str(hash(body_bytes))
+    gateway    = "razorpay"
+    event_type = event or "unknown"
 
+    logger.info("razorpay_webhook: received event=%s payment_id=%s", event_type, payment_id)
+
+    # ── 2 & 3. Idempotency — atomic check-and-insert ─────────────────────────
+    # Use payment_id as the canonical event_id (unique per Razorpay payment).
+    from server.db_service import execute_query, execute_transaction
+
+    existing = execute_query(
+        "SELECT id, status FROM payment_webhook_log WHERE gateway=%s AND event_id=%s",
+        (gateway, payment_id),
+    )
+    if existing:
+        if existing[0]["status"] == "PROCESSED":
+            logger.info("razorpay_webhook: duplicate event for payment_id=%s — already processed", payment_id)
+            return JSONResponse(content={"status": "duplicate", "payment_id": payment_id})
+        log_id = existing[0]["id"]
+    else:
+        # Atomically insert; ON CONFLICT DO NOTHING handles the race between
+        # two simultaneous deliveries of the same event from Razorpay.
+        inserted = execute_query(
+            """
+            INSERT INTO payment_webhook_log
+                (gateway, event_id, event_type, payload, status)
+            VALUES (%s, %s, %s, %s, 'RECEIVED')
+            ON CONFLICT (gateway, event_id) DO UPDATE
+                SET status = payment_webhook_log.status
+            RETURNING id
+            """,
+            (gateway, payment_id, event_type, body_bytes.decode("utf-8", errors="replace")),
+        )
+        if not inserted:
+            # Conflict resolved by concurrent request — treat as duplicate
+            return JSONResponse(content={"status": "duplicate", "payment_id": payment_id})
+        log_id = inserted[0]["id"]
+
+    # ── 4. Only process payment.captured ────────────────────────────────────
     if event != "payment.captured":
-        # Acknowledge but don't act on other events yet
+        execute_transaction([(
+            "UPDATE payment_webhook_log SET status='PROCESSED', processed_at=NOW() WHERE id=%s",
+            (log_id,),
+        )])
         return JSONResponse(content={"status": "ignored", "event": event})
 
-    payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
-    order_id      = payment.get("order_id")
-    payment_id    = payment.get("id")
-    amount_paise  = payment.get("amount", 0)
-    amount_inr    = amount_paise / 100
+    order_id     = payment.get("order_id")
+    amount_paise = payment.get("amount", 0)
+    amount_inr   = amount_paise / 100
 
     if not order_id:
+        execute_transaction([(
+            "UPDATE payment_webhook_log SET status='FAILED', error_detail=%s WHERE id=%s",
+            ("Missing order_id in payment payload", log_id),
+        )])
         raise HTTPException(status_code=400, detail="Missing order_id in payment payload")
 
-    # Look up applicant by razorpay_order_id stored in metadata
-    from server.db_service import execute_query
+    # ── 5. Look up applicant by razorpay_order_id ───────────────────────────
     rows = execute_query(
         "SELECT id, org_id FROM applicants WHERE metadata->>'razorpay_order_id' = %s",
         (order_id,),
     )
     if not rows:
         logger.warning("razorpay_webhook: no applicant found for order_id=%s", order_id)
+        execute_transaction([(
+            "UPDATE payment_webhook_log SET status='PROCESSED', processed_at=NOW(), "
+            "error_detail=%s WHERE id=%s",
+            (f"unmatched order_id={order_id}", log_id),
+        )])
         return JSONResponse(content={"status": "unmatched", "order_id": order_id})
 
     applicant_id = str(rows[0]["id"])
     org_id       = str(rows[0]["org_id"])
 
-    # Confirm admission
+    # ── 6. Confirm admission + queue pipeline ────────────────────────────────
     from server.admissions.confirmation import AdmissionConfirmationService
     from server.admissions.models import AdmissionConfirmRequest
     try:
@@ -242,13 +301,25 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
         )
     except Exception as exc:
         logger.error("razorpay_webhook: confirm failed for applicant=%s: %s", applicant_id, exc)
+        execute_transaction([(
+            "UPDATE payment_webhook_log SET status='FAILED', error_detail=%s WHERE id=%s",
+            (str(exc), log_id),
+        )])
         raise HTTPException(status_code=500, detail=str(exc))
 
-    # Resume pipeline → enrollment
+    # ── 7. Mark PROCESSED then queue enrollment pipeline ────────────────────
+    execute_transaction([(
+        "UPDATE payment_webhook_log SET status='PROCESSED', processed_at=NOW() WHERE id=%s",
+        (log_id,),
+    )])
+
     from server.tasks.admissions import advance_pipeline
     advance_pipeline.delay(org_id=org_id, applicant_id=applicant_id)
 
-    logger.info("razorpay_webhook: confirmed admission for applicant=%s payment=%s", applicant_id, payment_id)
+    logger.info(
+        "razorpay_webhook: confirmed admission for applicant=%s payment=%s",
+        applicant_id, payment_id,
+    )
     return JSONResponse(content={"status": "ok", "applicant_id": applicant_id})
 
 

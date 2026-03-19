@@ -31,6 +31,7 @@ Usage:
 """
 
 import logging
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from contextlib import contextmanager
 
@@ -43,11 +44,76 @@ except ImportError:
     psycopg2 = None
     pg_pool_module = None
 
+try:
+    import asyncpg
+except ImportError:
+    logging.warning("asyncpg not found. Async database functionality unavailable.")
+    asyncpg = None
+
 # Configure Logging
 logger = logging.getLogger(__name__)
 
-# Connection Pool (Global)
-_pg_pool = None
+# Connection Pools (Global)
+_pg_pool = None           # psycopg2 — used by Celery sync workers
+_asyncpg_pool = None      # asyncpg  — used by FastAPI async handlers
+
+
+# ---------------------------------------------------------------------------
+# P0-1: asyncpg pool lifecycle (call from FastAPI lifespan)
+# ---------------------------------------------------------------------------
+
+def _convert_params(query: str) -> str:
+    """Replace %s placeholders with asyncpg-style $N positional params."""
+    counter = 0
+
+    def _replace(_m: re.Match) -> str:
+        nonlocal counter
+        counter += 1
+        return f"${counter}"
+
+    return re.sub(r"%s", _replace, query)
+
+
+async def _init_connection(conn) -> None:
+    """Per-connection init: disable statement cache (required for SET LOCAL + pgbouncer)."""
+    await conn.set_type_codec("jsonb", encoder=str, decoder=str, schema="pg_catalog")
+
+
+async def init_pool() -> None:
+    """Call from FastAPI lifespan startup to create the asyncpg pool."""
+    global _asyncpg_pool
+    if asyncpg is None:
+        logger.warning("asyncpg not installed — skipping async pool init.")
+        return
+    from server.core.settings import settings
+    _asyncpg_pool = await asyncpg.create_pool(
+        user=settings.db_user,
+        password=settings.db_password,
+        host=settings.db_host,
+        port=settings.db_port,
+        database=settings.db_name,
+        min_size=settings.db_pool_min,
+        max_size=settings.db_pool_max,
+        statement_cache_size=0,   # required: SET LOCAL + pgbouncer compat
+        init=_init_connection,
+        command_timeout=30,
+    )
+    logger.info("asyncpg pool initialised (min=%s max=%s).", settings.db_pool_min, settings.db_pool_max)
+
+
+async def close_pool() -> None:
+    """Call from FastAPI lifespan shutdown."""
+    global _asyncpg_pool
+    if _asyncpg_pool is not None:
+        await _asyncpg_pool.close()
+        _asyncpg_pool = None
+        logger.info("asyncpg pool closed.")
+
+
+def _get_async_pool():
+    if _asyncpg_pool is None:
+        raise RuntimeError("asyncpg pool not initialised. Call init_pool() at startup.")
+    return _asyncpg_pool
 
 
 def get_db_pool():
@@ -56,7 +122,7 @@ def get_db_pool():
     if _pg_pool is None and psycopg2:
         try:
             from server.core.settings import settings
-            _pg_pool = psycopg2.pool.SimpleConnectionPool(
+            _pg_pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=settings.db_pool_min,
                 maxconn=settings.db_pool_max,
                 user=settings.db_user,
@@ -116,44 +182,59 @@ def _get_tenant_id_from_context() -> str:
     return get_current_tenant_id()
 
 
+async def execute_query_async(
+    query: str,
+    params: Optional[Tuple] = None,
+    tenant_id: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Async execute_query using asyncpg — use in async FastAPI route handlers.
+
+    EC-CROSS-03: SET LOCAL alis.current_tenant inside every transaction so
+    tenant context is never inherited from a previous connection in the pool.
+
+    The tenant_id is resolved in this priority:
+    1. Explicit `tenant_id` parameter (for internal service calls)
+    2. Request-scoped ContextVar (set by TenantMiddleware)
+    """
+    if asyncpg is None:
+        logger.warning("Mocking execute_query_async (asyncpg unavailable).")
+        return []
+
+    resolved_tenant = tenant_id or _get_tenant_id_from_context()
+    q = _convert_params(query)
+    p = list(params) if params else []
+
+    async with _get_async_pool().acquire() as conn:
+        async with conn.transaction():
+            # EC-CROSS-03: isolate tenant per transaction
+            await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
+            rows = await conn.fetch(q, *p)
+    return [dict(r) for r in rows]
+
+
 def execute_query(
     query: str,
     params: Optional[Tuple] = None,
     tenant_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Execute a read-only query with MANDATORY tenant scoping.
+    Synchronous execute_query (psycopg2) — backward-compatible default.
 
-    The tenant_id is resolved in this priority:
-    1. Explicit `tenant_id` parameter (for internal service calls)
-    2. Request-scoped ContextVar (set by TenantMiddleware)
-
-    If neither is available, the query is REJECTED (Layer 4 Invariant).
-
-    Args:
-        query: SQL query string
-        params: Tuple of parameters for variable substitution
-        tenant_id: Optional explicit tenant override
-
-    Returns:
-        List of dicts representing rows.
-
-    Raises:
-        TenantIsolationError: If tenant context cannot be resolved.
+    Used by all service-layer methods (sync).
+    Celery workers and service files should import this function.
+    For high-concurrency FastAPI handlers, use execute_query_async instead.
     """
     if not psycopg2:
         logger.warning("Mocking execute_query due to missing driver.")
         return []
 
-    # Resolve tenant_id
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
 
     with get_db_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             try:
-                # Set tenant context on connection (for RLS policies)
                 _set_tenant_on_connection(cursor, resolved_tenant)
-
                 cursor.execute(query, params)
                 if cursor.description:
                     return cursor.fetchall()
@@ -163,40 +244,59 @@ def execute_query(
                 raise
 
 
+# Alias for Celery workers — same as execute_query (both are sync psycopg2)
+execute_query_sync = execute_query
+
+
+async def execute_transaction_async(
+    queries: List[Tuple[str, Optional[Tuple]]],
+    tenant_id: Optional[str] = None
+) -> None:
+    """
+    Async execute_transaction (asyncpg) — use in async FastAPI route handlers.
+    EC-CROSS-03: SET LOCAL inside the transaction block ensures per-transaction tenant isolation.
+    """
+    if asyncpg is None:
+        logger.warning("Mocking execute_transaction_async (asyncpg unavailable).")
+        return
+
+    from server.core.lockdown import LockdownManager
+    LockdownManager.assert_write_allowed()
+
+    resolved_tenant = tenant_id or _get_tenant_id_from_context()
+
+    async with _get_async_pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
+            for query, params in queries:
+                q = _convert_params(query)
+                p = list(params) if params else []
+                await conn.execute(q, *p)
+
+
 def execute_transaction(
     queries: List[Tuple[str, Optional[Tuple]]],
     tenant_id: Optional[str] = None
 ) -> None:
     """
-    Execute a list of queries as a single atomic transaction
-    with MANDATORY tenant scoping.
-
-    Args:
-        queries: List of (query_string, params_tuple)
-        tenant_id: Optional explicit tenant override
-
-    Raises:
-        TenantIsolationError: If tenant context cannot be resolved.
+    Synchronous execute_transaction (psycopg2) — backward-compatible default.
+    Used by all service-layer methods and Celery workers.
+    For high-concurrency FastAPI handlers, use execute_transaction_async.
     """
     if not psycopg2:
         logger.warning("Mocking execute_transaction.")
         return
 
     # --- E00-S05: Lockdown Write Gate (Layer 4) ---
-    # Block all state mutations when system is in lockdown mode.
-    # Admin/SuperAdmin bypass is handled inside assert_write_allowed.
     from server.core.lockdown import LockdownManager
     LockdownManager.assert_write_allowed()
 
-    # Resolve tenant_id
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
 
     with get_db_connection() as conn:
         try:
             with conn.cursor() as cursor:
-                # Set tenant context for the entire transaction
                 _set_tenant_on_connection(cursor, resolved_tenant)
-
                 for query, params in queries:
                     cursor.execute(query, params)
             conn.commit()
@@ -206,29 +306,36 @@ def execute_transaction(
             raise
 
 
+# Alias for Celery workers
+execute_transaction_sync = execute_transaction
+
+
+async def execute_system_query_async(
+    query: str,
+    params: Optional[Tuple] = None
+) -> List[Dict[str, Any]]:
+    """
+    Async system-level query (asyncpg) — use in async FastAPI handlers.
+    USE SPARINGLY. For health checks and SUPER_ADMIN analytics.
+    """
+    if asyncpg is None:
+        logger.warning("Mocking execute_system_query_async (asyncpg unavailable).")
+        return []
+
+    q = _convert_params(query)
+    p = list(params) if params else []
+    async with _get_async_pool().acquire() as conn:
+        rows = await conn.fetch(q, *p)
+    return [dict(r) for r in rows]
+
+
 def execute_system_query(
     query: str,
     params: Optional[Tuple] = None
 ) -> List[Dict[str, Any]]:
     """
-    Execute a system-level query WITHOUT tenant scoping.
-
-    USE SPARINGLY. This is for:
-    - Schema migrations
-    - Health checks
-    - System-wide analytics (by SUPER_ADMIN only)
-    - Database initialization
-
-    This function does NOT set alis.current_tenant, so RLS policies
-    will block access to tenant-scoped tables unless the connection
-    role has the BYPASSRLS attribute.
-
-    Args:
-        query: SQL query string
-        params: Tuple of parameters for variable substitution
-
-    Returns:
-        List of dicts representing rows.
+    Synchronous system-level query (psycopg2) — backward-compatible default.
+    USE SPARINGLY. For Celery workers, init_db, health checks (sync context).
     """
     if not psycopg2:
         logger.warning("Mocking execute_system_query due to missing driver.")
@@ -246,13 +353,31 @@ def execute_system_query(
                 raise
 
 
+async def execute_system_transaction_async(
+    queries: List[Tuple[str, Optional[Tuple]]]
+) -> None:
+    """
+    Async system-level transaction (asyncpg) — use in async FastAPI handlers.
+    USE SPARINGLY. Same restrictions as execute_system_query_async.
+    """
+    if asyncpg is None:
+        logger.warning("Mocking execute_system_transaction_async (asyncpg unavailable).")
+        return
+
+    async with _get_async_pool().acquire() as conn:
+        async with conn.transaction():
+            for query, params in queries:
+                q = _convert_params(query)
+                p = list(params) if params else []
+                await conn.execute(q, *p)
+
+
 def execute_system_transaction(
     queries: List[Tuple[str, Optional[Tuple]]]
 ) -> None:
     """
-    Execute a system-level transaction WITHOUT tenant scoping.
-
-    USE SPARINGLY. Same restrictions as execute_system_query.
+    Synchronous system-level transaction (psycopg2) — backward-compatible default.
+    Used by init_db and Celery workers.
     """
     if not psycopg2:
         logger.warning("Mocking execute_system_transaction.")
@@ -268,6 +393,11 @@ def execute_system_transaction(
             conn.rollback()
             logger.error(f"System transaction failed: {e}")
             raise
+
+
+# Aliases used by Celery task files (both resolve to sync psycopg2 versions)
+execute_system_query_sync = execute_system_query
+execute_system_transaction_sync = execute_system_transaction
 
 
 # ============================================================================
@@ -439,11 +569,18 @@ def init_db():
     CREATE POLICY tenant_isolation_comments ON comments
         USING (tenant_id = current_setting('alis.current_tenant', true));
 
-    -- E00-S02: Audit ledger RLS — tenant-scoped SELECT + INSERT only
+    -- EC-CROSS-02: Audit ledger RLS — SELECT + INSERT only (immutable ledger)
+    -- No UPDATE or DELETE policies exist intentionally; triggers handle the block.
     DROP POLICY IF EXISTS tenant_isolation_audit_ledger ON audit_ledger;
-    CREATE POLICY tenant_isolation_audit_ledger ON audit_ledger
-        FOR ALL
-        USING (tenant_id = current_setting('alis.current_tenant', true))
+    DROP POLICY IF EXISTS tenant_audit_ledger_select ON audit_ledger;
+    DROP POLICY IF EXISTS tenant_audit_ledger_insert ON audit_ledger;
+
+    CREATE POLICY tenant_audit_ledger_select ON audit_ledger
+        FOR SELECT
+        USING (tenant_id = current_setting('alis.current_tenant', true));
+
+    CREATE POLICY tenant_audit_ledger_insert ON audit_ledger
+        FOR INSERT
         WITH CHECK (tenant_id = current_setting('alis.current_tenant', true));
     """
 
@@ -1162,8 +1299,42 @@ def init_db():
         WITH CHECK (org_id = current_setting('alis.current_tenant', true));
     """
 
+    # --- EC-CROSS-01: Domain Event Idempotency Log ---
+    # Prevents Celery from executing the same domain event handler twice on retry.
+    # UNIQUE(event_id, handler_name) makes every handler invocation idempotent.
+    domain_event_handler_log_sql = """
+    CREATE TABLE IF NOT EXISTS domain_event_handler_log (
+        id              BIGSERIAL    PRIMARY KEY,
+        event_id        VARCHAR(100) NOT NULL,
+        handler_name    VARCHAR(200) NOT NULL,
+        status          VARCHAR(20)  NOT NULL DEFAULT 'SUCCESS',
+        error_detail    TEXT,
+        processed_at    TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        CONSTRAINT uq_event_handler UNIQUE (event_id, handler_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_dehl_event_id
+        ON domain_event_handler_log(event_id);
+    CREATE INDEX IF NOT EXISTS idx_dehl_handler_status
+        ON domain_event_handler_log(handler_name, status);
+    """
+
+    # --- EC-CROSS-01: idempotency_store (Celery task-level dedup) ---
+    idempotency_store_sql = """
+    CREATE TABLE IF NOT EXISTS idempotency_store (
+        idempotency_key VARCHAR(200) PRIMARY KEY,
+        task_name       VARCHAR(200) NOT NULL,
+        result          JSONB,
+        created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        expires_at      TIMESTAMP WITH TIME ZONE NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_idem_expires
+        ON idempotency_store(expires_at);
+    """
+
     try:
-        execute_system_transaction([
+        execute_system_transaction_sync([
             (tenant_session_var_sql, None),
             (approval_requests_table_sql, None),
             (approval_actions_table_sql, None),
@@ -1198,6 +1369,9 @@ def init_db():
             # E04: Admissions
             (admissions_tables_sql, None),
             (admissions_rls_sql, None),
+            # EC-CROSS-01: Celery idempotency
+            (domain_event_handler_log_sql, None),
+            (idempotency_store_sql, None),
         ])
         logger.info(
             "Database tables initialized with tenant isolation "
@@ -1207,7 +1381,8 @@ def init_db():
             "custom_role_permissions, user_custom_roles, workflows, "
             "applicants, lead_merge_log, application_documents, "
             "counsellor_assignments, offer_letters, admission_records, "
-            "intake_quality_scores, students "
+            "intake_quality_scores, students, "
+            "domain_event_handler_log, idempotency_store "
             "+ RLS policies + immutability triggers)."
         )
     except Exception as e:

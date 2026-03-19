@@ -37,8 +37,13 @@ celery_app = Celery(
         "server.tasks.events",          # Domain event dispatch (P0-S17)
         "server.tasks.calendar",        # Academic calendar triggers (P0-S19)
         "server.tasks.admissions",      # M1 automation pipeline (E04-S13)
-        "server.tasks.finance",         # M4 finance beat tasks (E07)
-        "server.tasks.reporting",       # M8 reporting & analytics (E11)
+        "server.tasks.finance",          # M4 finance beat tasks (E07)
+        "server.tasks.reporting",        # M8 reporting & analytics (E11)
+        "server.tasks.shadow_divergence", # P21 shadow mode nightly divergence
+        "server.tasks.webhook_retry",    # P21 outbound webhook retry
+        "server.tasks.backup",           # P22 daily database backup
+        "server.tasks.plagiarism_poll",  # E15 Drillbit plagiarism result polling
+        "server.tasks.lms_sync",         # P14 Moodle LMS grade sync
     ],
 )
 
@@ -87,14 +92,60 @@ celery_app.conf.beat_schedule = {
         "task": "server.tasks.notifications.send_pending_reminders",
         "schedule": crontab(minute=0),
     },
-    # Retry failed domain events: every 5 minutes
+    # Retry PENDING domain events that were never dispatched: every 5 minutes
     "retry-failed-events": {
         "task": "server.tasks.events.retry_failed_events",
         "schedule": crontab(minute="*/5"),
+    },
+    # Detect PROCESSING events whose worker crashed mid-flight.
+    # Targets FINANCE and EXAMINATION topics only — these have near-zero
+    # acceptable inconsistency windows (payment confirmation → enrollment,
+    # grade finalization → transcript generation).
+    # Runs every 30 seconds via a timedelta schedule (not a crontab).
+    "retry-stuck-critical-events": {
+        "task": "server.tasks.events.retry_stuck_events",
+        "schedule": 30.0,  # seconds
+        "kwargs": {"topics": ["FINANCE", "EXAMINATION"], "stuck_after_seconds": 120},
     },
     # KPI snapshots: daily at 00:30 AM (after calendar check)
     "refresh-kpi-snapshots": {
         "task": "reporting.refresh_kpi_snapshots",
         "schedule": crontab(hour=0, minute=30),
+    },
+    # AQAR draft compilation: annually on 1 July (NAAC Annual Quality Assurance Report)
+    # Gated by regulatory.naac_evidence_collection feature flag — no-op if disabled.
+    "aqar-annual-draft": {
+        "task": "server.tasks.events.compile_aqar_draft",
+        "schedule": crontab(hour=6, minute=0, month_of_year=7, day_of_month=1),
+    },
+    # P21 — Shadow mode nightly divergence tracker (02:00 IST = 20:30 UTC)
+    "shadow-divergence-nightly": {
+        "task": "server.tasks.shadow_divergence.run_shadow_divergence",
+        "schedule": crontab(hour=20, minute=30),
+    },
+    # P21 — Webhook retry (every 5 minutes)
+    "webhook-retry": {
+        "task": "server.tasks.webhook_retry.retry_pending_webhooks",
+        "schedule": 300.0,  # seconds (5 minutes)
+    },
+    # P21 — Reporting gate deadline check (daily at 08:00 IST = 02:30 UTC)
+    "reporting-gate-check": {
+        "task": "server.tasks.admissions.check_reporting_deadlines",
+        "schedule": crontab(hour=2, minute=30),
+    },
+    # P22 — Daily database backup (03:00 UTC)
+    "daily-db-backup": {
+        "task": "server.tasks.backup.run_daily_backup",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    # E15 — Poll Drillbit for PhD plagiarism results (every 5 minutes)
+    "drillbit-poll": {
+        "task": "server.tasks.plagiarism_poll.poll_drillbit_results",
+        "schedule": 300.0,  # seconds (5 minutes)
+    },
+    # P14 — Moodle LMS grade sync: weekly, Sunday 01:00 UTC
+    "lms-grade-sync": {
+        "task": "server.tasks.lms_sync.sync_lms_grades",
+        "schedule": crontab(hour=1, minute=0, day_of_week=0),  # 0 = Sunday
     },
 }

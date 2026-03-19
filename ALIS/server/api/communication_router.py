@@ -55,7 +55,6 @@ def _org(r: Request) -> str:
 
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
-n
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
     from decimal import Decimal

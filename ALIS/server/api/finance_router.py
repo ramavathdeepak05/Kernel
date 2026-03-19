@@ -46,6 +46,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from server.core.rbac import Permission, require_permission
+from server.db_service import execute_query, execute_transaction
 
 from server.finance.fee_structure import FeeStructureService
 from server.finance.invoice       import InvoiceService
@@ -69,7 +70,8 @@ def _org(r: Request) -> str:
 
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
-n
+
+
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
     from decimal import Decimal
@@ -361,3 +363,223 @@ async def default_risk(
     return JSONResponse(
         content=FeeDefaultAnalyticsService.predict_defaults(_org(request), academic_year)
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# EC-ADM-05 — Razorpay Webhook (idempotent)
+# ──────────────────────────────────────────────────────────────
+
+@router.post("/webhooks/razorpay", include_in_schema=False)
+async def razorpay_webhook(request: Request) -> JSONResponse:
+    """
+    Idempotent Razorpay webhook receiver (EC-ADM-05).
+
+    Razorpay may fire the same event multiple times (at-least-once delivery).
+    We deduplicate via payment_webhook_log UNIQUE(gateway, event_id).
+
+    Step 1 — INSERT ON CONFLICT DO NOTHING: if conflict → already processed → 200 dup.
+    Step 2 — Process the event.
+    Step 3 — Mark PROCESSED or FAILED.
+    """
+    import json as _json
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"error": "invalid_json"})
+
+    gateway = "razorpay"
+    # Razorpay sends event id in payload.event → use payload hash as fallback
+    event_id = (
+        body.get("payload", {}).get("payment", {}).get("entity", {}).get("id")
+        or body.get("event_id")
+        or body.get("id")
+        or str(hash(_json.dumps(body, sort_keys=True)))
+    )
+    event_type = body.get("event", "unknown")
+
+    # --- Idempotency insert ---
+    rows = execute_transaction(
+        [(
+            """
+            INSERT INTO payment_webhook_log (gateway, event_id, event_type, payload, status)
+            VALUES (%s, %s, %s, %s, 'RECEIVED')
+            ON CONFLICT (gateway, event_id) DO NOTHING
+            """,
+            (gateway, event_id, event_type, _json.dumps(body)),
+        )],
+        returning="SELECT id FROM payment_webhook_log WHERE gateway=%s AND event_id=%s",
+        returning_params=(gateway, event_id),
+    ) if False else None  # execute_transaction doesn't support RETURNING — use query below
+
+    # Check if already processed
+    existing = execute_query(
+        "SELECT id, status FROM payment_webhook_log WHERE gateway=%s AND event_id=%s",
+        (gateway, event_id),
+    )
+    if existing and existing[0]["status"] in ("PROCESSED", "RECEIVED"):
+        if existing[0]["status"] == "PROCESSED":
+            return JSONResponse(content={"status": "duplicate"})
+        log_id = existing[0]["id"]
+    else:
+        # Insert fresh
+        inserted = execute_query(
+            """
+            INSERT INTO payment_webhook_log (gateway, event_id, event_type, payload, status)
+            VALUES (%s, %s, %s, %s, 'RECEIVED')
+            ON CONFLICT (gateway, event_id) DO UPDATE SET status = payment_webhook_log.status
+            RETURNING id
+            """,
+            (gateway, event_id, event_type, _json.dumps(body)),
+        )
+        if not inserted:
+            return JSONResponse(content={"status": "duplicate"})
+        log_id = inserted[0]["id"]
+
+    # --- Process event ---
+    try:
+        if event_type in ("payment.captured", "payment.authorized"):
+            payment_entity = body.get("payload", {}).get("payment", {}).get("entity", {})
+            razorpay_payment_id = payment_entity.get("id")
+            if razorpay_payment_id:
+                execute_transaction([(
+                    "UPDATE payments SET status='CAPTURED', gateway_response=%s "
+                    "WHERE gateway_payment_id=%s AND org_id=%s",
+                    (_json.dumps(payment_entity), razorpay_payment_id, _org(request)),
+                )])
+
+        execute_transaction([(
+            "UPDATE payment_webhook_log SET status='PROCESSED', processed_at=NOW() WHERE id=%s",
+            (log_id,),
+        )])
+        return JSONResponse(content={"status": "ok"})
+
+    except Exception as exc:
+        logger.error("razorpay_webhook: processing failed for event %s: %s", event_id, exc)
+        execute_transaction([(
+            "UPDATE payment_webhook_log SET status='FAILED', error_detail=%s WHERE id=%s",
+            (str(exc), log_id),
+        )])
+        return JSONResponse(status_code=500, content={"error": "processing_failed"})
+
+
+# ──────────────────────────────────────────────────────────────
+# EC-ADM-05 — UTR Disputes
+# ──────────────────────────────────────────────────────────────
+
+@router.post("/disputes", status_code=201)
+@require_permission(Permission.PAYMENT_PROCESS)
+async def raise_utr_dispute(request: Request, body: dict) -> JSONResponse:
+    """Raise a UTR-level payment dispute."""
+    rows = execute_query(
+        """
+        INSERT INTO payment_utr_disputes
+            (org_id, payment_id, utr_number, disputed_amount, reason, raised_by)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id, raised_at
+        """,
+        (
+            _org(request),
+            body["payment_id"],
+            body.get("utr_number"),
+            body["disputed_amount"],
+            body["reason"],
+            _actor(request),
+        ),
+    )
+    if not rows:
+        return JSONResponse(status_code=500, content={"error": "failed_to_create"})
+    return JSONResponse(
+        status_code=201,
+        content={"dispute_id": str(rows[0]["id"]), "raised_at": rows[0]["raised_at"].isoformat()},
+    )
+
+
+@router.get("/disputes")
+@require_permission(Permission.LEDGER_READ)
+async def list_disputes(
+    request: Request,
+    status: Optional[str] = Query(None),
+) -> JSONResponse:
+    """List UTR disputes for the tenant."""
+    sql = "SELECT * FROM payment_utr_disputes WHERE org_id=%s"
+    params: list = [_org(request)]
+    if status:
+        sql += " AND status=%s"
+        params.append(status)
+    sql += " ORDER BY raised_at DESC LIMIT 200"
+    rows = execute_query(sql, tuple(params))
+    return JSONResponse(content={"disputes": _jsonify(rows), "total": len(rows)})
+
+
+@router.post("/disputes/{dispute_id}/resolve")
+@require_permission(Permission.FEE_CREATE)
+async def resolve_dispute(request: Request, dispute_id: str, body: dict) -> JSONResponse:
+    """Resolve or reject a UTR dispute."""
+    resolution = body.get("resolution", "RESOLVED")  # RESOLVED | REJECTED
+    note = body.get("note", "")
+    execute_transaction([(
+        """
+        UPDATE payment_utr_disputes
+           SET status=%s, resolved_by=%s, resolved_at=NOW(), resolution_note=%s
+         WHERE id=%s AND org_id=%s
+        """,
+        (resolution, _actor(request), note, dispute_id, _org(request)),
+    )])
+    return JSONResponse(content={"dispute_id": dispute_id, "status": resolution})
+
+
+# ---------------------------------------------------------------------------
+# P22 — Tally / Busy Export (finance.tally_export, finance.busy_export flags)
+# ---------------------------------------------------------------------------
+
+@router.post("/export/tally")
+@require_permission(Permission.FEE_READ)
+async def export_tally_xml(request: Request, body: dict) -> JSONResponse:
+    """Export Tally XML from invoice/payment data for a date range."""
+    from server.finance.tally_export import TallyExportService
+    from fastapi.responses import Response as FastAPIResponse
+    org_id = _org(request)
+    from_date = body.get("from_date", "")
+    to_date = body.get("to_date", "")
+    xml_bytes = TallyExportService.export_tally_xml(org_id, from_date, to_date, _actor(request))
+    return FastAPIResponse(content=xml_bytes, media_type="application/xml",
+                           headers={"Content-Disposition": f"attachment; filename=tally_export_{from_date}_{to_date}.xml"})
+
+
+@router.post("/export/busy")
+@require_permission(Permission.FEE_READ)
+async def export_busy_csv(request: Request, body: dict) -> JSONResponse:
+    """Export Busy CSV from invoice/payment data for a date range."""
+    from server.finance.tally_export import TallyExportService
+    from fastapi.responses import Response as FastAPIResponse
+    org_id = _org(request)
+    from_date = body.get("from_date", "")
+    to_date = body.get("to_date", "")
+    csv_bytes = TallyExportService.export_busy_csv(org_id, from_date, to_date, _actor(request))
+    return FastAPIResponse(content=csv_bytes, media_type="text/csv",
+                           headers={"Content-Disposition": f"attachment; filename=busy_export_{from_date}_{to_date}.csv"})
+
+
+# ---------------------------------------------------------------------------
+# P22 — GST e-Invoice / IRN Generation
+# ---------------------------------------------------------------------------
+
+@router.post("/invoices/{invoice_id}/generate-irn")
+@require_permission(Permission.FEE_CREATE)
+async def generate_irn(request: Request, invoice_id: str) -> JSONResponse:
+    """Generate GST e-Invoice IRN for a student invoice (B2B, above threshold)."""
+    from server.finance.einvoice_service import EInvoiceService
+    try:
+        result = await EInvoiceService.generate_irn(invoice_id, _org(request), _actor(request))
+        return JSONResponse(content=result)
+    except Exception as exc:
+        return JSONResponse(status_code=422, content={"error": str(exc)})
+
+
+@router.get("/invoices/{invoice_id}/irn-status")
+@require_permission(Permission.FEE_READ)
+async def get_irn_status(request: Request, invoice_id: str) -> JSONResponse:
+    """Get IRN status for a student invoice."""
+    from server.finance.einvoice_service import EInvoiceService
+    result = EInvoiceService.get_irn_status(invoice_id, _org(request))
+    return JSONResponse(content=result if result else {"irn": None, "status": "NOT_GENERATED"})

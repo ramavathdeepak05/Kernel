@@ -1,0 +1,57 @@
+{
+  "_comment": "TODO: translate — Tamil stub (values marked with (ta) prefix for identification)",
+  "portal": {
+    "title": "(ta) Guardian Portal",
+    "phone_prompt": "(ta) Enter your registered mobile number",
+    "send_otp": "(ta) Send OTP",
+    "verify_otp": "(ta) Verify OTP",
+    "resend_otp": "(ta) Resend OTP",
+    "otp_sent": "(ta) OTP sent to {{phone}}"
+  },
+  "dashboard": {
+    "attendance": "(ta) Attendance",
+    "pending_dues": "(ta) Pending Dues",
+    "next_exam": "(ta) Next Exam",
+    "upcoming_exams": "(ta) Upcoming Exams",
+    "communication_history": "(ta) Communication History",
+    "consent_management": "(ta) Consent Management",
+    "revoke": "(ta) Revoke",
+    "active": "(ta) Active",
+    "revoked": "(ta) Revoked"
+  },
+  "student": {
+    "my_attendance": "(ta) My Attendance",
+    "my_exams": "(ta) My Exams",
+    "my_results": "(ta) My Results",
+    "my_dues": "(ta) My Dues",
+    "hall_ticket": "(ta) Hall Ticket"
+  },
+  "common": {
+    "loading": "(ta) Loading...",
+    "save": "(ta) Save",
+    "cancel": "(ta) Cancel",
+    "submit": "(ta) Submit",
+    "approve": "(ta) Approve",
+    "reject": "(ta) Reject",
+    "view": "(ta) View",
+    "download": "(ta) Download",
+    "logout": "(ta) Log out",
+    "back": "(ta) Back",
+    "search": "(ta) Search",
+    "filter": "(ta) Filter"
+  },
+  "nav": {
+    "dashboard": "(ta) Dashboard",
+    "admissions": "(ta) Admissions",
+    "academics": "(ta) Academics",
+    "examinations": "(ta) Examinations",
+    "finance": "(ta) Finance",
+    "hr": "(ta) HR & Staff",
+    "student_services": "(ta) Student Services",
+    "regulatory": "(ta) Regulatory",
+    "reports": "(ta) Reports",
+    "settings": "(ta) Settings",
+    "phd": "(ta) PhD & Research",
+    "convocation": "(ta) Convocation"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "_comment": "TODO: translate — Kannada stub (values marked with (kn) prefix for identification)",
+  "portal": {
+    "title": "(kn) Guardian Portal",
+    "phone_prompt": "(kn) Enter your registered mobile number",
+    "send_otp": "(kn) Send OTP",
+    "verify_otp": "(kn) Verify OTP",
+    "resend_otp": "(kn) Resend OTP",
+    "otp_sent": "(kn) OTP sent to {{phone}}"
+  },
+  "dashboard": {
+    "attendance": "(kn) Attendance",
+    "pending_dues": "(kn) Pending Dues",
+    "next_exam": "(kn) Next Exam",
+    "upcoming_exams": "(kn) Upcoming Exams",
+    "communication_history": "(kn) Communication History",
+    "consent_management": "(kn) Consent Management",
+    "revoke": "(kn) Revoke",
+    "active": "(kn) Active",
+    "revoked": "(kn) Revoked"
+  },
+  "student": {
+    "my_attendance": "(kn) My Attendance",
+    "my_exams": "(kn) My Exams",
+    "my_results": "(kn) My Results",
+    "my_dues": "(kn) My Dues",
+    "hall_ticket": "(kn) Hall Ticket"
+  },
+  "common": {
+    "loading": "(kn) Loading...",
+    "save": "(kn) Save",
+    "cancel": "(kn) Cancel",
+    "submit": "(kn) Submit",
+    "approve": "(kn) Approve",
+    "reject": "(kn) Reject",
+    "view": "(kn) View",
+    "download": "(kn) Download",
+    "logout": "(kn) Log out",
+    "back": "(kn) Back",
+    "search": "(kn) Search",
+    "filter": "(kn) Filter"
+  },
+  "nav": {
+    "dashboard": "(kn) Dashboard",
+    "admissions": "(kn) Admissions",
+    "academics": "(kn) Academics",
+    "examinations": "(kn) Examinations",
+    "finance": "(kn) Finance",
+    "hr": "(kn) HR & Staff",
+    "student_services": "(kn) Student Services",
+    "regulatory": "(kn) Regulatory",
+    "reports": "(kn) Reports",
+    "settings": "(kn) Settings",
+    "phd": "(kn) PhD & Research",
+    "convocation": "(kn) Convocation"
+  }
+}

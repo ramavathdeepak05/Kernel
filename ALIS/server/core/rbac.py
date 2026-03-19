@@ -88,6 +88,8 @@ class Permission(str, Enum):
     STUDENT_READ_PII = "student:read_pii"
 
     # Academics
+    ACADEMICS_READ   = "academics:read"
+    ACADEMICS_MANAGE = "academics:manage"
     COURSE_READ = "course:read"
     COURSE_CREATE = "course:create"
     COURSE_UPDATE = "course:update"
@@ -178,6 +180,10 @@ class Permission(str, Enum):
     PROCESS_READ   = "process:read"
     PROCESS_MANAGE = "process:manage"
 
+    # E15 — PhD / Doctoral
+    PHD_READ   = "phd:read"
+    PHD_MANAGE = "phd:manage"
+
     # Dynamic Role Management
     ROLE_CREATE = "role:create"
     ROLE_MANAGE = "role:manage"
@@ -185,6 +191,14 @@ class Permission(str, Enum):
 
     # System Monitoring (E02-S01)
     SYSTEM_READ = "system:read"
+
+    # Feature Flags — institutional feature toggle management (§12)
+    FEATURE_FLAG_READ   = "feature_flag:read"
+    FEATURE_FLAG_MANAGE = "feature_flag:manage"
+
+    # E18 — Convocation Management
+    CONVOCATION_READ   = "convocation:read"
+    CONVOCATION_MANAGE = "convocation:manage"
 
 
 # --- Role-Permission Mapping ---
@@ -265,6 +279,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.SYSTEM_READ,     # E02-S01
         Permission.PROCESS_READ,    # E13
         Permission.PROCESS_MANAGE,  # E13
+        Permission.FEATURE_FLAG_READ,    # §12 — view institutional feature flags
+        Permission.FEATURE_FLAG_MANAGE,  # §12 — enable/disable flags per tenant
     ],
     Role.SUPER_ADMIN: [
         # Super admin has all permissions

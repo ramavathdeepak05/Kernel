@@ -609,6 +609,7 @@ class TenantMiddleware:
         "/health",
         "/api/auth/login",
         "/api/auth/bootstrap",
+        "/api/auth/mfa/verify",   # carries mfa_token, not a session Bearer token
         "/docs",
         "/redoc",
         "/openapi.json",

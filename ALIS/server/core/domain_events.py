@@ -29,9 +29,28 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
 
-from server.db_service import execute_query, execute_transaction
+from server.db_service import (
+    execute_query,
+    execute_transaction,
+    execute_system_query,
+    execute_system_transaction,
+)
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics (optional — no hard dependency)
+# ---------------------------------------------------------------------------
+try:
+    from server.core.metrics import (
+        AVAILABLE as _METRICS_AVAILABLE,
+        DOMAIN_EVENTS_PUBLISHED as _DOMAIN_EVENTS_PUBLISHED,
+        DOMAIN_EVENTS_PROCESSED as _DOMAIN_EVENTS_PROCESSED,
+    )
+except Exception:
+    _METRICS_AVAILABLE = False
+    _DOMAIN_EVENTS_PUBLISHED = None
+    _DOMAIN_EVENTS_PROCESSED = None
 
 # ---------------------------------------------------------------------------
 # Handler registry (populated at startup by each module's event_handlers.py)
@@ -74,10 +93,10 @@ class DomainEvent:
     def __init__(
         self,
         event_type: str,
-        entity_type: str,
-        entity_id: str,
         org_id: str,
         payload: Dict[str, Any],
+        entity_type: str = "",
+        entity_id: str = "",
         actor_id: str = "system",
         correlation_id: Optional[str] = None,
     ):
@@ -149,6 +168,11 @@ class DomainEventBus:
             # Celery unavailable — beat retry task will pick it up
             logger.warning("DomainEventBus: Celery unavailable, event %s queued in DB: %s", event.id, e)
 
+        if _METRICS_AVAILABLE and _DOMAIN_EVENTS_PUBLISHED is not None:
+            try:
+                _DOMAIN_EVENTS_PUBLISHED.labels(event_type=event.event_type).inc()
+            except Exception:
+                pass
         logger.info("DomainEventBus: published %s [entity=%s/%s, org=%s]",
                     event.event_type, event.entity_type, event.entity_id, event.org_id)
         return event.id
@@ -192,6 +216,34 @@ class DomainEventBus:
         errors = []
 
         for handler in handlers:
+            handler_name = f"{handler.__module__}.{handler.__name__}"
+            # EC-CROSS-01: idempotency guard — skip if this handler already ran
+            try:
+                execute_system_transaction([
+                    (
+                        "INSERT INTO domain_event_handler_log "
+                        "(event_id, handler_name, status) VALUES (%s, %s, 'PROCESSING') "
+                        "ON CONFLICT (event_id, handler_name) DO NOTHING",
+                        (event_id, handler_name),
+                    )
+                ])
+                # If the INSERT was a no-op (conflict), the row exists → already ran
+                already_ran = execute_system_query(
+                    "SELECT status FROM domain_event_handler_log "
+                    "WHERE event_id = %s AND handler_name = %s",
+                    (event_id, handler_name),
+                )
+                if already_ran and already_ran[0]["status"] in ("SUCCESS", "PROCESSING"):
+                    if already_ran[0]["status"] == "SUCCESS":
+                        logger.info(
+                            "DomainEventBus: skipping handler %s (already ran for event %s)",
+                            handler_name, event_id,
+                        )
+                        continue
+                    # PROCESSING → this worker previously crashed mid-handler → retry is OK
+            except Exception as idem_err:
+                logger.warning("EC-CROSS-01: idempotency check failed for %s: %s", handler_name, idem_err)
+
             try:
                 handler(
                     event_type=event_type,
@@ -202,14 +254,33 @@ class DomainEventBus:
                     actor_id=row["actor_id"],
                     correlation_id=row["correlation_id"],
                 )
+                # Mark handler as successfully completed
+                execute_system_transaction([
+                    (
+                        "UPDATE domain_event_handler_log SET status = 'SUCCESS' "
+                        "WHERE event_id = %s AND handler_name = %s",
+                        (event_id, handler_name),
+                    )
+                ])
             except Exception as e:
                 logger.error("DomainEventBus: handler %s failed for event %s: %s",
                              handler.__name__, event_id, e)
                 errors.append(str(e))
+                try:
+                    execute_system_transaction([
+                        (
+                            "UPDATE domain_event_handler_log SET status = 'FAILED', "
+                            "error_detail = %s WHERE event_id = %s AND handler_name = %s",
+                            (str(e), event_id, handler_name),
+                        )
+                    ])
+                except Exception:
+                    pass
 
         if errors:
             retry_count = int(row.get("retry_count", 0)) + 1
             max_retries = 3
+            final_status = "FAILED" if retry_count >= max_retries else "PENDING"
             if retry_count >= max_retries:
                 execute_transaction([(
                     "UPDATE domain_events SET status = 'FAILED', retry_count = %s, "
@@ -221,8 +292,29 @@ class DomainEventBus:
                     "UPDATE domain_events SET status = 'PENDING', retry_count = %s WHERE id = %s",
                     (retry_count, event_id),
                 )])
+            if _METRICS_AVAILABLE and _DOMAIN_EVENTS_PROCESSED is not None:
+                try:
+                    _DOMAIN_EVENTS_PROCESSED.labels(event_type=event_type, status=final_status).inc()
+                except Exception:
+                    pass
         else:
             execute_transaction([(
                 "UPDATE domain_events SET status = 'DONE', processed_at = %s WHERE id = %s",
                 (datetime.now(timezone.utc), event_id),
             )])
+            if _METRICS_AVAILABLE and _DOMAIN_EVENTS_PROCESSED is not None:
+                try:
+                    _DOMAIN_EVENTS_PROCESSED.labels(event_type=event_type, status="DONE").inc()
+                except Exception:
+                    pass
+
+        # P21 — Outbound webhook dispatch (after all internal handlers)
+        # Runs for every event type; WebhookDispatcher checks subscriptions.
+        try:
+            import asyncio
+            from server.core.webhook_dispatcher import WebhookDispatcher
+            org_id = row.get("org_id", "")
+            if org_id:
+                asyncio.run(WebhookDispatcher.dispatch(org_id, event_type, payload))
+        except Exception as _wh_exc:
+            logger.debug("Webhook dispatch skipped or failed for event %s: %s", event_id, _wh_exc)
