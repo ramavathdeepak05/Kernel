@@ -9,7 +9,11 @@
     "build:renderer": "vite build",
     "preview": "vite preview"
   },
-  "keywords": ["alis", "attendance", "electron"],
+  "keywords": [
+    "alis",
+    "attendance",
+    "electron"
+  ],
   "author": "QUAICU Pvt. Ltd.",
   "license": "UNLICENSED",
   "devDependencies": {
@@ -29,6 +33,7 @@
     "lucide-react": "^0.400.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^6.24.0"
+    "react-router-dom": "^6.24.0",
+    "zustand": "^4.5.7"
   }
 }

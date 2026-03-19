@@ -116,6 +116,7 @@ from server.api.consent_router import router as consent_router                  
 from server.api.admin_router import router as admin_router                         # P21 Admin (shadow mode, migration, webhooks)
 from server.api.phd_router import router as phd_router                             # E15 PhD / Doctoral
 from server.api.convocation_router import router as convocation_router             # E18 Convocation
+from server.api.wifi_attendance_router import router as wifi_attendance_router     # P29 WiFi Attendance
 from server.consent.consent_middleware import ConsentMiddleware                    # E21 DPDP
 from server.core.shadow_mode_middleware import ShadowModeMiddleware                # P21 Shadow mode suppression
 from server.core.api_versioning import DeprecationMiddleware, get_api_v2_router    # §29 API versioning
@@ -390,6 +391,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router)             # P21 Admin (shadow mode, migration, webhooks)
     app.include_router(phd_router)               # E15 PhD / Doctoral
     app.include_router(convocation_router)       # E18 Convocation
+    app.include_router(wifi_attendance_router)   # P29 WiFi Attendance
 
     # --- API v2 mount (§29 versioning) ---
     api_v2_router = get_api_v2_router()
