@@ -23,6 +23,7 @@ from server.academics.faculty import FacultyAssignmentService
 from server.academics.timetable import TimetableService
 from server.academics.attendance import AttendanceService
 from server.academics.analytics import AttendanceAnalyticsService
+from server.academics.ta_assignment_service import TAAssignmentService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/academics", tags=["academics"])
@@ -276,5 +277,171 @@ async def get_ai_insights(request: Request, academic_year: str = "",
     result = AttendanceAnalyticsService.generate_ai_insights(
         org_id=_org(request), academic_year=academic_year,
         course_id=course_id, actor_id=_actor(request)
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+# ---------------------------------------------------------------------------
+# E20 — OBE / CO-PO Mapping Routes (P22)
+# ---------------------------------------------------------------------------
+
+@router.post("/obe/program-outcomes")
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def create_program_outcome(request: Request, body: dict) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.create_program_outcome(
+        org_id=_org(request), program_id=body["program_id"], code=body["code"],
+        description=body["description"], domain=body.get("domain"), nba_mapping=body.get("nba_mapping"),
+    )
+    return JSONResponse(content=_jsonify(result), status_code=201)
+
+
+@router.post("/obe/course-outcomes")
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def create_course_outcome(request: Request, body: dict) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.create_course_outcome(
+        org_id=_org(request), course_id=body["course_id"], code=body["code"],
+        description=body["description"], bloom_level=body.get("bloom_level"),
+    )
+    return JSONResponse(content=_jsonify(result), status_code=201)
+
+
+@router.post("/obe/mapping")
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def map_co_to_po(request: Request, body: dict) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.map_co_to_po(
+        org_id=_org(request), course_id=body["course_id"], co_id=body["co_id"],
+        po_id=body["po_id"], strength=body.get("strength", "M"), justification=body.get("justification"),
+    )
+    return JSONResponse(content=_jsonify(result), status_code=201)
+
+
+@router.get("/obe/matrix/{course_id}")
+@require_permission(Permission.ACADEMICS_READ)
+async def get_co_po_matrix(request: Request, course_id: str) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.get_co_po_matrix(_org(request), course_id)
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.post("/obe/attainment/{course_id}")
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def compute_attainment(request: Request, course_id: str, body: dict) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.compute_attainment(
+        org_id=_org(request), program_id=body["program_id"], course_id=course_id,
+        semester_id=body["semester_id"], actor_id=_actor(request),
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.get("/obe/attainment/{program_id}")
+@require_permission(Permission.ACADEMICS_READ)
+async def get_attainment_report(request: Request, program_id: str) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.get_attainment_report(_org(request), program_id)
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.get("/obe/gap-analysis/{program_id}")
+@require_permission(Permission.ACADEMICS_READ)
+async def get_gap_analysis(request: Request, program_id: str) -> JSONResponse:
+    from server.academics.obe_service import OBEService
+    result = OBEService.get_gap_analysis(_org(request), program_id)
+    return JSONResponse(content=_jsonify(result))
+
+
+# =============================================================================
+# P26-TA — Teaching Assistant Assignments
+# =============================================================================
+
+@router.post("/courses/{course_id}/ta-assignments", status_code=201, tags=["TA Assignments"])
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def assign_course_ta(request: Request, course_id: str, body: dict) -> JSONResponse:
+    """
+    Assign a student as TA for a course (semester-long).
+    Replaces any existing active course TA — old TA is notified of revocation.
+    body.student_identifier: student UUID, roll number, or email.
+    body.notes: optional notes (e.g. 'Lab section TA').
+    """
+    result = TAAssignmentService.assign_course_ta(
+        tenant_id=_org(request),
+        course_id=course_id,
+        faculty_id=_actor(request),
+        student_identifier=body["student_identifier"],
+        notes=body.get("notes"),
+    )
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.get("/courses/{course_id}/ta-assignments", tags=["TA Assignments"])
+@require_permission(Permission.ACADEMICS_READ)
+async def list_course_tas(request: Request, course_id: str) -> JSONResponse:
+    """List active TA assignments for a course."""
+    result = TAAssignmentService.list_course_tas(
+        tenant_id=_org(request),
+        course_id=course_id,
+        faculty_id=_actor(request),
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.delete("/courses/{course_id}/ta-assignments/{assignment_id}", tags=["TA Assignments"])
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def revoke_course_ta(request: Request, course_id: str, assignment_id: str) -> JSONResponse:
+    """Revoke a course-level TA assignment. TA is notified via WhatsApp/SMS."""
+    result = TAAssignmentService.revoke_course_ta(
+        tenant_id=_org(request),
+        course_id=course_id,
+        assignment_id=assignment_id,
+        faculty_id=_actor(request),
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.post("/sessions/{session_ref}/ta-assignments", status_code=201, tags=["TA Assignments"])
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def assign_session_ta(request: Request, session_ref: str, body: dict) -> JSONResponse:
+    """
+    Assign a TA for a specific attendance session only (one-time delegation).
+    body.student_identifier: student UUID, roll number, or email.
+    body.course_id: UUID of the course the session belongs to.
+    body.session_type: 'WIFI' (default) or 'MANUAL'.
+    """
+    result = TAAssignmentService.assign_session_ta(
+        tenant_id=_org(request),
+        course_id=body.get("course_id", ""),
+        session_ref=session_ref,
+        session_type=body.get("session_type", "WIFI"),
+        faculty_id=_actor(request),
+        student_identifier=body["student_identifier"],
+    )
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.delete("/sessions/{session_ref}/ta-assignments", tags=["TA Assignments"])
+@require_permission(Permission.ACADEMICS_MANAGE)
+async def revoke_session_ta(request: Request, session_ref: str) -> JSONResponse:
+    """Revoke all TA assignments for a specific attendance session."""
+    result = TAAssignmentService.revoke_session_ta(
+        tenant_id=_org(request),
+        session_ref=session_ref,
+        faculty_id=_actor(request),
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.get("/my-ta-assignments", tags=["TA Assignments"])
+@require_permission(Permission.STUDENT_READ)
+async def get_my_ta_assignments(request: Request) -> JSONResponse:
+    """
+    Returns all courses where the current user is an active TA.
+    Used by mobile/desktop app to show TA's attendance management scope.
+    """
+    result = TAAssignmentService.get_ta_courses(
+        student_id=_actor(request),
+        tenant_id=_org(request),
     )
     return JSONResponse(content=_jsonify(result))
