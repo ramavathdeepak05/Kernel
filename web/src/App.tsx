@@ -54,6 +54,9 @@ import { WorkflowsPage } from './pages/workflows/WorkflowsPage';
 import { ProcessEnginePage } from './pages/process-engine/ProcessEnginePage';
 import { ConsentPage } from './pages/consent/ConsentPage';
 
+// P28 — Offline PWA attendance (standalone, no shell — loads as installable page)
+import { OfflineAttendancePage } from './pages/attendance/OfflineAttendancePage';
+
 function ProtectedRoute() {
   const { isAuthenticated, hydrate } = useAuthStore();
 
@@ -130,6 +133,9 @@ export default function App() {
 
           {/* Guardian portal — standalone, no shell */}
           <Route path="/guardian" element={<GuardianPortalPage />} />
+
+          {/* Offline PWA attendance — standalone, installable (feature flag: academics.offline_attendance_pwa) */}
+          <Route path="/attendance/mark/:sessionId" element={<OfflineAttendancePage />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
