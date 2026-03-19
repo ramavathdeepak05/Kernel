@@ -42,10 +42,20 @@ razorpay==1.4.1
 # --- Auth / Security ---
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+pyotp==2.9.0                # TOTP / MFA
+cryptography==43.0.1        # Fernet encryption for TOTP secrets at rest
+PyJWT==2.9.0                # MFA challenge token signing
+asyncpg==0.29.0             # async PostgreSQL driver (FastAPI handlers)
+hvac==2.3.0                 # HashiCorp Vault client (P0-2)
+
+# --- Observability ---
+prometheus-client==0.21.0   # Prometheus metrics exposition
+sentry-sdk[fastapi]==2.14.0 # Error tracking + performance monitoring (optional — set SENTRY_DSN to enable)
 
 # --- Utilities ---
 python-dateutil==2.9.0
 orjson==3.10.7              # fast JSON serializer
+asteval==1.0.2              # safe expression evaluator for PolicyEngine DSL (replaces eval())
 
 # --- Auth / Crypto ---
 bcrypt==4.2.0

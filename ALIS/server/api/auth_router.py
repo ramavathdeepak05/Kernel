@@ -36,8 +36,10 @@ import os
 import secrets
 import logging
 from uuid import uuid4
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
+
+import jwt as _pyjwt
 
 from fastapi import APIRouter, Request, Header
 from fastapi.responses import JSONResponse
@@ -52,6 +54,7 @@ from server.core.security import (
 )
 from server.core.rbac import Role
 from server.core.audit import AuditLedger, AuditAction
+from server.core.mfa_service import MFAService, MFA_REQUIRED_ROLES
 from server.db_service import (
     execute_query,
     execute_transaction,
@@ -77,7 +80,7 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
     password: str = Field(..., min_length=8, max_length=256)
-    role: str = Field(default="student", description="RBAC role to assign")
+    role: str = Field(default=Role.STUDENT.value, description="RBAC role to assign")
     email: Optional[str] = None
     display_name: Optional[str] = None
     # Defaults to caller's tenant; SUPER_ADMIN may override
@@ -95,6 +98,28 @@ class BootstrapRequest(BaseModel):
     bootstrap_secret: str = Field(..., description="Must match ALIS_BOOTSTRAP_SECRET env var")
     email: Optional[str] = None
     display_name: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# MFA Request / Response Models
+# ---------------------------------------------------------------------------
+
+class MFAEnrollRequest(BaseModel):
+    device_name: str = Field(default="Authenticator App", max_length=128)
+
+
+class MFAConfirmRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8, description="6-digit TOTP code")
+
+
+class MFAVerifyRequest(BaseModel):
+    mfa_token: str = Field(..., description="Short-lived challenge token from /login")
+    code: str = Field(..., min_length=6, max_length=8, description="6-digit TOTP or 8-char backup code")
+    trust_device: bool = Field(default=False, description="Trust this device for 30 days")
+
+
+class MFADisableRequest(BaseModel):
+    code: str = Field(..., min_length=6, max_length=8, description="Current TOTP code to confirm disable")
 
 
 # =============================================================================
@@ -146,6 +171,71 @@ def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
     return JSONResponse(status_code=status, content=body)
 
 
+# ---------------------------------------------------------------------------
+# MFA challenge token helpers (short-lived JWT, purpose="mfa_challenge")
+# ---------------------------------------------------------------------------
+
+def _build_mfa_token(user_id: str, tenant_id: str, role: str) -> str:
+    """
+    Issue a short-lived JWT for the MFA challenge step.
+
+    Claims:
+        sub      — user_id
+        tenant   — tenant_id
+        role     — user role (needed to create the full session after MFA)
+        purpose  — "mfa_challenge"  (used to reject this token at all other endpoints)
+        exp      — now + mfa_challenge_token_expire_minutes
+    """
+    from server.core.settings import settings
+
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.mfa_challenge_token_expire_minutes
+    )
+    payload = {
+        "sub": user_id,
+        "tenant": tenant_id,
+        "role": role,
+        "purpose": "mfa_challenge",
+        "exp": expire,
+        "iat": datetime.now(timezone.utc),
+    }
+    return _pyjwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def _decode_mfa_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Decode and validate an mfa_challenge JWT.
+
+    Returns the claims dict on success, None if invalid/expired/wrong purpose.
+    """
+    from server.core.settings import settings
+
+    try:
+        claims = _pyjwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        if claims.get("purpose") != "mfa_challenge":
+            return None
+        return claims
+    except _pyjwt.ExpiredSignatureError:
+        return None
+    except _pyjwt.PyJWTError:
+        return None
+
+
+def _device_fingerprint(request: Request) -> str:
+    """
+    Build a stable device fingerprint from User-Agent + client IP.
+
+    Used as the input to SHA-256 inside MFAService.trust_device / is_device_trusted.
+    """
+    ua = request.headers.get("user-agent", "unknown-ua")
+    ip = request.client.host if request.client else "unknown-ip"
+    return f"{ua}:{ip}"
+
+
 # =============================================================================
 # POST /api/auth/login
 # =============================================================================
@@ -192,8 +282,48 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
 
     FailedLoginTracker.record_attempt(identifier, success=True, ip_address=ip)
 
+    user_id_str = str(user["id"])
+    user_role = user["role"]
+
+    # ------------------------------------------------------------------
+    # MFA gate: check if MFA is required and device is not already trusted
+    # ------------------------------------------------------------------
+    role_requires_mfa = user_role in MFA_REQUIRED_ROLES
+    has_mfa = MFAService.has_active_mfa(body.tenant_id, user_id_str)
+    fingerprint = _device_fingerprint(request)
+    device_trusted = MFAService.is_device_trusted(body.tenant_id, user_id_str, fingerprint)
+
+    mfa_needed = (role_requires_mfa or has_mfa) and not device_trusted
+
+    if mfa_needed:
+        # Issue a short-lived MFA challenge token — do NOT create a full session yet
+        mfa_token = _build_mfa_token(user_id_str, body.tenant_id, user_role)
+
+        AuditLedger.log(
+            action=AuditAction.LOGIN,
+            actor_id=user_id_str,
+            actor_role=user_role,
+            entity_type="mfa_challenge",
+            entity_id=user_id_str,
+            tenant_id=body.tenant_id,
+            metadata={"ip": ip, "username": user["username"], "event": "mfa_challenge_issued"},
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "mfa_required": True,
+                "mfa_token": mfa_token,
+                "user_id": user_id_str,
+                "tenant_id": body.tenant_id,
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # No MFA required (or device already trusted) — issue full session
+    # ------------------------------------------------------------------
     session, token = SessionManager.create_session(
-        user_id=str(user["id"]),
+        user_id=user_id_str,
         tenant_id=body.tenant_id,
         user_agent=request.headers.get("user-agent"),
         ip_address=ip,
@@ -201,8 +331,8 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
 
     AuditLedger.log(
         action=AuditAction.LOGIN,
-        actor_id=str(user["id"]),
-        actor_role=user["role"],
+        actor_id=user_id_str,
+        actor_role=user_role,
         entity_type="session",
         entity_id=session.id,
         tenant_id=body.tenant_id,
@@ -214,9 +344,9 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
         content={
             "token": token,
             "session_id": session.id,
-            "user_id": str(user["id"]),
+            "user_id": user_id_str,
             "username": user["username"],
-            "role": user["role"],
+            "role": user_role,
             "tenant_id": body.tenant_id,
             "expires_at": session.expires_at.isoformat(),
         },
@@ -550,5 +680,254 @@ async def bootstrap_tenant(body: BootstrapRequest) -> JSONResponse:
             "username": body.username,
             "role": Role.SUPER_ADMIN.value,
             "tenant_id": body.tenant_id,
+        },
+    )
+
+
+# =============================================================================
+# POST /api/auth/mfa/enroll
+# =============================================================================
+
+@router.post("/mfa/enroll")
+async def mfa_enroll(
+    request: Request,
+    body: MFAEnrollRequest,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Begin TOTP enrollment for the authenticated user.
+
+    Creates a pending (is_active=FALSE) mfa_devices row and returns:
+      - totp_uri     : otpauth:// URI — render as a QR code in the frontend
+      - backup_codes : 8 one-time codes — show once and prompt user to save them
+
+    The device is NOT yet active. Call POST /mfa/confirm with the first TOTP
+    code to activate it.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    result = MFAService.enroll_device(
+        org_id=session.tenant_id,
+        user_id=session.user_id,
+        device_name=body.device_name,
+    )
+
+    AuditLedger.log(
+        action=AuditAction.CREATE,
+        actor_id=session.user_id,
+        actor_role="user",
+        entity_type="mfa_device",
+        entity_id=result["device_id"],
+        tenant_id=session.tenant_id,
+        metadata={"event": "mfa_enrollment_started", "device_name": body.device_name},
+    )
+
+    return JSONResponse(status_code=200, content=result)
+
+
+# =============================================================================
+# POST /api/auth/mfa/confirm
+# =============================================================================
+
+@router.post("/mfa/confirm")
+async def mfa_confirm(
+    body: MFAConfirmRequest,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Confirm TOTP enrollment by verifying the first code from the authenticator app.
+
+    Activates the pending mfa_devices row for the authenticated user.
+    Returns 200 on success, 400 if the code is wrong or no pending enrollment exists.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    ok = MFAService.confirm_enrollment(
+        org_id=session.tenant_id,
+        user_id=session.user_id,
+        code=body.code,
+    )
+    if not ok:
+        return _err(400, "Invalid TOTP code or no pending enrollment found", "ERR_MFA_INVALID_CODE")
+
+    AuditLedger.log(
+        action=AuditAction.UPDATE,
+        actor_id=session.user_id,
+        actor_role="user",
+        entity_type="mfa_device",
+        entity_id=session.user_id,
+        tenant_id=session.tenant_id,
+        metadata={"event": "mfa_enrollment_confirmed"},
+    )
+
+    return JSONResponse(status_code=200, content={"message": "MFA enrollment confirmed. MFA is now active."})
+
+
+# =============================================================================
+# POST /api/auth/mfa/verify
+# =============================================================================
+
+@router.post("/mfa/verify")
+async def mfa_verify(
+    request: Request,
+    body: MFAVerifyRequest,
+) -> JSONResponse:
+    """
+    Complete the MFA challenge during login and receive a full session token.
+
+    Flow:
+      1. POST /login  → mfa_required=true + mfa_token (5-minute JWT)
+      2. User enters TOTP code from authenticator app (or a backup code)
+      3. POST /mfa/verify  → full session token (same shape as a normal login response)
+
+    If trust_device=true the device fingerprint (UA + IP) is stored as trusted
+    for 30 days; future logins from this device skip the MFA challenge.
+    """
+    # Decode and validate the short-lived MFA challenge token
+    claims = _decode_mfa_token(body.mfa_token)
+    if not claims:
+        return _err(401, "MFA token is invalid or expired", "ERR_MFA_TOKEN_INVALID")
+
+    user_id = claims["sub"]
+    tenant_id = claims["tenant"]
+    user_role = claims.get("role", "")
+
+    # Verify the TOTP / backup code
+    ok = MFAService.verify_challenge(
+        org_id=tenant_id,
+        user_id=user_id,
+        code=body.code,
+    )
+    if not ok:
+        return _err(401, "Invalid MFA code", "ERR_MFA_INVALID_CODE")
+
+    # Optionally trust the device
+    if body.trust_device:
+        MFAService.trust_device(tenant_id, user_id, _device_fingerprint(request))
+
+    # Issue full session
+    ip = request.client.host if request.client else "unknown"
+    session, token = SessionManager.create_session(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        user_agent=request.headers.get("user-agent"),
+        ip_address=ip,
+    )
+
+    # Fetch user details for the response
+    user = _fetch_user_by_id(user_id, tenant_id)
+    username = user["username"] if user else user_id
+
+    AuditLedger.log(
+        action=AuditAction.LOGIN,
+        actor_id=user_id,
+        actor_role=user_role,
+        entity_type="session",
+        entity_id=session.id,
+        tenant_id=tenant_id,
+        metadata={
+            "ip": ip,
+            "event": "mfa_verified",
+            "device_trusted": body.trust_device,
+        },
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "token": token,
+            "session_id": session.id,
+            "user_id": user_id,
+            "username": username,
+            "role": user_role,
+            "tenant_id": tenant_id,
+            "expires_at": session.expires_at.isoformat(),
+        },
+    )
+
+
+# =============================================================================
+# POST /api/auth/mfa/disable
+# =============================================================================
+
+@router.post("/mfa/disable")
+async def mfa_disable(
+    body: MFAConfirmRequest,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Disable MFA for the authenticated user.
+
+    Requires a valid current TOTP code to prevent an attacker with a stolen
+    session token from disabling MFA without physical access to the device.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    # Re-verify TOTP to confirm intent
+    ok = MFAService.verify_challenge(
+        org_id=session.tenant_id,
+        user_id=session.user_id,
+        code=body.code,
+    )
+    if not ok:
+        return _err(401, "Invalid TOTP code — MFA not disabled", "ERR_MFA_INVALID_CODE")
+
+    MFAService.disable_mfa(org_id=session.tenant_id, user_id=session.user_id)
+
+    AuditLedger.log(
+        action=AuditAction.UPDATE,
+        actor_id=session.user_id,
+        actor_role="user",
+        entity_type="mfa_device",
+        entity_id=session.user_id,
+        tenant_id=session.tenant_id,
+        metadata={"event": "mfa_disabled"},
+    )
+
+    return JSONResponse(status_code=200, content={"message": "MFA has been disabled for your account."})
+
+
+# =============================================================================
+# GET /api/auth/mfa/status
+# =============================================================================
+
+@router.get("/mfa/status")
+async def mfa_status(
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Return MFA enrollment status and whether MFA is mandatory for the caller's role.
+
+    Response:
+        {
+            "mfa_enrolled":  bool,   # has at least one active TOTP device
+            "mfa_required":  bool,   # role is in MFA_REQUIRED_ROLES
+            "role":          str,
+        }
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    user = _fetch_user_by_id(session.user_id, session.tenant_id)
+    if not user:
+        return _err(404, "User not found", "ERR_USER_NOT_FOUND")
+
+    user_role = user["role"]
+    enrolled = MFAService.has_active_mfa(session.tenant_id, session.user_id)
+    required = user_role in MFA_REQUIRED_ROLES
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "mfa_enrolled": enrolled,
+            "mfa_required": required,
+            "role": user_role,
         },
     )

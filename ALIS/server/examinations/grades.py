@@ -46,7 +46,7 @@ class GradeService:
 
     @classmethod
     def _load_grade_table(cls, org_id: str) -> list:
-        from server.admissions.policy_store import PolicyStore
+        from server.core.policy_store import PolicyStore
         table = PolicyStore.get(org_id, "exams.grading.grade_table")
         if table and isinstance(table, list):
             return [(row[0], row[1], row[2]) for row in table]

@@ -25,7 +25,7 @@ class AttendanceAnalyticsService:
         Return all students below the minimum attendance threshold.
         Pure DB query — no AI needed for the list itself.
         """
-        from server.admissions.policy_store import PolicyKey, PolicyStore
+        from server.core.policy_store import PolicyKey, PolicyStore
         min_pct = float(PolicyStore.get(org_id, PolicyKey.MIN_ATTENDANCE_PCT) or 75.0)
 
         sql = """

@@ -19,7 +19,7 @@ class HRAnalyticsService:
     @classmethod
     def workload_distribution(cls, org_id: str, academic_year: str) -> list[dict]:
         """Faculty workload: courses per faculty, credit hours, vs. policy limit."""
-        from server.admissions.policy_store import PolicyStore
+        from server.core.policy_store import PolicyStore
         max_courses = int(
             PolicyStore.get(org_id, "academics.faculty.max_courses_per_year") or 6
         )

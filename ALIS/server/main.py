@@ -16,15 +16,77 @@ Hard Constraints:
 - All requests are tenant-aware
 """
 
+import json
 import logging
 import time
 import urllib.request
+import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Sentry (optional — graceful if sentry-sdk not installed or DSN not set)
+# ---------------------------------------------------------------------------
+def _init_sentry() -> None:
+    """Initialise Sentry SDK if DSN is configured and sdk is installed."""
+    try:
+        from server.core.settings import settings as _s
+        if not _s.sentry_enabled:
+            return
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.asyncio import AsyncioIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+        import logging as _logging
+        sentry_sdk.init(
+            dsn=_s.sentry_dsn,
+            environment=_s.app_env,
+            release=f"alis@{0.1}",
+            traces_sample_rate=_s.sentry_traces_sample_rate,
+            profiles_sample_rate=_s.sentry_profiles_sample_rate,
+            integrations=[
+                FastApiIntegration(),
+                AsyncioIntegration(),
+                LoggingIntegration(
+                    level=_logging.WARNING,        # capture WARNING+ as breadcrumbs
+                    event_level=_logging.ERROR,    # send ERROR+ as Sentry events
+                ),
+            ],
+            # Never send PII (student data) to Sentry
+            send_default_pii=False,
+            # Ignore noisy client-facing 4xx errors
+            ignore_errors=[
+                "fastapi.exceptions.RequestValidationError",
+                "starlette.exceptions.HTTPException",
+            ],
+        )
+        logger.info("Sentry initialised (env=%s, sample_rate=%.2f)", _s.app_env, _s.sentry_traces_sample_rate)
+    except ImportError:
+        logger.debug("sentry-sdk not installed — error tracking disabled")
+    except Exception as exc:
+        logger.warning("Sentry init failed: %s", exc)
+
+
+_init_sentry()
+
+# ---------------------------------------------------------------------------
+# Prometheus metrics (optional — graceful if prometheus_client not installed)
+# ---------------------------------------------------------------------------
+from server.core.metrics import (  # noqa: E402
+    AVAILABLE as _PROMETHEUS_AVAILABLE,
+    HTTP_REQUESTS_TOTAL as _HTTP_REQUESTS_TOTAL,
+    HTTP_REQUEST_DURATION as _HTTP_REQUEST_DURATION,
+    ACTIVE_REQUESTS as _ACTIVE_REQUESTS,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
+if not _PROMETHEUS_AVAILABLE:
+    logger.warning("prometheus_client not installed — metrics endpoint will return 501")
 
 from server.core.error_handlers import register_exception_handlers
 from server.core.security import TenantMiddleware
@@ -48,6 +110,15 @@ from server.api.reporting_router import router as reporting_router              
 from server.api.alumni_router import router as alumni_router                       # E12
 from server.api.process_engine_router import router as process_engine_router       # E13
 from server.api.integrations_router import router as integrations_router           # P14
+from server.api.feature_flags_router import router as feature_flags_router         # §12 Feature Flags
+from server.api.regulatory_router import router as regulatory_router               # E14 Regulatory
+from server.api.consent_router import router as consent_router                     # E21 DPDP
+from server.api.admin_router import router as admin_router                         # P21 Admin (shadow mode, migration, webhooks)
+from server.api.phd_router import router as phd_router                             # E15 PhD / Doctoral
+from server.api.convocation_router import router as convocation_router             # E18 Convocation
+from server.consent.consent_middleware import ConsentMiddleware                    # E21 DPDP
+from server.core.shadow_mode_middleware import ShadowModeMiddleware                # P21 Shadow mode suppression
+from server.core.api_versioning import DeprecationMiddleware, get_api_v2_router    # §29 API versioning
 from server.tools import register_all_tools
 
 
@@ -78,6 +149,119 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 
+class MetricsMiddleware:
+    """Raw ASGI middleware: instruments HTTP requests with Prometheus metrics."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not _PROMETHEUS_AVAILABLE:
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+        # Collapse path params to avoid high-cardinality labels
+        label_path = path.split("?")[0]
+
+        _ACTIVE_REQUESTS.inc()
+        start = time.perf_counter()
+        status_code = 500
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 500)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            duration = time.perf_counter() - start
+            _ACTIVE_REQUESTS.dec()
+            _HTTP_REQUESTS_TOTAL.labels(method=method, path=label_path, status_code=str(status_code)).inc()
+            _HTTP_REQUEST_DURATION.labels(method=method, path=label_path).observe(duration)
+
+
+class RequestLoggingMiddleware:
+    """
+    Raw ASGI middleware: structured JSON request logging.
+
+    Emits one log line per request:
+    {
+      "ts": "...", "level": "info", "event": "http_request",
+      "method": "POST", "path": "/api/v1/...", "status_code": 201,
+      "duration_ms": 45.2, "tenant_id": "...", "request_id": "...", "user_id": "..."
+    }
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        request_id = (
+            headers.get(b"x-request-id", b"").decode()
+            or str(uuid.uuid4())
+        )
+        # Store request_id in scope so downstream can access it
+        scope["alis_request_id"] = request_id
+
+        start = time.perf_counter()
+        status_code = 500
+
+        async def send_wrapper(message):
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message.get("status", 500)
+                # Inject X-Request-ID response header
+                resp_headers = list(message.get("headers", []))
+                resp_headers.append((b"x-request-id", request_id.encode()))
+                message = {**message, "headers": resp_headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+        duration_ms = (time.perf_counter() - start) * 1000
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+
+        # tenant_id and user_id are set by TenantMiddleware on scope["state"]
+        state = scope.get("state", {})
+        tenant_id = getattr(state, "tenant_id", None) if hasattr(state, "tenant_id") else None
+        user_id = getattr(state, "user_id", None) if hasattr(state, "user_id") else None
+
+        log_record = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int((time.time() % 1) * 1000):03d}Z",
+            "level": "info",
+            "event": "http_request",
+            "method": method,
+            "path": path,
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 2),
+            "tenant_id": tenant_id,
+            "request_id": request_id,
+            "user_id": user_id,
+        }
+        logger.info(json.dumps(log_record))
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """P0-1: Init asyncpg pool on startup, close on shutdown."""
+    from server.db_service import init_pool, close_pool
+    await init_pool()
+    logger.info("ALIS startup: asyncpg pool ready.")
+    yield
+    await close_pool()
+    logger.info("ALIS shutdown: asyncpg pool closed.")
+
+
 def create_app() -> FastAPI:
     """
     Application factory.
@@ -94,17 +278,28 @@ def create_app() -> FastAPI:
             "All AI invocations route through the AI Gateway (E03-S01)."
         ),
         version="0.1.0",
+        lifespan=_lifespan,
         # Disable interactive docs in production — never expose schema to the public
         docs_url=None if settings.is_production else "/docs",
         redoc_url=None if settings.is_production else "/redoc",
         openapi_url=None if settings.is_production else "/openapi.json",
     )
 
+    # --- Observability (outermost — captures all requests including errors) ---
+    app.add_middleware(MetricsMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
+
     # --- Security Headers ---
     app.add_middleware(SecurityHeadersMiddleware)
 
     # --- Tenant Isolation (Layer 4 Invariant) ---
     app.add_middleware(TenantMiddleware)
+
+    # --- Shadow Mode (P21) — must run after TenantMiddleware to read tenant_id ---
+    app.add_middleware(ShadowModeMiddleware)
+
+    # --- DPDP Consent Enforcement (E21) — must run after TenantMiddleware ---
+    app.add_middleware(ConsentMiddleware)
 
     # --- CORS ---
     # In production restrict to explicit methods/headers; dev keeps wildcard for convenience.
@@ -161,6 +356,10 @@ def create_app() -> FastAPI:
     from server.process_engine.event_handlers import register_all as register_process_engine_handlers
     register_process_engine_handlers()
 
+    # --- E14 Event Handlers (Regulatory & Accreditation) ---
+    from server.regulatory.event_handlers import register_all as register_regulatory_handlers
+    register_regulatory_handlers()
+
     # --- Exception Handlers ---
     register_exception_handlers(app)
 
@@ -185,6 +384,27 @@ def create_app() -> FastAPI:
     app.include_router(alumni_router)            # E12
     app.include_router(process_engine_router)    # E13
     app.include_router(integrations_router)      # P14
+    app.include_router(feature_flags_router)     # §12 Feature Flags
+    app.include_router(regulatory_router)        # E14 Regulatory
+    app.include_router(consent_router)           # E21 DPDP
+    app.include_router(admin_router)             # P21 Admin (shadow mode, migration, webhooks)
+    app.include_router(phd_router)               # E15 PhD / Doctoral
+    app.include_router(convocation_router)       # E18 Convocation
+
+    # --- API v2 mount (§29 versioning) ---
+    api_v2_router = get_api_v2_router()
+    app.include_router(api_v2_router)
+
+    # --- API Deprecation Headers (v1 Sunset) ---
+    app.add_middleware(DeprecationMiddleware)
+
+    # --- Prometheus Metrics ---
+    @app.get("/metrics", tags=["system"], include_in_schema=False)
+    async def metrics():
+        """Prometheus metrics scrape endpoint (internal only — nginx blocks external access)."""
+        if not _PROMETHEUS_AVAILABLE:
+            return JSONResponse(status_code=501, content={"error": "prometheus_client not installed"})
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # --- Health & Readiness ---
     @app.get("/health", tags=["system"])
@@ -205,8 +425,8 @@ def create_app() -> FastAPI:
 
         # --- PostgreSQL ---
         try:
-            from server.db_service import execute_system_query
-            execute_system_query("SELECT 1")
+            from server.db_service import execute_system_query_async
+            await execute_system_query_async("SELECT 1")
             checks["postgres"] = "ok"
         except Exception as e:
             checks["postgres"] = f"error: {e}"

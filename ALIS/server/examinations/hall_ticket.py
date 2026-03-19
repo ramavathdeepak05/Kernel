@@ -40,7 +40,7 @@ class HallTicketService:
         Issue hall tickets for all eligible students in a semester.
         Called automatically when AttendanceFinalized event is received.
         """
-        from server.admissions.policy_store import PolicyKey, PolicyStore
+        from server.core.policy_store import PolicyKey, PolicyStore
         min_att = float(PolicyStore.get(org_id, PolicyKey.MIN_ATTENDANCE_PCT) or 75.0)
 
         # Get enrolled students with their attendance %

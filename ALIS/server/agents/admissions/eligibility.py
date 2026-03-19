@@ -159,10 +159,16 @@ def evaluate_eligibility_node(state: EligibilityState) -> dict:
         score = vo.confidence_score
         tier = vo.confidence_tier.value
 
+        # Confidence thresholds from policy_engine — never hardcoded (§12.4 R02)
+        org_id = state["rbac_context"].get("org_id", "")
+        from server.core.policy_store import PolicyStore
+        high_conf = float(PolicyStore.get(org_id, "ai.eligibility.high_confidence_threshold") or 0.8)
+        low_conf = float(PolicyStore.get(org_id, "ai.eligibility.low_confidence_threshold") or 0.5)
+
         # Map confidence to proposed state
-        if score >= 0.8:
+        if score >= high_conf:
             proposed = "ELIGIBLE"
-        elif score >= 0.5:
+        elif score >= low_conf:
             proposed = "PROVISIONALLY_ELIGIBLE"
         else:
             proposed = "MANUAL_REVIEW"

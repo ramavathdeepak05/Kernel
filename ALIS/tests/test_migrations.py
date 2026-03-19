@@ -111,14 +111,14 @@ class TestMigrationChain:
         assert len(genesis) == 1, f"Expected 1 genesis migration, got {len(genesis)}"
         assert genesis[0]["revision"] == "0001"
 
-    def test_chain_ends_at_0014(self):
-        """The latest migration must be 0014."""
+    def test_chain_ends_at_0032(self):
+        """The latest migration must be 0032 (P24 — Drillbit submission tracking)."""
         migrations = _all_migrations()
         revision_ids = {m["revision"] for m in migrations}
         # Find the head: the revision not referenced by any down_revision
         all_down = {m["down_revision"] for m in migrations if m.get("down_revision")}
         heads = revision_ids - all_down
-        assert heads == {"0014"}, f"Expected head=0014, got {heads}"
+        assert heads == {"0032"}, f"Expected head=0032, got {heads}"
 
     def test_full_chain_walkable(self):
         """Walk the full chain from genesis to head without gaps."""

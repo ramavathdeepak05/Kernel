@@ -141,7 +141,7 @@ class AttendanceService:
         attended = int(r.get("attended") or 0)
         pct = round((attended / total * 100), 2) if total > 0 else 0.0
 
-        from server.admissions.policy_store import PolicyKey, PolicyStore
+        from server.core.policy_store import PolicyKey, PolicyStore
         min_pct = float(PolicyStore.get(org_id, PolicyKey.MIN_ATTENDANCE_PCT) or 75.0)
 
         return {

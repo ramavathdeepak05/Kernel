@@ -90,10 +90,33 @@ class Settings(BaseSettings):
     # Ollama (Local AI — used when LLM_API_KEY is not set)
     # -------------------------------------------------------------------------
     ollama_base_url: str = Field(default="http://localhost:11434")
-    ollama_llm_model: str = Field(default="qwen2.5:1.5b-instruct-q8_0")
     ollama_embed_model: str = Field(default="nomic-embed-text")
     ollama_timeout_seconds: int = Field(default=120)
     ollama_max_retries: int = Field(default=3)
+
+    # Tiered model routing — map task classes to appropriately sized models.
+    # EXTRACTION: slot filling, JSON schema output, structured data — small model is fine.
+    # GENERATION: document drafting, briefing summaries, email composition — needs 7B+.
+    # REASONING:  eligibility decisions, risk scoring, complex multi-step logic — needs 14B+.
+    # Override individual tiers via env vars without touching code.
+    ollama_extraction_model: str = Field(
+        default="qwen2.5:1.5b-instruct-q8_0",
+        description="Model for structured extraction and slot-filling tasks",
+    )
+    ollama_generation_model: str = Field(
+        default="qwen2.5:7b-instruct",
+        description="Model for document drafting, summarization, briefing generation",
+    )
+    ollama_reasoning_model: str = Field(
+        default="qwen2.5:14b-instruct",
+        description="Model for eligibility decisions, risk scoring, complex reasoning",
+    )
+
+    # Backwards-compat alias used by legacy code that still reads ollama_llm_model.
+    # Points at the extraction tier so existing callers aren't broken.
+    @property
+    def ollama_llm_model(self) -> str:
+        return self.ollama_extraction_model
 
     # -------------------------------------------------------------------------
     # External LLM API (OpenAI-compatible — overrides Ollama when set)
@@ -111,12 +134,40 @@ class Settings(BaseSettings):
         return bool(self.llm_api_key and self.llm_api_base_url)
 
     # -------------------------------------------------------------------------
+    # MFA / Two-Factor Authentication
+    # -------------------------------------------------------------------------
+    mfa_required_roles: List[str] = Field(
+        default=["SUPER_ADMIN", "ADMIN", "REGISTRAR", "FINANCE_OFFICER", "HOD", "COE"],
+        description="Roles that must have MFA enabled before a full session is issued.",
+    )
+    mfa_challenge_token_expire_minutes: int = Field(
+        default=5,
+        description="Lifetime (minutes) of the short-lived mfa_challenge JWT issued at login.",
+    )
+
+    # -------------------------------------------------------------------------
     # JWT Auth
     # -------------------------------------------------------------------------
     jwt_secret_key: str = Field(default="change-me-jwt-secret-32-char-minimum")
-    jwt_algorithm: str = Field(default="HS256")
+    jwt_algorithm: str = Field(
+        default="HS256",
+        description="HS256 (symmetric, single key) or RS256 (asymmetric, key pair). "
+                    "RS256 is recommended for multi-tenant production — rotate keys via JWKS without downtime.",
+    )
     jwt_access_token_expire_minutes: int = Field(default=60)
     jwt_refresh_token_expire_days: int = Field(default=7)
+
+    # RS256 migration path — only required when jwt_algorithm = RS256.
+    # Generate keys: openssl genrsa -out private.pem 2048 && openssl rsa -in private.pem -pubout -out public.pem
+    # Set as env vars with literal newlines preserved (use $'-----BEGIN...\n...' in shell or JSON-encode).
+    jwt_rsa_private_key: str = Field(
+        default="",
+        description="PEM-encoded RSA private key for RS256 token signing. Required when jwt_algorithm=RS256.",
+    )
+    jwt_rsa_public_key: str = Field(
+        default="",
+        description="PEM-encoded RSA public key for RS256 token verification. Required when jwt_algorithm=RS256.",
+    )
 
     # -------------------------------------------------------------------------
     # Bootstrap
@@ -166,6 +217,24 @@ class Settings(BaseSettings):
     # PayU
     payu_merchant_key: str = Field(default="")
     payu_merchant_salt: str = Field(default="")
+
+    # -------------------------------------------------------------------------
+    # HashiCorp Vault (P0-2 — exam paper encryption + secrets management)
+    # -------------------------------------------------------------------------
+    vault_addr: str = Field(
+        default="http://localhost:8200",
+        description="Vault server address. Set VAULT_ADDR env var in production.",
+    )
+    vault_token: str = Field(
+        default="alis-dev-root-token",
+        description="Vault token. Use AppRole in production — never commit root token.",
+    )
+    vault_transit_mount: str = Field(default="transit")
+    vault_kv_mount: str = Field(default="secret")
+
+    @property
+    def vault_enabled(self) -> bool:
+        return bool(self.vault_addr and self.vault_token)
 
     # -------------------------------------------------------------------------
     # DigiLocker (Indian Government Document Vault)
@@ -225,6 +294,60 @@ class Settings(BaseSettings):
         return self.email_provider in ("GOOGLE", "MICROSOFT")
 
     # -------------------------------------------------------------------------
+    # Drillbit (Plagiarism Detection — PhD module)
+    # -------------------------------------------------------------------------
+    drillbit_api_key: str = Field(default="", description="Drillbit API key — obtain from drillbit.in")
+    drillbit_base_url: str = Field(default="https://api.drillbit.in/v1")
+    drillbit_timeout_seconds: int = Field(default=60)
+
+    @property
+    def drillbit_enabled(self) -> bool:
+        return bool(self.drillbit_api_key)
+
+    # -------------------------------------------------------------------------
+    # NIC e-Invoice (GST IRN Generation)
+    # -------------------------------------------------------------------------
+    nic_einvoice_base_url: str = Field(
+        default="https://einv-apisandbox.nic.in",
+        description="NIC e-Invoice API. Sandbox: einv-apisandbox.nic.in | Prod: einvoice6.gst.gov.in",
+    )
+    nic_einvoice_client_id: str = Field(default="")
+    nic_einvoice_client_secret: str = Field(default="")
+    nic_einvoice_gstin: str = Field(default="", description="Institution GSTIN (15 chars)")
+    nic_einvoice_username: str = Field(default="")
+    nic_einvoice_password: str = Field(default="")
+    nic_einvoice_timeout_seconds: int = Field(default=30)
+
+    @property
+    def nic_einvoice_configured(self) -> bool:
+        return bool(self.nic_einvoice_client_id and self.nic_einvoice_gstin)
+
+    # -------------------------------------------------------------------------
+    # LMS (Moodle / Canvas REST API — student provisioning)
+    # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    # Observability — Sentry
+    # -------------------------------------------------------------------------
+    sentry_dsn: str = Field(
+        default="",
+        description="Sentry DSN for error tracking. Leave empty to disable Sentry.",
+    )
+    sentry_traces_sample_rate: float = Field(
+        default=0.05,
+        description="Fraction of transactions to send to Sentry Performance (0.0–1.0). "
+                    "0.05 = 5% sampling in production to control volume.",
+    )
+    sentry_profiles_sample_rate: float = Field(
+        default=0.01,
+        description="Fraction of sampled transactions to profile. Keep low in production.",
+    )
+
+    @property
+    def sentry_enabled(self) -> bool:
+        return bool(self.sentry_dsn)
+
+    # -------------------------------------------------------------------------
     # Document Storage (S3 / Azure Blob / Local)
     # -------------------------------------------------------------------------
     storage_provider: str = Field(default="LOCAL")  # S3 | AZURE_BLOB | LOCAL
@@ -255,6 +378,14 @@ class Settings(BaseSettings):
             raise ValueError(f"app_env must be one of {allowed}")
         return v
 
+    @field_validator("jwt_algorithm")
+    @classmethod
+    def validate_jwt_algorithm(cls, v: str) -> str:
+        allowed = {"HS256", "RS256"}
+        if v not in allowed:
+            raise ValueError(f"jwt_algorithm must be one of {allowed}")
+        return v
+
     @model_validator(mode="after")
     def validate_production_secrets(self) -> "Settings":
         """Block startup if insecure defaults are used in production."""
@@ -281,6 +412,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "[SECURITY] ALIS_MASTER_KEY must be set in production (required for tenant encryption)."
             )
+
+        if self.jwt_algorithm == "RS256":
+            if not self.jwt_rsa_private_key or not self.jwt_rsa_public_key:
+                raise ValueError(
+                    "[SECURITY] jwt_rsa_private_key and jwt_rsa_public_key are required "
+                    "when jwt_algorithm=RS256."
+                )
 
         return self
 

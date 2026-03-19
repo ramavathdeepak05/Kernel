@@ -35,7 +35,7 @@ class FacultyAssignmentService:
             )
 
         # Workload check — configurable via PolicyStore
-        from server.admissions.policy_store import PolicyStore
+        from server.core.policy_store import PolicyStore
         max_load = int(PolicyStore.get(org_id, "academics.faculty.max_courses_per_year") or 6)
         current_load = execute_query(
             "SELECT COUNT(*) AS n FROM faculty_assignments WHERE faculty_id = %s AND academic_year = %s",
