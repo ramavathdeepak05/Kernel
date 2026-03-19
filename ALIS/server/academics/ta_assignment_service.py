@@ -2,9 +2,11 @@
 TA Assignment Service
 
 Implements delegated attendance authority:
-  - Faculty assigns a student as TA for a course (semester-long) or a specific session (one-time).
-  - TA gets scoped permission to initiate attendance sessions for assigned scope only.
-  - Faculty can revoke or change the TA at any time.
+  - Faculty assigns ONE OR MORE students as TAs for a course (semester-long) or a specific session.
+  - Multiple TAs can be active simultaneously — adding a new TA does NOT revoke existing ones.
+  - Faculty can revoke individual TAs at any time via assignment ID.
+  - Scope is chosen by faculty at assignment time: COURSE (all sessions) or SESSION (one session).
+  - TA must be an enrolled student in the course (enrollment check enforced at assignment).
   - All changes emit domain events that trigger WhatsApp/SMS notifications.
   - Audit trail: attendance sessions record initiated_by (TA) + on_behalf_of (faculty).
 
@@ -67,6 +69,21 @@ class TAAssignmentService:
     # ── course-level TA ──────────────────────────────────────────────────────
 
     @staticmethod
+    def _check_enrollment(course_id: str, student_id: str) -> None:
+        """Raise ValueError if student is not actively enrolled in the course."""
+        rows = execute_query(
+            """
+            SELECT 1 FROM course_enrollments
+            WHERE course_id=$1 AND student_id=$2 AND status='ACTIVE'
+            """,
+            (course_id, student_id),
+        )
+        if not rows:
+            raise ValueError(
+                "Student must be actively enrolled in this course to be assigned as TA"
+            )
+
+    @staticmethod
     def assign_course_ta(
         tenant_id: str,
         course_id: str,
@@ -75,52 +92,42 @@ class TAAssignmentService:
         notes: Optional[str] = None,
     ) -> dict:
         """
-        Assign a student as TA for a course.
-        If the course already has an active TA, the old one is revoked first.
+        Assign a student as course-level TA (semester-long, all sessions).
+        Multiple TAs can be active simultaneously — existing TAs are NOT revoked.
+        Student must be enrolled in the course.
         student_identifier: student UUID, roll number, or email.
         """
         course = TAAssignmentService._get_course(tenant_id, course_id)
 
-        # Faculty ownership check
         if str(course["faculty_id"]) != str(faculty_id):
             raise PermissionError("Only the course faculty can assign a TA")
 
         student = TAAssignmentService._resolve_student(tenant_id, student_identifier)
         student_id = student["student_id"]
 
-        # Revoke any existing active course TA for this course
-        existing = execute_query(
-            """
-            SELECT id, student_id FROM course_ta_assignments
-            WHERE course_id=$1 AND status='ACTIVE'
-            """,
-            (course_id,),
-        )
-        revoke_txns = []
-        revoked_ids = []
-        for ex in existing:
-            revoke_txns.append((
-                """
-                UPDATE course_ta_assignments
-                SET status='REVOKED', revoked_at=NOW(), revoked_by=$1
-                WHERE id=$2
-                """,
-                (faculty_id, str(ex["id"])),
-            ))
-            revoked_ids.append(str(ex["student_id"]))
+        # Enrollment check — TA must be enrolled in the course
+        TAAssignmentService._check_enrollment(course_id, student_id)
 
-        # Insert new assignment
-        revoke_txns.append((
+        # Prevent duplicate active assignment for the same student
+        already = execute_query(
+            """
+            SELECT id FROM course_ta_assignments
+            WHERE course_id=$1 AND student_id=$2 AND status='ACTIVE'
+            """,
+            (course_id, student_id),
+        )
+        if already:
+            raise ValueError("This student is already an active TA for this course")
+
+        execute_transaction([(
             """
             INSERT INTO course_ta_assignments
                 (tenant_id, course_id, faculty_id, student_id, assigned_by, notes)
             VALUES ($1,$2,$3,$4,$5,$6)
             """,
             (tenant_id, course_id, faculty_id, student_id, faculty_id, notes),
-        ))
-        execute_transaction(revoke_txns)
+        )])
 
-        # Fetch new assignment id
         new_row = execute_query(
             """
             SELECT id FROM course_ta_assignments
@@ -130,10 +137,8 @@ class TAAssignmentService:
             (course_id, student_id),
         )
         assignment_id = str(new_row[0]["id"]) if new_row else None
-
         faculty_name = TAAssignmentService._get_faculty_name(faculty_id)
 
-        # Notify new TA
         DomainEventBus.publish(
             "attendance.ta_assigned",
             {
@@ -150,22 +155,6 @@ class TAAssignmentService:
                 "phone": student.get("whatsapp_number") or student.get("phone"),
             },
         )
-
-        # Notify revoked TAs
-        for rid in revoked_ids:
-            DomainEventBus.publish(
-                "attendance.ta_revoked",
-                {
-                    "scope": "COURSE",
-                    "tenant_id": tenant_id,
-                    "course_id": course_id,
-                    "course_code": course["code"],
-                    "course_name": course["name"],
-                    "student_id": rid,
-                    "revoked_by": faculty_id,
-                    "reason": "Replaced by new TA assignment",
-                },
-            )
 
         logger.info(
             "course_ta_assigned course=%s student=%s by_faculty=%s",
@@ -263,7 +252,11 @@ class TAAssignmentService:
         faculty_id: str,
         student_identifier: str,
     ) -> dict:
-        """Assign a TA for one specific attendance session."""
+        """
+        Assign a TA for one specific attendance session.
+        Multiple TAs can be active for the same session — existing ones are NOT revoked.
+        Student must be enrolled in the course.
+        """
         course = TAAssignmentService._get_course(tenant_id, course_id)
         if str(course["faculty_id"]) != str(faculty_id):
             raise PermissionError("Only the course faculty can assign a session TA")
@@ -271,15 +264,19 @@ class TAAssignmentService:
         student = TAAssignmentService._resolve_student(tenant_id, student_identifier)
         student_id = student["student_id"]
 
-        # Revoke existing session TA if any
-        execute_transaction([(
+        # Enrollment check
+        TAAssignmentService._check_enrollment(course_id, student_id)
+
+        # Prevent duplicate active assignment for same student + session
+        already = execute_query(
             """
-            UPDATE session_ta_assignments
-            SET status='REVOKED', revoked_at=NOW(), revoked_by=$1
-            WHERE session_ref=$2 AND status='ACTIVE'
+            SELECT id FROM session_ta_assignments
+            WHERE session_ref=$1 AND student_id=$2 AND status='ACTIVE'
             """,
-            (faculty_id, session_ref),
-        )])
+            (session_ref, student_id),
+        )
+        if already:
+            raise ValueError("This student is already an active TA for this session")
 
         execute_transaction([(
             """
@@ -287,8 +284,6 @@ class TAAssignmentService:
                 (tenant_id, course_id, session_ref, session_type,
                  faculty_id, student_id, assigned_by)
             VALUES ($1,$2,$3,$4,$5,$6,$7)
-            ON CONFLICT (session_ref, student_id) DO UPDATE
-                SET status='ACTIVE', revoked_at=NULL, assigned_at=NOW()
             """,
             (tenant_id, course_id, session_ref, session_type,
              faculty_id, student_id, faculty_id),
