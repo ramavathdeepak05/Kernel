@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   FileText, Calendar, BarChart3, RefreshCw, Award, Clock,
   CheckCircle2, XCircle, AlertTriangle, TrendingUp, Users,
-  BookOpen, Layers, ChevronRight, Star,
+  BookOpen, Layers, ChevronRight, Star, Ticket, CreditCard, Brain,
 } from "lucide-react";
 import {
   useExamSchedules,
@@ -17,14 +17,17 @@ import type { ExamSchedule } from "@/services/examinations";
 const CURRENT_YEAR = "2024-25";
 const CURRENT_SEM = 4;
 
-type TabId = "overview" | "schedules" | "grades" | "results" | "reeval";
+type TabId = "overview" | "schedules" | "grades" | "results" | "reeval" | "halltickets" | "gradecards" | "aiscore";
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",   label: "Overview",   icon: <BarChart3 className="w-3.5 h-3.5" /> },
-  { id: "schedules",  label: "Schedules",  icon: <Calendar className="w-3.5 h-3.5" /> },
-  { id: "grades",     label: "Grades",     icon: <BookOpen className="w-3.5 h-3.5" /> },
-  { id: "results",    label: "Results",    icon: <Award className="w-3.5 h-3.5" /> },
-  { id: "reeval",     label: "Re-Eval",    icon: <RefreshCw className="w-3.5 h-3.5" /> },
+  { id: "overview",    label: "Overview",     icon: <BarChart3 className="w-3.5 h-3.5" /> },
+  { id: "schedules",   label: "Schedules",    icon: <Calendar className="w-3.5 h-3.5" /> },
+  { id: "grades",      label: "Grades",       icon: <BookOpen className="w-3.5 h-3.5" /> },
+  { id: "results",     label: "Results",      icon: <Award className="w-3.5 h-3.5" /> },
+  { id: "reeval",      label: "Re-Eval",      icon: <RefreshCw className="w-3.5 h-3.5" /> },
+  { id: "halltickets", label: "Hall Tickets", icon: <Ticket className="w-3.5 h-3.5" /> },
+  { id: "gradecards",  label: "Grade Cards",  icon: <CreditCard className="w-3.5 h-3.5" /> },
+  { id: "aiscore",     label: "AI Review",    icon: <Brain className="w-3.5 h-3.5" /> },
 ];
 
 const EXAM_TYPE_COLORS: Record<string, string> = {
@@ -636,6 +639,209 @@ function ReEvalTab() {
   );
 }
 
+// ── Hall Tickets Tab ───────────────────────────────────────────
+
+function HallTicketsTab() {
+  const [issuing, setIssuing] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
+
+  const handleBatchIssue = async () => {
+    setIssuing(true);
+    setProgress(0);
+    // Simulate batch progress
+    for (let i = 10; i <= 100; i += 10) {
+      await new Promise((r) => setTimeout(r, 180));
+      setProgress(i);
+    }
+    setIssuing(false);
+  };
+
+  const batches = [
+    { program: "B.Tech CSE", semester: 6, count: 487, issued: 487, status: "COMPLETE" },
+    { program: "B.Tech ECE", semester: 6, count: 312, issued: 312, status: "COMPLETE" },
+    { program: "MBA", semester: 4, count: 198, issued: 195, status: "PARTIAL" },
+    { program: "M.Tech", semester: 2, count: 84, issued: 0, status: "PENDING" },
+  ];
+
+  return (
+    <div className="space-y-4 pt-2">
+      {/* Action */}
+      <div className="flex items-center justify-between p-4 rounded-xl"
+        style={{ background: "rgba(52,211,153,0.06)", border: "1px solid rgba(52,211,153,0.12)" }}>
+        <div>
+          <p className="text-[13px] font-semibold" style={{ color: "#e2e8f0" }}>Batch Issue Hall Tickets</p>
+          <p className="text-[11px] mt-0.5" style={{ color: "#64748b" }}>
+            Generates PDF hall tickets for all eligible students in current semester
+          </p>
+          {progress !== null && (
+            <div className="mt-2 w-64 h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, background: "#34d399" }} />
+            </div>
+          )}
+        </div>
+        <button
+          onClick={handleBatchIssue}
+          disabled={issuing}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-[12px] font-medium transition-all"
+          style={{ background: issuing ? "rgba(52,211,153,0.06)" : "rgba(52,211,153,0.15)", color: "#34d399",
+            border: "1px solid rgba(52,211,153,0.25)", opacity: issuing ? 0.6 : 1 }}>
+          <Ticket className="w-3.5 h-3.5" />
+          {issuing ? `Generating… ${progress}%` : "Issue Batch"}
+        </button>
+      </div>
+
+      {/* Batch status table */}
+      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
+        <table className="w-full">
+          <thead>
+            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              {["Program", "Semester", "Eligible", "Issued", "Status"].map((h) => (
+                <th key={h} className="px-4 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider"
+                  style={{ color: "#475569" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {batches.map((b, i) => (
+              <tr key={i} style={{ borderBottom: i < batches.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#e2e8f0" }}>{b.program}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#94a3b8" }}>Sem {b.semester}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#94a3b8" }}>{b.count}</td>
+                <td className="px-4 py-3 text-[12px]" style={{ color: "#94a3b8" }}>{b.issued}</td>
+                <td className="px-4 py-3">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                    style={{
+                      background: b.status === "COMPLETE" ? "rgba(52,211,153,0.1)" : b.status === "PARTIAL" ? "rgba(251,191,36,0.1)" : "rgba(148,163,184,0.1)",
+                      color: b.status === "COMPLETE" ? "#34d399" : b.status === "PARTIAL" ? "#fbbf24" : "#94a3b8",
+                    }}>
+                    {b.status}
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Grade Cards Tab ────────────────────────────────────────────
+
+function GradeCardsTab() {
+  const programs = [
+    { name: "B.Tech CSE", sem: 6, total: 487, generated: 487, locked: true },
+    { name: "B.Tech ECE", sem: 6, total: 312, generated: 308, locked: false },
+    { name: "MBA", sem: 4, total: 198, generated: 0, locked: false },
+    { name: "M.Tech", sem: 2, total: 84, generated: 0, locked: false },
+  ];
+
+  return (
+    <div className="space-y-4 pt-2">
+      <p className="text-[12px]" style={{ color: "#64748b" }}>
+        Grade cards are pre-generated after result publication. Results must be locked before generation.
+      </p>
+      {programs.map((p, i) => {
+        const pct = p.total > 0 ? Math.round((p.generated / p.total) * 100) : 0;
+        return (
+          <div key={i} className="p-4 rounded-xl" style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[13px] font-medium" style={{ color: "#e2e8f0" }}>{p.name}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(255,255,255,0.04)", color: "#64748b" }}>
+                  Sem {p.sem}
+                </span>
+                {p.locked && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: "rgba(52,211,153,0.08)", color: "#34d399" }}>
+                    Results Locked
+                  </span>
+                )}
+              </div>
+              <span className="text-[12px]" style={{ color: "#94a3b8" }}>{p.generated}/{p.total}</span>
+            </div>
+            <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.06)" }}>
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct === 100 ? "#34d399" : "#3b82f6" }} />
+            </div>
+            <p className="text-[10px] mt-1" style={{ color: "#475569" }}>{pct}% generated</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── AI Score Review Tab ────────────────────────────────────────
+
+function AIScoreReviewTab() {
+  const queue = [
+    { id: "AI-2024-0001", student: "Priya Sharma", subject: "Advanced Algorithms", score: 78, aiFlag: "BOUNDARY", confidence: 0.71 },
+    { id: "AI-2024-0002", student: "Rahul Verma",  subject: "DBMS",                score: 92, aiFlag: "HIGH_SCORE", confidence: 0.85 },
+    { id: "AI-2024-0003", student: "Anita Roy",    subject: "OS Lab",               score: 45, aiFlag: "LOW_SCORE",  confidence: 0.62 },
+    { id: "AI-2024-0004", student: "Karan Mehta",  subject: "Machine Learning",     score: 88, aiFlag: "BOUNDARY",   confidence: 0.74 },
+  ];
+
+  const flagColor: Record<string, string> = {
+    BOUNDARY: "#fbbf24", HIGH_SCORE: "#34d399", LOW_SCORE: "#f87171",
+  };
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="flex items-center gap-2 p-3 rounded-xl"
+        style={{ background: "rgba(59,130,246,0.06)", border: "1px solid rgba(59,130,246,0.12)" }}>
+        <Brain className="w-4 h-4" style={{ color: "#60a5fa" }} />
+        <p className="text-[11px]" style={{ color: "#60a5fa" }}>
+          AI-flagged scores require faculty confirmation before marks are finalised.
+          Confidence below 0.80 triggers this queue.
+        </p>
+      </div>
+
+      <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(255,255,255,0.06)" }}>
+        <table className="w-full">
+          <thead>
+            <tr style={{ background: "rgba(255,255,255,0.03)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              {["ID", "Student", "Subject", "AI Score", "Flag", "Confidence", "Action"].map((h) => (
+                <th key={h} className="px-3 py-2.5 text-left text-[10px] font-medium uppercase tracking-wider"
+                  style={{ color: "#475569" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {queue.map((r, i) => (
+              <tr key={i} style={{ borderBottom: i < queue.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                <td className="px-3 py-3 text-[10px] font-mono" style={{ color: "#475569" }}>{r.id}</td>
+                <td className="px-3 py-3 text-[12px]" style={{ color: "#e2e8f0" }}>{r.student}</td>
+                <td className="px-3 py-3 text-[11px]" style={{ color: "#94a3b8" }}>{r.subject}</td>
+                <td className="px-3 py-3 text-[13px] font-bold" style={{ color: "#e2e8f0" }}>{r.score}</td>
+                <td className="px-3 py-3">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium"
+                    style={{ background: `${flagColor[r.aiFlag]}20`, color: flagColor[r.aiFlag] }}>
+                    {r.aiFlag.replace("_", " ")}
+                  </span>
+                </td>
+                <td className="px-3 py-3 text-[12px]" style={{ color: r.confidence < 0.75 ? "#f87171" : "#94a3b8" }}>
+                  {(r.confidence * 100).toFixed(0)}%
+                </td>
+                <td className="px-3 py-3">
+                  <div className="flex gap-1.5">
+                    <button className="px-2 py-1 rounded text-[10px] font-medium"
+                      style={{ background: "rgba(52,211,153,0.1)", color: "#34d399", border: "1px solid rgba(52,211,153,0.2)" }}>
+                      Confirm
+                    </button>
+                    <button className="px-2 py-1 rounded text-[10px] font-medium"
+                      style={{ background: "rgba(248,113,113,0.1)", color: "#f87171", border: "1px solid rgba(248,113,113,0.2)" }}>
+                      Override
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ──────────────────────────────────────────────────
 
 export default function ExaminationsPage() {
@@ -687,11 +893,14 @@ export default function ExaminationsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-6 pb-6">
-        {tab === "overview"  && <OverviewTab />}
-        {tab === "schedules" && <SchedulesTab />}
-        {tab === "grades"    && <GradesTab />}
-        {tab === "results"   && <ResultsTab />}
-        {tab === "reeval"    && <ReEvalTab />}
+        {tab === "overview"    && <OverviewTab />}
+        {tab === "schedules"   && <SchedulesTab />}
+        {tab === "grades"      && <GradesTab />}
+        {tab === "results"     && <ResultsTab />}
+        {tab === "reeval"      && <ReEvalTab />}
+        {tab === "halltickets" && <HallTicketsTab />}
+        {tab === "gradecards"  && <GradeCardsTab />}
+        {tab === "aiscore"     && <AIScoreReviewTab />}
       </div>
     </div>
   );
