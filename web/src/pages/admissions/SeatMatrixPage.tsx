@@ -283,7 +283,7 @@ function apiRecordToMatrix(r: SeatMatrixApiRecord, index: number): ProgramMatrix
 export function SeatMatrixPage() {
   const currentYear = new Date().getFullYear()
   const [year, setYear] = useState(currentYear)
-  const [matrixData, setMatrixData] = useState<ProgramMatrix[]>(MATRIX_DATA)
+  const [matrixData, setMatrixData] = useState<ProgramMatrix[]>([])
 
   useEffect(() => {
     const token = localStorage.getItem('token') ?? ''

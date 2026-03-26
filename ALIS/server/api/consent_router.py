@@ -316,3 +316,201 @@ async def reject_erasure(
         status_code=200,
         content={"message": "Erasure request rejected.", "erasure": erasure},
     )
+
+
+# =============================================================================
+# GET /api/v1/consent/admin/stats  (ADMIN/SUPER_ADMIN — DPO dashboard)
+# =============================================================================
+
+@router.get("/admin/stats")
+async def consent_admin_stats(
+    request: Request,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Aggregate consent rates by purpose for the DPO dashboard.
+    Returns: { stats: [{ purpose, given, revoked, total, rate }] }
+    """
+    session, err = _require_auth(authorization)
+    if err:
+        return err
+
+    org_id = _org(request)
+
+    from server.db_service import execute_query
+
+    user_rows = execute_query(
+        "SELECT role FROM users WHERE id = %s::uuid AND is_deleted = FALSE",
+        (session.user_id,),
+        tenant_id=org_id,
+    )
+    if not user_rows or user_rows[0].get("role") not in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
+        return JSONResponse(status_code=403, content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"})
+
+    rows = execute_query(
+        """
+        SELECT purpose,
+               COUNT(*) FILTER (WHERE status = 'GIVEN')     AS given,
+               COUNT(*) FILTER (WHERE status = 'WITHDRAWN') AS revoked,
+               COUNT(*)                                      AS total
+        FROM consent_records
+        WHERE org_id = %s
+        GROUP BY purpose
+        ORDER BY purpose
+        """,
+        (org_id,),
+        tenant_id=org_id,
+    )
+
+    stats = []
+    for r in rows:
+        total = (r["given"] or 0) + (r["revoked"] or 0)
+        rate = round((r["given"] / total * 100) if total > 0 else 0, 1)
+        stats.append({
+            "purpose": r["purpose"],
+            "given": r["given"] or 0,
+            "revoked": r["revoked"] or 0,
+            "total": total,
+            "rate": rate,
+        })
+
+    return JSONResponse(status_code=200, content={"stats": stats})
+
+
+# =============================================================================
+# GET /api/v1/consent/admin/events  (ADMIN/SUPER_ADMIN — DPO dashboard)
+# =============================================================================
+
+@router.get("/admin/events")
+async def consent_admin_events(
+    request: Request,
+    limit: int = 50,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Recent GIVEN/WITHDRAWN consent events for the DPO activity feed.
+    Returns: { events: [{ purpose, action, ts, user_name, ip_address }] }
+    """
+    session, err = _require_auth(authorization)
+    if err:
+        return err
+
+    org_id = _org(request)
+
+    from server.db_service import execute_query
+
+    user_rows = execute_query(
+        "SELECT role FROM users WHERE id = %s::uuid AND is_deleted = FALSE",
+        (session.user_id,),
+        tenant_id=org_id,
+    )
+    if not user_rows or user_rows[0].get("role") not in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
+        return JSONResponse(status_code=403, content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"})
+
+    rows = execute_query(
+        """
+        SELECT cr.purpose,
+               cr.status,
+               COALESCE(cr.given_at, cr.withdrawn_at) AS event_ts,
+               cr.ip_address::text                    AS ip_address,
+               u.name                                 AS user_name
+        FROM consent_records cr
+        LEFT JOIN users u ON u.id = cr.user_id
+        WHERE cr.org_id = %s
+        ORDER BY event_ts DESC
+        LIMIT %s
+        """,
+        (org_id, min(limit, 200)),
+        tenant_id=org_id,
+    )
+
+    events = [
+        {
+            "purpose": r["purpose"],
+            "action": r["status"],
+            "ts": r["event_ts"].isoformat() if r["event_ts"] else None,
+            "user_name": r["user_name"] or "Unknown",
+            "ip_address": r["ip_address"] or "",
+        }
+        for r in rows
+    ]
+
+    return JSONResponse(status_code=200, content={"events": events, "total": len(events)})
+
+
+# =============================================================================
+# GET /api/v1/consent/admin/dsr  (ADMIN/SUPER_ADMIN — DPO dashboard)
+# =============================================================================
+
+@router.get("/admin/dsr")
+async def consent_admin_dsr(
+    request: Request,
+    status: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Erasure / DSR request queue for the DPO.
+    ?status=PENDING|IN_PROGRESS|COMPLETED|REJECTED  (omit for all pending+in-progress)
+    Returns: { requests: [...], total: int }
+    """
+    session, err = _require_auth(authorization)
+    if err:
+        return err
+
+    org_id = _org(request)
+
+    from server.db_service import execute_query
+    from datetime import datetime, timezone
+
+    user_rows = execute_query(
+        "SELECT role FROM users WHERE id = %s::uuid AND is_deleted = FALSE",
+        (session.user_id,),
+        tenant_id=org_id,
+    )
+    if not user_rows or user_rows[0].get("role") not in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
+        return JSONResponse(status_code=403, content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"})
+
+    sql = """
+        SELECT er.id, er.status, er.reason, er.due_by,
+               er.created_at   AS requested_at,
+               er.completed_at, er.rejected_at, er.rejection_reason,
+               u.name          AS user_name
+        FROM erasure_requests er
+        LEFT JOIN users u ON u.id = er.user_id
+        WHERE er.org_id = %s
+    """
+    params: list = [org_id]
+    if status:
+        sql += " AND er.status = %s"
+        params.append(status.upper())
+    else:
+        sql += " AND er.status IN ('PENDING', 'IN_PROGRESS')"
+    sql += " ORDER BY er.created_at DESC LIMIT 100"
+
+    rows = execute_query(sql, params, tenant_id=org_id)
+
+    def _sla_hours(due_by) -> int | None:
+        if not due_by:
+            return None
+        now = datetime.now(timezone.utc)
+        due = due_by if due_by.tzinfo else due_by.replace(tzinfo=timezone.utc)
+        return max(0, int((due - now).total_seconds() / 3600))
+
+    out = [
+        {
+            "id": str(r["id"]),
+            "type": "ERASURE",
+            "status": r["status"],
+            "reason": r["reason"] or "",
+            "user_name": r["user_name"] or "Unknown",
+            "requested_at": r["requested_at"].isoformat() if r["requested_at"] else None,
+            "due_by": r["due_by"].isoformat() if r["due_by"] else None,
+            "sla_hours_remaining": _sla_hours(r["due_by"]),
+            "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
+            "rejected_at": r["rejected_at"].isoformat() if r["rejected_at"] else None,
+            "rejection_reason": r["rejection_reason"] or "",
+        }
+        for r in rows
+    ]
+
+    return JSONResponse(status_code=200, content={"requests": out, "total": len(out)})
