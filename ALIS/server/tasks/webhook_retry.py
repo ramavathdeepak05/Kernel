@@ -8,6 +8,7 @@ Beat schedule entry (added in worker.py):
         "schedule": timedelta(minutes=5),
     }
 """
+from __future__ import annotations
 
 import logging
 

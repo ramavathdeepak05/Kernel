@@ -10,6 +10,7 @@ Usage:
     subscription_id = await WebhookDispatcher.register(org_id, event_type, url, secret, actor_id)
     await WebhookDispatcher.dispatch(org_id, event_type, payload)
 """
+from __future__ import annotations
 
 import hashlib
 import hmac

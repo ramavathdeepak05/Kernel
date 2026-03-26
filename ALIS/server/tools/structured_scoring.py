@@ -46,6 +46,7 @@ Output data keys:
         "scoring_complete": bool
     }
 """
+from __future__ import annotations
 
 from typing import Any, ClassVar, Dict, List
 

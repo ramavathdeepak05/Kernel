@@ -15,6 +15,7 @@ Response Format:
     "details": { ... }
 }
 """
+from __future__ import annotations
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse

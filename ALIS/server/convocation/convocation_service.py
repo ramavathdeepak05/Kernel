@@ -3,6 +3,7 @@
 Degree audit automation, gold medal computation, seating generation.
 Gold medal computed on CGPA WITHOUT grace marks (policy-controlled).
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone

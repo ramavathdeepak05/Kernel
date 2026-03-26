@@ -4,6 +4,7 @@ E07 has module-scoped reports (collection summary, defaulters, etc.).
 E11 adds institution-wide financial analytics, trend reports, and
 reconciliation views that span multiple academic years.
 """
+from __future__ import annotations
 
 import logging
 from server.db_service import execute_query

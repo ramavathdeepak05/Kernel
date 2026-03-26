@@ -23,6 +23,7 @@ Acceptance Criteria:
 - [x] Runtime rejection of illegal transitions
 - [x] Forward-only invalidation via ANNULLED
 """
+from __future__ import annotations
 
 from enum import Enum
 from typing import Dict, Set, Optional, List

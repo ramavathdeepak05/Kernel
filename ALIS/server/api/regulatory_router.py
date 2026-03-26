@@ -17,6 +17,7 @@ RBAC:
 
 Feature gate: regulatory.naac_evidence_collection must be enabled.
 """
+from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Optional

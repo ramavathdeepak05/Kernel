@@ -3,6 +3,7 @@
 Beat tasks:
   - check_invoice_overdue: daily — marks unpaid past-due invoices as OVERDUE
 """
+from __future__ import annotations
 
 import logging
 

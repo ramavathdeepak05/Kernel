@@ -1,4 +1,5 @@
 """E10-S07 — Bulk Messaging"""
+from __future__ import annotations
 
 import logging
 import uuid

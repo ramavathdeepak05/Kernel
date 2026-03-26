@@ -12,6 +12,7 @@ This module implements the generic commenting and activity feed system.
 - RBAC-based visibility filtering
 - Soft-hiding of comments (moderation)
 """
+from __future__ import annotations
 
 import json
 from enum import Enum

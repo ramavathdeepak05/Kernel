@@ -5,6 +5,7 @@ Celery tasks for async notification delivery. The heavy lifting is done by
 NotificationDispatcher (channels.py + service.py). These tasks just ensure
 delivery happens off the request thread with retries.
 """
+from __future__ import annotations
 
 import logging
 

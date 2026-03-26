@@ -8,6 +8,7 @@ SAFETY severity (altercation/harassment):
   Overflow SLA: from policy_engine (R1 — never hardcoded 72h).
   Deadline stored as absolute TIMESTAMPTZ (R3).
 """
+from __future__ import annotations
 
 import logging
 import uuid

@@ -33,6 +33,7 @@ Must Align With
 - migration 0016 (tenant_feature_flags table)
 - SKILL.md invariant 2: "Configuration is data, not code"
 """
+from __future__ import annotations
 
 import json
 import logging

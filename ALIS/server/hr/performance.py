@@ -1,4 +1,5 @@
 """E08-S05 — Performance Reviews"""
+from __future__ import annotations
 
 import logging
 import uuid

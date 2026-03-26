@@ -28,6 +28,7 @@ Endpoints:
            GET    /exams/analytics/student/{student_id}/trend
            GET    /exams/analytics/semester/ai-insights
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

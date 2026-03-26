@@ -1,4 +1,5 @@
 """E09-S01 — Hostel Management"""
+from __future__ import annotations
 
 import logging
 import uuid

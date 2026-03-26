@@ -8,7 +8,7 @@
  * Tab 4: Re-admission applications
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const COLORS = {
   bg: '#0E1020',
@@ -149,10 +149,19 @@ function methodBadge(method: string | null): string {
   return method.replace('_', ' ');
 }
 
+// ── API helpers ──────────────────────────────────────────────────
+
+function authHeader() {
+  return { Authorization: `Bearer ${localStorage.getItem('token') ?? ''}`, 'Content-Type': 'application/json' };
+}
+
 // ── Main Component ───────────────────────────────────────────────
 
 export function AdmissionsModulePage() {
   const [activeTab, setActiveTab] = useState<'kanban' | 'docs' | 'reporting' | 'readmission'>('kanban');
+
+  // Kanban stage counts
+  const [stages, setStages] = useState(STAGES);
 
   // Doc queue state
   const [docQueue, setDocQueue] = useState<DocItem[]>(INITIAL_DOC_QUEUE);
@@ -163,19 +172,101 @@ export function AdmissionsModulePage() {
   // Re-admission state
   const [readmissions, setReadmissions] = useState<ReadmissionItem[]>(INITIAL_READMISSIONS);
 
-  function approveDoc(id: string) {
+  // Load pipeline stage counts
+  useEffect(() => {
+    fetch('/api/v1/admissions/pipeline-summary', { headers: authHeader() })
+      .then(r => r.ok ? r.json() as Promise<{ stage: string; count: number }[]> : null)
+      .then(data => {
+        if (!data || !Array.isArray(data) || data.length === 0) return;
+        const by: Record<string, number> = {};
+        data.forEach(s => { by[s.stage] = s.count; });
+        setStages(STAGES.map(s => {
+          let count = s.count;
+          if (s.key === 'lead')      count = by['leads']      ?? s.count;
+          if (s.key === 'submitted') count = by['applied']    ?? s.count;
+          if (s.key === 'docs')      count = by['documents']  ?? s.count;
+          if (s.key === 'eligible')  count = by['eligibility'] ?? s.count;
+          if (s.key === 'merit')     count = (by['entrance_test'] ?? 0) + (by['interview'] ?? 0) || s.count;
+          if (s.key === 'offer')     count = by['offer']      ?? s.count;
+          if (s.key === 'enrolled')  count = by['enrolled']   ?? s.count;
+          return { ...s, count };
+        }));
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load doc review queue
+  useEffect(() => {
+    fetch('/api/v1/admissions/review?entity_type=applicant', { headers: authHeader() })
+      .then(r => r.ok ? r.json() as Promise<{ items?: any[] }> : null)
+      .then(data => {
+        const items = data?.items ?? [];
+        if (items.length === 0) return;
+        setDocQueue(items.map((item: any, idx: number) => {
+          let method = 'Manual';
+          try { method = JSON.parse(item.flags ?? '{}').method ?? 'Manual'; } catch { /* noop */ }
+          return {
+            id: item.id ?? `ri-${idx}`,
+            applicant: item.entity_id ? `Applicant …${String(item.entity_id).slice(-6)}` : 'Applicant',
+            doc: item.reason ?? 'Document Review',
+            status: item.status === 'APPROVED' ? 'APPROVED' : item.status === 'REJECTED' ? 'REJECTED' : item.flags ? 'FLAGGED' : 'PENDING',
+            method,
+            flag: (item.status === 'PENDING' && item.reason) ? item.reason : null,
+            submitted: item.created_at ? String(item.created_at).slice(0, 10) : '',
+          };
+        }));
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load re-admissions
+  useEffect(() => {
+    fetch('/api/v1/admissions/readmission', { headers: authHeader() })
+      .then(r => r.ok ? r.json() as Promise<{ applications?: any[] }> : null)
+      .then(data => {
+        const apps = data?.applications ?? [];
+        if (apps.length === 0) return;
+        setReadmissions(apps.map((a: any) => ({
+          id: a.id,
+          name: a.applicant_name ?? a.student_name ?? 'Applicant',
+          program: a.program_name ?? a.program_id ?? '—',
+          gap: (a.gap_start && a.gap_end) ? `${a.gap_start}–${a.gap_end}` : (a.gap ?? '—'),
+          semesters: a.semesters_completed ?? a.gap_semesters ?? 0,
+          status: a.status ?? 'SUBMITTED',
+        })));
+      })
+      .catch(() => {});
+  }, []);
+
+  async function approveDoc(id: string) {
+    await fetch(`/api/v1/admissions/review/${id}/decide`, {
+      method: 'POST', headers: authHeader(),
+      body: JSON.stringify({ decision: 'APPROVED' }),
+    }).catch(() => {});
     setDocQueue((prev) => prev.map((d) => d.id === id ? { ...d, status: 'APPROVED' } : d));
   }
-  function rejectDoc(id: string) {
+  async function rejectDoc(id: string) {
+    await fetch(`/api/v1/admissions/review/${id}/decide`, {
+      method: 'POST', headers: authHeader(),
+      body: JSON.stringify({ decision: 'REJECTED' }),
+    }).catch(() => {});
     setDocQueue((prev) => prev.map((d) => d.id === id ? { ...d, status: 'REJECTED' } : d));
   }
   function markReported(id: string) {
     setReporting((prev) => prev.map((r) => r.id === id ? { ...r, reported: true } : r));
   }
-  function approveReadmission(id: string) {
+  async function approveReadmission(id: string) {
+    await fetch(`/api/v1/admissions/readmission/${id}/approve`, {
+      method: 'POST', headers: authHeader(),
+      body: JSON.stringify({ notes: '' }),
+    }).catch(() => {});
     setReadmissions((prev) => prev.map((r) => r.id === id ? { ...r, status: 'APPROVED' } : r));
   }
-  function rejectReadmission(id: string) {
+  async function rejectReadmission(id: string) {
+    await fetch(`/api/v1/admissions/readmission/${id}/reject`, {
+      method: 'POST', headers: authHeader(),
+      body: JSON.stringify({ notes: '' }),
+    }).catch(() => {});
     setReadmissions((prev) => prev.map((r) => r.id === id ? { ...r, status: 'REJECTED' } : r));
   }
 
@@ -216,7 +307,7 @@ export function AdmissionsModulePage() {
       {activeTab === 'kanban' && (
         <div style={{ overflowX: 'auto', paddingBottom: 16 }}>
           <div style={{ display: 'flex', gap: 14, minWidth: 'max-content' }}>
-            {STAGES.map((stage) => (
+            {stages.map((stage) => (
               <div key={stage.key} style={{ width: 180, flexShrink: 0 }}>
                 {/* Column header */}
                 <div style={{

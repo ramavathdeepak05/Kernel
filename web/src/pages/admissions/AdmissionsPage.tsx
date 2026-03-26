@@ -117,59 +117,6 @@ interface InboxItem {
   actions: { label: string; variant: "approve" | "review" | "reject" | "ghost" }[];
 }
 
-const MOCK_INBOX: InboxItem[] = [
-  {
-    id: "1",
-    type: "approval",
-    title: "Approve Conditional Offer: Sarah Jenkins",
-    subtitle: "B.Tech Computer Engineering · APP-2025-000089",
-    confidence: 88,
-    applicationId: "APP-2025-000089",
-    priority: "high",
-    age: "23m ago",
-    actions: [
-      { label: "Approve Offer", variant: "approve" },
-      { label: "Review", variant: "ghost" },
-    ],
-  },
-  {
-    id: "2",
-    type: "alert",
-    title: "Review: Essay Plagiarism Score High",
-    subtitle: "Rohan Desai · MBA · Turnitin: 41% match",
-    priority: "high",
-    age: "1h ago",
-    actions: [
-      { label: "Review Essay", variant: "review" },
-      { label: "Flag & Hold", variant: "ghost" },
-    ],
-  },
-  {
-    id: "3",
-    type: "ai_review",
-    title: "Borderline Eligibility: Priya Sharma",
-    subtitle: "12th marks: 59.8% (threshold 60.0%) · 0.2% gap",
-    confidence: 72,
-    applicationId: "APP-2025-000134",
-    priority: "medium",
-    age: "2h ago",
-    actions: [
-      { label: "Grant Override", variant: "approve" },
-      { label: "Decline", variant: "reject" },
-    ],
-  },
-  {
-    id: "4",
-    type: "exception",
-    title: "Payment Gateway Timeout: 3 Applicants",
-    subtitle: "Razorpay ORDER_IDs: RPY-8831, RPY-8832, RPY-8834",
-    priority: "medium",
-    age: "3h ago",
-    actions: [
-      { label: "Reconcile", variant: "review" },
-    ],
-  },
-];
 
 function InboxCard({ item }: { item: InboxItem }) {
   const [dismissed, setDismissed] = useState(false);
@@ -255,22 +202,38 @@ function InboxCard({ item }: { item: InboxItem }) {
 
 // ── Future items ─────────────────────────────────────────────
 
-const MOCK_FUTURE_ITEMS = [
-  { id: "f1", label: "Batch eligibility check", detail: "124 applications · ~3 min", status: "running" },
-  { id: "f2", label: "NTA score import", detail: "JEE Mains 2025 · queued", status: "queued" },
-  { id: "f3", label: "Offer letter generation", detail: "38 admitted students · ready", status: "ready" },
-  { id: "f4", label: "DigiLocker verification", detail: "12 applicants · pending API", status: "queued" },
-];
-
 function FutureItemsSection() {
+  const [items, setItems] = useState<{ id: string; label: string; detail: string; status: string }[]>([]);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token") ?? "";
+    fetch("/api/v1/workflows?current_state=RUNNING&limit=8", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: { id: string; workflow_type: string; current_state: string; context: Record<string, unknown> }[]) => {
+        setItems(rows.map(r => ({
+          id: r.id,
+          label: String(r.workflow_type ?? "").replace(/_/g, " "),
+          detail: String(r.context?.description ?? r.context?.label ?? r.workflow_type ?? ""),
+          status: r.current_state === "RUNNING" ? "running"
+            : r.current_state === "COMPLETE" ? "ready"
+            : "queued",
+        })));
+      })
+      .catch(() => setItems([]));
+  }, []);
+
+  if (items.length === 0) return null;
+
   return (
     <div className="mt-6">
       <div className="section-header">
         <RefreshCw className="w-3 h-3" style={{ color: "#475569" }} />
-        Future Items (Processing)
+        Active Workflows
       </div>
       <div className="space-y-2">
-        {MOCK_FUTURE_ITEMS.map((item) => (
+        {items.map((item) => (
           <div key={item.id} className="processing-card">
             <div
               className={item.status === "running" ? "status-dot-processing" : "w-1.5 h-1.5 rounded-full flex-shrink-0"}
@@ -279,7 +242,7 @@ function FutureItemsSection() {
               } : undefined}
             />
             <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-medium" style={{ color: "#94a3b8" }}>{item.label}</div>
+              <div className="text-[12px] font-medium capitalize" style={{ color: "#94a3b8" }}>{item.label}</div>
               <div className="text-[10px] mt-0.5" style={{ color: "#475569" }}>{item.detail}</div>
             </div>
             <div className="text-[10px] font-semibold uppercase tracking-wider flex-shrink-0"
@@ -786,7 +749,7 @@ export default function AdmissionsPage() {
   const [activeTab, setActiveTab] = useState<TabId>("inbox");
   const reviewQueue = useReviewQueue();
 
-  const inboxCount = MOCK_INBOX.length;
+  const inboxCount = reviewQueue.data?.length ?? 0;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -837,15 +800,25 @@ export default function AdmissionsPage() {
                 {inboxCount}
               </span>
             </div>
-            {MOCK_INBOX.map((item) => (
-              <InboxCard key={item.id} item={item} />
-            ))}
+            {reviewQueue.isLoading && (
+              <div className="flex items-center gap-2 py-4 px-1" style={{ color: "#475569" }}>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="text-[12px]">Loading review queue…</span>
+              </div>
+            )}
+            {!reviewQueue.isLoading && reviewQueue.data?.length === 0 && (
+              <div className="py-8 text-center">
+                <CheckCircle className="w-8 h-8 mx-auto mb-2" style={{ color: "#1D9E75" }} />
+                <p className="text-[13px] font-medium" style={{ color: "#94a3b8" }}>All caught up</p>
+                <p className="text-[11px] mt-1" style={{ color: "#475569" }}>No items in the review queue.</p>
+              </div>
+            )}
             {reviewQueue.data?.map((item) => (
               <InboxCard
                 key={item.id}
                 item={{
                   id: item.id,
-                  type: "exception",
+                  type: item.severity === "critical" || item.severity === "high" ? "alert" : "exception",
                   title: item.applicant_name,
                   subtitle: item.reason,
                   priority: item.severity === "critical" || item.severity === "high" ? "high" : "medium",

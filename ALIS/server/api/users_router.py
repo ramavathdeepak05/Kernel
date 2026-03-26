@@ -35,6 +35,7 @@ Invariants:
     - Soft-delete only — no hard deletes
     - Status state machine: ACTIVE ↔ SUSPENDED → ARCHIVED (irreversible)
 """
+from __future__ import annotations
 
 import logging
 from uuid import uuid4

@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CheckCircle, Circle, Clock, AlertTriangle, ArrowRight } from "lucide-react";
+import { CheckCircle, Circle, Clock, AlertTriangle, ArrowRight, Loader2 } from "lucide-react";
 import { STATUS_LABELS, STATUS_COLORS } from "@/types/admissions";
 import { cn } from "@/lib/utils";
+import { alisApi } from "@/lib/alis-api";
 
 const PIPELINE_STAGES = [
   { key: "SUBMITTED", label: "Application Submitted", icon: CheckCircle },
@@ -16,13 +18,65 @@ const PIPELINE_STAGES = [
 
 const STAGE_ORDER = PIPELINE_STAGES.map((s) => s.key);
 
+interface Application {
+  applicant_id: string;
+  application_id?: string;
+  status: string;
+  applicant_name?: string;
+  program_name?: string;
+  offer_expiry?: string;
+}
+
 export default function ApplicationStatusPage() {
   const [params] = useSearchParams();
-  const appId = params.get("id") ?? "APP-2025-000089";
+  const appId = params.get("id") ?? "";
 
-  // Mock data — in production this would fetch from applicationsApi
-  const currentStatus = "OFFER_ISSUED";
+  const [application, setApplication] = useState<Application | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!appId) {
+      setError("No application ID provided.");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    alisApi
+      .get<Application>(`/admissions/applications/${appId}`)
+      .then((data) => {
+        setApplication(data);
+        setError(null);
+      })
+      .catch((err: Error) => {
+        setError(err.message || "Failed to load application.");
+      })
+      .finally(() => setLoading(false));
+  }, [appId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[300px]">
+        <Loader2 className="w-6 h-6 animate-spin text-blue-500" />
+      </div>
+    );
+  }
+
+  if (error || !application) {
+    return (
+      <div className="max-w-2xl mx-auto px-6 py-12">
+        <div className="portal-card p-6 text-center text-slate-500 text-[14px]">
+          {error ?? "Application not found."}
+        </div>
+      </div>
+    );
+  }
+
+  const currentStatus = application.status;
   const currentStageIdx = STAGE_ORDER.indexOf(currentStatus);
+  const displayId = application.application_id ?? appId;
+  const displayName = application.applicant_name ?? "—";
+  const displayProgram = application.program_name ?? "—";
 
   return (
     <div className="max-w-2xl mx-auto px-6 py-12">
@@ -32,13 +86,15 @@ export default function ApplicationStatusPage() {
           <div>
             <p className="text-[11px] text-slate-500 mb-1 uppercase tracking-wide font-semibold">Application Status</p>
             <h1 className="text-2xl font-bold text-slate-900" style={{ fontFamily: "var(--font-family-sans)", letterSpacing: "-0.02em" }}>
-              {appId}
+              {displayId}
             </h1>
-            <p className="text-[13px] text-slate-500 mt-1">Sarah Jenkins · B.Tech Computer Engineering</p>
+            <p className="text-[13px] text-slate-500 mt-1">{displayName} · {displayProgram}</p>
           </div>
-          <span className={cn("status-badge text-[10px]", STATUS_COLORS[currentStatus])}>
-            {STATUS_LABELS[currentStatus]}
-          </span>
+          {currentStatus && (
+            <span className={cn("status-badge text-[10px]", STATUS_COLORS[currentStatus] ?? "bg-slate-100 text-slate-600")}>
+              {STATUS_LABELS[currentStatus] ?? currentStatus}
+            </span>
+          )}
         </div>
       </div>
 
@@ -51,8 +107,13 @@ export default function ApplicationStatusPage() {
             </div>
             <div className="flex-1">
               <p className="font-semibold text-emerald-800 text-[14px]">Action Required: Accept Your Offer</p>
-              <p className="text-[12px] text-emerald-600 mt-1">Your offer letter has been issued. Please accept by <strong>June 30, 2025</strong> to confirm your seat.</p>
-              <a href="/apply/offer?id=OFFER-2025-000089" className="inline-flex items-center gap-1.5 mt-3 text-[13px] font-semibold text-emerald-700 hover:text-emerald-900 transition-colors">
+              <p className="text-[12px] text-emerald-600 mt-1">
+                Your offer letter has been issued.
+                {application.offer_expiry && (
+                  <> Please accept by <strong>{new Date(application.offer_expiry).toLocaleDateString("en-IN")}</strong> to confirm your seat.</>
+                )}
+              </p>
+              <a href={`/apply/offer?id=${displayId}`} className="inline-flex items-center gap-1.5 mt-3 text-[13px] font-semibold text-emerald-700 hover:text-emerald-900 transition-colors">
                 View & Accept Offer <ArrowRight className="w-3.5 h-3.5" />
               </a>
             </div>

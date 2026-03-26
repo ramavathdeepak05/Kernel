@@ -13,6 +13,7 @@ Rules (R1 — no hardcoded thresholds):
   - Dual auth (CoE + Registrar) required to flag forgery
   - forgery_flags stored as JSONB array on document record
 """
+from __future__ import annotations
 
 import logging
 import uuid

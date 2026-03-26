@@ -48,10 +48,11 @@ def upgrade() -> None:
             ADD COLUMN IF NOT EXISTS channel VARCHAR(20) NOT NULL DEFAULT 'EMAIL';
     """)
 
-    # Unique constraint: one template entry per org + name + language + channel
+    # Unique constraint: one template entry per org + key + language + channel
+    # Note: column is `key` not `template_name` (template_name doesn't exist)
     op.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS uq_template_name_lang_channel
-            ON notification_templates(org_id, template_name, language, channel);
+            ON notification_templates(org_id, key, language, channel);
     """)
 
     # 3. WhatsApp delivery log

@@ -117,7 +117,7 @@ def seed(conn: psycopg2.extensions.connection) -> None:
     # 1. Organisation
     # ----------------------------------------------------------------
     print(f"  -> Organisation: {ORG_NAME} ({ORG_SLUG})")
-    cur.execute("SELECT id FROM organisations WHERE slug = %s", (ORG_SLUG,))
+    cur.execute("SELECT id FROM organizations WHERE slug = %s", (ORG_SLUG,))
     existing_org = cur.fetchone()
     if existing_org:
         org_id = str(existing_org["id"])
@@ -126,7 +126,7 @@ def seed(conn: psycopg2.extensions.connection) -> None:
         org_id = str(uuid.uuid4())
         cur.execute(
             """
-            INSERT INTO organisations (id, name, slug, status, metadata)
+            INSERT INTO organizations (id, name, slug, status, metadata)
             VALUES (%s, %s, %s, 'ACTIVE', %s)
             """,
             (org_id, ORG_NAME, ORG_SLUG, json.dumps({"programs": PROGRAMS})),
@@ -192,7 +192,62 @@ def seed(conn: psycopg2.extensions.connection) -> None:
         print("    institution_policies table not yet created (runs in E04-S10 migration) -- skipping")
 
     # ----------------------------------------------------------------
-    # 4. Academic calendar (current year, single semester)
+    # 4. Agent Rail silence policy (tenant_policies)
+    # ----------------------------------------------------------------
+    print("  -> Agent Rail silence policy")
+    # tenant_policies table created by migration 0015.
+    # policy_engine.evaluate() reads from this table — NOT institution_policies.
+    try:
+        cur.execute("SELECT 1 FROM tenant_policies LIMIT 1")
+        cur.execute(
+            "SELECT id FROM tenant_policies WHERE tenant_id = %s AND policy_id = %s",
+            (org_id, "agent_rail_silence"),
+        )
+        if not cur.fetchone():
+            cur.execute(
+                """
+                INSERT INTO tenant_policies
+                    (id, tenant_id, policy_id, version, scope, rules, status, effective_from)
+                VALUES (%s, %s, %s, 1, 'tenant', %s, 'APPROVED', NOW())
+                """,
+                (
+                    str(uuid.uuid4()),
+                    org_id,
+                    "agent_rail_silence",
+                    json.dumps([
+                        {
+                            "id": "always_surface_sla",
+                            "condition": "counts.sla_breached >= 1",
+                            "on_pass": "SURFACE",
+                            "reason_code": "SLA_BREACH",
+                        },
+                        {
+                            "id": "surface_urgent_threshold",
+                            "condition": "counts.urgent >= urgent_threshold",
+                            "urgent_threshold": 5,
+                            "on_pass": "SURFACE",
+                            "reason_code": "URGENT_COUNT",
+                        },
+                        {
+                            "id": "surface_total_threshold",
+                            "condition": "counts.total_pending >= total_threshold",
+                            "total_threshold": 20,
+                            "on_pass": "SURFACE",
+                            "reason_code": "BACKLOG",
+                        },
+                    ]),
+                ),
+            )
+            print("    Created agent_rail_silence policy")
+        else:
+            print("    Already exists -- skipping")
+    except psycopg2.errors.UndefinedTable:
+        conn.rollback()
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        print("    tenant_policies table not yet created (runs in migration 0015) -- skipping")
+
+    # ----------------------------------------------------------------
+    # 5. Academic calendar (current year, single semester)
     # ----------------------------------------------------------------
     print("  -> Academic calendar")
     academic_year = f"{date.today().year}-{date.today().year + 1}"

@@ -10,6 +10,7 @@ Business rules enforced here:
   adjustment invoice (never modifies the existing invoice).
 - student_dues_status view provides the read model for hall-ticket block checks.
 """
+from __future__ import annotations
 
 import logging
 import uuid

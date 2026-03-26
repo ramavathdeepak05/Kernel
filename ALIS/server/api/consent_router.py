@@ -16,6 +16,7 @@ All endpoints require a valid Bearer token (session validated via SessionManager
 The user's identity is read from the validated session (not from query params).
 The tenant (org_id) is read from request.state.tenant_id set by TenantMiddleware.
 """
+from __future__ import annotations
 
 import logging
 from typing import List, Optional

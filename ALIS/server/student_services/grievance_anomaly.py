@@ -13,6 +13,7 @@ grievance.invigilator_blackout_hours default 48   (during exam window)
 Anonymous complaints are capped at ROUTINE / SERIOUS (never CRITICAL).
 Identical text within 30 min from different users → COORDINATED_COMPLAINT_FLAG.
 """
+from __future__ import annotations
 
 import logging
 import uuid

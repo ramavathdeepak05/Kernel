@@ -79,11 +79,11 @@ def upgrade():
 
     # Seed feature flag
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
         SELECT id,
                'platform.multi_campus_enabled',
-               'false',
-               'Multi-campus group entity model (enable for group institutions)'
+               false,
+               '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING;
     """)

@@ -30,6 +30,7 @@ Acceptance Criteria:
 - [x] No tool chaining allowed
 - [x] RAG implemented via this framework
 """
+from __future__ import annotations
 
 import hashlib
 import logging

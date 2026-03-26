@@ -4,6 +4,7 @@
 Supervisor load balancer (max scholars from policy).
 DC meeting scheduler.
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, timedelta
@@ -425,20 +426,42 @@ class PhDService:
         supervisor_id: Optional[str] = None,
         program_id: Optional[str] = None,
     ) -> list:
-        sql = "SELECT * FROM phd_registrations WHERE org_id = %s"
-        params = [org_id]
+        conditions = ["pr.org_id = %s"]
+        params: list = [org_id]
 
         if status:
-            sql += " AND status = %s"
+            conditions.append("pr.status = %s")
             params.append(status)
         if supervisor_id:
-            sql += " AND supervisor_id = %s"
+            conditions.append("pr.supervisor_id = %s")
             params.append(supervisor_id)
         if program_id:
-            sql += " AND program_id = %s"
+            conditions.append("pr.program_id = %s")
             params.append(program_id)
 
-        sql += " ORDER BY registered_at DESC"
+        where = " AND ".join(conditions)
+        sql = f"""
+            SELECT
+                pr.*,
+                COALESCE(su.name, pr.student_id::text)       AS student_name,
+                COALESCE(sp.name, pr.supervisor_id::text)    AS supervisor_name,
+                COALESCE(mc.completed_count, 0)::int         AS milestones_complete,
+                COALESCE(mt.total_count, 9)::int             AS total_milestones
+            FROM phd_registrations pr
+            LEFT JOIN users su ON su.id = pr.student_id
+            LEFT JOIN users sp ON sp.id = pr.supervisor_id
+            LEFT JOIN (
+                SELECT phd_id, COUNT(*) AS completed_count
+                FROM phd_milestones WHERE status = 'COMPLETE'
+                GROUP BY phd_id
+            ) mc ON mc.phd_id = pr.id
+            LEFT JOIN (
+                SELECT phd_id, COUNT(*) AS total_count
+                FROM phd_milestones GROUP BY phd_id
+            ) mt ON mt.phd_id = pr.id
+            WHERE {where}
+            ORDER BY pr.created_at DESC
+        """
         rows = execute_query(sql, tuple(params))
         return [dict(r) for r in rows]
 

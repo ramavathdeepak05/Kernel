@@ -16,6 +16,7 @@ Rules
 The DB trigger `decrement_seat_counter()` handles real-time counter updates
 on enrollment confirmation.  This service handles business-level orchestration.
 """
+from __future__ import annotations
 
 import logging
 import uuid

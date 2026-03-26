@@ -57,6 +57,7 @@ Hard Constraints:
   - All policy access MUST go through this resolver.
   - If policy resolution fails, the operation MUST be blocked.
 """
+from __future__ import annotations
 
 import logging
 import threading

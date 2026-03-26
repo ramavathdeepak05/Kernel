@@ -1,4 +1,5 @@
 """E08-S03 — Leave Management"""
+from __future__ import annotations
 
 import logging
 import uuid

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   GitBranch, Shield, ClipboardList, ChevronDown, ChevronUp, Plus, X,
   ArrowRight, CheckCircle2, Clock, AlertTriangle, FileText, Users,
@@ -179,17 +179,67 @@ const AUDIT_TYPE_COLORS: Record<string, { color: string; bg: string }> = {
   WORKFLOW_CREATED: { color: C.purple, bg: C.purpleDim },
 };
 
+// ── API helper ─────────────────────────────────────────────────────────────
+async function apiFetch<T>(path: string): Promise<T | null> {
+  try {
+    const token = localStorage.getItem("token") ?? "";
+    const res = await fetch(`/api/v1${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    return res.json() as Promise<T>;
+  } catch {
+    return null;
+  }
+}
+
+// ── ProcessDefinition type from backend ────────────────────────────────────
+interface ProcessDefinition {
+  id: string;
+  name: string;
+  description?: string;
+  steps?: { name: string; role?: string; sla_hours?: number; step_type?: string }[];
+  is_active?: boolean;
+  created_at?: string;
+}
+
+// Convert a process definition to WFTemplate format
+function defToTemplate(d: ProcessDefinition): WFTemplate {
+  return {
+    id: d.id,
+    label: d.name,
+    steps: (d.steps ?? []).map(s => ({
+      name: s.name,
+      role: s.role ?? s.step_type ?? "System",
+      sla: s.sla_hours != null ? `${s.sla_hours}h` : "—",
+    })),
+  };
+}
+
 // ── Workflows Tab ──────────────────────────────────────────────────────────
 function WorkflowsTab() {
-  const [selected, setSelected] = useState("admissions");
+  const [workflows, setWorkflows] = useState<WFTemplate[]>(WORKFLOWS);
+  const [selected, setSelected] = useState(WORKFLOWS[0].id);
   const [showTooltip, setShowTooltip] = useState(false);
-  const wf = WORKFLOWS.find(w => w.id === selected) ?? WORKFLOWS[0];
+
+  useEffect(() => {
+    apiFetch<{ definitions?: ProcessDefinition[]; items?: ProcessDefinition[] }>("/processes/").then(d => {
+      const list: ProcessDefinition[] = d?.definitions ?? d?.items ?? [];
+      if (list.length > 0) {
+        const templates = list.map(defToTemplate);
+        setWorkflows(templates);
+        setSelected(templates[0].id);
+      }
+    });
+  }, []);
+
+  const wf = workflows.find(w => w.id === selected) ?? workflows[0];
 
   return (
     <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
       {/* left panel */}
       <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-        {WORKFLOWS.map(w => (
+        {workflows.map(w => (
           <button key={w.id} onClick={() => setSelected(w.id)} style={{
             padding: "12px 16px", borderRadius: 10, border: `1px solid ${selected === w.id ? C.teal : C.border}`,
             background: selected === w.id ? C.tealDim : C.surface, color: selected === w.id ? C.teal : C.text,
@@ -386,10 +436,50 @@ function PolicyRulesTab() {
 }
 
 // ── Audit Tab ──────────────────────────────────────────────────────────────
+
+interface RawAuditLog {
+  id: string;
+  action: string;
+  entity_type: string;
+  actor_role: string;
+  metadata: Record<string, unknown>;
+  timestamp: string;
+}
+
+function mapAuditType(action: string, entityType: string): string {
+  if (action === "create" && entityType.includes("process")) return "WORKFLOW_CREATED";
+  if (action === "update" && entityType.includes("process")) return "WORKFLOW_EDITED";
+  if (action === "create" && entityType.includes("policy")) return "POLICY_CREATED";
+  if (action === "archive" && entityType.includes("policy")) return "POLICY_ARCHIVED";
+  if (action === "update" && entityType.includes("rule")) return "RULE_UPDATED";
+  return "RULE_UPDATED";
+}
+
 function AuditTab() {
-  const allTypes = ["All", ...Array.from(new Set(AUDIT_EVENTS.map(e => e.type)))];
+  const [events, setEvents] = useState(AUDIT_EVENTS);
+  const allTypes = ["All", ...Array.from(new Set(events.map(e => e.type)))];
   const [filter, setFilter] = useState("All");
-  const visible = filter === "All" ? AUDIT_EVENTS : AUDIT_EVENTS.filter(e => e.type === filter);
+  const visible = filter === "All" ? events : events.filter(e => e.type === filter);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token") ?? "";
+    fetch("/api/v1/audit/logs?limit=30", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<{ logs?: RawAuditLog[] }> : null)
+      .then(data => {
+        const logs = data?.logs ?? [];
+        if (logs.length > 0) {
+          setEvents(logs.map(l => ({
+            ts: new Date(l.timestamp).toLocaleString("en-IN", { hour12: false }).replace(",", ""),
+            type: mapAuditType(l.action, l.entity_type),
+            by: String(l.metadata?.actor_name ?? l.actor_role ?? "System"),
+            summary: `${l.action.replace(/_/g, " ")} · ${l.entity_type.replace(/_/g, " ")}${l.metadata?.description ? ` — ${l.metadata.description}` : ""}`,
+          })));
+        }
+      })
+      .catch(() => {/* keep static fallback */});
+  }, []);
 
   return (
     <div>

@@ -5,6 +5,7 @@ Provides:
 2. AI narrative insights via Qwen (through AIGateway)
    - Falls back gracefully if Ollama is unavailable
 """
+from __future__ import annotations
 
 import logging
 

@@ -20,6 +20,7 @@ This package contains the foundational platform components:
 - policy_service: Policy Governance & Registry (E00-S09)
 - policy_resolver: Policy Resolver Middleware (E00-S10)
 """
+from __future__ import annotations
 
 from .models import User, Organization, ActorType, UserStatus, OrganizationStatus
 from .schema import UserCreate, UserRead, UserUpdate, OrganizationCreate, OrganizationRead

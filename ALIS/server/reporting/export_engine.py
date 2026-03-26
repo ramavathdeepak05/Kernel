@@ -3,6 +3,7 @@
 Exports any report data to CSV, Excel, or PDF.
 Large exports are processed asynchronously via Celery.
 """
+from __future__ import annotations
 
 import csv
 import io

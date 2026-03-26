@@ -27,6 +27,7 @@ Endpoints:
            GET   /comms/bulk
            GET   /comms/bulk/{id}
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

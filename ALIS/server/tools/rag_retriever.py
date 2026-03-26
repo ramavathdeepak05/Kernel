@@ -41,6 +41,7 @@ Vector Store Backend:
     returns empty results. In production, inject a QdrantBackend or
     PGVectorBackend instance.
 """
+from __future__ import annotations
 
 from typing import Any, ClassVar, Dict, List, Optional, Protocol, runtime_checkable
 

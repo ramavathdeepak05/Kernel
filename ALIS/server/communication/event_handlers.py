@@ -10,6 +10,7 @@ Subscribes:
   StudentEnrolled, StudentGraduated, ReEvalDecided,
   HostelAllotted, LibraryOverdue, FacultyOnLeave
 """
+from __future__ import annotations
 
 import logging
 

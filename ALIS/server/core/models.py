@@ -15,6 +15,7 @@ Constraints (from Master Handbook):
 - No domain-specific fields
 - Status lifecycle: ACTIVE, SUSPENDED, ARCHIVED
 """
+from __future__ import annotations
 
 from enum import Enum
 from uuid import uuid4

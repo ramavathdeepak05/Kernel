@@ -7,6 +7,7 @@ Allows staff to define and save report queries by selecting:
 
 Saved reports can be re-run or scheduled for export.
 """
+from __future__ import annotations
 
 import logging
 import uuid

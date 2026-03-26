@@ -1,4 +1,5 @@
 """E05-S03 — Student-Course Enrollment"""
+from __future__ import annotations
 
 import logging
 import uuid

@@ -22,6 +22,7 @@ Acceptance Criteria:
 - [x] Read-only to non-admins
 - [x] No runtime mutation of invariants
 """
+from __future__ import annotations
 
 from uuid import uuid4
 from datetime import datetime, timezone

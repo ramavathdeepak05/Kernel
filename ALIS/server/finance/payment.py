@@ -9,6 +9,7 @@ Flow:
 
 E07-S04 — Manual Payment Recording (CASH / CHEQUE / DD / NEFT)
 """
+from __future__ import annotations
 
 import hashlib
 import hmac
@@ -86,18 +87,19 @@ class PaymentService:
         """Called by webhook or frontend after successful Razorpay payment."""
         from server.core.settings import settings
 
-        # Signature verification
-        try:
-            expected = hmac.new(
-                settings.razorpay_webhook_secret.encode(),
-                f"{razorpay_order_id}|{razorpay_payment_id}".encode(),
-                "sha256",
-            ).hexdigest()
-            if not hmac.compare_digest(expected, razorpay_signature):
-                raise BusinessRuleViolation(message="Invalid Razorpay signature")
-        except Exception:
-            if settings.razorpay_webhook_secret:
-                raise
+        # Signature verification — secret must be configured; no bypass allowed
+        secret = settings.razorpay_webhook_secret
+        if not secret:
+            raise BusinessRuleViolation(
+                message="Razorpay webhook secret not configured — payment cannot be verified"
+            )
+        expected = hmac.new(
+            secret.encode(),
+            f"{razorpay_order_id}|{razorpay_payment_id}".encode(),
+            "sha256",
+        ).hexdigest()
+        if not hmac.compare_digest(expected, razorpay_signature):
+            raise BusinessRuleViolation(message="Invalid Razorpay signature")
 
         # Idempotency
         already = execute_query(

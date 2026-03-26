@@ -21,6 +21,7 @@ Event subscriptions (from architecture.md §15, E14 subscriber list):
 
 Reference: ALIS-skills/references/architecture.md §15
 """
+from __future__ import annotations
 
 import logging
 from typing import Any, Dict

@@ -17,6 +17,7 @@ Hierarchy matches the ALIS Layered Architecture:
   - Layer 5: AuthorityError (PermissionDenied, QuotaExceeded, EscalationDenied, DualControlRequired)
   - Layer 6: ResilienceError (ProvisionalWarning)
 """
+from __future__ import annotations
 
 from typing import Any, Dict, Optional, List
 

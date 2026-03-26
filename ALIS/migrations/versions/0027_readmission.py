@@ -91,30 +91,30 @@ def upgrade():
 
     # Seed institution policies
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'admissions.readmission_max_gap_years', '5', 'INTEGER', 'Maximum gap years allowed for re-admission', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'admissions.readmission_max_gap_years', '5'::jsonb, 'Maximum gap years allowed for re-admission', 'admissions'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'admissions.credit_transfer_max_pct', '50', 'DECIMAL', 'Max % of program credits that can be transferred from other institutions', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'admissions.credit_transfer_max_pct', '50'::jsonb, 'Max % of program credits that can be transferred from other institutions', 'admissions'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     # Seed feature flags
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
-        SELECT id, 'admissions.readmission_enabled', 'true', 'E17 Re-admission workflow'
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
+        SELECT id, 'admissions.readmission_enabled', true, '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
-        SELECT id, 'admissions.credit_transfer_ai_draft', 'true', 'AI-generated credit transfer equivalency drafts'
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
+        SELECT id, 'admissions.credit_transfer_ai_draft', true, '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING
     """)

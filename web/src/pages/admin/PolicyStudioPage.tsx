@@ -5,10 +5,11 @@
  * 3-panel layout: Categories (left 200px) | Policy List (centre) | Policy Editor (right 320px)
  * Current policy value + version history
  * Edit form: value + justification
- * "Draft with AI" button placeholder
+ * "Draft with AI" button → calls AI gateway
  */
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { alisApi } from '@/lib/alis-api';
 
 const COLORS = {
   bg: '#0E1020',
@@ -24,92 +25,168 @@ const COLORS = {
 };
 
 const POLICY_CATEGORIES = [
-  { key: 'admissions', label: 'Admissions', count: 12 },
-  { key: 'academics', label: 'Academics', count: 8 },
-  { key: 'finance', label: 'Finance', count: 15 },
-  { key: 'examinations', label: 'Examinations', count: 6 },
-  { key: 'phd', label: 'PhD & Research', count: 4 },
-  { key: 'obe', label: 'OBE / CO-PO', count: 3 },
-  { key: 'convocation', label: 'Convocation', count: 3 },
-  { key: 'platform', label: 'Platform', count: 5 },
+  { key: 'admissions', label: 'Admissions', module: 'M1' },
+  { key: 'academics', label: 'Academics', module: 'M2' },
+  { key: 'finance', label: 'Finance', module: 'M4' },
+  { key: 'examinations', label: 'Examinations', module: 'M3' },
+  { key: 'phd', label: 'PhD & Research', module: 'M8' },
+  { key: 'obe', label: 'OBE / CO-PO', module: 'M2' },
+  { key: 'convocation', label: 'Convocation', module: 'M2' },
+  { key: 'platform', label: 'Platform', module: null },
 ];
 
 type Policy = {
-  key: string;
-  type: string;
-  value: string;
+  id?: string;
+  policy_type: string;
+  name: string;
   description: string;
-  version: number;
+  parameters: Record<string, unknown>;
   status: string;
-  category: string;
-  updatedAt: string;
+  version?: number;
+  effective_from?: string;
+  updated_at?: string;
+  module?: string;
+  // Derived fields for display
+  category?: string;
 };
 
-const POLICIES: Policy[] = [
-  { key: 'admissions.readmission_max_gap_years', type: 'INTEGER', value: '5', description: 'Maximum gap years for re-admission', version: 2, status: 'APPROVED', category: 'admissions', updatedAt: '2026-03-01' },
-  { key: 'admissions.credit_transfer_max_pct', type: 'DECIMAL', value: '50', description: 'Max % program credits transferable', version: 1, status: 'APPROVED', category: 'admissions', updatedAt: '2026-02-15' },
-  { key: 'finance.einvoice_threshold_inr', type: 'DECIMAL', value: '500000', description: 'GST e-Invoice threshold (INR)', version: 1, status: 'APPROVED', category: 'finance', updatedAt: '2026-03-10' },
-  { key: 'phd.supervisor_max_scholars', type: 'INTEGER', value: '8', description: 'Maximum PhD scholars per supervisor', version: 1, status: 'APPROVED', category: 'phd', updatedAt: '2026-03-15' },
-  { key: 'phd.plagiarism_max_pct', type: 'DECIMAL', value: '25', description: 'Max plagiarism % for thesis submission', version: 1, status: 'APPROVED', category: 'phd', updatedAt: '2026-03-15' },
-  { key: 'obe.attainment_threshold_pct', type: 'DECIMAL', value: '60', description: 'Min % students to attain CO', version: 1, status: 'APPROVED', category: 'obe', updatedAt: '2026-03-15' },
-  { key: 'convocation.distinction_cgpa_threshold', type: 'DECIMAL', value: '8.5', description: 'Min CGPA for distinction', version: 1, status: 'APPROVED', category: 'convocation', updatedAt: '2026-03-15' },
-  { key: 'academics.late_joiner_catchup_weeks', type: 'INTEGER', value: '3', description: 'Weeks for late joiner catch-up', version: 1, status: 'APPROVED', category: 'academics', updatedAt: '2026-01-20' },
-  { key: 'examinations.rubber_stamp_threshold', type: 'DECIMAL', value: '0.95', description: 'Faculty override rate that triggers rubber stamp alert', version: 1, status: 'APPROVED', category: 'examinations', updatedAt: '2026-02-01' },
-  { key: 'finance.scholarship_dispute_window_days', type: 'INTEGER', value: '30', description: 'Days student can dispute scholarship revocation', version: 1, status: 'APPROVED', category: 'finance', updatedAt: '2026-02-20' },
-];
+type VersionEntry = {
+  id: string;
+  version?: number;
+  status: string;
+  effective_from?: string;
+  updated_at?: string;
+};
 
-function typeColor(type: string): string {
-  return type === 'INTEGER' ? COLORS.purple : COLORS.amber;
+function typeLabel(parameters: Record<string, unknown>): string {
+  const v = Object.values(parameters)[0];
+  if (typeof v === 'number') return Number.isInteger(v) ? 'INTEGER' : 'DECIMAL';
+  if (typeof v === 'boolean') return 'BOOLEAN';
+  return 'STRING';
 }
 
-function buildVersionHistory(policy: Policy): { v: number; date: string; status: string }[] {
-  const history = [];
-  for (let i = policy.version; i >= 1; i--) {
-    history.push({ v: i, date: policy.updatedAt, status: 'APPROVED' });
-  }
-  return history;
+function typeColor(parameters: Record<string, unknown>): string {
+  const t = typeLabel(parameters);
+  return t === 'INTEGER' ? COLORS.purple : COLORS.amber;
+}
+
+function primaryValue(parameters: Record<string, unknown>): string {
+  const entries = Object.entries(parameters);
+  if (entries.length === 0) return '—';
+  return String(entries[0][1]);
 }
 
 export function PolicyStudioPage() {
   const [selectedCategory, setSelectedCategory] = useState<string>('admissions');
+  const [policies, setPolicies] = useState<Policy[]>([]);
+  const [loadingPolicies, setLoadingPolicies] = useState(false);
   const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
   const [editValue, setEditValue] = useState('');
   const [editJustification, setEditJustification] = useState('');
+  const [versionHistory, setVersionHistory] = useState<VersionEntry[]>([]);
   const [showAIDraft, setShowAIDraft] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
   const [aiDraftResult, setAiDraftResult] = useState<string | null>(null);
-  const [savedMsg, setSavedMsg] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const filteredPolicies = POLICIES.filter((p) => p.category === selectedCategory);
+  // Load policies when category changes
+  useEffect(() => {
+    setLoadingPolicies(true);
+    setSelectedPolicy(null);
+    alisApi
+      .get<{ policies: Policy[] }>('/policy/', {
+        params: { limit: 100 },
+      })
+      .then((res) => {
+        // Filter client-side by category prefix in policy_type
+        const all = res.policies ?? [];
+        const filtered = all.filter((p) => p.policy_type?.startsWith(selectedCategory + '.') || p.module === POLICY_CATEGORIES.find((c) => c.key === selectedCategory)?.module);
+        setPolicies(filtered.length > 0 ? filtered : all.filter((p) => p.policy_type?.startsWith(selectedCategory)));
+      })
+      .catch(() => setPolicies([]))
+      .finally(() => setLoadingPolicies(false));
+  }, [selectedCategory]);
 
-  function handleSelectPolicy(p: Policy) {
+  const handleSelectPolicy = useCallback((p: Policy) => {
     setSelectedPolicy(p);
-    setEditValue(p.value);
+    setEditValue(primaryValue(p.parameters ?? {}));
     setEditJustification('');
     setShowAIDraft(false);
     setAiDraftResult(null);
-    setSavedMsg(false);
-  }
+    setSaveState('idle');
+    setSaveError(null);
+    setVersionHistory([]);
 
-  function handleSave() {
+    // Load version history
+    alisApi
+      .get<{ history: VersionEntry[] }>(`/policy/history/${encodeURIComponent(p.policy_type)}`)
+      .then((res) => setVersionHistory(res.history ?? []))
+      .catch(() => setVersionHistory([]));
+  }, []);
+
+  const handleSave = useCallback(async () => {
     if (!selectedPolicy) return;
-    setSavedMsg(true);
-    setTimeout(() => setSavedMsg(false), 2500);
-  }
+    setSaveState('saving');
+    setSaveError(null);
+    try {
+      // Determine the parameter key from existing policy
+      const paramKey = Object.keys(selectedPolicy.parameters ?? {})[0] ?? 'value';
+      const numVal = Number(editValue);
+      const parsedValue = isNaN(numVal) ? editValue : numVal;
 
-  function handleGenerateDraft() {
+      await alisApi.post('/policy/draft', {
+        policy_type: selectedPolicy.policy_type,
+        name: selectedPolicy.name,
+        description: editJustification || selectedPolicy.description,
+        parameters: { [paramKey]: parsedValue },
+        effective_from: new Date().toISOString(),
+        module: selectedPolicy.module ?? null,
+      });
+
+      setSaveState('saved');
+      setTimeout(() => setSaveState('idle'), 2500);
+
+      // Refresh version history
+      alisApi
+        .get<{ history: VersionEntry[] }>(`/policy/history/${encodeURIComponent(selectedPolicy.policy_type)}`)
+        .then((res) => setVersionHistory(res.history ?? []))
+        .catch(() => null);
+    } catch (err: unknown) {
+      setSaveState('error');
+      setSaveError(err instanceof Error ? err.message : 'Save failed.');
+    }
+  }, [selectedPolicy, editValue, editJustification]);
+
+  const handleGenerateDraft = useCallback(async () => {
+    if (!selectedPolicy) return;
     setAiLoading(true);
     setAiDraftResult(null);
-    setTimeout(() => {
+    try {
+      const userId = localStorage.getItem('user_id') ?? 'system';
+      const tenantId = localStorage.getItem('tenant_id') ?? 'demo';
+      const res = await alisApi.post<{ content?: string; error?: string }>('/ai/invoke', {
+        actor_id: userId,
+        actor_role: 'admin',
+        org_id: tenantId,
+        module: 'RAIL',
+        agent_name: 'context_advisor_v1',
+        input_data: {
+          policy_type: selectedPolicy.policy_type,
+          current_value: editValue,
+          description_prompt: aiDescription,
+        },
+      });
+      setAiDraftResult(res.content ?? 'AI did not return a suggestion. Try refining your prompt.');
+    } catch (err: unknown) {
+      setAiDraftResult(`AI unavailable: ${err instanceof Error ? err.message : 'Unknown error.'}`);
+    } finally {
       setAiLoading(false);
-      setAiDraftResult(
-        `Based on your description, the suggested value is: ${selectedPolicy?.value ?? '—'}. ` +
-        `AI rationale: Policy aligns with UGC guidelines and institutional precedent. ` +
-        `Proposed effective date: 2026-04-01. Requires registrar approval.`
-      );
-    }, 1400);
-  }
+    }
+  }, [selectedPolicy, editValue, aiDescription]);
+
+  const filteredPolicies = policies;
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: COLORS.bg, color: COLORS.text, fontFamily: 'Inter, system-ui, sans-serif' }}>
@@ -129,30 +206,16 @@ export function PolicyStudioPage() {
               key={cat.key}
               onClick={() => { setSelectedCategory(cat.key); setSelectedPolicy(null); }}
               style={{
-                display: 'flex',
-                width: '100%',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '9px 16px',
-                border: 'none',
+                display: 'flex', width: '100%', alignItems: 'center',
+                justifyContent: 'space-between', padding: '9px 16px', border: 'none',
                 background: selectedCategory === cat.key ? `${COLORS.purple}22` : 'transparent',
                 borderLeft: selectedCategory === cat.key ? `3px solid ${COLORS.purple}` : '3px solid transparent',
                 color: selectedCategory === cat.key ? COLORS.text : COLORS.muted,
-                fontSize: 13,
-                fontWeight: selectedCategory === cat.key ? 600 : 400,
-                cursor: 'pointer',
-                textAlign: 'left',
-                transition: 'all 0.12s',
+                fontSize: 13, fontWeight: selectedCategory === cat.key ? 600 : 400,
+                cursor: 'pointer', textAlign: 'left', transition: 'all 0.12s',
               }}
             >
               <span>{cat.label}</span>
-              <span style={{
-                fontSize: 11, background: selectedCategory === cat.key ? COLORS.purple : COLORS.border,
-                color: selectedCategory === cat.key ? '#fff' : COLORS.muted,
-                borderRadius: 10, padding: '1px 7px', minWidth: 20, textAlign: 'center',
-              }}>
-                {cat.count}
-              </span>
             </button>
           ))}
         </div>
@@ -160,35 +223,41 @@ export function PolicyStudioPage() {
         {/* CENTRE: Policy list */}
         <div style={{ flex: 1, overflowY: 'auto', background: COLORS.bg, padding: '16px 20px' }}>
           <p style={{ margin: '0 0 14px', fontSize: 12, color: COLORS.muted, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            {POLICY_CATEGORIES.find((c) => c.key === selectedCategory)?.label} — {filteredPolicies.length} policies
+            {POLICY_CATEGORIES.find((c) => c.key === selectedCategory)?.label}
+            {loadingPolicies ? ' — Loading…' : ` — ${filteredPolicies.length} policies`}
           </p>
-          {filteredPolicies.length === 0 && (
-            <p style={{ color: COLORS.muted, fontSize: 14 }}>No policies in this category.</p>
+          {!loadingPolicies && filteredPolicies.length === 0 && (
+            <p style={{ color: COLORS.muted, fontSize: 14 }}>No policies found for this category.</p>
           )}
           {filteredPolicies.map((p) => (
             <div
-              key={p.key}
+              key={p.id ?? p.policy_type}
               onClick={() => handleSelectPolicy(p)}
               style={{
-                background: selectedPolicy?.key === p.key ? `${COLORS.purple}18` : COLORS.card,
-                border: `1px solid ${selectedPolicy?.key === p.key ? COLORS.purple : COLORS.border}`,
-                borderRadius: 8,
-                padding: '13px 16px',
-                marginBottom: 10,
-                cursor: 'pointer',
-                transition: 'all 0.12s',
+                background: selectedPolicy?.policy_type === p.policy_type ? `${COLORS.purple}18` : COLORS.card,
+                border: `1px solid ${selectedPolicy?.policy_type === p.policy_type ? COLORS.purple : COLORS.border}`,
+                borderRadius: 8, padding: '13px 16px', marginBottom: 10, cursor: 'pointer', transition: 'all 0.12s',
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <code style={{ fontSize: 12, color: COLORS.purple, fontFamily: 'monospace', wordBreak: 'break-all' }}>{p.key}</code>
-                <span style={{ fontSize: 11, fontWeight: 700, color: typeColor(p.type), background: typeColor(p.type) + '22', padding: '2px 7px', borderRadius: 4, marginLeft: 8, whiteSpace: 'nowrap' }}>
-                  {p.type}
+                <code style={{ fontSize: 12, color: COLORS.purple, fontFamily: 'monospace', wordBreak: 'break-all' }}>{p.policy_type}</code>
+                <span style={{
+                  fontSize: 11, fontWeight: 700,
+                  color: typeColor(p.parameters ?? {}),
+                  background: typeColor(p.parameters ?? {}) + '22',
+                  padding: '2px 7px', borderRadius: 4, marginLeft: 8, whiteSpace: 'nowrap',
+                }}>
+                  {typeLabel(p.parameters ?? {})}
                 </span>
               </div>
-              <p style={{ margin: '6px 0 4px', fontSize: 13, color: COLORS.text }}>{p.description}</p>
+              <p style={{ margin: '6px 0 4px', fontSize: 13, color: COLORS.text }}>{p.name}</p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 12, color: COLORS.muted }}>Value: <strong style={{ color: COLORS.text }}>{p.value}</strong></span>
-                <span style={{ fontSize: 11, color: COLORS.muted }}>v{p.version} · {p.updatedAt}</span>
+                <span style={{ fontSize: 12, color: COLORS.muted }}>
+                  Value: <strong style={{ color: COLORS.text }}>{primaryValue(p.parameters ?? {})}</strong>
+                </span>
+                <span style={{ fontSize: 11, color: COLORS.muted }}>
+                  {p.status} · {p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-IN') : '—'}
+                </span>
               </div>
             </div>
           ))}
@@ -203,15 +272,13 @@ export function PolicyStudioPage() {
             </div>
           ) : (
             <div>
-              {/* Policy key */}
               <code style={{ fontSize: 11, color: COLORS.purple, fontFamily: 'monospace', wordBreak: 'break-all', display: 'block', marginBottom: 10 }}>
-                {selectedPolicy.key}
+                {selectedPolicy.policy_type}
               </code>
 
-              {/* Type + status badges */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: typeColor(selectedPolicy.type), background: typeColor(selectedPolicy.type) + '22', padding: '3px 8px', borderRadius: 4 }}>
-                  {selectedPolicy.type}
+                <span style={{ fontSize: 11, fontWeight: 700, color: typeColor(selectedPolicy.parameters ?? {}), background: typeColor(selectedPolicy.parameters ?? {}) + '22', padding: '3px 8px', borderRadius: 4 }}>
+                  {typeLabel(selectedPolicy.parameters ?? {})}
                 </span>
                 <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.teal, background: COLORS.teal + '22', padding: '3px 8px', borderRadius: 4 }}>
                   {selectedPolicy.status}
@@ -220,7 +287,6 @@ export function PolicyStudioPage() {
 
               <p style={{ fontSize: 12, color: COLORS.muted, margin: '0 0 16px' }}>{selectedPolicy.description}</p>
 
-              {/* Current value */}
               <div style={{ marginBottom: 14 }}>
                 <label style={{ fontSize: 12, color: COLORS.muted, display: 'block', marginBottom: 5 }}>Current Value</label>
                 <input
@@ -235,7 +301,6 @@ export function PolicyStudioPage() {
                 />
               </div>
 
-              {/* Justification */}
               <div style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 12, color: COLORS.muted, display: 'block', marginBottom: 5 }}>Change Justification</label>
                 <textarea
@@ -253,24 +318,38 @@ export function PolicyStudioPage() {
               </div>
 
               {/* Version history */}
-              <div style={{ marginBottom: 18 }}>
-                <p style={{ fontSize: 12, color: COLORS.muted, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Version History</p>
-                {buildVersionHistory(selectedPolicy).map((h) => (
-                  <div key={h.v} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: `1px solid ${COLORS.border}` }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.purple, minWidth: 24 }}>v{h.v}</span>
-                    <span style={{ fontSize: 12, color: COLORS.muted }}>{h.date}</span>
-                    <span style={{ fontSize: 11, color: COLORS.teal, marginLeft: 'auto' }}>{h.status}</span>
-                  </div>
-                ))}
-              </div>
+              {versionHistory.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <p style={{ fontSize: 12, color: COLORS.muted, margin: '0 0 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Version History</p>
+                  {versionHistory.slice(0, 5).map((h, i) => (
+                    <div key={h.id ?? i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', borderBottom: `1px solid ${COLORS.border}` }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.purple, minWidth: 24 }}>v{h.version ?? (versionHistory.length - i)}</span>
+                      <span style={{ fontSize: 12, color: COLORS.muted }}>
+                        {h.updated_at ? new Date(h.updated_at).toLocaleDateString('en-IN') : '—'}
+                      </span>
+                      <span style={{ fontSize: 11, color: COLORS.teal, marginLeft: 'auto' }}>{h.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {saveError && (
+                <p style={{ fontSize: 12, color: COLORS.red, margin: '0 0 10px' }}>{saveError}</p>
+              )}
 
               {/* Action buttons */}
               <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
                 <button
                   onClick={handleSave}
-                  style={{ flex: 1, padding: '9px 0', background: COLORS.teal, border: 'none', borderRadius: 7, color: '#fff', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}
+                  disabled={saveState === 'saving'}
+                  style={{
+                    flex: 1, padding: '9px 0',
+                    background: saveState === 'saved' ? COLORS.teal : saveState === 'error' ? COLORS.red : COLORS.teal,
+                    border: 'none', borderRadius: 7, color: '#fff', fontWeight: 600, fontSize: 13,
+                    cursor: saveState === 'saving' ? 'not-allowed' : 'pointer', opacity: saveState === 'saving' ? 0.6 : 1,
+                  }}
                 >
-                  {savedMsg ? '✓ Saved' : 'Save Changes'}
+                  {saveState === 'saving' ? 'Saving…' : saveState === 'saved' ? '✓ Saved' : 'Save Changes'}
                 </button>
                 <button
                   onClick={() => { setShowAIDraft(!showAIDraft); setAiDraftResult(null); }}
@@ -293,8 +372,7 @@ export function PolicyStudioPage() {
                       width: '100%', padding: '9px 12px',
                       background: COLORS.surface, border: `1px solid ${COLORS.border}`,
                       borderRadius: 6, color: COLORS.text, fontSize: 13,
-                      resize: 'vertical', boxSizing: 'border-box', outline: 'none',
-                      marginBottom: 10,
+                      resize: 'vertical', boxSizing: 'border-box', outline: 'none', marginBottom: 10,
                     }}
                   />
                   <button

@@ -99,17 +99,17 @@ def upgrade():
 
     # Seed policies
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'convocation.distinction_cgpa_threshold', '8.5', 'DECIMAL', 'Minimum CGPA for distinction at convocation', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'convocation.distinction_cgpa_threshold', '8.5'::jsonb, 'Minimum CGPA for distinction at convocation', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'convocation.gold_medal_exclude_grace', 'true', 'BOOLEAN', 'Exclude grace marks from gold medal CGPA computation', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'convocation.gold_medal_exclude_grace', 'true'::jsonb, 'Exclude grace marks from gold medal CGPA computation', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
 

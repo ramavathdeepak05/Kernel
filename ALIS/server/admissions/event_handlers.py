@@ -6,6 +6,7 @@ or send auto-notifications at each lifecycle step.
 
 Registered at application startup (server/main.py calls register_all()).
 """
+from __future__ import annotations
 
 import logging
 

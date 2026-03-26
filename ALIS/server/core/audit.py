@@ -40,6 +40,7 @@ Acceptance Criteria
   • [x] Admin export capability
   • [x] No UPDATE / DELETE on audit table (DB-enforced)
 """
+from __future__ import annotations
 
 import hashlib
 import json
@@ -75,6 +76,10 @@ class AuditAction(str, Enum):
     LOGIN = "login"
     LOGOUT = "logout"
     ACCESS_DENIED = "access_denied"
+    SESSION_REVOKED = "session_revoked"
+    PASSWORD_RESET_REQUESTED = "password_reset_requested"
+    PASSWORD_RESET_COMPLETED = "password_reset_completed"
+    PASSWORD_CHANGED = "password_changed"
 
     # Overrides
     OVERRIDE_REQUESTED = "override_requested"
@@ -147,6 +152,12 @@ class AuditAction(str, Enum):
     PROMPT_CREATED = "prompt_created"
     PROMPT_ACTIVATED = "prompt_activated"
     PROMPT_SUPERSEDED = "prompt_superseded"
+
+    # Policy Engine — Decision Tracing (Phase A)
+    POLICY_EVALUATED = "policy_evaluated"
+
+    # Selective Auto-execution (Phase D)
+    AUTO_EXECUTED = "auto_executed"
 
 
 # ============================================================================

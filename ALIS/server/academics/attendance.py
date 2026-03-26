@@ -1,4 +1,5 @@
 """E05-S06 — Attendance Tracking"""
+from __future__ import annotations
 
 import logging
 import uuid

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Shield, FileText, Clock, CheckCircle2, XCircle, AlertTriangle,
   Search, Download, ChevronDown, ChevronUp, X, Users, BarChart3,
@@ -357,8 +357,46 @@ function DSRTab() {
 }
 
 // ── Audit Log Tab ──────────────────────────────────────────────────────────
+interface AuditLogEntry {
+  id: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  actor_role: string;
+  metadata: Record<string, unknown>;
+  timestamp: string;
+}
+
 function AuditLogTab() {
   const [toast, setToast] = useState(false);
+  const [rows, setRows] = useState<typeof AUDIT_ROWS>([]);
+  const [liveLoading, setLiveLoading] = useState(true);
+
+  useEffect(() => {
+    const token = localStorage.getItem("token") ?? "";
+    fetch("/api/v1/audit/logs?entity_type=consent&limit=50", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<{ logs?: AuditLogEntry[] }> : null)
+      .then(data => {
+        const logs = data?.logs ?? [];
+        if (logs.length > 0) {
+          setRows(logs.map(l => ({
+            ts: new Date(l.timestamp).toLocaleString("en-IN", { hour12: false }).replace(",", ""),
+            student: String(l.metadata?.student_name ?? l.metadata?.user_name ?? l.entity_id ?? "—"),
+            action: l.action.toUpperCase() === "CREATE" ? "GIVEN" : l.action.toUpperCase() === "DELETE" ? "REVOKED" : l.action.toUpperCase(),
+            purpose: String(l.metadata?.purpose ?? l.entity_type ?? "—"),
+            channel: String(l.metadata?.channel ?? "System"),
+            ip: String(l.metadata?.ip_address ?? "—"),
+            officer: String(l.metadata?.actor_name ?? l.actor_role ?? "—"),
+          })));
+        } else {
+          setRows(AUDIT_ROWS);
+        }
+        setLiveLoading(false);
+      })
+      .catch(() => { setRows(AUDIT_ROWS); setLiveLoading(false); });
+  }, []);
 
   function handleExport() {
     setToast(true);
@@ -373,7 +411,6 @@ function AuditLogTab() {
           position: "fixed", bottom: 32, right: 32, background: C.teal, color: "#fff",
           padding: "12px 24px", borderRadius: 10, fontWeight: 700, fontSize: 14,
           boxShadow: "0 8px 32px rgba(29,158,117,0.4)", zIndex: 1000,
-          animation: "none",
         }}>
           Exported!
         </div>
@@ -388,35 +425,39 @@ function AuditLogTab() {
         </button>
       </div>
 
-      <div style={{ ...card, padding: 0, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ background: C.surface2 }}>
-              {["Timestamp", "Student", "Action", "Purpose", "Channel", "IP Address", "Officer"].map(h => (
-                <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap" }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {AUDIT_ROWS.map((row, i) => (
-              <tr key={i} style={{ borderTop: `1px solid ${C.border}`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted, whiteSpace: "nowrap", fontFamily: "monospace" }}>{row.ts}</td>
-                <td style={{ padding: "9px 14px", fontSize: 12, color: C.text, whiteSpace: "nowrap" }}>{row.student}</td>
-                <td style={{ padding: "9px 14px" }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
-                    color: row.action === "GIVEN" ? C.green : C.red,
-                    background: row.action === "GIVEN" ? C.greenDim : C.redDim,
-                  }}>{row.action}</span>
-                </td>
-                <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.purpose}</td>
-                <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted }}>{row.channel}</td>
-                <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted, fontFamily: "monospace" }}>{row.ip}</td>
-                <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted }}>{row.officer}</td>
+      {liveLoading ? (
+        <div style={{ textAlign: "center", padding: 40, color: C.muted }}>Loading audit log…</div>
+      ) : (
+        <div style={{ ...card, padding: 0, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: C.surface2 }}>
+                {["Timestamp", "Student", "Action", "Purpose", "Channel", "IP Address", "Officer"].map(h => (
+                  <th key={h} style={{ padding: "11px 14px", textAlign: "left", fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.07em", whiteSpace: "nowrap" }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} style={{ borderTop: `1px solid ${C.border}`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
+                  <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted, whiteSpace: "nowrap", fontFamily: "monospace" }}>{row.ts}</td>
+                  <td style={{ padding: "9px 14px", fontSize: 12, color: C.text, whiteSpace: "nowrap" }}>{row.student}</td>
+                  <td style={{ padding: "9px 14px" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 4,
+                      color: row.action === "GIVEN" ? C.green : C.red,
+                      background: row.action === "GIVEN" ? C.greenDim : C.redDim,
+                    }}>{row.action}</span>
+                  </td>
+                  <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.purpose}</td>
+                  <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted }}>{row.channel}</td>
+                  <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted, fontFamily: "monospace" }}>{row.ip}</td>
+                  <td style={{ padding: "9px 14px", fontSize: 11, color: C.muted }}>{row.officer}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

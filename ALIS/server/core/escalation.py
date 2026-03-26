@@ -28,6 +28,7 @@ Acceptance Criteria (E00-S04):
 - [x] TTL policy-configurable with max cap
 - [x] Critical operations extensible via config
 """
+from __future__ import annotations
 
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone

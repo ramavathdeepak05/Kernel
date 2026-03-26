@@ -7,6 +7,7 @@ This is a synchronous read model — queried at hall-ticket generation gate.
 The dues_cleared flag is computed from live DB state, not from events
 (which can be stale if a library fine is posted after the event fires).
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

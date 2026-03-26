@@ -1,4 +1,5 @@
 """E05-S02 — Course Management"""
+from __future__ import annotations
 
 import json
 import logging

@@ -30,11 +30,11 @@ def upgrade():
 
     # 3. Seed feature flag — e-Invoice
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
         SELECT id,
                'finance.einvoice_enabled',
-               'false',
-               'GST e-Invoice IRN generation via NIC API (enable for GST-registered institutions)'
+               false,
+               '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING;
     """)
@@ -42,16 +42,14 @@ def upgrade():
     # 4. Seed policy — e-invoice threshold
     op.execute("""
         INSERT INTO institution_policies
-            (org_id, policy_key, policy_value, policy_type, description, version, created_by)
+            (org_id, key, value, description, category)
         SELECT id,
                'finance.einvoice_threshold_inr',
-               '500000',
-               'DECIMAL',
+               '500000'::jsonb,
                'Invoice amount threshold (INR) above which GST e-Invoice / IRN is required',
-               1,
-               NULL
+               'finance'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING;
+        ON CONFLICT (org_id, key) DO NOTHING;
     """)
 
     # 5. ALTER users — language_preference
@@ -62,16 +60,14 @@ def upgrade():
     # Seed policy — supported languages
     op.execute("""
         INSERT INTO institution_policies
-            (org_id, policy_key, policy_value, policy_type, description, version, created_by)
+            (org_id, key, value, description, category)
         SELECT id,
                'platform.supported_languages',
-               '["en","te","kn","ta","mr","hi"]',
-               'JSON',
+               '["en","te","kn","ta","mr","hi"]'::jsonb,
                'Languages supported for student/parent facing UI',
-               1,
-               NULL
+               'platform'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING;
+        ON CONFLICT (org_id, key) DO NOTHING;
     """)
 
 

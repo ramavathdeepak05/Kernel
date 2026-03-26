@@ -30,6 +30,7 @@ Acceptance Criteria (E00-S07)
   • [x] Deletion requires superadmin + log
   • [x] Retention audit report
 """
+from __future__ import annotations
 
 import logging
 from enum import Enum

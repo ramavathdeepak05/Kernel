@@ -45,6 +45,7 @@ Endpoints:
     GET    /services/counselling/referrals
     GET    /services/counselling/summary
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

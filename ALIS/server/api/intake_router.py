@@ -6,6 +6,7 @@ E04-S14: Public application intake — no JWT auth, org API key in header.
 
 E04-S15: Razorpay webhook handler — payment.captured → auto-confirm + enroll.
 """
+from __future__ import annotations
 
 import hashlib
 import hmac

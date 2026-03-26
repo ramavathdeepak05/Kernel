@@ -21,6 +21,7 @@ Acceptance Criteria (E03-S02):
 - [x] Resource limits enforced (num_ctx, num_gpu, num_thread, keep_alive, timeout
       stored in config JSONB and forwarded to OllamaLLM at invocation time)
 """
+from __future__ import annotations
 
 from uuid import uuid4
 from datetime import datetime, timezone

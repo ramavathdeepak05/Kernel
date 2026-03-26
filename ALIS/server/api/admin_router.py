@@ -8,6 +8,7 @@ Sections
 2.  Data Migration       POST/GET  /admin/migrations/*
 3.  Outbound Webhooks    POST/GET/DELETE /admin/webhooks/*
 """
+from __future__ import annotations
 
 import io
 import logging
@@ -437,6 +438,66 @@ async def list_campuses(
     from server.core.campus_service import CampusService
     result = CampusService.list_campuses(group_org_id)
     return JSONResponse(content={"campuses": result, "total": len(result)})
+
+
+# ===========================================================================
+# 4.  DEAD-LETTER QUEUE — Failed Task Log
+# ===========================================================================
+
+@router.get("/failed-tasks")
+async def list_failed_tasks(
+    task_name: Optional[str] = Query(None),
+    retried: Optional[bool] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user=Depends(super_admin),
+):
+    """List Celery tasks that exhausted all retries and landed in the DLQ."""
+    from server.db_service import execute_query
+    sql = "SELECT id, task_id, task_name, args, kwargs, error, failed_at, tenant_id, retried, retried_at FROM failed_task_log WHERE TRUE"
+    params: list = []
+    if task_name:
+        sql += " AND task_name ILIKE %s"
+        params.append(f"%{task_name}%")
+    if retried is not None:
+        sql += " AND retried = %s"
+        params.append(retried)
+    sql += " ORDER BY failed_at DESC LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+    rows = execute_query(sql, tuple(params))
+    count_row = execute_query("SELECT COUNT(*) AS n FROM failed_task_log WHERE TRUE" + (
+        (" AND task_name ILIKE %s" if task_name else "") +
+        (" AND retried = %s" if retried is not None else "")
+    ), tuple(params[:-2]) if params[:-2] else ())
+    total = count_row[0]["n"] if count_row else 0
+    return {"tasks": rows, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/failed-tasks/{task_log_id}/retry")
+async def retry_failed_task(
+    task_log_id: int = Path(...),
+    user=Depends(super_admin),
+):
+    """Re-enqueue a failed task by its dead-letter log ID."""
+    from server.db_service import execute_query, execute_transaction
+    rows = execute_query("SELECT * FROM failed_task_log WHERE id = %s", (task_log_id,))
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found in dead-letter log")
+    row = rows[0]
+    if row["retried"]:
+        raise HTTPException(status_code=409, detail="Task already retried")
+    # Re-enqueue via Celery send_task
+    from server.worker import celery_app
+    celery_app.send_task(
+        row["task_name"],
+        args=row["args"] or [],
+        kwargs=row["kwargs"] or {},
+    )
+    execute_transaction([(
+        "UPDATE failed_task_log SET retried = TRUE, retried_at = NOW() WHERE id = %s",
+        (task_log_id,),
+    )])
+    return {"status": "requeued", "task_name": row["task_name"]}
 
 
 @router.post("/organizations/{org_id}/promote-to-group")

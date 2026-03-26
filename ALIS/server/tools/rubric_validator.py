@@ -29,6 +29,7 @@ Output data keys:
         "component_count": int
     }
 """
+from __future__ import annotations
 
 from typing import Any, ClassVar, Dict, List
 

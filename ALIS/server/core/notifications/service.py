@@ -19,6 +19,7 @@ Acceptance Criteria:
 - [x] Delivery status tracking
 - [x] No direct notifications from modules
 """
+from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone

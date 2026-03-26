@@ -27,6 +27,7 @@ Acceptance Criteria:
 - [x] Non-bypassable
 - [x] Explicit violation reasons
 """
+from __future__ import annotations
 
 from enum import Enum
 from typing import Dict, List, Optional, Callable, Any

@@ -13,6 +13,7 @@ Must Align With:
 
 Blueprint: Rule Engine pattern (deterministic send behavior)
 """
+from __future__ import annotations
 
 import logging
 import smtplib
@@ -26,6 +27,18 @@ from ..config import ConfigRegistry
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalise_e164(phone: str) -> str:
+    """Normalise a phone number to E.164 format (e.g. +919876543210)."""
+    digits = "".join(c for c in phone if c.isdigit() or c == "+")
+    if digits.startswith("+"):
+        return digits
+    if digits.startswith("0"):
+        digits = digits[1:]
+    if len(digits) == 10:
+        return f"+91{digits}"
+    return f"+{digits}"
 
 
 # --- Channel Result ---
@@ -148,30 +161,30 @@ class SMSChannel(BaseChannel):
         self,
         recipient: str,
         subject: Optional[str],  # Ignored for SMS
-        body: str
+        body: str,
+        **kwargs,
     ) -> ChannelResult:
-        """Send SMS notification."""
+        """Send SMS via MSG91 or Twilio (delegates to SMSGatewayClient)."""
         if not self.is_enabled():
-            return ChannelResult(
-                success=False,
-                error_message="SMS channel is disabled"
-            )
-        
+            return ChannelResult(success=False, error_message="SMS channel is disabled")
+
         try:
-            # TODO: Integrate with SMS provider (e.g., Twilio, AWS SNS)
-            logger.info(f"[SMS] To: {recipient} | Body: {body[:160]}")
-            
-            return ChannelResult(
-                success=True,
-                provider_response="LOGGED (dev mode)"
+            from server.admissions.integrations.sms_gateway import SMSGatewayClient
+            client = SMSGatewayClient()
+            result = client.send_sms(
+                phone=_normalise_e164(recipient),
+                message=body[:160],
+                template_id=kwargs.get("template_id"),
             )
-            
-        except Exception as e:
-            logger.error(f"[SMS] Failed to send to {recipient}: {str(e)}")
-            return ChannelResult(
-                success=False,
-                error_message=str(e)
-            )
+            if result.success:
+                logger.info("[SMS] Sent to %s via %s", recipient, result.provider)
+                return ChannelResult(success=True, provider_response=result.message_id)
+            logger.warning("[SMS] Failed to send to %s: %s", recipient, result.error)
+            return ChannelResult(success=False, error_message=result.error)
+
+        except Exception as exc:
+            logger.error("[SMS] Unexpected error sending to %s: %s", recipient, exc)
+            return ChannelResult(success=False, error_message=str(exc))
     
     def is_enabled(self) -> bool:
         """Check if SMS is enabled in config."""
@@ -194,30 +207,45 @@ class WhatsAppChannel(BaseChannel):
         self,
         recipient: str,
         subject: Optional[str],  # Ignored for WhatsApp
-        body: str
+        body: str,
+        **kwargs,
     ) -> ChannelResult:
-        """Send WhatsApp notification."""
+        """Send WhatsApp message via Meta Graph API (text message type)."""
         if not self.is_enabled():
-            return ChannelResult(
-                success=False,
-                error_message="WhatsApp channel is disabled"
-            )
-        
+            return ChannelResult(success=False, error_message="WhatsApp channel is disabled")
+
+        from server.core.settings import settings
+
+        phone_number_id = settings.whatsapp_phone_number_id
+        access_token    = settings.whatsapp_access_token
+        if not phone_number_id or not access_token:
+            logger.warning("[WHATSAPP] Not configured — skipping send to %s", recipient)
+            return ChannelResult(success=False, error_message="WhatsApp not configured")
+
         try:
-            # TODO: Integrate with WhatsApp Business API
-            logger.info(f"[WHATSAPP] To: {recipient} | Body: {body[:500]}")
-            
-            return ChannelResult(
-                success=True,
-                provider_response="LOGGED (dev mode)"
+            import httpx
+            phone   = _normalise_e164(recipient)
+            url     = f"https://graph.facebook.com/v18.0/{phone_number_id}/messages"
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": phone,
+                "type": "text",
+                "text": {"body": body},
+            }
+            resp = httpx.post(
+                url,
+                json=payload,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=getattr(settings, "whatsapp_timeout_seconds", 10),
             )
-            
-        except Exception as e:
-            logger.error(f"[WHATSAPP] Failed to send to {recipient}: {str(e)}")
-            return ChannelResult(
-                success=False,
-                error_message=str(e)
-            )
+            resp.raise_for_status()
+            msg_id = resp.json().get("messages", [{}])[0].get("id", "")
+            logger.info("[WHATSAPP] Sent to %s | msg_id=%s", phone, msg_id)
+            return ChannelResult(success=True, provider_response=msg_id)
+
+        except Exception as exc:
+            logger.error("[WHATSAPP] Failed to send to %s: %s", recipient, exc)
+            return ChannelResult(success=False, error_message=str(exc))
     
     def is_enabled(self) -> bool:
         """Check if WhatsApp is enabled in config."""

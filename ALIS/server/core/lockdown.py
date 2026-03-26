@@ -26,6 +26,7 @@ Acceptance Criteria (E00-S05):
     - [x] Activation/deactivation audit logged
     - [x] Blocked attempts audit logged
 """
+from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field

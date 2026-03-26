@@ -3,6 +3,7 @@
 Celery Beat task that triggers BackupService.run_daily_backup().
 Scheduled daily at 03:00 UTC via worker.py beat_schedule.
 """
+from __future__ import annotations
 
 import logging
 

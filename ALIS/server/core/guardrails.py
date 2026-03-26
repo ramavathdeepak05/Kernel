@@ -34,6 +34,7 @@ Acceptance Criteria (E03-S08):
     - [x] Safe fallback responses
     - [x] No silent failures
 """
+from __future__ import annotations
 
 import re
 import logging

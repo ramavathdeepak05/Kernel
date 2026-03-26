@@ -4,6 +4,7 @@ Admissions automation tasks — E04-S13+
 Celery tasks that drive the autonomous M1 pipeline.
 Triggered by domain events or the public intake endpoint.
 """
+from __future__ import annotations
 
 import logging
 

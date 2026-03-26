@@ -38,6 +38,7 @@ Permission routing:
     - Cross-module permission   → PENDING (owning module manager must approve)
     - SUPER_ADMIN requests      → always APPROVED
 """
+from __future__ import annotations
 
 import logging
 from uuid import uuid4

@@ -16,6 +16,7 @@ Acceptance Criteria:
 - [x] Workflow instances are auditable
 - [x] No domain logic inside schema
 """
+from __future__ import annotations
 
 from uuid import uuid4
 from datetime import datetime, timezone

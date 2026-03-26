@@ -9,6 +9,7 @@ Flow:
      - Generate payslip record (+ PDF via ReportLab)
      - Status: DRAFT → PROCESSED → PAID
 """
+from __future__ import annotations
 
 import json
 import logging

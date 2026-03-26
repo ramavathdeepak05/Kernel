@@ -1,4 +1,5 @@
 """E11-S02 — Admissions Reports"""
+from __future__ import annotations
 
 import logging
 from server.db_service import execute_query

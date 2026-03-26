@@ -1,4 +1,5 @@
 """E06-S01 — Exam Schedule"""
+from __future__ import annotations
 
 import logging
 import uuid

@@ -93,6 +93,12 @@ def mock_audit_log_in_memory():
 class TestAIGateway:
     """Tests for AIGateway class."""
 
+    def _force_ollama_settings(self):
+        """Return a mock settings object that disables external LLM (forces Ollama path)."""
+        mock_settings = Mock()
+        mock_settings.use_external_llm = False
+        return mock_settings
+
     def test_get_llm_returns_instrumented_llm(self):
         """get_llm should return an InstrumentedLLM wrapper."""
         ctx = AIGatewayContext(
@@ -100,7 +106,8 @@ class TestAIGateway:
             actor_role=Role.AI_AGENT
         )
 
-        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama:
+        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama, \
+             patch('server.core.settings.get_settings', return_value=self._force_ollama_settings()):
             mock_ollama.return_value = Mock()
             llm = AIGateway.get_llm(ctx)
 
@@ -114,8 +121,9 @@ class TestAIGateway:
             actor_role=Role.AI_AGENT
         )
 
-        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama:
-            with patch('server.core.ai_gateway.ConfigRegistry') as mock_config:
+        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama, \
+             patch('server.core.settings.get_settings', return_value=self._force_ollama_settings()), \
+             patch('server.core.ai_gateway.ConfigRegistry') as mock_config:
                 # Mock the class attributes for key names
                 mock_config.LLM_BASE_URL = "ai.llm.base_url"
                 mock_config.LLM_MODEL_NAME = "ai.llm.model_name"
@@ -139,7 +147,8 @@ class TestAIGateway:
             actor_role=Role.AI_AGENT
         )
 
-        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama:
+        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama, \
+             patch('server.core.settings.get_settings', return_value=self._force_ollama_settings()):
             mock_ollama.return_value = Mock()
             AIGateway.get_llm(ctx, model_name="qwen2.5")
 
@@ -210,6 +219,12 @@ class TestRBACEnforcement:
         """Setup test fixtures."""
         AuditLog._entries = []
 
+    @staticmethod
+    def _ollama_settings():
+        s = Mock()
+        s.use_external_llm = False
+        return s
+
     def test_student_role_denied_ai_invoke(self):
         """Students should NOT be able to invoke AI Gateway."""
         ctx = AIGatewayContext(
@@ -217,7 +232,8 @@ class TestRBACEnforcement:
             actor_role=Role.STUDENT
         )
 
-        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama:
+        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama, \
+             patch('server.core.settings.get_settings', return_value=self._ollama_settings()):
             mock_llm = Mock()
             mock_ollama.return_value = mock_llm
 
@@ -238,7 +254,8 @@ class TestRBACEnforcement:
             actor_role=Role.AI_AGENT
         )
 
-        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama:
+        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama, \
+             patch('server.core.settings.get_settings', return_value=self._ollama_settings()):
             mock_llm = Mock()
             mock_llm.invoke.return_value = "Response"
             mock_ollama.return_value = mock_llm
@@ -255,7 +272,8 @@ class TestRBACEnforcement:
             actor_role=Role.SYSTEM
         )
 
-        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama:
+        with patch('server.core.ai_gateway.OllamaLLM') as mock_ollama, \
+             patch('server.core.settings.get_settings', return_value=self._ollama_settings()):
             mock_llm = Mock()
             mock_llm.invoke.return_value = "Response"
             mock_ollama.return_value = mock_llm
@@ -278,13 +296,17 @@ class TestNoCloudConstraint:
         assert "anthropic" not in [v for v in violations]
 
     def test_forbidden_imports_list(self):
-        """Verify forbidden imports list is correct."""
+        """Verify forbidden imports list is correct.
+        openai/langchain_openai are PERMITTED (used via NVIDIA NIM external API config).
+        Only direct Anthropic cloud imports are forbidden.
+        """
         forbidden = AIGateway._FORBIDDEN_IMPORTS
 
-        assert "openai" in forbidden
         assert "anthropic" in forbidden
-        assert "langchain_openai" in forbidden
         assert "langchain_anthropic" in forbidden
+        # openai / langchain_openai are permitted — used via external LLM API config
+        assert "openai" not in forbidden
+        assert "langchain_openai" not in forbidden
 
 
 class TestAuditMetadata:

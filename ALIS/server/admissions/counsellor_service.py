@@ -7,6 +7,7 @@ the PGVector embedding ETL whenever a counsellor profile is created or updated.
 The embedding powers E04-S05 auto-assignment (vector similarity search).
 Full HR management of counsellors moves to E08 in a later phase.
 """
+from __future__ import annotations
 
 import logging
 import uuid

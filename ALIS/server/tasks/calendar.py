@@ -12,6 +12,7 @@ Domain events fired:
     ExamPeriodStarted    → when EXAM_PERIOD phase begins
     ResultWindowOpen     → when RESULTS phase begins
 """
+from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timezone

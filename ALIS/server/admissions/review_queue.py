@@ -7,6 +7,7 @@ to the staff dashboard. Staff approves or rejects → pipeline resumes.
 Table: review_items
   status: PENDING → APPROVED | REJECTED
 """
+from __future__ import annotations
 
 import json
 import logging

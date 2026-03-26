@@ -17,8 +17,9 @@ It is consumed exclusively by the AI Gateway router.
 Registered Agents:
     - eligibility_evaluator_v1  — Eligibility Eval Wizard (M1-W3)
 """
+from __future__ import annotations
 
-from typing import Dict, Any, List, Callable, Optional, Tuple
+from typing import Dict, Any, List, Callable, Literal, Optional, Tuple
 from dataclasses import dataclass, field
 
 from server.core.ai_gateway import (
@@ -55,6 +56,7 @@ class AgentMeta:
     authorization_policy: str
     allowed_tools: Tuple[str, ...] = ()   # E03-S04: declared tool scope
     description: str = ""
+    status: Literal["ACTIVE", "SHADOW", "DEPRECATED"] = "ACTIVE"
 
 
 # =============================================================================

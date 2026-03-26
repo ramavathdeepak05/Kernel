@@ -69,16 +69,18 @@ def upgrade() -> None:
         granted_by  UUID NOT NULL,
         granted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-        -- Optional expiry — for temporary elevated roles (e.g. exam duty)
-        expires_at  TIMESTAMPTZ,
-
-        -- A user can hold the same role multiple times only if scoped differently.
-        -- NULL scope values must compare equal for the uniqueness check, so we
-        -- use COALESCE to treat NULL as the empty string.
-        CONSTRAINT uq_role_assignment
-            UNIQUE (org_id, user_id, role_id,
-                    COALESCE(scope_type, ''), COALESCE(scope_ref, ''))
+        -- Optional expiry -- for temporary elevated roles (e.g. exam duty)
+        expires_at  TIMESTAMPTZ
     )""")
+
+    # PostgreSQL UNIQUE constraints don't support expressions; use a unique index
+    # COALESCE normalises NULL scope values so a user can't hold the same role
+    # org-wide twice, but CAN hold it org-wide AND scoped.
+    op.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_role_assignment
+        ON role_assignments (org_id, user_id, role_id,
+                             COALESCE(scope_type, ''), COALESCE(scope_ref, ''))
+    """)
 
     op.execute("CREATE INDEX IF NOT EXISTS idx_role_asgn_org_user  ON role_assignments(org_id, user_id)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_role_asgn_org_role  ON role_assignments(org_id, role_id)")

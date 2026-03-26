@@ -3,6 +3,7 @@ Document Generation Models
 ==========================
 Pydantic models for document templates and generated documents.
 """
+from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Any, Optional

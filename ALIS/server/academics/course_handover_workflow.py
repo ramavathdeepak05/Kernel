@@ -14,6 +14,7 @@ Steps
 4. Freeze pending IA auto-releases
 5. Assign temporary substitute via workflow approval queue (SLA from policy)
 """
+from __future__ import annotations
 
 import logging
 import uuid

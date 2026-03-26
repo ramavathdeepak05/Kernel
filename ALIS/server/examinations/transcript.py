@@ -4,6 +4,7 @@ Generates a signed, versioned academic transcript PDF for a student,
 covering all published semester results and grade details.
 Uploaded to MinIO; content_hash prevents duplicate generation.
 """
+from __future__ import annotations
 
 import hashlib
 import json

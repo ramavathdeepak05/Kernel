@@ -11,6 +11,7 @@ Flow:
      Drillbit and calls record_result() when COMPLETE.
   3. record_result() — writes similarity_pct + PASSED/FAILED, fires domain event.
 """
+from __future__ import annotations
 
 import logging
 import os

@@ -8,6 +8,7 @@ R6 — NEVER mutate closed ledger entries.
 R12 — Store policy_version_id on every revocation record.
 R1 — Dispute window from policy_engine ('finance.scholarship_dispute_window_days').
 """
+from __future__ import annotations
 
 import logging
 import uuid

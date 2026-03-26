@@ -27,6 +27,7 @@ Acceptance Criteria:
 - [x] Approval actions audited
 - [x] No hard-coded approver logic
 """
+from __future__ import annotations
 
 from uuid import uuid4
 from datetime import datetime, timezone

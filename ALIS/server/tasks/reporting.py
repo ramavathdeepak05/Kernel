@@ -1,4 +1,5 @@
 """E11 — Reporting & Analytics Celery Tasks"""
+from __future__ import annotations
 
 import logging
 

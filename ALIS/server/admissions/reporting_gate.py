@@ -18,6 +18,7 @@ Feature flag
 ────────────
 admissions.biometric_reporting_gate — enables biometric/QR check-in
 """
+from __future__ import annotations
 
 import logging
 import uuid

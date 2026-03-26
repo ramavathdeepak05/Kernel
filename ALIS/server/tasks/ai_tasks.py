@@ -3,6 +3,7 @@ AI background tasks — P0-S10
 
 Celery tasks for AI workloads: embedding ETL, document OCR, async LLM inference.
 """
+from __future__ import annotations
 
 import logging
 
@@ -87,13 +88,57 @@ def upsert_counsellor_embedding(self, org_id: str, counsellor_id: str, profile_t
 
 
 # =============================================================================
-# E04 — Async document verification (stub — implemented in E04)
+# E04 — Async document verification
 # =============================================================================
 
-@celery_app.task(name="ai_tasks.verify_document_async", bind=True, max_retries=2)
+@celery_app.task(name="ai_tasks.verify_document_async", bind=True, max_retries=3, default_retry_delay=30)
 def verify_document_async(self, org_id: str, document_id: str, applicant_id: str) -> dict:
     """
-    Run AI document verification asynchronously.
-    Full implementation tied to E04 document_verification.py.
+    Async wrapper for ForgeryDetectionService.evaluate_document().
+
+    Tier routing:
+      ACADEMIC_CERTIFICATE docs  → DIGILOCKER_API queue
+      OCR confidence < threshold → MANUAL_FORENSIC queue
+      Otherwise                  → MANUAL_OFFICER queue
+
+    The task fetches doc_type from DB; OCR confidence defaults to 0.7
+    (routes to MANUAL_OFFICER) unless already stored on the document record.
     """
-    raise NotImplementedError("E04: Async document verification not yet implemented")
+    from server.admissions.forgery_detection import ForgeryDetectionService
+    from server.db_service import execute_query
+
+    try:
+        rows = execute_query(
+            """
+            SELECT doc_type, COALESCE(confidence_score, 0.7) AS ocr_confidence
+            FROM application_documents
+            WHERE id = %s AND org_id = %s
+            """,
+            (document_id, org_id),
+        )
+        if not rows:
+            logger.error("verify_document_async: document %s not found in org %s", document_id, org_id)
+            return {"status": "not_found", "document_id": document_id}
+
+        doc_type       = rows[0]["doc_type"]
+        ocr_confidence = float(rows[0]["ocr_confidence"])
+
+        result = ForgeryDetectionService.evaluate_document(
+            org_id=org_id,
+            document_id=document_id,
+            doc_type=doc_type,
+            ocr_confidence=ocr_confidence,
+            actor_id=applicant_id,
+        )
+
+        logger.info(
+            "verify_document_async: doc=%s method=%s queue=%s",
+            document_id,
+            result.get("verification_method"),
+            result.get("review_queue"),
+        )
+        return {"status": "ok", **result}
+
+    except Exception as exc:
+        logger.exception("verify_document_async failed for doc=%s: %s", document_id, exc)
+        raise self.retry(exc=exc)

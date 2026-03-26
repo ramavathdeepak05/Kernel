@@ -189,7 +189,7 @@ def test_client():
     """
     from fastapi.testclient import TestClient
     from server.main import app
-    with TestClient(app, raise_server_exceptions=True) as client:
+    with TestClient(app, raise_server_exceptions=True, headers={"X-Tenant-ID": TEST_ORG_ID}) as client:
         yield client
 
 

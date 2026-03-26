@@ -34,16 +34,27 @@ export const authService = {
   login: async (
     username: string,
     password: string,
-    tenant_id = "demo"
+    tenant_id?: string
   ): Promise<{ access_token: string; user: UserProfile }> => {
+    // Resolve tenant_id: explicit arg > env var > "demo"
+    const resolved_tenant_id =
+      tenant_id ||
+      (import.meta.env.VITE_TENANT_ID as string | undefined) ||
+      "demo";
+
     const raw = await apiFetch<LoginResponse>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password, tenant_id }),
+      body: JSON.stringify({ username, password, tenant_id: resolved_tenant_id }),
     });
     // Fetch full profile after login
     localStorage.setItem("token", raw.token);
     const user = await apiFetch<UserProfile>("/auth/me");
     localStorage.removeItem("token"); // let authStore handle persistence
+
+    // Store auxiliary keys used by portal pages and AI gateway calls
+    localStorage.setItem("tenant_id", raw.tenant_id || resolved_tenant_id);
+    localStorage.setItem("user_id", raw.user_id);
+
     return { access_token: raw.token, user };
   },
 

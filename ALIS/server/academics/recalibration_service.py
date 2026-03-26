@@ -9,6 +9,7 @@ Pre-locked exam dates are immovable — only non-exam deadlines shift.
 
 All thresholds from policy_engine (R1). State transitions via state machine (R6).
 """
+from __future__ import annotations
 
 import logging
 import uuid

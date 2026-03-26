@@ -1,4 +1,5 @@
 """E12-S01 — Alumni Profile Management"""
+from __future__ import annotations
 
 import logging
 import uuid

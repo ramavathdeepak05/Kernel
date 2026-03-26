@@ -3,6 +3,7 @@
 Generates executive-level narrative summaries of institution performance
 using Qwen via AIGateway. Falls back to structured data if AI unavailable.
 """
+from __future__ import annotations
 
 import logging
 

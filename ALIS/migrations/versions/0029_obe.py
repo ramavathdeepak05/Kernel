@@ -102,23 +102,23 @@ def upgrade():
 
     # Seed policies
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'obe.attainment_threshold_pct', '60', 'DECIMAL', 'Minimum % of students required to attain CO for it to be considered achieved', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'obe.attainment_threshold_pct', '60'::jsonb, 'Minimum % of students required to attain CO for it to be considered achieved', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'obe.po_attainment_target', '70', 'DECIMAL', 'Target PO attainment % for NBA accreditation', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'obe.po_attainment_target', '70'::jsonb, 'Target PO attainment % for NBA accreditation', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     # Seed feature flag
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
-        SELECT id, 'obe.enabled', 'true', 'E20 OBE/CO-PO mapping module'
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
+        SELECT id, 'obe.enabled', true, '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING
     """)

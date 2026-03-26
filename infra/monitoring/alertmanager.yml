@@ -1,8 +1,8 @@
 global:
   resolve_timeout: 5m
   # SMTP configuration — override via environment or secrets in production
-  smtp_smarthost: "${ALERT_SMTP_HOST:-localhost:25}"
-  smtp_from: "${ALERT_FROM_EMAIL:-alis-alerts@institution.edu.in}"
+  smtp_smarthost: "localhost:25"
+  smtp_from: "alis-alerts@institution.edu.in"
   smtp_require_tls: false
 
 # ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ route:
 receivers:
   - name: default
     email_configs:
-      - to: "${ALERT_OPS_EMAIL:-ops@institution.edu.in}"
+      - to: "ops@institution.edu.in"
         send_resolved: true
         html: |
           <h3>{{ .CommonAnnotations.summary }}</h3>
@@ -58,24 +58,24 @@ receivers:
 
   - name: critical_webhook
     webhook_configs:
-      - url: "${ALERT_WEBHOOK_URL:-http://localhost:9999/alis-alert}"
+      - url: "http://localhost:9999/alis-alert"
         send_resolved: true
         http_config:
-          bearer_token: "${ALERT_WEBHOOK_TOKEN:-}"
+          bearer_token: ""
 
   - name: finance_team
     email_configs:
-      - to: "${ALERT_FINANCE_EMAIL:-finance@institution.edu.in}"
+      - to: "finance@institution.edu.in"
         send_resolved: true
 
   - name: admissions_team
     email_configs:
-      - to: "${ALERT_ADMISSIONS_EMAIL:-admissions@institution.edu.in}"
+      - to: "admissions@institution.edu.in"
         send_resolved: true
 
   - name: academics_team
     email_configs:
-      - to: "${ALERT_ACADEMICS_EMAIL:-academics@institution.edu.in}"
+      - to: "academics@institution.edu.in"
         send_resolved: true
 
 # ---------------------------------------------------------------------------

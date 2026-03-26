@@ -4,6 +4,7 @@ Handles academic, personal, career, and crisis counselling sessions.
 Notes are treated as sensitive — stored in DB but flagged is_confidential.
 Referrals to external professionals tracked separately.
 """
+from __future__ import annotations
 
 import logging
 import uuid

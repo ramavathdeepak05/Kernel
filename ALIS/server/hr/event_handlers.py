@@ -5,6 +5,7 @@ Subscribes to:
   - LeaveApproved     → notify staff
   - LeaveRejected     → notify staff
 """
+from __future__ import annotations
 
 import logging
 

@@ -242,10 +242,88 @@ function StaffTab() {
   );
 }
 
+// ── Leave Modal ────────────────────────────────────────────────
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+
+function LeaveModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [form, setForm] = useState({ leave_type: "CASUAL", from_date: "", to_date: "", reason: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr("");
+    try {
+      const token = localStorage.getItem("token");
+      const r = await fetch(`${API_BASE}/hr/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(form),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || "Failed"); }
+      onDone();
+      onClose();
+    } catch (ex: unknown) { setErr(ex instanceof Error ? ex.message : "Failed to submit"); }
+    finally { setSaving(false); }
+  };
+
+  const inp: React.CSSProperties = {
+    width: "100%", padding: "8px 12px", borderRadius: 8,
+    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(51,65,85,0.6)",
+    color: "#e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box",
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 400 }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 440, background: "#0f172a", border: "1px solid rgba(51,65,85,0.7)", borderRadius: 14, padding: 24, zIndex: 401 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>Apply for Leave</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 18, lineHeight: 1 }}>✕</button>
+        </div>
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Leave Type</label>
+            <select value={form.leave_type} onChange={(e) => setForm((f) => ({ ...f, leave_type: e.target.value }))} style={{ ...inp, cursor: "pointer" }}>
+              {["CASUAL", "SICK", "EARNED", "MATERNITY", "PATERNITY", "COMPENSATORY"].map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>From Date</label>
+              <input type="date" required value={form.from_date} onChange={(e) => setForm((f) => ({ ...f, from_date: e.target.value }))} style={inp} />
+            </div>
+            <div>
+              <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>To Date</label>
+              <input type="date" required value={form.to_date} onChange={(e) => setForm((f) => ({ ...f, to_date: e.target.value }))} style={inp} />
+            </div>
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Reason</label>
+            <textarea required rows={3} value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} style={{ ...inp, resize: "vertical" }} placeholder="Brief reason for leave…" />
+          </div>
+          {err && <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(251,113,133,0.08)", border: "1px solid rgba(251,113,133,0.2)", color: "#fb7185", fontSize: 12 }}>{err}</div>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
+            <button type="button" onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, background: "transparent", border: "1px solid rgba(51,65,85,0.6)", color: "#94a3b8", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: TEAL_BG, border: `0.5px solid ${TEAL_BORDER}`, color: TEAL, fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
+              {saving ? "Submitting…" : "Submit Request"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
 // ── Leave Tab ──────────────────────────────────────────────────
 
 function LeaveTab() {
-  const { data, isLoading } = usePendingLeave();
+  const { data, isLoading, refetch } = usePendingLeave();
+  const [showModal, setShowModal] = useState(false);
   const requests = data?.leave_requests ?? [];
   const statusConfig: Record<string, { bg: string; text: string }> = {
     PENDING:   { bg: "rgba(251,191,36,0.1)",  text: "#fbbf24" },
@@ -255,12 +333,19 @@ function LeaveTab() {
   };
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl w-fit"
-        style={{ background: "rgba(251,191,36,0.06)", border: "0.5px solid rgba(251,191,36,0.2)" }}>
-        <Clock className="w-4 h-4" style={{ color: "#fbbf24" }} />
-        <span className="text-[12px]" style={{ color: "#fbbf24" }}>
-          {isLoading ? "..." : `${data?.total ?? 0} pending`} leave requests
-        </span>
+      {showModal && <LeaveModal onClose={() => setShowModal(false)} onDone={refetch} />}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl"
+          style={{ background: "rgba(251,191,36,0.06)", border: "0.5px solid rgba(251,191,36,0.2)" }}>
+          <Clock className="w-4 h-4" style={{ color: "#fbbf24" }} />
+          <span className="text-[12px]" style={{ color: "#fbbf24" }}>
+            {isLoading ? "..." : `${data?.total ?? 0} pending`} leave requests
+          </span>
+        </div>
+        <button onClick={() => setShowModal(true)}
+          style={{ padding: "6px 14px", borderRadius: 8, background: TEAL_BG, border: `0.5px solid ${TEAL_BORDER}`, color: TEAL, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          + Apply for Leave
+        </button>
       </div>
       <div className="rounded-xl overflow-hidden" style={{ border: "0.5px solid rgba(51,65,85,0.5)" }}>
         <table className="w-full">

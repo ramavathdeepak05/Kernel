@@ -18,6 +18,7 @@ Only authenticated requests (those that carry a valid session recognised by
 TenantMiddleware) are checked.  Unauthenticated requests pass through here
 and are rejected by the downstream auth guards.
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

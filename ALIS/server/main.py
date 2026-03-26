@@ -15,6 +15,7 @@ Hard Constraints:
 - All AI invocations go through the AI Gateway
 - All requests are tenant-aware
 """
+from __future__ import annotations
 
 import json
 import logging

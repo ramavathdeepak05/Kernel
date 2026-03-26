@@ -9,6 +9,7 @@ Table: institution_policies
   org_id + key → UNIQUE constraint (one value per rule per org)
   value is JSONB — supports scalars, lists, and dicts
 """
+from __future__ import annotations
 
 import json
 import logging

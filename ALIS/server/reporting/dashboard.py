@@ -3,6 +3,7 @@
 Live aggregate KPIs for the institution dashboard.
 Expensive queries are cached in kpi_snapshots (refreshed by Celery beat).
 """
+from __future__ import annotations
 
 import logging
 from datetime import date

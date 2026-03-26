@@ -5,6 +5,7 @@ Handles students who join mid-semester via state counselling.
 - Compressed assignment deadlines (past-due → single 2-week deadline)
 - Standard penalty rules suppressed for excused period
 """
+from __future__ import annotations
 
 import logging
 import uuid

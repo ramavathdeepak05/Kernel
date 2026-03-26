@@ -9,6 +9,7 @@ Reads from regulatory_metrics to produce the 5 NIRF parameter groups:
 
 Reference: ALIS-skills/references/architecture.md §5
 """
+from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional

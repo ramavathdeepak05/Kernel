@@ -39,6 +39,7 @@ Usage
 Agents should call get_model_for_task() rather than reading
 settings.ollama_extraction_model directly, so routing logic stays in one place.
 """
+from __future__ import annotations
 
 from enum import Enum
 

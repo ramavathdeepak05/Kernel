@@ -4,6 +4,7 @@ Orchestrates pg_dump, MinIO backup verification, and alerting.
 Fires platform.backup_failed domain event on failure.
 Beat schedule: daily at 03:00 UTC (add to worker.py separately).
 """
+from __future__ import annotations
 
 import logging
 import os

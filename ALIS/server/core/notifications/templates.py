@@ -11,6 +11,7 @@ Must Align With:
 - Policy configurable (templates can be updated)
 - No domain logic (templates are content only)
 """
+from __future__ import annotations
 
 from typing import Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field

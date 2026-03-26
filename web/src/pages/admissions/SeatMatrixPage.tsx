@@ -7,7 +7,7 @@
  * Waitlist depth per category
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 // ---------------------------------------------------------------------------
 // Types + mock data
@@ -231,11 +231,81 @@ function ProgramCard({ matrix }: { matrix: ProgramMatrix }) {
 }
 
 // ---------------------------------------------------------------------------
+// API types from backend
+// ---------------------------------------------------------------------------
+
+interface SeatMatrixApiRecord {
+  id: string
+  program_name?: string
+  program_id?: string
+  intake_batch?: string | number
+  categories?: {
+    code: string
+    label?: string
+    total_seats?: number
+    filled_seats?: number
+    waitlist_count?: number
+  }[]
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  GENERAL: '#5D5FEF', SC: '#1D9E75', ST: '#4CAF9F', OBC_NCL: '#EF9F27',
+  OBC: '#EF9F27', EWS: '#9B59B6', MANAGEMENT: '#E24B4A', NRI: '#7B82A8',
+  SPORTS: '#60a5fa', DEFENCE: '#f472b6',
+}
+
+function apiRecordToMatrix(r: SeatMatrixApiRecord, index: number): ProgramMatrix {
+  const cats: CategorySlot[] = (r.categories ?? []).map(c => ({
+    label: c.label ?? c.code.replace(/_/g, '-'),
+    code: c.code,
+    total: c.total_seats ?? 0,
+    filled: c.filled_seats ?? 0,
+    waitlist: c.waitlist_count ?? 0,
+    color: CATEGORY_COLORS[c.code] ?? '#7B82A8',
+  }))
+  const totalIntake = cats.reduce((s, c) => s + c.total, 0)
+  const filledSeats = cats.reduce((s, c) => s + c.filled, 0)
+  return {
+    id: r.id ?? `matrix-${index}`,
+    program: r.program_name ?? r.program_id ?? 'Program',
+    intakeYear: Number(r.intake_batch ?? new Date().getFullYear()),
+    totalIntake,
+    filledSeats,
+    fillPct: totalIntake > 0 ? Math.round((filledSeats / totalIntake) * 100) : 0,
+    categories: cats,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export function SeatMatrixPage() {
-  const [year, setYear] = useState(2024)
+  const currentYear = new Date().getFullYear()
+  const [year, setYear] = useState(currentYear)
+  const [matrixData, setMatrixData] = useState<ProgramMatrix[]>(MATRIX_DATA)
+
+  useEffect(() => {
+    const token = localStorage.getItem('token') ?? ''
+    fetch(`/api/v1/seats?intake_batch=${year}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<{ seats?: SeatMatrixApiRecord[] }> : null)
+      .then(data => {
+        const seats = data?.seats ?? []
+        if (seats.length > 0) {
+          setMatrixData(seats.map(apiRecordToMatrix))
+        }
+      })
+      .catch(() => {/* keep static fallback */})
+  }, [year])
+
+  const totalIntake = matrixData.reduce((s, m) => s + m.totalIntake, 0)
+  const totalFilled = matrixData.reduce((s, m) => s + m.filledSeats, 0)
+  const totalWaitlist = matrixData.reduce((s, m) => s + m.categories.reduce((cs, c) => cs + c.waitlist, 0), 0)
+  const totalUnfilled = totalIntake - totalFilled
+
+  const yearOptions = [currentYear, currentYear - 1, currentYear - 2]
 
   return (
     <div style={{ padding: '0 0 40px' }}>
@@ -254,18 +324,17 @@ export function SeatMatrixPage() {
           onChange={e => setYear(Number(e.target.value))}
           style={{ padding: '8px 14px', borderRadius: 8, background: '#1A1D2E', border: '1px solid #1E2235', color: '#C9D1E9', fontSize: 14 }}
         >
-          <option value={2024}>Intake 2024</option>
-          <option value={2023}>Intake 2023</option>
+          {yearOptions.map(y => <option key={y} value={y}>Intake {y}</option>)}
         </select>
       </div>
 
       {/* Summary strip */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
         {[
-          { label: 'Total Intake', value: '240' },
-          { label: 'Filled', value: '205', color: '#1D9E75' },
-          { label: 'Waitlisted', value: '42', color: '#EF9F27' },
-          { label: 'Unfilled', value: '35', color: '#E24B4A' },
+          { label: 'Total Intake', value: String(totalIntake || '—') },
+          { label: 'Filled', value: String(totalFilled || '—'), color: '#1D9E75' },
+          { label: 'Waitlisted', value: String(totalWaitlist || '—'), color: '#EF9F27' },
+          { label: 'Unfilled', value: String(totalUnfilled > 0 ? totalUnfilled : '—'), color: '#E24B4A' },
         ].map(s => (
           <div key={s.label} style={{
             padding: '12px 20px', background: '#11131F',
@@ -283,9 +352,13 @@ export function SeatMatrixPage() {
 
       {/* Program cards */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {MATRIX_DATA.filter(m => m.intakeYear === year).map(matrix => (
-          <ProgramCard key={matrix.id} matrix={matrix} />
-        ))}
+        {matrixData.length === 0 ? (
+          <p style={{ color: '#7B82A8', fontSize: 14 }}>No seat matrix data found for intake {year}.</p>
+        ) : (
+          matrixData.map(matrix => (
+            <ProgramCard key={matrix.id} matrix={matrix} />
+          ))
+        )}
       </div>
     </div>
   )

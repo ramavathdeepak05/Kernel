@@ -1,4 +1,5 @@
 """E10-S04 — In-App Notifications"""
+from __future__ import annotations
 
 import logging
 import uuid

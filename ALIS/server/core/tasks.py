@@ -19,6 +19,7 @@ Acceptance Criteria:
 - [x] Completion tracking
 - [x] Reminder notifications
 """
+from __future__ import annotations
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta, timezone

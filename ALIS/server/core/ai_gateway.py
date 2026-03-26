@@ -35,6 +35,7 @@ Acceptance Criteria (E00-S06):
 - [x] AI output validated against mandatory schema
 - [x] Forbidden STATE_IMPACT values rejected
 """
+from __future__ import annotations
 
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
@@ -488,6 +489,9 @@ class AIInvocationResult:
     guardrail_violations: int = 0
     guardrail_blocked: bool = False
 
+    # Phase D: Selective auto-execution (True when policy bypassed HITL)
+    auto_executed: bool = False
+
 
 # =============================================================================
 # INSTRUMENTED LLM WRAPPER
@@ -654,6 +658,43 @@ class InstrumentedLLM:
                     },
                 )
 
+        # --- Step 2.7: Selective Auto-execution (Phase D) ---
+        # If the caller passed a policy_result with auto_execute=True, and the
+        # guardrails passed, this invocation is eligible to skip the HITL gate.
+        # Logged separately as AUTO_EXECUTED for regulatory traceability.
+        auto_executed = False
+        policy_result = kwargs.get("policy_result")
+        if (
+            policy_result is not None
+            and getattr(policy_result, "detail", {}).get("auto_execute") is True
+            and success
+            and not guardrail_blocked
+        ):
+            auto_executed = True
+            AuditLog.log(
+                action=AuditAction.AUTO_EXECUTED,
+                actor_id=self._context.actor_id,
+                actor_type=self._context.actor_type,
+                actor_role=(
+                    self._context.actor_role.value
+                    if self._context.actor_role else None
+                ),
+                entity_type="ai_gateway",
+                entity_id=request_id,
+                org_id=self._context.org_id,
+                module=self._context.module,
+                metadata={
+                    "policy_id": getattr(policy_result, "policy_id", None),
+                    "policy_version": getattr(policy_result, "policy_version", None),
+                    "rule_id": getattr(policy_result, "rule_id", None),
+                    "verdict": getattr(policy_result, "verdict", None),
+                    "confidence_score": (
+                        validated_output.confidence_score if validated_output else None
+                    ),
+                    "reason": "auto_execute_if condition satisfied",
+                },
+            )
+
         # --- Step 3: Calculate Metrics ---
         end_time = datetime.now(timezone.utc)
         latency_ms = (end_time - start_time).total_seconds() * 1000
@@ -702,6 +743,7 @@ class InstrumentedLLM:
             validated_output=validated_output,
             guardrail_violations=guardrail_violations,
             guardrail_blocked=guardrail_blocked,
+            auto_executed=auto_executed,
         )
 
     def invoke_with_prompt(

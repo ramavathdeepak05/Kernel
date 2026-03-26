@@ -28,6 +28,7 @@ Hard Constraints:
 - Transit key per tenant — no cross-tenant key reuse
 - Root token only used for initial setup; service token rotated daily via AppRole
 """
+from __future__ import annotations
 
 import base64
 import logging

@@ -10,3 +10,4 @@ Available integrations:
   - SMSGatewayClient        — MSG91 / Twilio OTP + notifications
   - DocumentStorageClient   — AWS S3 / Azure Blob / local file storage
 """
+from __future__ import annotations

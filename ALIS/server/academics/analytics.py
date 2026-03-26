@@ -3,6 +3,7 @@
 Identifies at-risk students and generates narrative insights using the
 AI Gateway (Qwen via Ollama). All AI output is advisory only.
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

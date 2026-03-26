@@ -11,6 +11,7 @@ Routes:
   POST   /convocation/{convocation_id}/generate-seating — generate seating plan
   GET    /convocation/{convocation_id}/seating      — get seating records
 """
+from __future__ import annotations
 
 import logging
 from datetime import date

@@ -23,11 +23,12 @@ Endpoints:
     POST /api/v1/admissions/intake/score               — E04-S08: Intake quality score
     POST /api/v1/admissions/enroll                     — E04-S09: Enrollment handover
 """
+from __future__ import annotations
 
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from server.core.exceptions import ALISError
@@ -727,7 +728,7 @@ async def list_entrance_scores(
     )
 
 
-@router.delete("/applications/{applicant_id}/entrance-scores/{score_id}", status_code=204)
+@router.delete("/applications/{applicant_id}/entrance-scores/{score_id}", status_code=204, response_model=None)
 @require_permission(Permission.STUDENT_CREATE)
 async def delete_entrance_score(
     request: Request, applicant_id: str, score_id: str
@@ -1264,7 +1265,7 @@ async def get_referral_code(request: Request, code: str) -> JSONResponse:
     return JSONResponse(status_code=200, content=rc.model_dump(mode="json"))
 
 
-@router.delete("/referral-codes/{code}", status_code=204)
+@router.delete("/referral-codes/{code}", status_code=204, response_model=None)
 @require_permission(Permission.OVERRIDE_APPROVE)
 async def deactivate_referral_code(request: Request, code: str) -> None:
     ReferralCodeService.deactivate(code, _org(request), _actor(request))
@@ -1312,7 +1313,7 @@ async def upsert_policy(request: Request, key: str, body: PolicyUpsertRequest) -
     return JSONResponse(content=result)
 
 
-@router.delete("/policies/{key:path}", status_code=204)
+@router.delete("/policies/{key:path}", status_code=204, response_model=None)
 @require_permission(Permission.OVERRIDE_APPROVE)
 async def deactivate_policy(request: Request, key: str) -> None:
     """Soft-delete a policy (sets is_active=FALSE)."""
@@ -1364,7 +1365,7 @@ async def get_eligibility_criteria(
     return JSONResponse(content=criteria.model_dump())
 
 
-@router.delete("/eligibility/criteria/{program_name}", status_code=204)
+@router.delete("/eligibility/criteria/{program_name}", status_code=204, response_model=None)
 @require_permission(Permission.OVERRIDE_APPROVE)
 async def delete_eligibility_criteria(
     request: Request,

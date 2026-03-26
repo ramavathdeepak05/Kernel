@@ -25,6 +25,7 @@ Acceptance Criteria (E00-S01):
     - [x] Encrypted-at-rest for CONFIDENTIAL and REGULATED
     - [x] Masking in logs and AI context
 """
+from __future__ import annotations
 
 import re
 import logging

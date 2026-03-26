@@ -31,6 +31,7 @@ Hard Constraints (from Master Handbook):
     - Account lockout after 5 failed attempts (15 min)
     - Bootstrap is a one-time operation per tenant, protected by env secret
 """
+from __future__ import annotations
 
 import os
 import secrets
@@ -48,6 +49,8 @@ from pydantic import BaseModel, Field
 from server.core.security import (
     PasswordHasher,
     SessionManager,
+    PasswordResetManager,
+    GuardianOTPManager,
     FailedLoginTracker,
     RateLimiter,
     InputValidator,
@@ -931,3 +934,357 @@ async def mfa_status(
             "role": user_role,
         },
     )
+
+
+# =============================================================================
+# PASSWORD RESET (unauthenticated flows — no session required)
+# =============================================================================
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., description="Registered email address")
+    tenant_id: str = Field(..., description="Institution tenant ID")
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., description="Reset token from email")
+    new_password: str = Field(..., min_length=8, max_length=256)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=256)
+
+
+@router.post("/forgot-password")
+async def forgot_password(request: Request, body: ForgotPasswordRequest) -> JSONResponse:
+    """
+    Initiate password reset. Always returns 200 to prevent user enumeration.
+
+    If the email is registered, a reset link is queued via the notification service.
+    Token is Redis-backed, 30-minute TTL, single-use.
+    """
+    if not InputValidator.validate_email(body.email):
+        return _err(400, "Invalid email format", "ERR_INVALID_EMAIL")
+
+    if not RateLimiter.check(f"pwreset:{body.email}", max_requests=3, window_seconds=3600):
+        return _err(429, "Too many reset requests. Try again in 1 hour.", "ERR_RATE_LIMITED")
+
+    # Look up user — safe to fail silently (prevents enumeration)
+    rows = execute_system_query(
+        "SELECT id, email, role, is_deleted FROM users WHERE email = %s AND tenant_id = %s",
+        (body.email.lower(), body.tenant_id),
+    )
+    if rows and not rows[0].get("is_deleted"):
+        user = rows[0]
+        try:
+            token = PasswordResetManager.generate_token(user["id"], body.tenant_id)
+            # Deliver via notification service (email)
+            from server.core.notifications.service import NotificationService
+            NotificationService.send(
+                channel="email",
+                recipient_id=user["id"],
+                template_key="auth.password_reset",
+                tenant_id=body.tenant_id,
+                context={"reset_token": token, "user_email": body.email},
+            )
+        except Exception:
+            logger.exception("forgot_password: token/notification error for user %s", user["id"])
+            # Still return 200 — don't expose internal errors
+
+        AuditLog.log(
+            action=AuditAction.PASSWORD_RESET_REQUESTED,
+            actor_id=rows[0]["id"],
+            actor_type="user",
+            tenant_id=body.tenant_id,
+            metadata={"email": body.email},
+        )
+
+    return JSONResponse(status_code=200, content={
+        "message": "If that email is registered, a reset link has been sent."
+    })
+
+
+@router.post("/reset-password")
+async def reset_password(request: Request, body: ResetPasswordRequest) -> JSONResponse:
+    """
+    Complete password reset using a valid token.
+
+    Token is consumed (single-use) on first call. Returns 400 if expired or invalid.
+    """
+    payload = PasswordResetManager.validate_and_consume(body.token)
+    if not payload:
+        return _err(400, "Reset token is invalid or has expired.", "ERR_INVALID_RESET_TOKEN")
+
+    user_id = payload["user_id"]
+    tenant_id = payload["tenant_id"]
+
+    new_hash = PasswordHasher.hash(body.new_password)
+    execute_transaction(
+        [("UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s AND tenant_id = %s",
+          (new_hash, user_id, tenant_id))],
+        tenant_id=tenant_id,
+    )
+
+    # Revoke all existing sessions — password change invalidates all sessions
+    SessionManager.revoke_all_user_sessions(user_id, reason="Password reset")
+
+    AuditLog.log(
+        action=AuditAction.PASSWORD_RESET_COMPLETED,
+        actor_id=user_id,
+        actor_type="user",
+        tenant_id=tenant_id,
+        metadata={},
+    )
+
+    return JSONResponse(status_code=200, content={"message": "Password updated. Please log in."})
+
+
+@router.post("/change-password")
+async def change_password(
+    request: Request,
+    body: ChangePasswordRequest,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Change password for an authenticated user.
+
+    Requires current password verification. Revokes all other sessions on success.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    user = _fetch_user_by_id(session.user_id, session.tenant_id)
+    if not user:
+        return _err(404, "User not found", "ERR_USER_NOT_FOUND")
+
+    if not PasswordHasher.verify(body.current_password, user.get("password_hash", "")):
+        return _err(400, "Current password is incorrect.", "ERR_WRONG_PASSWORD")
+
+    new_hash = PasswordHasher.hash(body.new_password)
+    execute_transaction(
+        [("UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s AND tenant_id = %s",
+          (new_hash, session.user_id, session.tenant_id))],
+        tenant_id=session.tenant_id,
+    )
+
+    # Revoke all sessions except the current one
+    all_sessions = SessionManager.list_user_sessions(session.user_id)
+    for s in all_sessions:
+        if s["session_id"] != session.id and s["is_active"]:
+            SessionManager.revoke_session(s["session_id"], reason="Password changed")
+
+    AuditLog.log(
+        action=AuditAction.PASSWORD_CHANGED,
+        actor_id=session.user_id,
+        actor_type="user",
+        tenant_id=session.tenant_id,
+        metadata={},
+    )
+
+    return JSONResponse(status_code=200, content={"message": "Password changed."})
+
+
+# =============================================================================
+# SESSION VISIBILITY (authenticated)
+# =============================================================================
+
+
+@router.get("/sessions")
+async def list_sessions(
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """List all active sessions for the authenticated user."""
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    sessions = SessionManager.list_user_sessions(session.user_id)
+    # Mark which one is the current session
+    for s in sessions:
+        s["is_current"] = s["session_id"] == session.id
+
+    return JSONResponse(status_code=200, content={"sessions": sessions})
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_session(
+    session_id: str,
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Revoke a specific session. Cannot revoke the current session — use logout instead."""
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    if session_id == session.id:
+        return _err(400, "Cannot revoke your current session. Use /logout instead.", "ERR_CANNOT_REVOKE_CURRENT")
+
+    target = SessionManager.get_session(session_id)
+    if not target or target.user_id != session.user_id:
+        return _err(404, "Session not found", "ERR_SESSION_NOT_FOUND")
+
+    SessionManager.revoke_session(session_id, reason="User revoked via API")
+
+    AuditLog.log(
+        action=AuditAction.SESSION_REVOKED,
+        actor_id=session.user_id,
+        actor_type="user",
+        tenant_id=session.tenant_id,
+        metadata={"revoked_session_id": session_id},
+    )
+
+    return JSONResponse(status_code=200, content={"message": "Session revoked."})
+
+
+@router.delete("/sessions")
+async def revoke_all_other_sessions(
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """Revoke all sessions except the current one (sign out everywhere else)."""
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    all_sessions = SessionManager.list_user_sessions(session.user_id)
+    revoked = 0
+    for s in all_sessions:
+        if s["session_id"] != session.id and s["is_active"]:
+            SessionManager.revoke_session(s["session_id"], reason="Sign out all other sessions")
+            revoked += 1
+
+    AuditLog.log(
+        action=AuditAction.SESSION_REVOKED,
+        actor_id=session.user_id,
+        actor_type="user",
+        tenant_id=session.tenant_id,
+        metadata={"revoked_count": revoked, "reason": "sign_out_all"},
+    )
+
+    return JSONResponse(status_code=200, content={"revoked": revoked})
+
+
+# =============================================================================
+# GUARDIAN PORTAL — OTP-only auth (unauthenticated flows)
+# =============================================================================
+
+
+class GuardianOTPRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=15, description="Guardian's registered mobile number")
+    tenant_id: str = Field(..., description="Institution tenant ID")
+
+
+class GuardianVerifyRequest(BaseModel):
+    phone: str = Field(..., min_length=10, max_length=15)
+    otp: str = Field(..., min_length=6, max_length=6)
+    tenant_id: str = Field(...)
+
+
+@router.post("/guardian/request-otp")
+async def guardian_request_otp(request: Request, body: GuardianOTPRequest) -> JSONResponse:
+    """
+    Send a 6-digit OTP to a registered guardian's mobile number.
+
+    Looks up the guardian by phone + tenant. If not found, returns 200 (no enumeration).
+    Rate-limited to 3 OTP requests per hour per phone number.
+    """
+    phone = body.phone.strip().replace(" ", "").replace("-", "")
+
+    if not RateLimiter.check(f"gotp:{phone}", max_requests=3, window_seconds=3600):
+        return _err(429, "Too many OTP requests. Try again in 1 hour.", "ERR_RATE_LIMITED")
+
+    rows = execute_system_query(
+        """SELECT u.id AS guardian_id, gs.student_id, gs.student_name
+           FROM users u
+           JOIN guardian_student_links gs ON gs.guardian_id = u.id
+           WHERE u.phone = %s AND u.tenant_id = %s AND u.is_deleted = FALSE
+           LIMIT 1""",
+        (phone, body.tenant_id),
+    )
+
+    if rows:
+        row = rows[0]
+        try:
+            otp = GuardianOTPManager.generate(phone, row["student_id"], body.tenant_id)
+            from server.core.notifications.service import NotificationService
+            NotificationService.send(
+                channel="sms",
+                recipient_id=row["guardian_id"],
+                template_key="auth.guardian_otp",
+                tenant_id=body.tenant_id,
+                context={"otp": otp, "student_name": row.get("student_name", "your ward")},
+            )
+        except Exception:
+            logger.exception("guardian_request_otp: OTP/notification error for phone %s", phone[-4:])
+
+    return JSONResponse(status_code=200, content={
+        "message": "If your number is registered, an OTP has been sent."
+    })
+
+
+@router.post("/guardian/verify-otp")
+async def guardian_verify_otp(request: Request, body: GuardianVerifyRequest) -> JSONResponse:
+    """
+    Verify guardian OTP and issue a scoped session token.
+
+    On success, returns a session token valid for 4 hours with PARENT role,
+    plus the linked student's info for rendering the portal.
+    """
+    phone = body.phone.strip().replace(" ", "").replace("-", "")
+
+    if not RateLimiter.check(f"gotp_verify:{phone}", max_requests=5, window_seconds=600):
+        return _err(429, "Too many OTP attempts.", "ERR_RATE_LIMITED")
+
+    result = GuardianOTPManager.verify_and_consume(phone, body.otp)
+    if not result:
+        return _err(400, "Invalid or expired OTP.", "ERR_INVALID_OTP")
+
+    student_id = result["student_id"]
+    tenant_id = result["tenant_id"]
+
+    # Look up guardian user record to create a session
+    rows = execute_system_query(
+        "SELECT id, display_name FROM users WHERE phone = %s AND tenant_id = %s AND is_deleted = FALSE LIMIT 1",
+        (phone, tenant_id),
+    )
+    if not rows:
+        return _err(401, "Guardian account not found.", "ERR_AUTH_FAILED")
+
+    guardian = rows[0]
+
+    # Fetch student summary for the portal response
+    student_rows = execute_system_query(
+        "SELECT id, display_name, enrollment_number FROM users WHERE id = %s AND tenant_id = %s LIMIT 1",
+        (student_id, tenant_id),
+    )
+    student = student_rows[0] if student_rows else {"display_name": "Student", "enrollment_number": ""}
+
+    token = SessionManager.create_session(
+        user_id=guardian["id"],
+        role=Role.PARENT.value,
+        tenant_id=tenant_id,
+        ip_address=request.client.host if request.client else "unknown",
+        user_agent=request.headers.get("user-agent", ""),
+        expires_in=timedelta(hours=4),
+    )
+
+    AuditLog.log(
+        action=AuditAction.LOGIN_SUCCESS,
+        actor_id=guardian["id"],
+        actor_type="guardian",
+        tenant_id=tenant_id,
+        metadata={"channel": "otp", "student_id": student_id},
+    )
+
+    return JSONResponse(status_code=200, content={
+        "token": token,
+        "role": "PARENT",
+        "guardian_name": guardian.get("display_name", ""),
+        "student": {
+            "student_id": student_id,
+            "name": student.get("display_name", ""),
+            "enrollment_number": student.get("enrollment_number", ""),
+        },
+        "tenant_id": tenant_id,
+    })

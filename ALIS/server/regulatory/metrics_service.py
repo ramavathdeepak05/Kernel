@@ -7,6 +7,7 @@ CRITICAL: This module must NEVER call or import from any other business module.
 It only reads from and writes to regulatory_metrics.
 Cross-module data flows via domain events → event_handlers → record().
 """
+from __future__ import annotations
 
 import logging
 from datetime import date

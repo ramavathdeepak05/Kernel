@@ -1,4 +1,5 @@
 """E05-S05 — Academic Timetable"""
+from __future__ import annotations
 
 import logging
 import uuid

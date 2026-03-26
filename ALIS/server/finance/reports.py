@@ -7,6 +7,7 @@ Reports:
 4. Scholarship impact — total discounts granted
 5. Program-wise revenue breakdown
 """
+from __future__ import annotations
 
 import logging
 

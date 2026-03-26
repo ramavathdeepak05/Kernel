@@ -14,6 +14,7 @@ Endpoints:
 
 All endpoints enforce RBAC via the standard middleware pattern.
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime

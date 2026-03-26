@@ -26,7 +26,9 @@ Acceptance Criteria (E01-S04):
 - [x] Default deny
 - [x] Explicit failure reasons
 """
+from __future__ import annotations
 
+import inspect
 from enum import Enum
 from typing import Dict, List, Optional
 from dataclasses import dataclass
@@ -641,5 +643,6 @@ def require_permission(permission: Permission):
                         )
 
             return await func(*args, **kwargs)
+        wrapper.__signature__ = inspect.signature(func)
         return wrapper
     return decorator

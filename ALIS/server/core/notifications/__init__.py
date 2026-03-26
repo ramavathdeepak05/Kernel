@@ -3,6 +3,7 @@ ALIS Notifications Package - E02-S03
 
 Centralized notification infrastructure for all ALIS modules.
 """
+from __future__ import annotations
 
 from .channels import (
     BaseChannel,

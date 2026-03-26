@@ -12,6 +12,7 @@ Must Align With:
 - "Permission-aware search results" (Acceptance Criteria)
 - "No raw DB search from modules" (Dependency Rule)
 """
+from __future__ import annotations
 
 import json
 from typing import List, Optional, Dict, Any

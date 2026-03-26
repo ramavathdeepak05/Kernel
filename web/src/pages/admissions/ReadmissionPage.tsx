@@ -5,7 +5,7 @@
  * Tab 1: Re-admission Applications (submit + review)
  * Tab 2: Credit Transfer Requests (AI draft + review)
  */
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const APPS = [
   { id: 'ra1', name: 'Deepak Kumar', program: 'B.Tech ME', gapFrom: '2022-07', gapTo: '2025-01', semesters: 4, status: 'UNDER_REVIEW', rollNo: null },
@@ -60,11 +60,74 @@ function StatusBadge({ label, color }: { label: string; color: string }) {
 
 type AppStatus = 'UNDER_REVIEW' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 
-function AppTable({ apps }: { apps: typeof APPS }) {
+type ReadmissionApp = {
+  id: string;
+  name: string;
+  program: string;
+  gapFrom: string;
+  gapTo: string;
+  semesters: number;
+  status: string;
+  rollNo: string | null;
+};
+
+interface ReadmissionApiRecord {
+  id: string;
+  applicant_name?: string;
+  student_name?: string;
+  program_id?: string;
+  program_name?: string;
+  gap_start?: string;
+  gap_end?: string;
+  semesters_completed?: number;
+  gap_semesters?: number;
+  status?: string;
+  roll_number?: string;
+}
+
+function apiRecordToApp(r: ReadmissionApiRecord): ReadmissionApp {
+  return {
+    id: r.id,
+    name: r.applicant_name ?? r.student_name ?? '—',
+    program: r.program_name ?? r.program_id ?? '—',
+    gapFrom: r.gap_start?.slice(0, 7) ?? '—',
+    gapTo: r.gap_end?.slice(0, 7) ?? '—',
+    semesters: r.semesters_completed ?? r.gap_semesters ?? 0,
+    status: r.status ?? 'SUBMITTED',
+    rollNo: r.roll_number ?? null,
+  };
+}
+
+async function apiPost(path: string, body: Record<string, unknown> = {}): Promise<boolean> {
+  try {
+    const token = localStorage.getItem('token') ?? '';
+    const res = await fetch(`/api/v1${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function AppTable({ apps, onRefresh }: { apps: ReadmissionApp[]; onRefresh: () => void }) {
   const [localApps, setLocalApps] = useState(apps);
 
-  function handleAction(id: string, action: AppStatus) {
-    setLocalApps(prev => prev.map(a => a.id === id ? { ...a, status: action } : a));
+  useEffect(() => { setLocalApps(apps); }, [apps]);
+
+  async function handleAction(id: string, action: AppStatus) {
+    let ok = false;
+    if (action === 'UNDER_REVIEW') ok = await apiPost(`/readmission/${id}/review`);
+    else if (action === 'APPROVED') ok = await apiPost(`/readmission/${id}/approve`, { notes: '' });
+    else if (action === 'REJECTED') ok = await apiPost(`/readmission/${id}/reject`, { notes: '' });
+    if (ok) {
+      onRefresh();
+    } else {
+      // Optimistic update on API failure
+      setLocalApps(prev => prev.map(a => a.id === id ? { ...a, status: action } : a));
+    }
   }
 
   return (
@@ -362,6 +425,22 @@ function CreditTransferCard({ ct, decision, onDecide }: {
 export function ReadmissionPage() {
   const [activeTab, setActiveTab] = useState<'applications' | 'credits'>('applications');
   const [decisions, setDecisions] = useState<CTDecision>({});
+  const [apps, setApps] = useState<ReadmissionApp[]>(APPS.map(a => a as ReadmissionApp));
+
+  function loadApps() {
+    const token = localStorage.getItem('token') ?? '';
+    fetch('/api/v1/readmission', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() as Promise<{ applications?: ReadmissionApiRecord[] }> : null)
+      .then(data => {
+        const list = data?.applications ?? [];
+        if (list.length > 0) setApps(list.map(apiRecordToApp));
+      })
+      .catch(() => {/* keep static fallback */});
+  }
+
+  useEffect(() => { loadApps(); }, []);
 
   const tabs = [
     { key: 'applications', label: 'Re-admission Applications' },
@@ -404,10 +483,10 @@ export function ReadmissionPage() {
             {/* Summary chips */}
             <div style={{ display: 'flex', gap: 12 }}>
               {[
-                { label: 'Total', count: APPS.length, color: COLORS.muted },
-                { label: 'Under Review', count: APPS.filter(a => a.status === 'UNDER_REVIEW').length, color: COLORS.amber },
-                { label: 'Submitted', count: APPS.filter(a => a.status === 'SUBMITTED').length, color: COLORS.purple },
-                { label: 'Approved', count: APPS.filter(a => a.status === 'APPROVED').length, color: COLORS.teal },
+                { label: 'Total', count: apps.length, color: COLORS.muted },
+                { label: 'Under Review', count: apps.filter(a => a.status === 'UNDER_REVIEW').length, color: COLORS.amber },
+                { label: 'Submitted', count: apps.filter(a => a.status === 'SUBMITTED').length, color: COLORS.purple },
+                { label: 'Approved', count: apps.filter(a => a.status === 'APPROVED').length, color: COLORS.teal },
               ].map(s => (
                 <div key={s.label} style={{
                   background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: '12px 20px', textAlign: 'center',
@@ -418,7 +497,7 @@ export function ReadmissionPage() {
               ))}
             </div>
 
-            <AppTable apps={APPS} />
+            <AppTable apps={apps} onRefresh={loadApps} />
             <NewApplicationForm />
           </div>
         )}

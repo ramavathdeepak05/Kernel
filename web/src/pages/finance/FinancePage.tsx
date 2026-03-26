@@ -380,20 +380,93 @@ function ScholarshipsTab() {
   );
 }
 
+// ── Waiver Modal ───────────────────────────────────────────────
+
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+
+function WaiverModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [form, setForm] = useState({ student_id: "", requested_amount: "", reason: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+
+  const submit = async (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr("");
+    try {
+      const token = localStorage.getItem("token");
+      const r = await fetch(`${API_BASE}/finance/waivers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ ...form, requested_amount: Number(form.requested_amount) }),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || "Failed"); }
+      onDone();
+      onClose();
+    } catch (ex: unknown) { setErr(ex instanceof Error ? ex.message : "Failed to submit"); }
+    finally { setSaving(false); }
+  };
+
+  const inp: React.CSSProperties = {
+    width: "100%", padding: "8px 12px", borderRadius: 8,
+    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(51,65,85,0.6)",
+    color: "#e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box",
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 400 }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", width: 440, background: "#0f172a", border: "1px solid rgba(51,65,85,0.7)", borderRadius: 14, padding: 24, zIndex: 401 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: "#e2e8f0" }}>Request Fee Waiver</span>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 18, lineHeight: 1 }}>✕</button>
+        </div>
+        <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Student ID</label>
+            <input required value={form.student_id} onChange={(e) => setForm((f) => ({ ...f, student_id: e.target.value }))} style={inp} placeholder="UUID or roll number" />
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Requested Amount (₹)</label>
+            <input type="number" required min={1} value={form.requested_amount} onChange={(e) => setForm((f) => ({ ...f, requested_amount: e.target.value }))} style={inp} placeholder="e.g. 25000" />
+          </div>
+          <div>
+            <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Reason / Justification</label>
+            <textarea required rows={3} value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} style={{ ...inp, resize: "vertical" }} placeholder="Grounds for waiver request…" />
+          </div>
+          {err && <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(251,113,133,0.08)", border: "1px solid rgba(251,113,133,0.2)", color: "#fb7185", fontSize: 12 }}>{err}</div>}
+          <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 4 }}>
+            <button type="button" onClick={onClose} style={{ padding: "8px 18px", borderRadius: 8, background: "transparent", border: "1px solid rgba(51,65,85,0.6)", color: "#94a3b8", fontSize: 13, cursor: "pointer" }}>Cancel</button>
+            <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: "rgba(251,191,36,0.12)", border: "1px solid rgba(251,191,36,0.3)", color: "#fbbf24", fontSize: 13, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
+              {saving ? "Submitting…" : "Submit Waiver"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
 // ── Waivers Tab ────────────────────────────────────────────────
 
 function WaiversTab() {
-  const { data, isLoading } = usePendingWaivers();
+  const { data, isLoading, refetch } = usePendingWaivers();
+  const [showModal, setShowModal] = useState(false);
   const waivers = data?.waivers ?? [];
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
+      {showModal && <WaiverModal onClose={() => setShowModal(false)} onDone={refetch} />}
+      <div className="flex items-center justify-between">
         <div className="px-3 py-1.5 rounded-lg flex items-center gap-2 text-[12px]"
           style={{ background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.2)", color: "#fbbf24" }}>
           <Clock className="w-3.5 h-3.5" />
           {isLoading ? "..." : `${data?.total ?? 0} pending`} waiver requests
         </div>
+        <button onClick={() => setShowModal(true)}
+          style={{ padding: "6px 14px", borderRadius: 8, background: "rgba(251,191,36,0.1)", border: "1px solid rgba(251,191,36,0.25)", color: "#fbbf24", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          + Request Waiver
+        </button>
       </div>
 
       <div className="rounded-xl overflow-hidden"

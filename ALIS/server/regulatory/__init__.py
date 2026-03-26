@@ -8,3 +8,4 @@ Supported frameworks:
 
 Reference: ALIS-skills/references/architecture.md §5, §15, §20
 """
+from __future__ import annotations

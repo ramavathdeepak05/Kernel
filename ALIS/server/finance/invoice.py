@@ -5,6 +5,7 @@ Generates invoices from fee structures. Supports:
 - Bulk invoice generation for all enrolled students in a program/semester
 - Automatic discount application (scholarships + approved waivers)
 """
+from __future__ import annotations
 
 import json
 import logging

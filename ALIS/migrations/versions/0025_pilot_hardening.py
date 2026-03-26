@@ -418,15 +418,10 @@ def upgrade() -> None:
     $$ LANGUAGE plpgsql;
     """)
 
-    # Attach trigger to enrollment_provisioning on SEAT_CONFIRMED status
-    op.execute("""
-    DROP TRIGGER IF EXISTS trg_decrement_seat_counter ON enrollment_provisioning;
-    CREATE TRIGGER trg_decrement_seat_counter
-        AFTER INSERT ON enrollment_provisioning
-        FOR EACH ROW
-        WHEN (NEW.status = 'SEAT_CONFIRMED')
-        EXECUTE FUNCTION decrement_seat_counter();
-    """)
+    # NOTE: trigger skipped — enrollment_provisioning has no status/program_id/intake_year.
+    # The decrement_seat_counter() function is registered; seat_matrix updates must be
+    # wired via applicants.status transition (not enrollment_provisioning INSERT).
+    op.execute("DROP TRIGGER IF EXISTS trg_decrement_seat_counter ON enrollment_provisioning")
 
     # -------------------------------------------------------------------------
     # 13. enrollment_type column on enrollment_provisioning — EC-ADM-02
@@ -486,7 +481,7 @@ def upgrade() -> None:
         "shadow_mode_divergence_log",
         "shadow_mode_go_live_log",
         "data_migration_jobs",
-        "data_migration_errors",
+        # data_migration_errors excluded — no org_id column, inherits isolation via job_id FK
         "outbound_webhook_subscriptions",
         "outbound_webhook_deliveries",
         "reporting_gate_log",
@@ -497,8 +492,10 @@ def upgrade() -> None:
     ]
     for table in rls_tables:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
+        # PostgreSQL has no CREATE POLICY IF NOT EXISTS — drop first, then create
+        op.execute(f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}")
         op.execute(f"""
-            CREATE POLICY IF NOT EXISTS {table}_tenant_isolation
+            CREATE POLICY {table}_tenant_isolation
             ON {table}
             USING (org_id::text = current_setting('alis.current_tenant', TRUE))
         """)
@@ -514,7 +511,7 @@ def upgrade() -> None:
         f.flag_key,
         f.enabled,
         f.config::jsonb,
-        'system'
+        NULL::uuid
     FROM organizations org
     CROSS JOIN (VALUES
         ('admissions.biometric_reporting_gate',    false, '{}'),

@@ -15,6 +15,7 @@ Hard constraints:
   - All DB access uses execute_query / execute_transaction with tenant_id.
   - No async/await — sync only.
 """
+from __future__ import annotations
 
 import secrets
 import hashlib

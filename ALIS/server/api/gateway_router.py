@@ -20,6 +20,7 @@ Must Align With:
     - "Agents draft, rules decide"
     - "AI is read-only with respect to state"
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional, Dict, Any
@@ -45,6 +46,14 @@ from server.core.ai_observability import AIObservabilityService
 
 # Module-scoped agent registries — import per module
 from server.agents.admissions.registry import AdmissionsAgentRegistry
+from server.agents.rail.registry import RailAgentRegistry
+from server.agents.academics.registry import AcademicsAgentRegistry
+from server.agents.examinations.registry import ExaminationsAgentRegistry
+from server.agents.finance.registry import FinanceAgentRegistry
+from server.agents.hr_admin.registry import HRAdminAgentRegistry
+from server.agents.student_services.registry import StudentServicesAgentRegistry
+from server.agents.regulatory.registry import RegulatoryAgentRegistry
+from server.agents.research.registry import ResearchAgentRegistry
 
 
 logger = logging.getLogger(__name__)
@@ -59,14 +68,15 @@ router = APIRouter(prefix="/api/v1/ai", tags=["ai-gateway"])
 # Maps module identifiers to their scoped agent registries.
 # Each module maintains its own registry per the Module-Scoped Agent Model.
 _MODULE_REGISTRIES: Dict[str, Any] = {
-    "M1": AdmissionsAgentRegistry,
-    # "M2": AcademicsAgentRegistry,     # Future: E03-S02+
-    # "M3": ExaminationsAgentRegistry,  # Future
-    # "M4": FinanceAgentRegistry,       # Future
-    # "M5": HRAdminAgentRegistry,       # Future
-    # "M6": StudentServicesAgentRegistry, # Future
-    # "M7": RegulatoryAgentRegistry,    # Future
-    # "M8": ResearchAgentRegistry,      # Future
+    "M1":   AdmissionsAgentRegistry,
+    "M2":   AcademicsAgentRegistry,
+    "M3":   ExaminationsAgentRegistry,
+    "M4":   FinanceAgentRegistry,
+    "M5":   HRAdminAgentRegistry,
+    "M6":   StudentServicesAgentRegistry,
+    "M7":   RegulatoryAgentRegistry,
+    "M8":   ResearchAgentRegistry,
+    "RAIL": RailAgentRegistry,
 }
 
 

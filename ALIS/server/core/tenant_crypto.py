@@ -20,6 +20,7 @@ Must Align With:
 - "No Cloud" Rule
 - Layer 4: Global Locks & Invariants
 """
+from __future__ import annotations
 
 import os
 import secrets

@@ -3,6 +3,7 @@
 Waiver requests route through the E02 approval engine.
 On approval: discount column on the invoice is updated.
 """
+from __future__ import annotations
 
 import logging
 import uuid

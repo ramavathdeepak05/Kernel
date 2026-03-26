@@ -16,6 +16,7 @@ Must Align With:
 - Event Contract Rule (Cross-module via events only)
 - Layer 6 (Resilience - Error isolation)
 """
+from __future__ import annotations
 
 import logging
 import uuid

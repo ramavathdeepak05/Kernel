@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Clock, CheckCircle2, AlertTriangle, Users, ChevronUp, ChevronDown,
-  Search, Filter, RotateCcw, ThumbsUp, ThumbsDown, ArrowUp,
-  CalendarCheck, Shield, FileText, GraduationCap, DollarSign,
+  Clock, CheckCircle2, AlertTriangle, Users, Search,
+  RotateCcw, ThumbsUp, ThumbsDown, ArrowUp,
+  CalendarCheck, Shield, Loader2,
 } from "lucide-react";
 
 // ── theme ──────────────────────────────────────────────────────────────────
@@ -32,48 +32,110 @@ const card: React.CSSProperties = {
   padding: "20px 24px",
 };
 
-// ── mock data ──────────────────────────────────────────────────────────────
-const INITIAL_QUEUE = [
-  { id: "1", dot: C.amber,   badge: "FEE_WAIVER",     role: "Finance",    student: "Priya Sharma",     desc: "Requesting 50% tuition waiver citing financial hardship — income certificate attached",        submitted: "2h ago" },
-  { id: "2", dot: C.teal,    badge: "OFFER_LETTER",   role: "Registrar",  student: "Arjun Mehta",      desc: "Conditional offer requires HOD countersign before dispatch to candidate",                    submitted: "3h ago" },
-  { id: "3", dot: C.red,     badge: "GRADE_OVERRIDE", role: "HOD",        student: "Sneha Patel",      desc: "Lab component re-evaluation requested after equipment failure during exam",                   submitted: "5h ago" },
-  { id: "4", dot: C.blue,    badge: "DOCUMENT_REUP",  role: "Registrar",  student: "Rohan Nair",       desc: "Original marksheet rejected (low scan quality), student re-uploaded clearer version",         submitted: "6h ago" },
-  { id: "5", dot: C.amber,   badge: "FEE_WAIVER",     role: "Finance",    student: "Kavya Reddy",      desc: "Sports scholarship top-up request — state level achievement certificate provided",            submitted: "8h ago" },
-  { id: "6", dot: C.teal,    badge: "HOSTEL_ALLOC",   role: "Dean",       student: "Vikram Iyer",      desc: "Room change request citing medical reason — doctor certificate attached by warden",           submitted: "10h ago" },
-  { id: "7", dot: C.red,     badge: "GRADE_OVERRIDE", role: "HOD",        student: "Ananya Singh",     desc: "Internal mark revision after OMR scanning error identified in batch 2024-B",                 submitted: "12h ago" },
-  { id: "8", dot: C.blue,    badge: "LEAVE_APPROVAL", role: "HOD",        student: "Rahul Gupta",      desc: "Medical leave extension for 14 days — hospital discharge summary submitted",                  submitted: "1d ago" },
-];
+// ── Types ──────────────────────────────────────────────────────────────────
 
-const ESCALATIONS = [
-  { id: "e1", title: "FEE_WAIVER — Priya Sharma", reason: "Primary approver (Finance Head) inactive for 48h", original: "Dr. Ramesh Nair (Finance Head)", escalatedTo: "Dean — Prof. Aisha Patel", since: "6h ago", slaRemaining: 45 },
-  { id: "e2", title: "GRADE_OVERRIDE — Ananya Singh", reason: "HOD did not respond within SLA window (24h)", original: "Dr. K. Krishnamurthy (HOD CSE)", escalatedTo: "Academic Registrar", since: "2h ago", slaRemaining: 180 },
-  { id: "e3", title: "OFFER_LETTER — Batch 2024-B", reason: "System escalation — quorum not met in 36h", original: "Admissions Committee", escalatedTo: "Vice Chancellor", since: "30m ago", slaRemaining: 18 },
-];
+interface ApprovalAction {
+  id: string;
+  actor_id: string;
+  actor_role: string;
+  action: "approve" | "reject";
+  comment: string | null;
+  acted_at: string;
+}
 
-const QUORUM = [
-  { id: "q1", title: "Merit List Final Approval — CSE 2025", required: ["Dean Academics", "HOD CSE", "Finance Controller"], approved: [true, true, false], votes: 2, total: 3, voted: false },
-  { id: "q2", title: "Bulk Fee Waiver — EWS Category Q3", required: ["Finance Head", "Registrar", "Dean Student Welfare"], approved: [true, false, false], votes: 1, total: 3, voted: false },
-  { id: "q3", title: "Hostel Block-D Reallocation Policy", required: ["Chief Warden", "Dean Admin", "Registrar", "Student Rep"], approved: [true, true, true, false], votes: 3, total: 4, voted: false },
-];
+interface ApprovalRequest {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  action_type: string;
+  config_id: string;
+  status: string;
+  requested_by: string;
+  required_roles: string[];
+  mode: "single" | "any" | "all";
+  required_count: number;
+  resolved_at: string | null;
+  resolution_reason: string | null;
+  context: Record<string, unknown>;
+  created_at: string;
+  actions?: ApprovalAction[];
+}
 
-const HISTORY = [
-  { date: "2026-03-19 09:12", event: "FEE_WAIVER",     student: "Mithun Das",       approvedBy: "Dr. Priya Nair",       outcome: "APPROVED",  duration: "1.2h" },
-  { date: "2026-03-19 08:47", event: "GRADE_OVERRIDE",  student: "Sonal Mehta",      approvedBy: "Prof. R. Sharma",      outcome: "REJECTED",  duration: "0.8h" },
-  { date: "2026-03-19 07:30", event: "OFFER_LETTER",    student: "Kiran Bose",       approvedBy: "Registrar Office",     outcome: "APPROVED",  duration: "2.1h" },
-  { date: "2026-03-18 22:15", event: "LEAVE_APPROVAL",  student: "Aarav Patel",      approvedBy: "Dr. Sunita Rao",       outcome: "APPROVED",  duration: "0.5h" },
-  { date: "2026-03-18 20:00", event: "DOCUMENT_REUP",   student: "Deepika Kumar",    approvedBy: "Admissions Desk",      outcome: "APPROVED",  duration: "3.0h" },
-  { date: "2026-03-18 18:45", event: "FEE_WAIVER",      student: "Nikhil Joshi",     approvedBy: "Finance Head",         outcome: "ESCALATED", duration: "6.2h" },
-  { date: "2026-03-18 17:10", event: "HOSTEL_ALLOC",    student: "Preeti Singh",     approvedBy: "Chief Warden",         outcome: "APPROVED",  duration: "1.8h" },
-  { date: "2026-03-18 15:50", event: "GRADE_OVERRIDE",  student: "Tanmay Roy",       approvedBy: "HOD Mech",             outcome: "APPROVED",  duration: "4.5h" },
-  { date: "2026-03-18 14:20", event: "FEE_WAIVER",      student: "Anjali Verma",     approvedBy: "Dean Student Affairs", outcome: "REJECTED",  duration: "2.3h" },
-  { date: "2026-03-18 12:00", event: "LEAVE_APPROVAL",  student: "Siddharth Rao",    approvedBy: "Dr. K. Pillai",        outcome: "APPROVED",  duration: "0.3h" },
-  { date: "2026-03-18 10:45", event: "OFFER_LETTER",    student: "Nandini Krishnan", approvedBy: "Registrar Office",     outcome: "APPROVED",  duration: "1.1h" },
-  { date: "2026-03-17 09:00", event: "HOSTEL_ALLOC",    student: "Farhan Shaikh",    approvedBy: "Chief Warden",         outcome: "ESCALATED", duration: "9.0h" },
-];
+// ── API Helpers ────────────────────────────────────────────────────────────
 
-const ROLES = ["All", "Finance", "Registrar", "HOD", "Dean"];
+const BASE = "/api/approvals";
+
+async function getApprovals(path = "", params?: Record<string, string>) {
+  const token = localStorage.getItem("token") ?? "";
+  const qs = params ? "?" + new URLSearchParams(params) : "";
+  const res = await fetch(`${BASE}${path}${qs}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function postApproval(path: string, body: unknown) {
+  const token = localStorage.getItem("token") ?? "";
+  const res = await fetch(`${BASE}${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// ── Utility ────────────────────────────────────────────────────────────────
+
+function ageHours(iso: string): number {
+  return (Date.now() - new Date(iso).getTime()) / 3_600_000;
+}
+
+function relativeTime(iso: string): string {
+  const h = ageHours(iso);
+  if (h < 1) return `${Math.floor(h * 60)}m ago`;
+  if (h < 24) return `${Math.floor(h)}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function formatDuration(start: string, end: string | null): string {
+  if (!end) return "—";
+  const h = (new Date(end).getTime() - new Date(start).getTime()) / 3_600_000;
+  return `${h.toFixed(1)}h`;
+}
+
+function actionDot(type: string): string {
+  const t = type.toUpperCase();
+  if (t.includes("FEE") || t.includes("WAIVER") || t.includes("SCHOLAR")) return C.amber;
+  if (t.includes("OFFER") || t.includes("ENROLL") || t.includes("HOSTEL") || t.includes("ADMIT")) return C.teal;
+  if (t.includes("GRADE") || t.includes("OVERRIDE") || t.includes("REEVAL")) return C.red;
+  return C.blue;
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  hod: "HOD", dean: "Dean", registrar: "Registrar",
+  finance_officer: "Finance", hr_admin: "HR",
+  admin: "Admin", super_admin: "Super Admin",
+};
+
+function roleLabel(r: string): string {
+  return ROLE_LABEL[r] ?? r.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function studentLabel(r: ApprovalRequest): string {
+  return String(r.context.student_name ?? r.context.name ?? r.entity_id);
+}
+
+function descLabel(r: ApprovalRequest): string {
+  return String(
+    r.context.description ?? r.context.reason ?? r.context.notes ??
+    `${r.action_type.replace(/_/g, " ")} approval requested`,
+  );
+}
 
 // ── sub-components ─────────────────────────────────────────────────────────
+
 function StatStrip({ items }: { items: { label: string; value: string | number; icon: React.ReactNode; color: string }[] }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 24 }}>
@@ -94,239 +156,375 @@ function StatStrip({ items }: { items: { label: string; value: string | number; 
 
 function BadgePill({ label, color, bg }: { label: string; color: string; bg: string }) {
   return (
-    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color, background: bg, padding: "3px 8px", borderRadius: 4 }}>
+    <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", color, background: bg, padding: "3px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
       {label}
     </span>
   );
 }
 
+function LoadingPane({ label }: { label: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "64px 24px" }}>
+      <Loader2 size={28} color={C.teal} style={{ margin: "0 auto 12px", display: "block" }} />
+      <div style={{ color: C.muted, fontSize: 13 }}>{label}</div>
+    </div>
+  );
+}
+
+function EmptyPane({ icon, title, sub }: { icon: React.ReactNode; title: string; sub: string }) {
+  return (
+    <div style={{ ...card, textAlign: "center", padding: "48px 24px" }}>
+      <div style={{ margin: "0 auto 12px", display: "flex", justifyContent: "center" }}>{icon}</div>
+      <div style={{ color: C.text, fontWeight: 600, fontSize: 16 }}>{title}</div>
+      <div style={{ color: C.muted, fontSize: 13, marginTop: 6 }}>{sub}</div>
+    </div>
+  );
+}
+
 // ── Queue Tab ──────────────────────────────────────────────────────────────
-function QueueTab() {
-  const [queue, setQueue] = useState(INITIAL_QUEUE);
+
+interface QueueTabProps {
+  items: ApprovalRequest[];
+  escalatedCount: number;
+  resolvedToday: number;
+  loading: boolean;
+  onAction: (id: string, action: "approve" | "reject") => Promise<void>;
+}
+
+const ROLE_FILTERS = ["All", "hod", "dean", "registrar", "finance_officer", "hr_admin"];
+
+function QueueTab({ items, escalatedCount, resolvedToday, loading, onAction }: QueueTabProps) {
+  const [busy, setBusy] = useState<string | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [roleFilter, setRoleFilter] = useState("All");
   const [search, setSearch] = useState("");
 
-  function handleAction(id: string, action: "approve" | "reject") {
-    setFlash(id + action);
-    setTimeout(() => {
-      setQueue(q => q.filter(r => r.id !== id));
-      setFlash(null);
-    }, 700);
+  async function handleAction(id: string, action: "approve" | "reject") {
+    setBusy(id + action);
+    try {
+      await onAction(id, action);
+      setFlash(id + action);
+      setTimeout(() => setFlash(null), 800);
+    } catch {
+      // no-op — parent handles error toast
+    } finally {
+      setBusy(null);
+    }
   }
 
-  const visible = queue.filter(r =>
-    (roleFilter === "All" || r.role === roleFilter) &&
-    (search === "" || r.student.toLowerCase().includes(search.toLowerCase()) || r.badge.toLowerCase().includes(search.toLowerCase()))
+  const avgWait = items.length > 0
+    ? `${(items.reduce((s, r) => s + ageHours(r.created_at), 0) / items.length).toFixed(1)}h`
+    : "—";
+
+  const visible = items.filter(r =>
+    (roleFilter === "All" || r.required_roles.includes(roleFilter)) &&
+    (search === "" ||
+      studentLabel(r).toLowerCase().includes(search.toLowerCase()) ||
+      r.action_type.toLowerCase().includes(search.toLowerCase())),
   );
 
   return (
     <div>
       <StatStrip items={[
-        { label: "Pending Approvals", value: queue.length, icon: <Clock size={20} />, color: C.amber },
-        { label: "Avg Wait", value: "4.2h", icon: <RotateCcw size={20} />, color: C.blue },
-        { label: "Escalated", value: 3, icon: <ArrowUp size={20} />, color: C.red },
-        { label: "Resolved Today", value: 28, icon: <CheckCircle2 size={20} />, color: C.teal },
+        { label: "Pending Approvals", value: items.length, icon: <Clock size={20} />, color: C.amber },
+        { label: "Avg Wait", value: avgWait, icon: <RotateCcw size={20} />, color: C.blue },
+        { label: "Escalated", value: escalatedCount, icon: <ArrowUp size={20} />, color: C.red },
+        { label: "Resolved Today", value: resolvedToday, icon: <CheckCircle2 size={20} />, color: C.teal },
       ]} />
 
-      {/* filter bar */}
       <div style={{ display: "flex", gap: 12, marginBottom: 20, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ display: "flex", gap: 6 }}>
-          {ROLES.map(r => (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {ROLE_FILTERS.map(r => (
             <button key={r} onClick={() => setRoleFilter(r)} style={{
               padding: "6px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
               background: roleFilter === r ? C.teal : C.surface2,
               color: roleFilter === r ? "#fff" : C.muted,
               transition: "all 0.15s",
-            }}>{r}</button>
+            }}>
+              {r === "All" ? "All" : roleLabel(r)}
+            </button>
           ))}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, background: C.surface2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "6px 12px", flex: 1, maxWidth: 320 }}>
           <Search size={14} color={C.muted} />
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search student or event type…"
-            style={{ background: "none", border: "none", outline: "none", color: C.text, fontSize: 13, flex: 1 }} />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search entity or event type…"
+            style={{ background: "none", border: "none", outline: "none", color: C.text, fontSize: 13, flex: 1 }}
+          />
         </div>
       </div>
 
-      {/* list */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {visible.length === 0 && (
-          <div style={{ ...card, textAlign: "center", padding: "48px 24px" }}>
-            <CheckCircle2 size={40} color={C.teal} style={{ margin: "0 auto 12px" }} />
-            <div style={{ color: C.text, fontWeight: 600, fontSize: 16 }}>All caught up!</div>
-            <div style={{ color: C.muted, fontSize: 13, marginTop: 6 }}>No pending approvals in this queue.</div>
+      {loading
+        ? <LoadingPane label="Loading approval queue…" />
+        : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {visible.length === 0 && (
+              <EmptyPane
+                icon={<CheckCircle2 size={40} color={C.teal} />}
+                title="All caught up!"
+                sub="No pending approvals in this queue."
+              />
+            )}
+            {visible.map(row => {
+              const dot = actionDot(row.action_type);
+              const isFlashing = flash?.startsWith(row.id) ?? false;
+              const inProgress = busy?.startsWith(row.id) ?? false;
+              return (
+                <div key={row.id} style={{
+                  ...card, display: "flex", alignItems: "center", gap: 16, padding: "14px 20px",
+                  opacity: isFlashing || inProgress ? 0.5 : 1, transition: "opacity 0.3s",
+                  position: "relative", overflow: "hidden",
+                }}>
+                  {isFlashing && (
+                    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(29,158,117,0.08)", fontSize: 18, fontWeight: 700, color: C.teal }}>
+                      ✓ Done
+                    </div>
+                  )}
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: dot, flexShrink: 0 }} />
+                  <BadgePill label={row.action_type.replace(/_/g, " ")} color={dot} bg={`${dot}22`} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 600, color: C.text, fontSize: 14 }}>{studentLabel(row)}</span>
+                      <span style={{ fontSize: 11, color: C.muted, background: C.surface2, padding: "2px 8px", borderRadius: 4 }}>
+                        {row.required_roles.map(roleLabel).join(", ")}
+                      </span>
+                      <span style={{ fontSize: 11, color: C.muted }}>{relativeTime(row.created_at)}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {descLabel(row)}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+                    <button
+                      onClick={() => handleAction(row.id, "approve")}
+                      disabled={inProgress}
+                      style={{
+                        padding: "7px 16px", borderRadius: 8, border: "none", background: C.teal, color: "#fff",
+                        fontSize: 12, fontWeight: 600, cursor: inProgress ? "not-allowed" : "pointer",
+                        display: "flex", alignItems: "center", gap: 6, opacity: inProgress ? 0.6 : 1,
+                      }}
+                    >
+                      <ThumbsUp size={12} /> Approve
+                    </button>
+                    <button
+                      onClick={() => handleAction(row.id, "reject")}
+                      disabled={inProgress}
+                      style={{
+                        padding: "7px 16px", borderRadius: 8, border: `1px solid ${C.red}55`, background: C.redDim, color: C.red,
+                        fontSize: 12, fontWeight: 600, cursor: inProgress ? "not-allowed" : "pointer",
+                        display: "flex", alignItems: "center", gap: 6, opacity: inProgress ? 0.6 : 1,
+                      }}
+                    >
+                      <ThumbsDown size={12} /> Reject
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
-        {visible.map(row => {
-          const isFlashing = flash === row.id + "approve" || flash === row.id + "reject";
-          return (
-            <div key={row.id} style={{
-              ...card, display: "flex", alignItems: "center", gap: 16, padding: "14px 20px",
-              opacity: isFlashing ? 0.5 : 1, transition: "opacity 0.3s",
-              position: "relative", overflow: "hidden",
-            }}>
-              {isFlashing && (
-                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(29,158,117,0.08)", fontSize: 18, fontWeight: 700, color: C.teal }}>
-                  ✓ Done
-                </div>
-              )}
-              {/* status dot */}
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: row.dot, flexShrink: 0 }} />
-              {/* badge */}
-              <BadgePill label={row.badge} color={row.dot} bg={`${row.dot}22`} />
-              {/* center */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontWeight: 600, color: C.text, fontSize: 14 }}>{row.student}</span>
-                  <span style={{ fontSize: 11, color: C.muted, background: C.surface2, padding: "2px 8px", borderRadius: 4 }}>{row.role}</span>
-                  <span style={{ fontSize: 11, color: C.muted }}>{row.submitted}</span>
-                </div>
-                <div style={{ fontSize: 12, color: C.muted, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {row.desc}
-                </div>
-              </div>
-              {/* actions */}
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-                <button onClick={() => handleAction(row.id, "approve")} style={{
-                  padding: "7px 16px", borderRadius: 8, border: "none", background: C.teal, color: "#fff",
-                  fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <ThumbsUp size={12} /> Approve
-                </button>
-                <button onClick={() => handleAction(row.id, "reject")} style={{
-                  padding: "7px 16px", borderRadius: 8, border: `1px solid ${C.red}55`, background: C.redDim, color: C.red,
-                  fontSize: 12, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
-                }}>
-                  <ThumbsDown size={12} /> Reject
-                </button>
-                <button style={{ background: "none", border: "none", color: C.muted, fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: "7px 4px" }}>
-                  Escalate
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
 
-// ── Escalations Tab ────────────────────────────────────────────────────────
-function EscalationsTab() {
-  const [resolved, setResolved] = useState<string[]>([]);
-  const items = ESCALATIONS.filter(e => !resolved.includes(e.id));
+// ── Escalations Tab ─────────────────────────────────────────────────────────
+
+interface EscalationsTabProps {
+  items: ApprovalRequest[];
+  loading: boolean;
+  onForceResolve: (id: string) => Promise<void>;
+}
+
+function EscalationsTab({ items, loading, onForceResolve }: EscalationsTabProps) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<Set<string>>(new Set());
+
+  async function handleForceResolve(id: string) {
+    setBusy(id);
+    try {
+      await onForceResolve(id);
+      setResolved(prev => new Set([...prev, id]));
+    } catch {
+      // no-op
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const visible = items.filter(e => !resolved.has(e.id));
+
+  if (loading) return <LoadingPane label="Loading escalations…" />;
+
+  if (visible.length === 0) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <EmptyPane
+          icon={<Shield size={36} color={C.teal} />}
+          title="No active escalations"
+          sub="All approval requests are within SLA."
+        />
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {items.map(e => {
-        const slaColor = e.slaRemaining < 60 ? C.red : e.slaRemaining < 120 ? C.amber : C.teal;
-        const slaPct = Math.min(100, (e.slaRemaining / 240) * 100);
+      {visible.map(e => {
+        const overdueMins = Math.floor((ageHours(e.created_at) - 24) * 60);
+        const overduePct = Math.min(100, (overdueMins / 240) * 100);
+        const isBusy = busy === e.id;
+
         return (
           <div key={e.id} style={{ ...card }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
                   <AlertTriangle size={16} color={C.red} />
-                  <span style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{e.title}</span>
+                  <span style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>
+                    {e.action_type.replace(/_/g, " ")} — {studentLabel(e)}
+                  </span>
                 </div>
                 <div style={{ fontSize: 12, color: C.muted }}>
-                  <span style={{ color: C.amber }}>Reason:</span> {e.reason}
+                  <span style={{ color: C.amber }}>Reason:</span> SLA breach — pending for {Math.floor(ageHours(e.created_at))}h (limit: 24h)
                 </div>
               </div>
-              <span style={{ fontSize: 11, color: C.muted }}>{e.since}</span>
+              <span style={{ fontSize: 11, color: C.muted }}>{relativeTime(e.created_at)}</span>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
               <div style={{ background: C.surface2, borderRadius: 8, padding: "10px 14px" }}>
-                <div style={{ fontSize: 10, color: C.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>Original Approver</div>
-                <div style={{ fontSize: 13, color: C.text }}>{e.original}</div>
+                <div style={{ fontSize: 10, color: C.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>Required Approver</div>
+                <div style={{ fontSize: 13, color: C.text }}>{e.required_roles.map(roleLabel).join(", ")}</div>
               </div>
               <div style={{ background: C.surface2, borderRadius: 8, padding: "10px 14px" }}>
                 <div style={{ fontSize: 10, color: C.muted, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>Escalated To</div>
-                <div style={{ fontSize: 13, color: C.teal }}>{e.escalatedTo}</div>
+                <div style={{ fontSize: 13, color: C.teal }}>Admin Review</div>
               </div>
             </div>
-            {/* SLA bar */}
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 11, color: C.muted }}>SLA Remaining</span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: slaColor }}>{e.slaRemaining < 60 ? `${e.slaRemaining}m` : `${Math.floor(e.slaRemaining / 60)}h ${e.slaRemaining % 60}m`}</span>
+                <span style={{ fontSize: 11, color: C.muted }}>SLA Overdue</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.red }}>
+                  +{overdueMins < 60 ? `${overdueMins}m` : `${Math.floor(overdueMins / 60)}h ${overdueMins % 60}m`}
+                </span>
               </div>
               <div style={{ height: 6, background: C.surface2, borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${slaPct}%`, background: slaColor, borderRadius: 3, transition: "width 0.3s" }} />
+                <div style={{ height: "100%", width: `${overduePct}%`, background: C.red, borderRadius: 3 }} />
               </div>
             </div>
-            <button onClick={() => setResolved(r => [...r, e.id])} style={{
-              padding: "8px 18px", borderRadius: 8, border: `1px solid ${C.red}55`, background: C.redDim,
-              color: C.red, fontSize: 12, fontWeight: 600, cursor: "pointer",
-            }}>
-              Force Resolve
+            <button
+              onClick={() => handleForceResolve(e.id)}
+              disabled={isBusy}
+              style={{
+                padding: "8px 18px", borderRadius: 8, border: `1px solid ${C.red}55`, background: C.redDim,
+                color: C.red, fontSize: 12, fontWeight: 600, cursor: isBusy ? "not-allowed" : "pointer",
+                opacity: isBusy ? 0.6 : 1,
+              }}
+            >
+              {isBusy ? "Resolving…" : "Force Resolve"}
             </button>
           </div>
         );
       })}
-      {items.length === 0 && (
-        <div style={{ ...card, textAlign: "center", padding: "48px 24px" }}>
-          <Shield size={36} color={C.teal} style={{ margin: "0 auto 12px" }} />
-          <div style={{ color: C.text, fontWeight: 600 }}>No active escalations</div>
-        </div>
-      )}
     </div>
   );
 }
 
-// ── Quorum Tab ─────────────────────────────────────────────────────────────
-function QuorumTab() {
-  const [quorum, setQuorum] = useState(QUORUM);
+// ── Quorum Tab ──────────────────────────────────────────────────────────────
 
-  function castVote(id: string) {
-    setQuorum(q => q.map(item => item.id !== id ? item : {
-      ...item,
-      voted: true,
-      votes: item.votes + 1,
-      approved: item.approved.map((v, i) => i === item.approved.indexOf(false) ? true : v),
-    }));
+interface QuorumTabProps {
+  items: ApprovalRequest[];
+  currentUserId: string | undefined;
+  loading: boolean;
+  onVote: (id: string) => Promise<void>;
+}
+
+function QuorumTab({ items, currentUserId, loading, onVote }: QuorumTabProps) {
+  const [voting, setVoting] = useState<string | null>(null);
+  const [voted, setVoted] = useState<Set<string>>(new Set());
+
+  if (loading) return <LoadingPane label="Loading quorum decisions…" />;
+
+  if (items.length === 0) {
+    return (
+      <EmptyPane
+        icon={<Users size={36} color={C.teal} />}
+        title="No quorum decisions pending"
+        sub="All multi-approver requests have been resolved."
+      />
+    );
+  }
+
+  async function castVote(id: string) {
+    setVoting(id);
+    try {
+      await onVote(id);
+      setVoted(prev => new Set([...prev, id]));
+    } catch {
+      // no-op
+    } finally {
+      setVoting(null);
+    }
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {quorum.map(q => {
-        const pct = (q.votes / q.total) * 100;
-        const allApproved = q.votes === q.total;
+      {items.map(q => {
+        const actions = q.actions ?? [];
+        const approveActions = actions.filter(a => a.action === "approve");
+        const approvedRoles = new Set(approveActions.map(a => a.actor_role));
+        const voteCount = approveActions.length;
+        const allApproved = voteCount >= q.required_count;
+        const pct = (voteCount / Math.max(q.required_count, 1)) * 100;
+        const hasVoted = voted.has(q.id) || (!!currentUserId && actions.some(a => a.actor_id === currentUserId));
+        const isVoting = voting === q.id;
+
         return (
           <div key={q.id} style={{ ...card }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
-              <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>{q.title}</div>
+              <div style={{ fontWeight: 700, color: C.text, fontSize: 15 }}>
+                {String(q.context.title ?? `${q.action_type.replace(/_/g, " ")} — ${q.entity_id}`)}
+              </div>
               <span style={{ fontSize: 13, fontWeight: 700, color: allApproved ? C.teal : C.amber }}>
-                {q.votes}/{q.total} approved
+                {voteCount}/{q.required_count} approved
               </span>
             </div>
-            {/* signatories */}
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-              {q.required.map((name, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <div style={{ width: 20, height: 20, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: q.approved[i] ? C.greenDim : C.surface2, border: `1px solid ${q.approved[i] ? C.green : C.border}` }}>
-                    {q.approved[i]
-                      ? <CheckCircle2 size={12} color={C.green} />
-                      : <Clock size={10} color={C.muted} />}
+              {q.required_roles.map((role, i) => {
+                const hasRoleVoted = approvedRoles.has(role);
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 20, height: 20, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: hasRoleVoted ? C.greenDim : C.surface2, border: `1px solid ${hasRoleVoted ? C.green : C.border}` }}>
+                      {hasRoleVoted
+                        ? <CheckCircle2 size={12} color={C.green} />
+                        : <Clock size={10} color={C.muted} />}
+                    </div>
+                    <span style={{ fontSize: 13, color: hasRoleVoted ? C.text : C.muted }}>{roleLabel(role)}</span>
+                    {hasRoleVoted && (
+                      <span style={{ fontSize: 10, color: C.green, background: C.greenDim, padding: "2px 6px", borderRadius: 4 }}>VOTED</span>
+                    )}
                   </div>
-                  <span style={{ fontSize: 13, color: q.approved[i] ? C.text : C.muted }}>{name}</span>
-                  {q.approved[i] && <span style={{ fontSize: 10, color: C.green, background: C.greenDim, padding: "2px 6px", borderRadius: 4 }}>VOTED</span>}
-                </div>
-              ))}
+                );
+              })}
             </div>
-            {/* progress bar */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ height: 8, background: C.surface2, borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: allApproved ? C.teal : C.amber, borderRadius: 4, transition: "width 0.4s" }} />
+                <div style={{ height: "100%", width: `${Math.min(100, pct)}%`, background: allApproved ? C.teal : C.amber, borderRadius: 4, transition: "width 0.4s" }} />
               </div>
             </div>
-            <button onClick={() => !q.voted && castVote(q.id)} disabled={q.voted || allApproved} style={{
-              padding: "8px 20px", borderRadius: 8, border: "none", cursor: q.voted || allApproved ? "default" : "pointer",
-              background: q.voted || allApproved ? C.surface2 : C.teal,
-              color: q.voted || allApproved ? C.muted : "#fff",
-              fontSize: 13, fontWeight: 600,
-            }}>
-              {allApproved ? "✓ Quorum Reached" : q.voted ? "Vote Recorded" : "Cast Your Vote"}
+            <button
+              onClick={() => !hasVoted && !allApproved && castVote(q.id)}
+              disabled={hasVoted || allApproved || isVoting}
+              style={{
+                padding: "8px 20px", borderRadius: 8, border: "none",
+                cursor: hasVoted || allApproved || isVoting ? "default" : "pointer",
+                background: hasVoted || allApproved ? C.surface2 : C.teal,
+                color: hasVoted || allApproved ? C.muted : "#fff",
+                fontSize: 13, fontWeight: 600,
+              }}
+            >
+              {allApproved ? "✓ Quorum Reached" : hasVoted ? "Vote Recorded" : isVoting ? "Recording…" : "Cast Your Vote"}
             </button>
           </div>
         );
@@ -335,39 +533,63 @@ function QuorumTab() {
   );
 }
 
-// ── History Tab ────────────────────────────────────────────────────────────
-function HistoryTab() {
+// ── History Tab ─────────────────────────────────────────────────────────────
+
+interface HistoryTabProps {
+  items: ApprovalRequest[];
+  loading: boolean;
+}
+
+function HistoryTab({ items, loading }: HistoryTabProps) {
   const outcomeCfg: Record<string, { color: string; bg: string }> = {
-    APPROVED:  { color: C.green,  bg: C.greenDim  },
-    REJECTED:  { color: C.red,    bg: C.redDim    },
-    ESCALATED: { color: C.amber,  bg: C.amberDim  },
+    APPROVED: { color: C.green, bg: C.greenDim },
+    REJECTED: { color: C.red, bg: C.redDim },
   };
+
+  if (loading) return <LoadingPane label="Loading history…" />;
+
+  if (items.length === 0) {
+    return (
+      <EmptyPane
+        icon={<CalendarCheck size={36} color={C.teal} />}
+        title="No history yet"
+        sub="Resolved approvals will appear here."
+      />
+    );
+  }
 
   return (
     <div style={{ ...card, padding: 0, overflow: "hidden" }}>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: C.surface2, borderBottom: `1px solid ${C.border}` }}>
-            {["Date", "Event", "Student", "Approved By", "Outcome", "Duration"].map(h => (
+            {["Date", "Event", "Entity", "Resolution", "Outcome", "Duration"].map(h => (
               <th key={h} style={{ padding: "12px 16px", textAlign: "left", fontSize: 11, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {HISTORY.map((row, i) => {
-            const oc = outcomeCfg[row.outcome] ?? { color: C.muted, bg: C.surface2 };
+          {items.map((row, i) => {
+            const oc = outcomeCfg[row.status] ?? { color: C.muted, bg: C.surface2 };
+            const dateStr = new Date(row.resolved_at ?? row.created_at).toLocaleString("en-IN", {
+              month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+            });
             return (
-              <tr key={i} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
-                <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>{row.date}</td>
+              <tr key={row.id} style={{ borderBottom: `1px solid ${C.border}`, background: i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)" }}>
+                <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted, whiteSpace: "nowrap" }}>{dateStr}</td>
                 <td style={{ padding: "12px 16px" }}>
-                  <BadgePill label={row.event} color={C.blue} bg={C.blueDim} />
+                  <BadgePill label={row.action_type.replace(/_/g, " ")} color={C.blue} bg={C.blueDim} />
                 </td>
-                <td style={{ padding: "12px 16px", fontSize: 13, color: C.text }}>{row.student}</td>
-                <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted }}>{row.approvedBy}</td>
+                <td style={{ padding: "12px 16px", fontSize: 13, color: C.text }}>{studentLabel(row)}</td>
+                <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted }}>
+                  {String(row.context.approved_by ?? row.required_roles.map(roleLabel).join(", "))}
+                </td>
                 <td style={{ padding: "12px 16px" }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: oc.color, background: oc.bg, padding: "3px 8px", borderRadius: 4 }}>{row.outcome}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: oc.color, background: oc.bg, padding: "3px 8px", borderRadius: 4 }}>{row.status}</span>
                 </td>
-                <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted }}>{row.duration}</td>
+                <td style={{ padding: "12px 16px", fontSize: 12, color: C.muted }}>
+                  {formatDuration(row.created_at, row.resolved_at)}
+                </td>
               </tr>
             );
           })}
@@ -377,11 +599,89 @@ function HistoryTab() {
   );
 }
 
-// ── Page ───────────────────────────────────────────────────────────────────
+// ── Page ────────────────────────────────────────────────────────────────────
+
 type Tab = "queue" | "escalations" | "quorum" | "history";
 
 export function WorkflowsPage() {
   const [tab, setTab] = useState<Tab>("queue");
+  const [pending, setPending] = useState<ApprovalRequest[]>([]);
+  const [quorumDetails, setQuorumDetails] = useState<ApprovalRequest[]>([]);
+  const [history, setHistory] = useState<ApprovalRequest[]>([]);
+  const [loadingPending, setLoadingPending] = useState(true);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+
+  const currentUserId: string | undefined = (() => {
+    try {
+      const u = localStorage.getItem("user");
+      return u ? JSON.parse(u).id : undefined;
+    } catch { return undefined; }
+  })();
+
+  const loadPending = useCallback(async () => {
+    setLoadingPending(true);
+    try {
+      const data = await getApprovals("/pending") as { pending: ApprovalRequest[] };
+      const items = data.pending ?? [];
+      setPending(items);
+
+      // Load quorum item details (with actions) — typically ≤5 items
+      const quorumItems = items.filter(r => r.mode !== "single");
+      if (quorumItems.length > 0) {
+        const details = await Promise.all(
+          quorumItems.map(r => getApprovals(`/${r.id}`) as Promise<ApprovalRequest>),
+        );
+        setQuorumDetails(details);
+      } else {
+        setQuorumDetails([]);
+      }
+    } catch {
+      setPending([]);
+      setQuorumDetails([]);
+    } finally {
+      setLoadingPending(false);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const [approved, rejected] = await Promise.all([
+        getApprovals("", { status: "APPROVED", limit: "25" }) as Promise<{ requests: ApprovalRequest[] }>,
+        getApprovals("", { status: "REJECTED", limit: "25" }) as Promise<{ requests: ApprovalRequest[] }>,
+      ]);
+      const combined = [
+        ...(approved.requests ?? []),
+        ...(rejected.requests ?? []),
+      ].sort(
+        (a, b) =>
+          new Date(b.resolved_at ?? b.created_at).getTime() -
+          new Date(a.resolved_at ?? a.created_at).getTime(),
+      );
+      setHistory(combined.slice(0, 50));
+    } catch {
+      setHistory([]);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPending();
+    loadHistory();
+  }, [loadPending, loadHistory]);
+
+  const handleAction = async (id: string, action: "approve" | "reject") => {
+    await postApproval(`/${id}/${action}`, { comment: "" });
+    await loadPending();
+  };
+
+  // Derived data splits
+  const singleItems = pending.filter(r => r.mode === "single");
+  const escalatedItems = pending.filter(r => ageHours(r.created_at) > 24);
+  const resolvedToday = history.filter(r =>
+    r.resolved_at && ageHours(r.resolved_at) < 24,
+  ).length;
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: "queue",       label: "Queue",       icon: <Clock size={14} /> },
@@ -392,7 +692,6 @@ export function WorkflowsPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: C.bg, padding: "32px 40px", fontFamily: "Inter, system-ui, sans-serif" }}>
-      {/* header */}
       <div style={{ marginBottom: 28 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
           <Shield size={22} color={C.teal} />
@@ -401,7 +700,6 @@ export function WorkflowsPage() {
         <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Manage pending approvals, escalations, quorum decisions, and review history.</p>
       </div>
 
-      {/* tab bar */}
       <div style={{ display: "flex", gap: 4, marginBottom: 28, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: "fit-content" }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
@@ -414,11 +712,36 @@ export function WorkflowsPage() {
         ))}
       </div>
 
-      {/* content */}
-      {tab === "queue"       && <QueueTab />}
-      {tab === "escalations" && <EscalationsTab />}
-      {tab === "quorum"      && <QuorumTab />}
-      {tab === "history"     && <HistoryTab />}
+      {tab === "queue" && (
+        <QueueTab
+          items={singleItems}
+          escalatedCount={escalatedItems.length}
+          resolvedToday={resolvedToday}
+          loading={loadingPending}
+          onAction={handleAction}
+        />
+      )}
+      {tab === "escalations" && (
+        <EscalationsTab
+          items={escalatedItems}
+          loading={loadingPending}
+          onForceResolve={id => handleAction(id, "reject")}
+        />
+      )}
+      {tab === "quorum" && (
+        <QuorumTab
+          items={quorumDetails}
+          currentUserId={currentUserId}
+          loading={loadingPending}
+          onVote={id => handleAction(id, "approve")}
+        />
+      )}
+      {tab === "history" && (
+        <HistoryTab
+          items={history}
+          loading={loadingHistory}
+        />
+      )}
     </div>
   );
 }

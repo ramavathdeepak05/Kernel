@@ -236,19 +236,23 @@ class PaymentGatewayClient:
         order_id: str,
         payment_id: str,
         signature: str,
+        callback_params: Optional[Dict[str, Any]] = None,
     ) -> PaymentVerification:
         """
         Verify the payment callback signature from the gateway.
 
         After the applicant completes payment, the frontend/webhook sends back
         order_id, payment_id, and signature. This method verifies authenticity.
+
+        For PayU, pass the full callback dict as `callback_params` — PayU hash
+        verification requires status, amount, txnid, email, and udf fields.
         """
         self._require_enabled()
 
         if self._provider == GatewayProvider.RAZORPAY:
             return self._razorpay_verify(order_id, payment_id, signature)
         elif self._provider == GatewayProvider.PAYU:
-            return self._payu_verify(order_id, payment_id, signature)
+            return self._payu_verify(order_id, payment_id, signature, callback_params)
         else:
             raise ValueError(f"Unsupported gateway provider: {self._provider}")
 
@@ -314,27 +318,74 @@ class PaymentGatewayClient:
             return {}
 
     def _payu_verify(
-        self, order_id: str, payment_id: str, signature: str
+        self,
+        order_id: str,
+        payment_id: str,
+        signature: str,
+        callback_params: Optional[Dict[str, Any]] = None,
     ) -> PaymentVerification:
         """
         PayU reverse hash verification.
-        Hash: sha512(salt|status|||||||||||email|firstname|productinfo|amount|txnid|key)
+
+        PayU callback reverse hash (sha512):
+          salt|status|udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
+
+        `callback_params` must be the full dict POSTed by PayU to the callback URL.
+        If absent, the payment is rejected (safer than accepting blindly).
         """
+        merchant_key  = self._settings.payu_merchant_key
         merchant_salt = self._settings.payu_merchant_salt
 
-        # PayU sends back a status in the callback — for now we verify the hash format
-        # In production, parse the full response variables from PayU
-        logger.info("PayU: payment verification for txn=%s", order_id)
+        if not callback_params:
+            logger.warning("PayU: verify_payment called without callback_params — rejecting txn=%s", order_id)
+            return PaymentVerification(
+                is_valid=False,
+                order_id=order_id,
+                payment_id=payment_id,
+                signature=signature,
+                amount_paise=0,
+                method="payu",
+                provider=GatewayProvider.PAYU,
+                error="callback_params required for PayU hash verification",
+            )
+
+        p = callback_params
+        # Build reverse hash string
+        hash_seq = "|".join([
+            merchant_salt,
+            p.get("status", ""),
+            p.get("udf5", ""),
+            p.get("udf4", ""),
+            p.get("udf3", ""),
+            p.get("udf2", ""),
+            p.get("udf1", ""),
+            p.get("email", ""),
+            p.get("firstname", ""),
+            p.get("productinfo", ""),
+            p.get("amount", ""),
+            p.get("txnid", ""),
+            merchant_key,
+        ])
+        expected     = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
+        provided     = p.get("hash", signature)
+        is_valid     = hmac.compare_digest(expected.lower(), provided.lower())
+        amount_paise = int(float(p.get("amount", "0")) * 100)
+
+        if is_valid:
+            logger.info("PayU: payment verified [%s] txn=%s", p.get("mihpayid", payment_id), order_id)
+        else:
+            logger.warning("PayU: hash mismatch — txn=%s (possible tamper)", p.get("txnid", order_id))
 
         return PaymentVerification(
-            is_valid=True,  # Actual verification requires full callback params
+            is_valid=is_valid,
             order_id=order_id,
-            payment_id=payment_id,
-            signature=signature,
-            amount_paise=0,
-            method="payu",
+            payment_id=p.get("mihpayid", payment_id),
+            signature=provided,
+            amount_paise=amount_paise,
+            method=p.get("mode", "payu"),
             provider=GatewayProvider.PAYU,
-            raw={"note": "PayU verification requires full callback parameter parsing"},
+            raw=p,
+            error=None if is_valid else "PayU hash verification failed",
         )
 
     # -------------------------------------------------------------------------
@@ -409,16 +460,61 @@ class PaymentGatewayClient:
     def _payu_refund(
         self, payment_id: str, amount: Optional[Decimal], notes: Dict[str, str]
     ) -> RefundResult:
-        """PayU refunds are initiated via their Cancel/Refund API."""
-        logger.info("PayU: refund request for payment [%s]", payment_id)
-        return RefundResult(
-            refund_id="",
-            payment_id=payment_id,
-            amount_paise=int(amount * 100) if amount else 0,
-            status="pending",
-            provider=GatewayProvider.PAYU,
-            raw={"note": "PayU refund API integration pending"},
-        )
+        """
+        PayU cancel/refund API.
+        Endpoint: POST https://info.payu.in/merchant/postservice.php?form=2
+        Hash: sha512(key|command|var1|var2|var3|var4|salt)
+          var1 = mihpayid (PayU's internal payment ID)
+          var2 = net_amount_debit (exact rupee amount to refund)
+        """
+        import httpx
+
+        merchant_key  = self._settings.payu_merchant_key
+        merchant_salt = self._settings.payu_merchant_salt
+        timeout       = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
+        amount_str    = f"{amount:.2f}" if amount else "0.00"
+
+        # Build refund hash
+        hash_seq     = f"{merchant_key}|cancel_refund_transaction|{payment_id}|{amount_str}|||{merchant_salt}"
+        refund_hash  = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
+
+        try:
+            resp = httpx.post(
+                "https://info.payu.in/merchant/postservice.php?form=2",
+                data={
+                    "key":     merchant_key,
+                    "command": "cancel_refund_transaction",
+                    "var1":    payment_id,   # mihpayid
+                    "var2":    amount_str,   # net_amount_debit
+                    "hash":    refund_hash,
+                },
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data   = resp.json()
+            # PayU returns {"status": 1, "msg": "...", "request_id": "..."}
+            status = data.get("status", 0)
+
+            logger.info("PayU: refund for [%s] status=%s request_id=%s", payment_id, status, data.get("request_id"))
+            return RefundResult(
+                refund_id=str(data.get("request_id", "")),
+                payment_id=payment_id,
+                amount_paise=int(float(amount_str) * 100),
+                status="processed" if status == 1 else "failed",
+                provider=GatewayProvider.PAYU,
+                raw=data,
+                error=None if status == 1 else data.get("msg", "PayU refund failed"),
+            )
+        except Exception as exc:
+            logger.error("PayU: refund API call failed — %s", exc)
+            return RefundResult(
+                refund_id="",
+                payment_id=payment_id,
+                amount_paise=int(float(amount_str) * 100),
+                status="failed",
+                provider=GatewayProvider.PAYU,
+                error=str(exc),
+            )
 
     # -------------------------------------------------------------------------
     # FETCH ORDER STATUS

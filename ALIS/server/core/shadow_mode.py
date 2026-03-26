@@ -11,6 +11,7 @@ as a JSON blob.  Redis caches the enabled flag: alis:shadow:{org_id}
 
 All SLA / threshold values come from the policy engine — never literals.
 """
+from __future__ import annotations
 
 import json
 import logging

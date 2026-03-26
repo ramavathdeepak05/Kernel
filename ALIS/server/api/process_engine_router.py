@@ -26,7 +26,7 @@ Endpoints:
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from server.core.rbac import require_permission
 from server.process_engine.models import (
@@ -202,7 +202,7 @@ def update_definition(
     )
 
 
-@router.delete("/{process_id}", status_code=204)
+@router.delete("/{process_id}", status_code=204, response_model=None)
 def delete_definition(
     process_id: str,
     ctx=Depends(require_permission("process:manage")),

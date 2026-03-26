@@ -8,6 +8,7 @@ Periodic tasks for Moodle LMS integration:
 Run worker:
     celery -A server.worker worker --loglevel=info
 """
+from __future__ import annotations
 
 import logging
 

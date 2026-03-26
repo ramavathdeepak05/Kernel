@@ -3,6 +3,7 @@
 Subscribes: StudentEnrolled
 Publishes:  AttendanceFinalized (via AttendanceService)
 """
+from __future__ import annotations
 
 import logging
 from datetime import date

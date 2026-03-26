@@ -13,6 +13,7 @@ Usage:
 Loaded from environment variables. In production, set via .env file
 mounted into the Docker container. Never commit .env to git.
 """
+from __future__ import annotations
 
 from functools import lru_cache
 from typing import List
@@ -45,8 +46,11 @@ class Settings(BaseSettings):
     db_name: str = Field(default="alis_db")
     db_user: str = Field(default="postgres")
     db_password: str = Field(default="postgres")
-    db_pool_min: int = Field(default=2)
-    db_pool_max: int = Field(default=20)
+    db_pool_min: int = Field(default=5)
+    db_pool_max: int = Field(default=80)     # PgBouncer → Postgres; was 20
+    pgbouncer_enabled: bool = Field(default=False, description="Route DB connections through PgBouncer")
+    pgbouncer_host: str = Field(default="localhost", description="PgBouncer host (set to 'pgbouncer' in docker-compose)")
+    pgbouncer_port: int = Field(default=6432, description="PgBouncer port (5432 inside docker network)")
 
     @property
     def db_url(self) -> str:
@@ -203,6 +207,14 @@ class Settings(BaseSettings):
     twilio_auth_token: str = Field(default="")
     twilio_verify_service_sid: str = Field(default="")
     twilio_from_number: str = Field(default="")
+
+    # -------------------------------------------------------------------------
+    # WhatsApp (Meta Business API)
+    # -------------------------------------------------------------------------
+    whatsapp_phone_number_id: str = Field(default="", description="Meta Business phone number ID")
+    whatsapp_access_token: str = Field(default="", description="Meta Graph API permanent access token")
+    whatsapp_webhook_verify_token: str = Field(default="", description="Webhook verification token")
+    whatsapp_timeout_seconds: int = Field(default=10)
 
     # -------------------------------------------------------------------------
     # Payment Gateway (Razorpay primary, PayU fallback)

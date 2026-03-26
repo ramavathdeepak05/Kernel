@@ -4,6 +4,7 @@ Subscribes to:
   - LibraryOverdue     → notify borrower (fired by beat task)
   - CrisisSessionLogged → alert designated coordinator (future)
 """
+from __future__ import annotations
 
 import logging
 

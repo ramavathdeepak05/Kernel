@@ -12,6 +12,7 @@ Routes:
   POST   /phd/plagiarism/submit                 — submit plagiarism check
   POST   /phd/plagiarism/{report_id}/result     — record plagiarism result
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

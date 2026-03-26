@@ -38,6 +38,7 @@ Acceptance Criteria (E00-S08)
   • [x] Viewable in admin console (via get_decrypted_field_diffs)
   • [x] Tamper detection enabled (hash-chain from AuditLedger)
 """
+from __future__ import annotations
 
 import base64
 import json

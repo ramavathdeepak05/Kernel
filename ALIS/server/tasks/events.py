@@ -4,6 +4,7 @@ Domain Event Celery Tasks — P0-S17/S18
 Celery tasks that dispatch domain events to registered handlers,
 and retry failed events from the DB.
 """
+from __future__ import annotations
 
 import logging
 from typing import List
@@ -141,7 +142,7 @@ def compile_aqar_draft(self):
     logger.info("compile_aqar_draft: starting annual AQAR draft compilation")
 
     tenants = execute_system_query(
-        "SELECT id, name FROM organisations WHERE status = 'ACTIVE'"
+        "SELECT id, name FROM organizations WHERE status = 'ACTIVE'"
     )
     compiled = 0
     for tenant in tenants:
@@ -168,7 +169,6 @@ def compile_aqar_draft(self):
 from server.core.domain_events import DomainEventBus as _DomainEventBus
 
 
-@_DomainEventBus.register_handler("attendance.ta_assigned")
 async def _handle_ta_assigned(payload: dict) -> None:
     """Notify student they've been assigned as TA."""
     scope = payload.get("scope", "COURSE")
@@ -202,7 +202,9 @@ async def _handle_ta_assigned(payload: dict) -> None:
         )
 
 
-@_DomainEventBus.register_handler("attendance.ta_revoked")
+_DomainEventBus.subscribe("attendance.ta_assigned", _handle_ta_assigned)
+
+
 async def _handle_ta_revoked(payload: dict) -> None:
     """Notify student their TA assignment has been revoked."""
     course_code = payload.get("course_code", "")
@@ -224,3 +226,5 @@ async def _handle_ta_revoked(payload: dict) -> None:
             "notification.sms_requested",
             {"phone": phone, "message": message, "student_id": payload.get("student_id")},
         )
+
+_DomainEventBus.subscribe("attendance.ta_revoked", _handle_ta_revoked)

@@ -33,6 +33,7 @@ Invariants:
     - APPROVED / REJECTED are terminal states
     - All actions are audit-logged
 """
+from __future__ import annotations
 
 import json
 import logging

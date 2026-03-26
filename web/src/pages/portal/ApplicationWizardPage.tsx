@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { CheckCircle, ArrowRight, ArrowLeft, Save } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { CheckCircle, ArrowRight, ArrowLeft, Save, Loader2 } from "lucide-react";
+import { alisApi } from "@/lib/alis-api";
 
 const STEPS = [
   { n: 1, title: "Personal Details" },
@@ -117,7 +118,28 @@ function ReviewStep({ data }: { data: Record<string, string> }) {
   );
 }
 
-function PaymentStep() {
+function PaymentStep({ applicantId }: { applicantId: string }) {
+  const [paying, setPaying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handlePay = async () => {
+    setPaying(true);
+    setError(null);
+    try {
+      const result = await alisApi.post<{ payment_url?: string; order_id?: string }>(
+        "/admissions/applications/fee",
+        { applicant_id: applicantId, fee_type: "application", amount: 1000 }
+      );
+      if (result.payment_url) {
+        window.location.href = result.payment_url;
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Payment initiation failed.");
+    } finally {
+      setPaying(false);
+    }
+  };
+
   return (
     <div className="max-w-sm">
       <div className="portal-card p-6 mb-5">
@@ -131,20 +153,158 @@ function PaymentStep() {
           <span className="text-lg font-bold text-blue-600">₹1,000</span>
         </div>
       </div>
-      <button className="w-full h-12 rounded-xl font-semibold text-[14px] text-white transition-all"
-        style={{ background: "#2563eb", boxShadow: "0 4px 14px rgba(37,99,235,0.3)" }}>
-        Pay ₹1,000 via Razorpay
+      {error && <p className="text-[12px] text-red-500 mb-3">{error}</p>}
+      <button
+        onClick={handlePay}
+        disabled={paying}
+        className="w-full h-12 rounded-xl font-semibold text-[14px] text-white transition-all disabled:opacity-60 flex items-center justify-center gap-2"
+        style={{ background: "#2563eb", boxShadow: "0 4px 14px rgba(37,99,235,0.3)" }}
+      >
+        {paying ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</> : "Pay ₹1,000 via Razorpay"}
       </button>
     </div>
   );
 }
 
+// Maps wizard step → API save action
+async function saveStep(step: number, applicantId: string, data: Record<string, string>): Promise<void> {
+  switch (step) {
+    case 1:
+      await alisApi.patch(`/admissions/applications/${applicantId}/personal`, {
+        first_name: data.first_name,
+        last_name: data.last_name,
+        date_of_birth: data.dob,
+        gender: data.gender,
+        nationality: data.nationality,
+        category: data.category,
+      });
+      break;
+    case 2:
+      await alisApi.patch(`/admissions/applications/${applicantId}/address`, {
+        permanent_address: data["Permanent Address"],
+        city: data["City"],
+        state: data["State"],
+        pincode: data["Pincode"],
+        emergency_contact_name: data["Emergency Contact Name"],
+        emergency_contact_phone: data["Emergency Contact Phone"],
+      });
+      break;
+    case 3:
+    case 4:
+      await alisApi.post(`/admissions/applications/${applicantId}/qualifications`, {
+        level: step === 3 ? "10th" : "12th",
+        board: data["Board Name"],
+        institution: data[step === 3 ? "School Name" : "School/College"],
+        year_of_passing: data["Year of Passing"],
+        aggregate_pct: data[step === 3 ? "Percentage" : "Aggregate %"],
+      });
+      break;
+    case 5:
+      await alisApi.post(`/admissions/applications/${applicantId}/entrance-scores`, {
+        exam_name: data["Exam Name (JEE/NEET/CAT/etc.)"],
+        roll_number: data["Roll Number"],
+        score: data["Score / Percentile"],
+        rank: data["Rank"],
+        exam_year: data["Year of Exam"],
+      });
+      break;
+    case 6:
+      await alisApi.put(`/admissions/applications/${applicantId}/preferences`, {
+        program_name: data.program,
+        specialization: data.specialization,
+        intake_batch: data.intake_batch,
+        hostel_required: data.hostel === "yes",
+        scholarship_consideration: data.scholarship === "yes",
+      });
+      break;
+    case 9:
+      await alisApi.post(`/admissions/applications/${applicantId}/declaration`, {
+        declaration_accepted: true,
+      });
+      await alisApi.post(`/admissions/applications/${applicantId}/submit`, {});
+      break;
+    default:
+      break;
+  }
+}
+
 export default function ApplicationWizardPage() {
   const [step, setStep] = useState(1);
   const [data, setData] = useState<Record<string, string>>({});
+  const [applicantId, setApplicantId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   const canPrev = step > 1;
   const canNext = step < 10;
+
+  // On mount — start or resume application
+  useEffect(() => {
+    const stored = localStorage.getItem("alis_applicant_id");
+    if (stored) {
+      setApplicantId(stored);
+    } else {
+      // Start a new application (applicant_id comes from authenticated user's profile)
+      const userId = localStorage.getItem("user_id") ?? "";
+      if (userId) {
+        alisApi
+          .post<{ applicant_id: string }>(`/admissions/applications/${userId}/start`, {})
+          .then((res) => {
+            setApplicantId(res.applicant_id ?? userId);
+            localStorage.setItem("alis_applicant_id", res.applicant_id ?? userId);
+          })
+          .catch(() => {
+            // Fallback to user ID as applicant ID
+            setApplicantId(userId);
+          });
+      }
+    }
+  }, []);
+
+  const handleNext = useCallback(async () => {
+    if (!canNext) return;
+    if (!applicantId) { setStep((s) => s + 1); return; }
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await saveStep(step, applicantId, data);
+      if (step === 9) setSubmitted(true);
+      setStep((s) => s + 1);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : "Save failed. Please retry.");
+    } finally {
+      setSaving(false);
+    }
+  }, [step, canNext, applicantId, data]);
+
+  const handleSaveDraft = useCallback(async () => {
+    if (!applicantId) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await saveStep(step, applicantId, data);
+    } catch (err: unknown) {
+      setSaveError(err instanceof Error ? err.message : "Draft save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }, [step, applicantId, data]);
+
+  if (submitted && step < 10) {
+    return (
+      <div className="max-w-xl mx-auto px-6 py-16 text-center">
+        <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-4">
+          <CheckCircle className="w-7 h-7 text-emerald-500" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-2" style={{ fontFamily: "var(--font-family-sans)" }}>
+          Application Submitted
+        </h2>
+        <p className="text-[13px] text-slate-500">Your application has been submitted. You can track its status from the portal.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -152,7 +312,7 @@ export default function ApplicationWizardPage() {
         <h1 className="text-2xl font-bold text-slate-900" style={{ fontFamily: "var(--font-family-sans)", letterSpacing: "-0.02em" }}>
           Application Form
         </h1>
-        <p className="text-[13px] text-slate-500 mt-1">Step {step} of 10 · Draft auto-saved</p>
+        <p className="text-[13px] text-slate-500 mt-1">Step {step} of 10 · {saving ? "Saving…" : "Draft auto-saved"}</p>
       </div>
 
       <div className="flex gap-8">
@@ -196,29 +356,40 @@ export default function ApplicationWizardPage() {
             {step === 1 && <Step1 data={data} setData={setData} />}
             {step === 6 && <Step6 data={data} setData={setData} />}
             {step === 9 && <ReviewStep data={data} />}
-            {step === 10 && <PaymentStep />}
+            {step === 10 && <PaymentStep applicantId={applicantId ?? ""} />}
             {![1, 6, 9, 10].includes(step) && <GenericStep stepNum={step} />}
           </div>
+
+          {saveError && (
+            <p className="text-[12px] text-red-500 mb-3 px-1">{saveError}</p>
+          )}
 
           {/* Navigation */}
           <div className="flex items-center justify-between">
             <button
               onClick={() => canPrev && setStep(step - 1)}
-              disabled={!canPrev}
+              disabled={!canPrev || saving}
               className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all"
             >
               <ArrowLeft className="w-4 h-4" /> Back
             </button>
-            <button className="flex items-center gap-1.5 text-[12px] text-slate-400 hover:text-slate-600 transition-colors">
-              <Save className="w-3.5 h-3.5" /> Save draft
+            <button
+              onClick={handleSaveDraft}
+              disabled={saving || !applicantId}
+              className="flex items-center gap-1.5 text-[12px] text-slate-400 hover:text-slate-600 transition-colors disabled:opacity-40"
+            >
+              {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Save draft
             </button>
             {canNext && (
               <button
-                onClick={() => setStep(step + 1)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold text-white transition-all"
+                onClick={handleNext}
+                disabled={saving}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold text-white transition-all disabled:opacity-60"
                 style={{ background: "#2563eb" }}
               >
-                Next <ArrowRight className="w-4 h-4" />
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {step === 9 ? "Submit" : "Next"} {!saving && <ArrowRight className="w-4 h-4" />}
               </button>
             )}
           </div>

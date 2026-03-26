@@ -11,6 +11,7 @@ Publishes (via domain events in service layer):
   - ResultsDeclared      (grades.py)
   - ReEvalDecided        (reeval.py)
 """
+from __future__ import annotations
 
 import logging
 

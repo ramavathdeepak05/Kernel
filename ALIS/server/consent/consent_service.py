@@ -18,6 +18,7 @@ Hard Constraints:
 - %s placeholders throughout
 - IDs are UUID strings
 """
+from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone, timedelta

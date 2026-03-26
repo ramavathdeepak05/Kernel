@@ -1,4 +1,5 @@
 """E12-S05 — Alumni Network (connections + mentorship)"""
+from __future__ import annotations
 
 import logging
 import uuid

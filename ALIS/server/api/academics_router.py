@@ -1,9 +1,10 @@
 """E05 — Academics API Router"""
+from __future__ import annotations
 
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from server.core.rbac import Permission, require_permission
@@ -171,7 +172,7 @@ async def get_faculty_assignments(request: Request, faculty_id: str,
     return JSONResponse(content={"assignments": items, "total": len(items)})
 
 
-@router.delete("/faculty/assignments/{assignment_id}", status_code=204)
+@router.delete("/faculty/assignments/{assignment_id}", status_code=204, response_model=None)
 @require_permission(Permission.STUDENT_CREATE)
 async def unassign_faculty(request: Request, assignment_id: str) -> None:
     FacultyAssignmentService.unassign(
@@ -204,7 +205,7 @@ async def get_timetable(request: Request, academic_year: str = "",
     return JSONResponse(content=_jsonify({"slots": slots, "total": len(slots)}))
 
 
-@router.delete("/timetable/{slot_id}", status_code=204)
+@router.delete("/timetable/{slot_id}", status_code=204, response_model=None)
 @require_permission(Permission.STUDENT_CREATE)
 async def delete_timetable_slot(request: Request, slot_id: str) -> None:
     TimetableService.delete_slot(

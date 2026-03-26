@@ -16,6 +16,7 @@ Authorization hierarchy (checked in order):
   3. User has active session-level TA for this specific session → allow
   4. → 403
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

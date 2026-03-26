@@ -6,6 +6,7 @@ LAYER: Orchestration (FastAPI)
 
 Exposes the Workflow Engine's monitoring endpoints.
 """
+from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from typing import List, Dict, Any, Optional

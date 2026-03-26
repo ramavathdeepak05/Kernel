@@ -18,6 +18,7 @@ Duplicate detection
 Jaro-Winkler similarity ≥ 0.90 on (name, dob, phone) combination.
 All rows audited with source='migration_pipeline' in audit_ledger.
 """
+from __future__ import annotations
 
 import csv
 import io

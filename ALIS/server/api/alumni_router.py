@@ -40,6 +40,7 @@ Endpoints:
            POST   /alumni/network/mentorship/{id}/respond
            GET    /alumni/network/mentorship/mine
 """
+from __future__ import annotations
 
 import logging
 from typing import Optional

@@ -4,6 +4,7 @@ ALIS Core Schema - Pydantic Models for API I/O
 This module contains Pydantic models for request/response validation.
 Separate from core models to maintain clean separation.
 """
+from __future__ import annotations
 
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -108,7 +109,28 @@ class OrganizationRead(BaseModel):
     updated_at: Optional[datetime]
 
 
-from typing import Dict, Any
+from typing import Dict, Any, List
+
+# --- Timeline Event Schema (Phase B — Entity Debugger) ---
+
+class TimelineEvent(BaseModel):
+    """A single formatted entry in an entity's decision/activity timeline.
+
+    Returned by GET /api/v1/audit/timeline/{entity_type}/{entity_id}.
+    Designed for direct UI consumption — labels, colors, and icons are
+    pre-computed so the frontend renders without business logic.
+    """
+    id: int
+    timestamp: str                      # ISO 8601 UTC
+    action: str                         # raw AuditAction value
+    label: str                          # "Policy Evaluated (v3, Rule r1)"
+    actor_id: str
+    actor_role: Optional[str] = None
+    color: str                          # "green" | "blue" | "amber" | "red" | "muted"
+    icon: str                           # "check" | "ai" | "lock" | "alert" | "clock" | "zap"
+    metadata: Dict[str, Any] = {}
+    formatted_detail: Optional[str] = None  # metadata["formatted"] if present
+
 
 # --- Event Schema (E02-S09) ---
 

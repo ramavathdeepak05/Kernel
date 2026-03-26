@@ -1,4 +1,5 @@
 """E10-S05 — Announcements"""
+from __future__ import annotations
 
 import logging
 import uuid

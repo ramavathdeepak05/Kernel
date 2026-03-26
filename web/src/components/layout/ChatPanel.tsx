@@ -11,6 +11,9 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { invokeRailAgent } from "../../lib/agent-gateway";
+import { useAuthStore } from "../../store/authStore";
+import { useALISRole } from "../../hooks/useALISRole";
 
 interface Message {
   id: string;
@@ -34,40 +37,7 @@ const QUICK_ACTIONS = [
   { label: "Eligible batch", icon: Users, intent: "run batch eligibility check" },
 ];
 
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: "1",
-    role: "ai",
-    content: "Good morning. I've reviewed the overnight batch.\n\n47 applications are awaiting document review. 3 eligibility checks returned borderline results — these require your judgement.\n\nWhat would you like to work on?",
-    timestamp: new Date(Date.now() - 4 * 60000),
-    actionCards: [
-      { label: "Open doc review queue", description: "47 pending", intent: "open doc queue", variant: "review" },
-      { label: "Review borderline cases", description: "3 flagged", intent: "show borderline", variant: "approve" },
-    ],
-  },
-  {
-    id: "2",
-    role: "ai",
-    content: "I've analysed David Chen's profile.\n\nHe has passed all eligibility checks — 12th: 91.4%, JEE rank: 2,847, interview score: 84/100.\n\nShould I draft the admission letter?",
-    timestamp: new Date(Date.now() - 2 * 60000),
-    actionCards: [
-      { label: "Draft admit letter", description: "Route to Dean for signature", intent: "draft admit letter david chen", variant: "approve" },
-      { label: "View full profile", description: "APP-2025-000312", intent: "open david chen profile", variant: "default" },
-    ],
-  },
-  {
-    id: "3",
-    role: "user",
-    content: "Yes, route to the Dean for final signature.",
-    timestamp: new Date(Date.now() - 90000),
-  },
-  {
-    id: "4",
-    role: "ai",
-    content: "Done. Admission letter drafted and routed to Dean Sharma's approval queue.\n\nReference: ADM-2025-0312 · Expected turnaround: 2–4 hours based on her current load.",
-    timestamp: new Date(Date.now() - 80000),
-  },
-];
+const INITIAL_MESSAGES: Message[] = [];
 
 function formatTime(date: Date): string {
   return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
@@ -190,8 +160,12 @@ export default function ChatPanel({ isOpen, onToggle, moduleContext = "admission
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [agentContext, setAgentContext] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const { user } = useAuthStore();
+  const { role } = useALISRole();
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -199,7 +173,7 @@ export default function ChatPanel({ isOpen, onToggle, moduleContext = "admission
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || !user) return;
 
     const userMsg: Message = {
       id: Date.now().toString(),
@@ -212,17 +186,36 @@ export default function ChatPanel({ isOpen, onToggle, moduleContext = "admission
     setInput("");
     setIsTyping(true);
 
-    // Simulate AI response
-    await new Promise((r) => setTimeout(r, 1200 + Math.random() * 600));
+    const recentMessages = messages.slice(-5).map((m) => ({
+      role: m.role === "ai" ? "agent" : "user",
+      text: m.content,
+    }));
+
+    const resp = await invokeRailAgent({
+      actorId: user.id,
+      orgId: user.tenant_id,
+      role,
+      view: moduleContext,
+      message: text,
+      agentContext,
+      recentMessages,
+    });
+
     setIsTyping(false);
 
-    const aiMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "ai",
-      content: getSimulatedResponse(text),
-      timestamp: new Date(),
-    };
-    setMessages((prev) => [...prev, aiMsg]);
+    if (resp.agentContext !== undefined) {
+      setAgentContext(resp.agentContext ?? null);
+    }
+
+    if (resp.message) {
+      const aiMsg: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "ai",
+        content: resp.message,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, aiMsg]);
+    }
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -305,7 +298,7 @@ export default function ChatPanel({ isOpen, onToggle, moduleContext = "admission
         <div className="flex items-center gap-2">
           <button
             className="btn-ghost w-8 h-8 p-0 flex items-center justify-center"
-            onClick={() => setMessages(INITIAL_MESSAGES)}
+            onClick={() => { setMessages([]); setAgentContext(null); }}
             title="Clear chat"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -403,19 +396,3 @@ export default function ChatPanel({ isOpen, onToggle, moduleContext = "admission
   );
 }
 
-function getSimulatedResponse(input: string): string {
-  const q = input.toLowerCase();
-  if (q.includes("merit") || q.includes("generate")) {
-    return "Generating merit list for B.Tech Computer Science 2025 intake.\n\nRunning composite score formula: 12th marks (35%) + JEE rank (50%) + interview (15%).\n\nEstimated completion: ~45 seconds. I'll notify you when the ranked list is ready for your review.";
-  }
-  if (q.includes("doc") || q.includes("pending") || q.includes("queue")) {
-    return "47 applications have pending document reviews.\n\n· 23 — awaiting 12th marksheet upload\n· 14 — transfer certificate pending\n· 8  — category certificate not uploaded\n· 2  — document quality rejected (re-upload requested)\n\nShall I send batch reminder SMS to all 47 applicants?";
-  }
-  if (q.includes("eligib")) {
-    return "Batch eligibility check initiated for 124 submitted applications.\n\nRunning rule engine against program-specific criteria (B.Tech: 60% PCM, MBA: 50% aggregate + CAT score).\n\nI'll surface the ineligible and borderline cases for your review once complete.";
-  }
-  if (q.includes("borderline") || q.includes("borderline")) {
-    return "3 borderline eligibility cases flagged:\n\n1. Priya Sharma — 12th: 59.8% (threshold 60%) — gap of 0.2%\n2. Arjun Mehta — JEE rank: 51,247 (threshold 50,000)\n3. Neha Gupta — Category cert not yet verified (provisional)\n\nWould you like to review each case individually or apply a batch override with reason logging?";
-  }
-  return "Understood. Processing your request for the admissions module.\n\nIs there anything specific you'd like me to prioritise — document reviews, eligibility checks, or offer letter generation?";
-}

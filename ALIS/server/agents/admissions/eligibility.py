@@ -38,6 +38,7 @@ Hard Constraints:
     - Uses AIGateway.get_llm() exclusively for inference.
     - Output conforms to AIResponseSchema (E00-S06).
 """
+from __future__ import annotations
 
 from typing import TypedDict, Dict, Any, Optional
 import json

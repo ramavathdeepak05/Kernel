@@ -14,6 +14,7 @@ Layer Compliance:
 - Checks Global Locks (Layer 4) before generation
 - Logs all generation events (Audit)
 """
+from __future__ import annotations
 import hashlib
 import os
 from datetime import datetime, timezone

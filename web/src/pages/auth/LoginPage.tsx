@@ -7,6 +7,9 @@ import { authService } from "@/services/auth";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [tenantId, setTenantId] = useState(
+    (import.meta.env.VITE_TENANT_ID as string | undefined) || ""
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const { setAuth } = useAuthStore();
@@ -17,7 +20,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const data = await authService.login(email, password);
+      const data = await authService.login(email, password, tenantId || undefined);
       setAuth(data.user, data.access_token);
       navigate("/admissions");
     } catch (err: unknown) {
@@ -127,6 +130,26 @@ export default function LoginPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#64748b" }}>
+                Institution ID
+              </label>
+              <input
+                type="text"
+                value={tenantId}
+                onChange={(e) => setTenantId(e.target.value)}
+                placeholder="e.g. woxsen"
+                className="w-full h-11 px-4 rounded-xl outline-none text-[13px] transition-all"
+                style={{
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: "#e2e8f0",
+                  fontFamily: "var(--font-family-mono)",
+                }}
+                onFocus={(e) => { e.currentTarget.style.borderColor = "rgba(129,140,248,0.4)"; e.currentTarget.style.boxShadow = "0 0 0 3px rgba(129,140,248,0.06)"; }}
+                onBlur={(e) => { e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+              />
+            </div>
             <div>
               <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: "#64748b" }}>
                 Email

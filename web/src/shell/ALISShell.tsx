@@ -27,7 +27,10 @@ import { PrimaryCanvas } from './PrimaryCanvas'
 import { AgentRail } from './AgentRail/AgentRail'
 import { AgentBottomSheet } from './AgentBottomSheet'
 import { useALISRole } from '../hooks/useALISRole'
+import { useAgentContext } from '../hooks/useAgentContext'
+import { useAgentCanvasSync } from '../hooks/useAgentCanvasSync'
 import { MODULE_ICONS, MODULE_LABELS, MODULE_ROUTES } from '../lib/role-config'
+import { CampusSwitcher } from '../components/CampusSwitcher'
 
 function useMobile() {
   const [isMobile, setIsMobile] = useState(() =>
@@ -106,6 +109,9 @@ function MobileHeader({ onHamburger }: { onHamburger: () => void }) {
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 13 }}>A</span>
       </div>
       <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: 0.5 }}>ALIS</span>
+      <div style={{ marginLeft: 'auto' }}>
+        <CampusSwitcher compact={false} />
+      </div>
     </header>
   )
 }
@@ -250,6 +256,11 @@ export function ALISShell() {
 
   const closeNav = useCallback(() => setNavOpen(false), [])
   const closeSheet = useCallback(() => setSheetOpen(false), [])
+
+  // Agent rail intelligence — fires on every canvas view change
+  useAgentContext()
+  // Sync agent-dispatched CanvasActions to the primary canvas
+  useAgentCanvasSync()
 
   // Desktop layout
   if (!isMobile) {

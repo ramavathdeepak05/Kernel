@@ -45,6 +45,7 @@ Must Align With
 - architecture.md §10 (Policy Engine — Rules-as-Data)
 - SKILL.md invariant 2 (Configuration is data, not code)
 """
+from __future__ import annotations
 
 import json
 import logging
@@ -76,6 +77,21 @@ class PolicyResult:
     policy_id: Optional[str] = None
     policy_version: Optional[int] = None
     detail: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def formatted_reason(self) -> str:
+        """Human-readable decision summary for ops teams and audit display.
+
+        Example output:
+            Decision: ELIGIBLE
+            Reason: ATTENDANCE_MEETS_THRESHOLD (Policy v3, Rule r1)
+        """
+        parts = [f"Decision: {self.verdict}"]
+        if self.reason_code:
+            rule_ref = f"Rule {self.rule_id}" if self.rule_id else "default"
+            policy_ref = f"Policy v{self.policy_version}" if self.policy_version else "unversioned"
+            parts.append(f"Reason: {self.reason_code} ({policy_ref}, {rule_ref})")
+        return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +247,8 @@ class PolicyEngine:
         context: Dict[str, Any],
         tenant_id: str,
         default_verdict: str = "ELIGIBLE",
+        actor_id: str = "system",
+        entity_id: Optional[str] = None,
     ) -> PolicyResult:
         """Evaluate a policy against the provided context.
 
@@ -239,29 +257,67 @@ class PolicyEngine:
         call site — use "ELIGIBLE" for permissive defaults, "INELIGIBLE"
         for strict defaults).
 
-        The returned PolicyResult.policy_version MUST be stored in the
-        audit log for regulatory traceability.
+        Every evaluation is automatically traced to the immutable audit
+        ledger (action=POLICY_EVALUATED) with the full inputs snapshot,
+        the condition expression that fired, and a human-readable reason.
 
         Args:
             policy_id:       Dot-notation policy key e.g. "attendance_eligibility"
             context:         Runtime data dict — shape defined per policy
             tenant_id:       Institution UUID
             default_verdict: Outcome if no rule fires
+            actor_id:        Who triggered this evaluation (default "system")
+            entity_id:       Business entity being evaluated (e.g. student UUID)
 
         Returns:
-            PolicyResult with verdict, reason_code, rule_id, policy_version
+            PolicyResult with verdict, reason_code, rule_id, policy_version,
+            and a formatted_reason property for human-readable display.
         """
+        # Local import avoids circular dependency (audit → policy_engine)
+        from server.core.audit import AuditLog, AuditAction
+
+        def _trace(result: PolicyResult, condition: Optional[str] = None) -> None:
+            """Persist a decision trace to the immutable audit ledger."""
+            try:
+                AuditLog.log(
+                    action=AuditAction.POLICY_EVALUATED,
+                    actor_id=actor_id,
+                    actor_type="system",
+                    actor_role=None,
+                    entity_type="policy",
+                    entity_id=entity_id or policy_id,
+                    tenant_id=tenant_id,
+                    metadata={
+                        "policy_id": policy_id,
+                        "policy_version": result.policy_version,
+                        "rule_id": result.rule_id,
+                        "verdict": result.verdict,
+                        "reason_code": result.reason_code,
+                        "condition": condition,
+                        "inputs_snapshot": context,
+                        "formatted": result.formatted_reason,
+                    },
+                )
+            except Exception as exc:
+                # Trace failure must never block the evaluation result
+                logger.error(
+                    "policy_engine: audit trace failed for policy '%s' — %s",
+                    policy_id, exc,
+                )
+
         policy = self._load_policy(policy_id, tenant_id)
         if policy is None:
             logger.warning(
                 "policy_engine: no APPROVED policy '%s' for tenant %s — returning default '%s'",
                 policy_id, tenant_id, default_verdict,
             )
-            return PolicyResult(
+            result = PolicyResult(
                 verdict=default_verdict,
                 reason_code="NO_POLICY_FOUND",
                 policy_id=policy_id,
             )
+            _trace(result)
+            return result
 
         rules: List[Dict[str, Any]] = policy.get("rules", [])
         version: int = policy.get("version", 0)
@@ -274,39 +330,51 @@ class PolicyEngine:
                 continue
 
             # Build namespace: rule-level params + context variables
+            # Exclude known structural keys; auto_execute_if is reserved for Phase D
             rule_params = {
                 k: v for k, v in rule.items()
-                if k not in {"id", "condition", "on_pass", "on_fail", "reason_code"}
+                if k not in {"id", "condition", "on_pass", "on_fail", "reason_code", "auto_execute_if"}
             }
             namespace = _build_evaluator_namespace(context, rule_params)
 
             passed = _safe_eval(condition, namespace)
 
             if passed and rule.get("on_pass"):
-                return PolicyResult(
+                result = PolicyResult(
                     verdict=rule["on_pass"],
                     reason_code=rule.get("reason_code"),
                     rule_id=rule_id,
                     policy_id=policy_id,
                     policy_version=version,
                 )
+                # Phase D: evaluate auto_execute_if if policy master switch is on
+                if policy.get("allow_auto_execute", False):
+                    auto_cond = rule.get("auto_execute_if", "")
+                    if auto_cond and _safe_eval(auto_cond, _build_evaluator_namespace(context, {})):
+                        result.detail["auto_execute"] = True
+                _trace(result, condition)
+                return result
 
             if not passed and rule.get("on_fail"):
-                return PolicyResult(
+                result = PolicyResult(
                     verdict=rule["on_fail"],
                     reason_code=rule.get("reason_code"),
                     rule_id=rule_id,
                     policy_id=policy_id,
                     policy_version=version,
                 )
+                _trace(result, condition)
+                return result
 
-        # No rule fired
-        return PolicyResult(
+        # No rule fired — return the caller-specified default
+        result = PolicyResult(
             verdict=default_verdict,
             reason_code="NO_RULE_FIRED",
             policy_id=policy_id,
             policy_version=version,
         )
+        _trace(result)
+        return result
 
     # ------------------------------------------------------------------
     # Simple value lookup (no rule evaluation)

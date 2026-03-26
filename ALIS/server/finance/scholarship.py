@@ -1,4 +1,5 @@
 """E07-S05 — Scholarship Management"""
+from __future__ import annotations
 
 import logging
 import uuid

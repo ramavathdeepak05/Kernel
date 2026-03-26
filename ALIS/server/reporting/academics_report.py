@@ -1,4 +1,5 @@
 """E11-S03 — Academic Reports"""
+from __future__ import annotations
 
 import logging
 from server.db_service import execute_query

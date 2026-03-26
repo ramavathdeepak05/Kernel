@@ -63,7 +63,7 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      test: ["CMD", "ollama", "list"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -101,13 +101,15 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DB_HOST: postgres
+      DB_HOST: pgbouncer        # route through PgBouncer, not directly to postgres
+      DB_PORT: 5432
+      PGBOUNCER_ENABLED: "true"
       REDIS_HOST: redis
       OLLAMA_BASE_URL: http://ollama:11434
       MINIO_ENDPOINT: minio:9000
       VAULT_ADDR: http://vault:8200
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -143,15 +145,19 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DB_HOST: postgres
+      DB_HOST: pgbouncer
+      DB_PORT: 5432
+      PGBOUNCER_ENABLED: "true"
       REDIS_HOST: redis
       OLLAMA_BASE_URL: http://ollama:11434
       MINIO_ENDPOINT: minio:9000
     depends_on:
-      postgres:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./ALIS:/app
     command: >
       celery -A server.worker worker
       --loglevel=info
@@ -176,10 +182,40 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./ALIS:/app
     command: >
       celery -A server.worker beat
       --loglevel=info
       --schedule=/tmp/celerybeat-schedule
+
+  # ---------------------------------------------------------------------------
+  # PgBouncer (connection pooler — session mode, max 1000 clients → 80 backend)
+  # ---------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1-p1
+    container_name: alis_pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-alis_db}
+      POOL_MODE: session
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 80
+      SERVER_IDLE_TIMEOUT: 30    # free idle backend after 30s
+      CLIENT_IDLE_TIMEOUT: 600   # close idle client after 10m
+      SERVER_RESET_QUERY: DISCARD ALL
+    ports:
+      - "6432:5432"              # 6432 externally, 5432 inside alis_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
 
   # ---------------------------------------------------------------------------
   # HashiCorp Vault (P0-2: exam paper encryption + CoE-only decrypt + audit)

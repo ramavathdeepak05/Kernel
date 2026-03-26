@@ -11,6 +11,7 @@ Beat schedule entry (added in worker.py):
         "schedule": crontab(hour=20, minute=30),
     }
 """
+from __future__ import annotations
 
 import logging
 import uuid

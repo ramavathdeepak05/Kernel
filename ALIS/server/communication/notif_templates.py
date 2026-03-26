@@ -1,4 +1,5 @@
 """E10-S01 — DB-backed Notification Template Management"""
+from __future__ import annotations
 
 import logging
 import uuid

@@ -19,6 +19,7 @@ Layer Compliance:
 - Layer 5: RBAC+ enforced for all access
 - Audit: All operations logged
 """
+from __future__ import annotations
 
 import hashlib
 import uuid

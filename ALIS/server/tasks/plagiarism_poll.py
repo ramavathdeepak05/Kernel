@@ -3,6 +3,7 @@
 Runs every 5 minutes (300 s).  Finds all PENDING plagiarism reports that have
 a Drillbit submission ID and calls PlagiarismService.poll_result() for each.
 """
+from __future__ import annotations
 
 import logging
 

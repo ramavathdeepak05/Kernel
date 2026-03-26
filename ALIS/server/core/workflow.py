@@ -25,6 +25,7 @@ Acceptance Criteria:
 Blueprint: This is a Rule Engine (Blueprint A) wrapper that orchestrates
 domain-specific logic. The engine itself contains NO domain logic.
 """
+from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any

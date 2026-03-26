@@ -5,6 +5,7 @@ Eligibility gates:
   2. Attendance must meet minimum threshold (AttendanceFinalized confirms this)
   3. No pending dues
 """
+from __future__ import annotations
 
 import logging
 import uuid

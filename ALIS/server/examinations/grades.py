@@ -4,6 +4,7 @@ Grading scale is configurable via PolicyStore:
   exams.grading.scale = "10" | "4" | "percentage"
   exams.grading.grade_table = {...}  (marks → grade → points mapping)
 """
+from __future__ import annotations
 
 import logging
 import uuid

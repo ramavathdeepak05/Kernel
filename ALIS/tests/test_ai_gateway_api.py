@@ -60,7 +60,7 @@ from server.core.exceptions import PermissionDeniedError
 from server.agents.admissions.registry import AdmissionsAgentRegistry
 
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Tenant-ID": "test-tenant"})
 
 
 # ============================================================================

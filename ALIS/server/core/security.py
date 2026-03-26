@@ -25,6 +25,7 @@ Acceptance Criteria (E01-S11):
 - [x] No sensitive error leakage
 - [x] Default deny posture
 """
+from __future__ import annotations
 
 import hashlib
 import secrets
@@ -168,6 +169,8 @@ _USER_SESS_PFX  = "alis:user_sess:"
 _FAIL_PREFIX    = "alis:fail:"
 _LOCKOUT_PREFIX = "alis:lockout:"
 _RATE_PREFIX    = "alis:rate:"
+_PWRESET_PREFIX  = "alis:pwreset:"
+_GUARDIAN_OTP_PFX = "alis:gotp:"
 
 
 def _get_redis() -> "_redis_lib.Redis":
@@ -424,6 +427,38 @@ class SessionManager:
             logger.exception("SessionManager.revoke_all_sessions Redis error")
             return 0
 
+    @classmethod
+    def list_user_sessions(cls, user_id: str) -> list:
+        """
+        Return a summary list of all sessions for a user.
+
+        Reads the `alis:user_sess:{user_id}` Redis set, loads each session,
+        and returns metadata safe to expose via API (no token hashes).
+        """
+        try:
+            r = _get_redis()
+            session_ids = r.smembers(_USER_SESS_PFX + user_id)
+            result = []
+            for sid in session_ids:
+                session = cls._load(r, sid)
+                if session is None:
+                    continue
+                result.append({
+                    "session_id": session.id,
+                    "ip_address": session.ip_address,
+                    "user_agent": session.user_agent,
+                    "device_id": session.device_id,
+                    "created_at": session.created_at.isoformat() if session.created_at else None,
+                    "last_activity": session.last_activity.isoformat() if session.last_activity else None,
+                    "expires_at": session.expires_at.isoformat() if session.expires_at else None,
+                    "is_active": session.is_active,
+                    "is_expired": session.is_expired,
+                })
+            return sorted(result, key=lambda s: s["last_activity"] or "", reverse=True)
+        except Exception:
+            logger.exception("SessionManager.list_user_sessions Redis error")
+            return []
+
 
 # --- Rate Limiter ---
 
@@ -458,6 +493,120 @@ class RateLimiter:
         except Exception:
             logger.exception("RateLimiter.check Redis error — failing open")
             return True  # fail open — don't block traffic if Redis is down
+
+
+# --- Password Reset ---
+
+class PasswordResetManager:
+    """
+    Redis-backed password reset token management.
+
+    Tokens are:
+    - Cryptographically random (32 bytes URL-safe)
+    - Single-use — consumed on validate_and_consume()
+    - 30-minute TTL
+    - One token per user (new request overwrites the old one)
+
+    Redis key pattern: alis:pwreset:{token_hash} → JSON{user_id, tenant_id}
+    """
+
+    _TTL = 1800  # 30 minutes
+
+    @classmethod
+    def generate_token(cls, user_id: str, tenant_id: str) -> str:
+        """Generate and store a reset token. Returns the raw (unhashed) token."""
+        token = TokenGenerator.generate_token()
+        token_hash = TokenGenerator.hash_token(token)
+        try:
+            r = _get_redis()
+            r.setex(
+                _PWRESET_PREFIX + token_hash,
+                cls._TTL,
+                json.dumps({"user_id": user_id, "tenant_id": tenant_id}),
+            )
+        except Exception:
+            logger.exception("PasswordResetManager.generate_token Redis error")
+            raise
+        return token
+
+    @classmethod
+    def validate_and_consume(cls, token: str) -> Optional[dict]:
+        """
+        Validate a reset token and atomically consume it (single-use).
+
+        Returns {"user_id": ..., "tenant_id": ...} if valid, None if expired/invalid.
+        """
+        try:
+            r = _get_redis()
+            token_hash = TokenGenerator.hash_token(token)
+            key = _PWRESET_PREFIX + token_hash
+            data = r.get(key)
+            if not data:
+                return None
+            r.delete(key)  # single-use: consume immediately
+            return json.loads(data)
+        except Exception:
+            logger.exception("PasswordResetManager.validate_and_consume Redis error")
+            return None
+
+
+# --- Guardian OTP ---
+
+class GuardianOTPManager:
+    """
+    Redis-backed OTP for guardian (parent) portal login.
+
+    OTP is a 6-digit numeric code, valid for 10 minutes, single-use.
+    Redis key: alis:gotp:{sha256(phone)} → JSON{otp, student_id, tenant_id}
+
+    After verification, the OTP record is consumed and the caller creates
+    a scoped session for the PARENT role.
+    """
+
+    _TTL = 600  # 10 minutes
+
+    @classmethod
+    def _key(cls, phone: str) -> str:
+        return _GUARDIAN_OTP_PFX + TokenGenerator.hash_token(phone)
+
+    @classmethod
+    def generate(cls, phone: str, student_id: str, tenant_id: str) -> str:
+        """Generate a 6-digit OTP, store in Redis, return the OTP."""
+        import random
+        otp = f"{random.SystemRandom().randint(0, 999999):06d}"
+        try:
+            r = _get_redis()
+            r.setex(
+                cls._key(phone),
+                cls._TTL,
+                json.dumps({"otp": otp, "student_id": student_id, "tenant_id": tenant_id}),
+            )
+        except Exception:
+            logger.exception("GuardianOTPManager.generate Redis error")
+            raise
+        return otp
+
+    @classmethod
+    def verify_and_consume(cls, phone: str, otp: str) -> Optional[dict]:
+        """
+        Verify OTP and consume it (single-use).
+
+        Returns {"student_id": ..., "tenant_id": ...} on success, None if invalid/expired.
+        """
+        try:
+            r = _get_redis()
+            key = cls._key(phone)
+            data = r.get(key)
+            if not data:
+                return None
+            record = json.loads(data)
+            if record.get("otp") != otp:
+                return None
+            r.delete(key)
+            return {"student_id": record["student_id"], "tenant_id": record["tenant_id"]}
+        except Exception:
+            logger.exception("GuardianOTPManager.verify_and_consume Redis error")
+            return None
 
 
 # --- Input Validation ---
@@ -613,6 +762,7 @@ class TenantMiddleware:
         "/docs",
         "/redoc",
         "/openapi.json",
+        "/api/v1/ai/health",      # AI subsystem health — unauthenticated probe
     }
 
     def __init__(self, app):

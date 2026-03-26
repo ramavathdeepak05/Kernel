@@ -1,4 +1,5 @@
 """E07-S01 — Fee Structure Management"""
+from __future__ import annotations
 
 import logging
 import uuid

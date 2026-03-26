@@ -3,6 +3,7 @@
 Provides the `dispatch()` class method used by all other modules.
 Replaces the in-memory _logs dict in the legacy NotificationDispatcher.
 """
+from __future__ import annotations
 
 import logging
 import uuid

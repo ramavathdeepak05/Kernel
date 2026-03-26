@@ -1,4 +1,5 @@
 """E12-S04 — Recruitment Drives"""
+from __future__ import annotations
 
 import json
 import logging

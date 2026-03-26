@@ -116,11 +116,11 @@ def upgrade() -> None:
         -- Exemption active?
         EXISTS (
             SELECT 1 FROM student_fee_exemptions e
-            WHERE e.student_id = si.student_id
-              AND e.org_id = si.org_id
+            WHERE e.student_id::text = si.student_id::text
+              AND e.org_id::text = si.org_id::text
               AND e.status = 'ACTIVE'
               AND e.valid_until >= CURRENT_DATE
-              AND (e.invoice_id IS NULL OR e.invoice_id = si.id)
+              AND (e.invoice_id IS NULL OR e.invoice_id::text = si.id::text)
         ) AS exemption_active,
         -- Promissory cover sufficient?
         (

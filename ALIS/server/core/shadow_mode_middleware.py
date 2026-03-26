@@ -11,6 +11,7 @@ nightly task can compute divergence metrics even for comms paths.
 Usage (registered in main.py):
     app.add_middleware(ShadowModeMiddleware)
 """
+from __future__ import annotations
 
 import logging
 import time

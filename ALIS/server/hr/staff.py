@@ -1,4 +1,5 @@
 """E08-S01 — Staff Profile Management"""
+from __future__ import annotations
 
 import json
 import logging

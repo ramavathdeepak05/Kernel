@@ -36,6 +36,9 @@ ENV/
 
 # Environment variables
 .env
+.env.production
+.env.staging
+nginx/certs/*.pem
 
 # Database
 *.db

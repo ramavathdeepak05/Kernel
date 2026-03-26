@@ -8,6 +8,7 @@ Uses Qwen (via AIGateway) to score each student's default risk based on:
 
 Falls back to rule-based scoring if Ollama is unavailable.
 """
+from __future__ import annotations
 
 import logging
 

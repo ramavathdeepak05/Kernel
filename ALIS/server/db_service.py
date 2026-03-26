@@ -29,6 +29,7 @@ Usage:
     # System-level (bypasses tenant scoping - use sparingly):
     result = execute_system_query("SELECT count(*) FROM pg_stat_activity")
 """
+from __future__ import annotations
 
 import logging
 import re
@@ -86,11 +87,14 @@ async def init_pool() -> None:
         logger.warning("asyncpg not installed — skipping async pool init.")
         return
     from server.core.settings import settings
+    # Route through PgBouncer when enabled (session mode, no connection limit worries)
+    db_host = settings.pgbouncer_host if settings.pgbouncer_enabled else settings.db_host
+    db_port = settings.pgbouncer_port if settings.pgbouncer_enabled else settings.db_port
     _asyncpg_pool = await asyncpg.create_pool(
         user=settings.db_user,
         password=settings.db_password,
-        host=settings.db_host,
-        port=settings.db_port,
+        host=db_host,
+        port=db_port,
         database=settings.db_name,
         min_size=settings.db_pool_min,
         max_size=settings.db_pool_max,
@@ -98,7 +102,8 @@ async def init_pool() -> None:
         init=_init_connection,
         command_timeout=30,
     )
-    logger.info("asyncpg pool initialised (min=%s max=%s).", settings.db_pool_min, settings.db_pool_max)
+    via = f"pgbouncer ({db_host}:{db_port})" if settings.pgbouncer_enabled else f"postgres ({db_host}:{db_port})"
+    logger.info("asyncpg pool initialised via %s (min=%s max=%s).", via, settings.db_pool_min, settings.db_pool_max)
 
 
 async def close_pool() -> None:
@@ -122,16 +127,19 @@ def get_db_pool():
     if _pg_pool is None and psycopg2:
         try:
             from server.core.settings import settings
+            db_host = settings.pgbouncer_host if settings.pgbouncer_enabled else settings.db_host
+            db_port = settings.pgbouncer_port if settings.pgbouncer_enabled else settings.db_port
             _pg_pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=settings.db_pool_min,
                 maxconn=settings.db_pool_max,
                 user=settings.db_user,
                 password=settings.db_password,
-                host=settings.db_host,
-                port=settings.db_port,
+                host=db_host,
+                port=db_port,
                 database=settings.db_name,
             )
-            logger.info("Database connection pool initialized.")
+            via = f"pgbouncer ({db_host}:{db_port})" if settings.pgbouncer_enabled else f"postgres ({db_host}:{db_port})"
+            logger.info("psycopg2 pool initialised via %s (max=%s).", via, settings.db_pool_max)
         except Exception as e:
             logger.error(f"Failed to initialize database pool: {e}")
             raise

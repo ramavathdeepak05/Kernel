@@ -15,6 +15,7 @@ If confidence < threshold → route to faculty review WITHOUT showing AI score
 If faculty final_score deviates > deviation threshold from AI draft → require
 override_reason. Store policy_version_id on every AnswerEvaluationRecord (R12).
 """
+from __future__ import annotations
 
 import logging
 import uuid

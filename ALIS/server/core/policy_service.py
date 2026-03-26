@@ -39,6 +39,7 @@ Acceptance Criteria (E00-S09):
   - [x] Every policy version hash stored
   - [ ] Diff viewer available in admin UI (frontend — separate task)
 """
+from __future__ import annotations
 
 import hashlib
 import json

@@ -13,14 +13,14 @@ This requires both devices to be on the same NAT gateway (campus WiFi hotspot).
 Feature flag: academics.offline_attendance_pwa (controls whether the desktop app button is shown in UI,
 but the API itself is always available for authorized faculty).
 """
+from __future__ import annotations
 import logging
 import secrets
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
-from server.core.security import get_current_user
 from server.db_service import execute_query, execute_transaction
 from server.core.domain_events import DomainEventBus
 
@@ -73,14 +73,13 @@ def _get_faculty_course(tenant_id: str, course_id: str, faculty_id: str) -> dict
 def start_wifi_session(
     body: StartSessionRequest,
     request: Request,
-    current_user: dict = Depends(get_current_user),
 ):
     """
     Faculty starts a WiFi attendance session.
     Returns the session_id, session_token (8-char), and duration.
     """
-    tenant_id = str(current_user["tenant_id"])
-    faculty_id = str(current_user["id"])
+    tenant_id = str(getattr(request.state, "tenant_id", "default"))
+    faculty_id = str(getattr(request.state, "user_id", "anonymous"))
 
     course = _get_faculty_course(tenant_id, body.course_id, faculty_id)
     faculty_ip = _get_client_ip(request)
@@ -129,13 +128,13 @@ def start_wifi_session(
 @router.get("/sessions/{session_id}")
 def get_session_status(
     session_id: str,
-    current_user: dict = Depends(get_current_user),
+    request: Request,
 ):
     """
     Poll for live session status + verified student roster.
     Called every 3 seconds by the desktop app's LiveRoster component.
     """
-    tenant_id = str(current_user["tenant_id"])
+    tenant_id = str(getattr(request.state, "tenant_id", "default"))
 
     rows = execute_query(
         """
@@ -206,7 +205,6 @@ def get_session_status(
 def verify_student_presence(
     body: VerifyRequest,
     request: Request,
-    current_user: dict = Depends(get_current_user),
 ):
     """
     Student self-verification endpoint.
@@ -214,8 +212,8 @@ def verify_student_presence(
     Backend checks: is this student's public IP the same as the faculty's IP?
     If yes → PRESENT. If no → IP_MISMATCH (manual review required).
     """
-    tenant_id = str(current_user["tenant_id"])
-    student_id = str(current_user.get("student_id") or current_user["id"])
+    tenant_id = str(getattr(request.state, "tenant_id", "default"))
+    student_id = str(getattr(request.state, "user_id", "anonymous"))
     student_ip = _get_client_ip(request)
 
     # Find the active session by token
@@ -276,15 +274,15 @@ def verify_student_presence(
 @router.post("/sessions/{session_id}/end", status_code=status.HTTP_200_OK)
 def end_wifi_session(
     session_id: str,
-    current_user: dict = Depends(get_current_user),
+    request: Request,
 ):
     """
     Faculty ends the WiFi session.
     All enrolled students who never verified → auto-marked ABSENT in attendance_records.
     Fires domain event attendance.wifi_session_ended.
     """
-    tenant_id = str(current_user["tenant_id"])
-    faculty_id = str(current_user["id"])
+    tenant_id = str(getattr(request.state, "tenant_id", "default"))
+    faculty_id = str(getattr(request.state, "user_id", "anonymous"))
 
     rows = execute_query(
         """

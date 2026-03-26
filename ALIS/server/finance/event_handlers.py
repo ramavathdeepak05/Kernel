@@ -11,6 +11,7 @@ Publishes:
   - FeePaymentReceived   (payment.py)
   - FeeWaiverApproved    (waiver.py)
 """
+from __future__ import annotations
 
 import logging
 

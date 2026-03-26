@@ -25,6 +25,7 @@ Acceptance Criteria:
 - [x] Immutable audit trail
 - [x] Time-bound validity
 """
+from __future__ import annotations
 
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone

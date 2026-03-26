@@ -9,6 +9,7 @@ This is load-critical: result publication hits 2,000 concurrent users in 30 min.
 R9 — Template rendered via document_engine.render(template_id, context, tenant_id).
      Template lives in document_templates table — never hardcoded HTML.
 """
+from __future__ import annotations
 
 import logging
 import uuid

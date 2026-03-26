@@ -17,11 +17,21 @@ Run beat scheduler (for calendar triggers):
     # OR simple file-based scheduler:
     celery -A server.worker beat --loglevel=info
 """
+from __future__ import annotations
+
+import json
+import logging
+import traceback as tb_module
+from typing import Any
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import task_failure
+from kombu import Queue
 
 from server.core.settings import settings
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # App
@@ -66,6 +76,59 @@ celery_app.conf.update(
     task_max_retries=3,
     task_default_retry_delay=60,    # seconds
 )
+
+celery_app.conf.task_queues = (
+    Queue("default"),
+    Queue("high_priority"),
+    Queue("dead_letter"),   # Receives tasks that exhausted all retries
+)
+celery_app.conf.task_default_queue = "default"
+
+# ---------------------------------------------------------------------------
+# Dead-Letter Queue — task_failure signal
+#
+# Fired by Celery after a task has exhausted all retries.  Writes a row to
+# the failed_task_log table so ops can inspect and manually replay via
+# GET/POST /api/v1/admin/failed-tasks.
+# ---------------------------------------------------------------------------
+
+@task_failure.connect
+def on_task_failure(
+    sender: Any,
+    task_id: str,
+    exception: Exception,
+    args: Any,
+    kwargs: Any,
+    traceback: Any,
+    einfo: Any,
+    **rest: Any,
+) -> None:
+    """Persist failed task metadata to the dead-letter log."""
+    try:
+        from server.db_service import execute_transaction
+        task_name: str = getattr(sender, "name", str(sender))
+        full_tb = tb_module.format_tb(traceback) if traceback else []
+        # Extract tenant_id if it was threaded through kwargs
+        tenant_id: str | None = (kwargs or {}).get("tenant_id") or (kwargs or {}).get("org_id")
+        execute_transaction([(
+            """
+            INSERT INTO failed_task_log
+                (task_id, task_name, args, kwargs, error, traceback, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                task_id,
+                task_name,
+                json.dumps(list(args or [])),
+                json.dumps(dict(kwargs or {})),
+                str(exception),
+                "".join(full_tb)[:4000],  # cap at 4 KB
+                tenant_id,
+            ),
+        )])
+    except Exception:
+        # Never let DLQ logging crash the worker process
+        logger.exception("DLQ: failed to persist failed_task_log entry for task %s", task_id)
 
 # ---------------------------------------------------------------------------
 # Beat Schedule (Celery Beat — periodic tasks)

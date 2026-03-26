@@ -6,6 +6,7 @@ Provides:
 3. Department performance summary
 4. AI narrative via Qwen (non-fatal fallback)
 """
+from __future__ import annotations
 
 import logging
 

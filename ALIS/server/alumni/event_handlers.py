@@ -3,6 +3,7 @@
 Subscribes to:
   - StudentGraduated → auto-create alumni profile
 """
+from __future__ import annotations
 
 import logging
 

@@ -458,15 +458,184 @@ function TransportTab() {
   );
 }
 
+// ── Grievances Tab ────────────────────────────────────────────
+
+interface Grievance {
+  id: string;
+  subject: string;
+  category: string;
+  status: string;
+  created_at: string;
+  description: string;
+}
+
+function GrievancesTab() {
+  const { data: grievanceData, isLoading, refetch } = useQuery({
+    queryKey: ["ss", "grievances"],
+    queryFn: () => apiFetch<{ grievances: Grievance[]; total: number }>("/student-services/grievances"),
+    staleTime: 30_000,
+    retry: 1,
+  });
+  const grievances = grievanceData?.grievances ?? [];
+
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ subject: "", category: "ACADEMIC", description: "" });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const [success, setSuccess] = useState(false);
+
+  const submit = async (e: { preventDefault: () => void }) => {
+    e.preventDefault();
+    setSaving(true);
+    setErr("");
+    try {
+      const token = localStorage.getItem("token");
+      const r = await fetch(`${API}/student-services/grievances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(form),
+      });
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || "Failed"); }
+      setSuccess(true);
+      setForm({ subject: "", category: "ACADEMIC", description: "" });
+      setShowForm(false);
+      refetch();
+    } catch (ex: unknown) { setErr(ex instanceof Error ? ex.message : "Failed to submit"); }
+    finally { setSaving(false); }
+  };
+
+  const inp: React.CSSProperties = {
+    width: "100%", padding: "8px 12px", borderRadius: 8,
+    background: "rgba(255,255,255,0.04)", border: BORDER,
+    color: "#e2e8f0", fontSize: 13, outline: "none", boxSizing: "border-box",
+  };
+
+  const CATEGORY_COLORS: Record<string, string> = {
+    ACADEMIC: "#818cf8", FINANCIAL: "#fbbf24", HOSTEL: "#f97316",
+    LIBRARY: TEAL, TRANSPORT: "#38bdf8", OTHER: "#94a3b8",
+  };
+  const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+    OPEN:        { bg: "rgba(251,191,36,0.1)",  color: "#fbbf24" },
+    IN_PROGRESS: { bg: "rgba(56,189,248,0.1)",  color: "#38bdf8" },
+    RESOLVED:    { bg: "rgba(52,211,153,0.1)",  color: "#34d399" },
+    CLOSED:      { bg: "rgba(100,116,139,0.1)", color: "#64748b" },
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Submit form */}
+      {showForm ? (
+        <div style={{ background: PANEL_BG, borderRadius: 12, border: BORDER, padding: 20 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>Submit Grievance</span>
+            <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontSize: 18, lineHeight: 1 }}>✕</button>
+          </div>
+          <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 160px", gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Subject</label>
+                <input required value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))} style={inp} placeholder="Brief summary of the issue" />
+              </div>
+              <div>
+                <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Category</label>
+                <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} style={{ ...inp, cursor: "pointer" }}>
+                  {["ACADEMIC", "FINANCIAL", "HOSTEL", "LIBRARY", "TRANSPORT", "OTHER"].map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#64748b", display: "block", marginBottom: 6 }}>Description</label>
+              <textarea required rows={4} value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} style={{ ...inp, resize: "vertical" }} placeholder="Describe the issue in detail…" />
+            </div>
+            {err && <div style={{ padding: "8px 12px", borderRadius: 8, background: "rgba(251,113,133,0.08)", border: "1px solid rgba(251,113,133,0.2)", color: "#fb7185", fontSize: 12 }}>{err}</div>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button type="button" onClick={() => setShowForm(false)} style={{ padding: "8px 18px", borderRadius: 8, background: "transparent", border: BORDER, color: "#94a3b8", fontSize: 12, cursor: "pointer" }}>Cancel</button>
+              <button type="submit" disabled={saving} style={{ padding: "8px 18px", borderRadius: 8, background: TEAL_BG, border: `0.5px solid ${TEAL_BORDER}`, color: TEAL, fontSize: 12, fontWeight: 600, cursor: saving ? "not-allowed" : "pointer" }}>
+                {saving ? "Submitting…" : "Submit Grievance"}
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 14px", borderRadius: 8, background: "rgba(251,113,133,0.06)", border: "0.5px solid rgba(251,113,133,0.2)" }}>
+            <AlertCircle style={{ width: 14, height: 14, color: "#fb7185" }} />
+            <span style={{ fontSize: 12, color: "#fb7185" }}>{isLoading ? "…" : `${grievanceData?.total ?? 0}`} grievances</span>
+          </div>
+          {success && <span style={{ fontSize: 11, color: TEAL }}>✓ Grievance submitted</span>}
+          <button onClick={() => { setShowForm(true); setSuccess(false); }} style={{ padding: "6px 14px", borderRadius: 8, background: TEAL_BG, border: `0.5px solid ${TEAL_BORDER}`, color: TEAL, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            + New Grievance
+          </button>
+        </div>
+      )}
+
+      {/* Grievances list */}
+      <div style={{ background: PANEL_BG, borderRadius: 12, border: BORDER, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "rgba(15,23,42,0.8)" }}>
+              {["Subject", "Category", "Submitted", "Status"].map((h) => (
+                <th key={h} style={{ padding: "10px 16px", textAlign: "left", fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em", color: "#475569" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              [...Array(3)].map((_, i) => (
+                <tr key={i} style={{ borderTop: BORDER }}>
+                  {[...Array(4)].map((_, j) => (
+                    <td key={j} style={{ padding: "10px 16px" }}>
+                      <div style={{ height: 14, borderRadius: 4, background: "rgba(51,65,85,0.4)", width: "75%", animation: "pulse 1.5s ease-in-out infinite" }} />
+                    </td>
+                  ))}
+                </tr>
+              ))
+            ) : grievances.length === 0 ? (
+              <tr>
+                <td colSpan={4} style={{ padding: 32, textAlign: "center", fontSize: 12, color: "#475569" }}>
+                  <CheckCircle2 style={{ width: 24, height: 24, margin: "0 auto 8px", color: TEAL, opacity: 0.5 }} />
+                  No grievances on record
+                </td>
+              </tr>
+            ) : grievances.map((g) => {
+              const sc = STATUS_COLORS[g.status] ?? STATUS_COLORS.OPEN;
+              const catColor = CATEGORY_COLORS[g.category] ?? "#94a3b8";
+              return (
+                <tr key={g.id} style={{ borderTop: BORDER }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = ROW_BG)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  <td style={{ padding: "10px 16px", fontSize: 12, color: "#e2e8f0", maxWidth: 260 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.subject}</div>
+                  </td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 500, background: `${catColor}15`, color: catColor }}>{g.category}</span>
+                  </td>
+                  <td style={{ padding: "10px 16px", fontSize: 11, color: "#64748b" }}>{g.created_at?.split("T")[0]}</td>
+                  <td style={{ padding: "10px 16px" }}>
+                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600, background: sc.bg, color: sc.color }}>{g.status}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────
 
-type TabId = "overview" | "hostel" | "library" | "transport";
+type TabId = "overview" | "hostel" | "library" | "transport" | "grievances";
 
 const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",  label: "Overview",  icon: <TrendingUp className="w-3.5 h-3.5" /> },
-  { id: "hostel",    label: "Hostel",    icon: <Home className="w-3.5 h-3.5" /> },
-  { id: "library",   label: "Library",   icon: <BookOpen className="w-3.5 h-3.5" /> },
-  { id: "transport", label: "Transport", icon: <Bus className="w-3.5 h-3.5" /> },
+  { id: "overview",    label: "Overview",    icon: <TrendingUp className="w-3.5 h-3.5" /> },
+  { id: "hostel",      label: "Hostel",      icon: <Home className="w-3.5 h-3.5" /> },
+  { id: "library",     label: "Library",     icon: <BookOpen className="w-3.5 h-3.5" /> },
+  { id: "transport",   label: "Transport",   icon: <Bus className="w-3.5 h-3.5" /> },
+  { id: "grievances",  label: "Grievances",  icon: <AlertCircle className="w-3.5 h-3.5" /> },
 ];
 
 export default function StudentServicesPage() {
@@ -515,10 +684,11 @@ export default function StudentServicesPage() {
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
-        {tab === "overview"  && <OverviewTab />}
-        {tab === "hostel"    && <HostelTab />}
-        {tab === "library"   && <LibraryTab />}
-        {tab === "transport" && <TransportTab />}
+        {tab === "overview"   && <OverviewTab />}
+        {tab === "hostel"     && <HostelTab />}
+        {tab === "library"    && <LibraryTab />}
+        {tab === "transport"  && <TransportTab />}
+        {tab === "grievances" && <GrievancesTab />}
       </div>
     </div>
   );

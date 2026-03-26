@@ -113,39 +113,39 @@ def upgrade():
 
     # Feature flag seeds
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
-        SELECT id, 'phd.enabled', 'true', 'E15 PhD/Doctoral module'
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
+        SELECT id, 'phd.enabled', true, '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, description)
-        SELECT id, 'phd.plagiarism_check_required', 'true', 'Require Drillbit plagiarism check before thesis submission'
+        INSERT INTO tenant_feature_flags (org_id, flag_key, enabled, config)
+        SELECT id, 'phd.plagiarism_check_required', true, '{}'::jsonb
         FROM organizations
         ON CONFLICT (org_id, flag_key) DO NOTHING
     """)
 
     # Default policy seeds
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'phd.plagiarism_max_pct', '25', 'DECIMAL', 'Maximum allowed similarity percentage for PhD thesis (Drillbit)', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'phd.plagiarism_max_pct', '25'::jsonb, 'Maximum allowed similarity percentage for PhD thesis (Drillbit)', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'phd.supervisor_max_scholars', '8', 'INTEGER', 'Maximum PhD scholars per supervisor', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'phd.supervisor_max_scholars', '8'::jsonb, 'Maximum PhD scholars per supervisor', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
     op.execute("""
-        INSERT INTO institution_policies (org_id, policy_key, policy_value, policy_type, description, version, created_by)
-        SELECT id, 'phd.dc_meeting_interval_months', '6', 'INTEGER', 'Months between mandatory DC committee meetings', 1, NULL
+        INSERT INTO institution_policies (org_id, key, value, description, category)
+        SELECT id, 'phd.dc_meeting_interval_months', '6'::jsonb, 'Months between mandatory DC committee meetings', 'academics'
         FROM organizations
-        ON CONFLICT (org_id, policy_key) DO NOTHING
+        ON CONFLICT (org_id, key) DO NOTHING
     """)
 
 

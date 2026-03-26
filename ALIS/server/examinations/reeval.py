@@ -6,6 +6,7 @@ The request routes through the E02 Approval/Quorum engine:
   - On APPROVED: revised marks are applied and GPA recomputed
   - On REJECTED: request closed with review note
 """
+from __future__ import annotations
 
 import logging
 import uuid

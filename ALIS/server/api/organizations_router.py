@@ -35,6 +35,7 @@ Invariants:
     - Suspending a parent does NOT cascade to children (explicit intent required)
     - All mutations are audit-logged
 """
+from __future__ import annotations
 
 import logging
 from uuid import uuid4
