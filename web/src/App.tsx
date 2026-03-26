@@ -42,6 +42,7 @@ import AlumniPage from "./pages/alumni/AlumniPage";
 // P22 new pages
 import { RegulatoryPage } from './pages/regulatory/RegulatoryPage';
 import { PolicyStudioPage } from './pages/admin/PolicyStudioPage';
+import { OnboardingWizardPage } from './pages/admin/OnboardingWizardPage';
 import { AdmissionsModulePage } from './pages/admissions/AdmissionsModulePage';
 import { PhDPage } from './pages/phd/PhDPage';
 import { ReadmissionPage } from './pages/admissions/ReadmissionPage';
@@ -118,6 +119,7 @@ export default function App() {
               <Route path="/alumni" element={<AlumniPage />} />
               <Route path="/regulatory" element={<RegulatoryPage />} />
               <Route path="/admin/policies" element={<PolicyStudioPage />} />
+              <Route path="/admin/onboarding" element={<OnboardingWizardPage />} />
               <Route path="/admissions/pipeline" element={<AdmissionsModulePage />} />
               <Route path="/admissions/readmission" element={<ReadmissionPage />} />
               <Route path="/phd" element={<PhDPage />} />
