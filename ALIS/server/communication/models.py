@@ -39,10 +39,11 @@ class TemplateCreate(BaseModel):
 
 
 class TemplateUpdate(BaseModel):
-    name:    Optional[str] = None
-    subject: Optional[str] = None
-    body:    Optional[str] = None
-    is_active: Optional[bool] = None
+    name:                 Optional[str]  = None
+    subject:              Optional[str]  = None
+    body:                 Optional[str]  = None
+    is_active:            Optional[bool] = None
+    whatsapp_template_id: Optional[str]  = None   # MSG91 DLT registered template ID
 
 
 class AnnouncementCreate(BaseModel):

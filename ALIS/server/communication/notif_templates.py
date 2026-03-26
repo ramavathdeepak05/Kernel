@@ -75,6 +75,8 @@ class NotifTemplateService:
             fields.append("body = %s"); params.append(req.body)
         if req.is_active is not None:
             fields.append("is_active = %s"); params.append(req.is_active)
+        if req.whatsapp_template_id is not None:
+            fields.append("whatsapp_template_id = %s"); params.append(req.whatsapp_template_id)
         if not fields:
             return cls.get(org_id, template_id)
         fields.append("updated_at = NOW()")

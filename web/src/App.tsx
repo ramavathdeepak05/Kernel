@@ -57,6 +57,9 @@ import { ProcessEnginePage } from './pages/process-engine/ProcessEnginePage';
 import { ConsentPage } from './pages/consent/ConsentPage';
 import { TeamManagementPage } from './pages/admin/TeamManagementPage';
 
+// Settings
+import { SettingsPage } from './pages/settings/SettingsPage';
+
 // P28 — Offline PWA attendance (standalone, no shell — loads as installable page)
 import { OfflineAttendancePage } from './pages/attendance/OfflineAttendancePage';
 
@@ -147,6 +150,9 @@ export default function App() {
 
               {/* Team management */}
               <Route path="/admin/team" element={<TeamManagementPage />} />
+
+              {/* Settings — SUPER_ADMIN / Admin */}
+              <Route path="/settings" element={<SettingsPage />} />
             </Route>
           </Route>
 
