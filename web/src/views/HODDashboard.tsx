@@ -7,14 +7,14 @@
  * Faculty workload table with overload indicators
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { RiskBar } from '../components/RiskBar'
 import { DataTable, type Column } from '../components/DataTable'
 
 // ---------------------------------------------------------------------------
-// Types + mock data
+// Types + static fallback data
 // ---------------------------------------------------------------------------
 
 interface FacultyWorkload {
@@ -36,28 +36,14 @@ interface CourseHeatCell {
   avg: number
 }
 
-const DEPT_STATS = [
-  { label: 'Dept. attendance', value: '74%', delta: 'Target: 75%', deltaColor: '#EF9F27' },
-  { label: 'Faculty workload', value: '3.8', delta: 'avg sessions/week', deltaColor: '#1D9E75' },
-  { label: 'At-risk students', value: '14', delta: '↑ 3 from last week', deltaColor: '#EF9F27' },
-  { label: 'Pending approvals', value: '5', delta: '2 urgent', deltaColor: '#E24B4A' },
+const DEPT_STATS_DEFAULT = [
+  { label: 'Dept. attendance', value: '—', delta: 'Loading…', deltaColor: '#7B82A8' },
+  { label: 'Faculty workload', value: '—', delta: 'avg sessions/week', deltaColor: '#7B82A8' },
+  { label: 'At-risk students', value: '—', delta: 'Loading…', deltaColor: '#EF9F27' },
+  { label: 'Pending approvals', value: '—', delta: 'Loading…', deltaColor: '#E24B4A' },
 ]
 
-const FACULTY_WORKLOAD: FacultyWorkload[] = [
-  { id: 'f1', name: 'Dr. Priya Menon', designation: 'Professor', courses: 3, sessionsPerWeek: 6, pendingAssessments: 8, isOverloaded: false },
-  { id: 'f2', name: 'Prof. Ramesh Kumar', designation: 'Assoc. Professor', courses: 5, sessionsPerWeek: 12, pendingAssessments: 15, isOverloaded: true },
-  { id: 'f3', name: 'Dr. Anjali Singh', designation: 'Asst. Professor', courses: 4, sessionsPerWeek: 10, pendingAssessments: 6, isOverloaded: false },
-  { id: 'f4', name: 'Mr. Suresh Nair', designation: 'Lecturer', courses: 3, sessionsPerWeek: 7, pendingAssessments: 4, isOverloaded: false },
-  { id: 'f5', name: 'Dr. Kavitha Rao', designation: 'Professor', courses: 6, sessionsPerWeek: 14, pendingAssessments: 20, isOverloaded: true },
-]
-
-const HEAT_MAP: CourseHeatCell[] = [
-  { course: 'CS301 — Data Structures', week1: 78, week2: 72, week3: 65, week4: 71, avg: 72 },
-  { course: 'CS302 — DBMS', week1: 85, week2: 83, week3: 80, week4: 84, avg: 83 },
-  { course: 'CS303 — OS', week1: 68, week2: 65, week3: 61, week4: 67, avg: 65 },
-  { course: 'CS304 — Networks', week1: 90, week2: 88, week3: 87, week4: 89, avg: 89 },
-  { course: 'CS305 — Algorithms', week1: 74, week2: 70, week3: 68, week4: 73, avg: 71 },
-]
+const HEAT_MAP_FALLBACK: CourseHeatCell[] = []
 
 // ---------------------------------------------------------------------------
 // Heat map cell
@@ -138,13 +124,80 @@ const FACULTY_COLUMNS: Column<FacultyWorkload>[] = [
 // Component
 // ---------------------------------------------------------------------------
 
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` })
+
 export function HODDashboard() {
   const [activeTab, setActiveTab] = useState<'workload' | 'heatmap'>('workload')
+  const [stats, setStats] = useState(DEPT_STATS_DEFAULT)
+  const [faculty, setFaculty] = useState<FacultyWorkload[]>([])
+  const [heatMap, setHeatMap] = useState<CourseHeatCell[]>(HEAT_MAP_FALLBACK)
+
+  useEffect(() => {
+    const h = authHeader()
+    const currentYear = new Date().getFullYear().toString()
+
+    // Faculty workload
+    fetch(`/api/v1/reporting/academics/faculty-workload?academic_year=${currentYear}`, { headers: h })
+      .then(r => r.json())
+      .then(d => {
+        if (d.faculty?.length) {
+          const rows: FacultyWorkload[] = d.faculty.map((f: any, i: number) => ({
+            id: f.faculty_id || f.id || String(i),
+            name: f.name || f.faculty_name || 'Unknown',
+            designation: f.designation || f.employment_type || 'Faculty',
+            courses: Number(f.course_count ?? f.courses ?? 0),
+            sessionsPerWeek: Number(f.sessions_per_week ?? f.weekly_sessions ?? 0),
+            pendingAssessments: Number(f.pending_assessments ?? 0),
+            isOverloaded: Number(f.sessions_per_week ?? f.weekly_sessions ?? 0) > 10,
+          }))
+          setFaculty(rows)
+
+          const total = rows.reduce((s, r) => s + r.sessionsPerWeek, 0)
+          const avg = rows.length ? (total / rows.length).toFixed(1) : '—'
+          setStats(prev => prev.map(s =>
+            s.label === 'Faculty workload' ? { ...s, value: avg, deltaColor: '#1D9E75' } : s
+          ))
+        }
+      })
+      .catch(() => {})
+
+    // At-risk students
+    fetch(`/api/v1/academics/analytics/at-risk?academic_year=${currentYear}`, { headers: h })
+      .then(r => r.json())
+      .then(d => {
+        const total = d.total ?? d.at_risk?.length ?? null
+        if (total !== null) {
+          setStats(prev => prev.map(s =>
+            s.label === 'At-risk students'
+              ? { ...s, value: String(total), deltaColor: total > 10 ? '#E24B4A' : '#EF9F27' }
+              : s
+          ))
+        }
+      })
+      .catch(() => {})
+
+    // Pending approvals
+    fetch('/api/v1/approvals?status=PENDING&limit=1', {
+      headers: { ...h, 'Content-Type': 'application/json' },
+    })
+      .then(r => r.json())
+      .then(d => {
+        const count = d.total ?? d.approval_requests?.length ?? null
+        if (count !== null) {
+          setStats(prev => prev.map(s =>
+            s.label === 'Pending approvals'
+              ? { ...s, value: String(count), deltaColor: count > 0 ? '#E24B4A' : '#1D9E75' }
+              : s
+          ))
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Stats */}
-      <StatsRow stats={DEPT_STATS} />
+      <StatsRow stats={stats} />
 
       {/* Tab switcher */}
       <div style={{ display: 'flex', gap: 8 }}>
@@ -173,7 +226,7 @@ export function HODDashboard() {
         <DataTable
           title="Faculty Workload"
           columns={FACULTY_COLUMNS}
-          rows={FACULTY_WORKLOAD}
+          rows={faculty}
           onRowClick={() => {}}
         />
       )}
@@ -189,35 +242,39 @@ export function HODDashboard() {
           <p style={{ color: '#7B82A8', fontSize: 12, margin: '0 0 16px', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
             Attendance Heat Map — Course × Week
           </p>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr>
-                  {['Course', 'Week 1', 'Week 2', 'Week 3', 'Week 4', 'Avg'].map(h => (
-                    <th key={h} style={{
-                      padding: '8px 12px', textAlign: h === 'Course' ? 'left' : 'center',
-                      color: '#7B82A8', fontWeight: 600, fontSize: 11, letterSpacing: '0.04em',
-                      borderBottom: '1px solid #1E2235',
-                    }}>
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {HEAT_MAP.map(row => (
-                  <tr key={row.course} style={{ borderBottom: '1px solid #1E2235' }}>
-                    <td style={{ padding: '8px 12px', color: '#C9D1E9', fontSize: 13 }}>{row.course}</td>
-                    <td style={{ padding: '8px 12px' }}><HeatCell value={row.week1} /></td>
-                    <td style={{ padding: '8px 12px' }}><HeatCell value={row.week2} /></td>
-                    <td style={{ padding: '8px 12px' }}><HeatCell value={row.week3} /></td>
-                    <td style={{ padding: '8px 12px' }}><HeatCell value={row.week4} /></td>
-                    <td style={{ padding: '8px 12px' }}><HeatCell value={row.avg} /></td>
+          {heatMap.length === 0 ? (
+            <p style={{ color: '#7B82A8', fontSize: 13, margin: 0 }}>No attendance data available.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {['Course', 'Week 1', 'Week 2', 'Week 3', 'Week 4', 'Avg'].map(h => (
+                      <th key={h} style={{
+                        padding: '8px 12px', textAlign: h === 'Course' ? 'left' : 'center',
+                        color: '#7B82A8', fontWeight: 600, fontSize: 11, letterSpacing: '0.04em',
+                        borderBottom: '1px solid #1E2235',
+                      }}>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {heatMap.map(row => (
+                    <tr key={row.course} style={{ borderBottom: '1px solid #1E2235' }}>
+                      <td style={{ padding: '8px 12px', color: '#C9D1E9', fontSize: 13 }}>{row.course}</td>
+                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week1} /></td>
+                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week2} /></td>
+                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week3} /></td>
+                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week4} /></td>
+                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.avg} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>

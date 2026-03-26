@@ -43,8 +43,8 @@ async def global_exception_handler(request: Request, exc: Exception):
     Catch-all for unhandled exceptions (bugs).
     Prevents raw stack traces from leaking to the user.
     """
-    # In a real system, log the full traceback here to Sentry/logs
-    print(f"CRITICAL UNHANDLED ERROR: {str(exc)}")
+    import logging as _logging
+    _logging.getLogger(__name__).exception("CRITICAL UNHANDLED ERROR: %s", exc)
     
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

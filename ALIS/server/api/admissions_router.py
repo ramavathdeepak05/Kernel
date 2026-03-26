@@ -1983,6 +1983,7 @@ async def get_review_queue(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 @router.post("/readmission")
+@require_permission(Permission.STUDENT_CREATE)
 async def submit_readmission(request: Request, body: dict) -> JSONResponse:
     """Submit a re-admission application."""
     from server.admissions.readmission_service import ReadmissionService
@@ -2006,6 +2007,7 @@ async def submit_readmission(request: Request, body: dict) -> JSONResponse:
 
 
 @router.get("/readmission")
+@require_permission(Permission.STUDENT_READ)
 async def list_readmissions(
     request: Request,
     status: Optional[str] = None,
@@ -2017,6 +2019,7 @@ async def list_readmissions(
 
 
 @router.get("/readmission/{application_id}")
+@require_permission(Permission.STUDENT_READ)
 async def get_readmission(request: Request, application_id: str) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
     result = ReadmissionService.get_application(application_id, _org(request))
@@ -2024,6 +2027,7 @@ async def get_readmission(request: Request, application_id: str) -> JSONResponse
 
 
 @router.post("/readmission/{application_id}/review")
+@require_permission(Permission.OVERRIDE_APPROVE)
 async def start_readmission_review(request: Request, application_id: str) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
     result = ReadmissionService.start_review(application_id, _org(request), _actor(request))
@@ -2031,6 +2035,7 @@ async def start_readmission_review(request: Request, application_id: str) -> JSO
 
 
 @router.post("/readmission/{application_id}/approve")
+@require_permission(Permission.OVERRIDE_APPROVE)
 async def approve_readmission(request: Request, application_id: str, body: dict) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
     result = ReadmissionService.approve(application_id, _org(request), _actor(request), review_notes=body.get("notes"))
@@ -2038,6 +2043,7 @@ async def approve_readmission(request: Request, application_id: str, body: dict)
 
 
 @router.post("/readmission/{application_id}/reject")
+@require_permission(Permission.OVERRIDE_APPROVE)
 async def reject_readmission(request: Request, application_id: str, body: dict) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
     result = ReadmissionService.reject(application_id, _org(request), _actor(request), review_notes=body.get("notes", ""))
@@ -2045,6 +2051,7 @@ async def reject_readmission(request: Request, application_id: str, body: dict) 
 
 
 @router.post("/credit-transfer")
+@require_permission(Permission.STUDENT_CREATE)
 async def submit_credit_transfer(request: Request, body: dict) -> JSONResponse:
     """Submit a credit transfer request."""
     from server.admissions.credit_transfer_service import CreditTransferService
@@ -2061,6 +2068,7 @@ async def submit_credit_transfer(request: Request, body: dict) -> JSONResponse:
 
 
 @router.post("/credit-transfer/{request_id}/ai-draft")
+@require_permission(Permission.STUDENT_CREATE)
 async def generate_credit_transfer_ai_draft(request: Request, request_id: str) -> JSONResponse:
     from server.admissions.credit_transfer_service import CreditTransferService
     result = await CreditTransferService.generate_ai_draft(request_id, _org(request), _actor(request))
@@ -2068,6 +2076,7 @@ async def generate_credit_transfer_ai_draft(request: Request, request_id: str) -
 
 
 @router.post("/credit-transfer/{request_id}/decide")
+@require_permission(Permission.OVERRIDE_APPROVE)
 async def decide_credit_transfer(request: Request, request_id: str, body: dict) -> JSONResponse:
     from server.admissions.credit_transfer_service import CreditTransferService
     result = await CreditTransferService.review_and_decide(
@@ -2083,6 +2092,7 @@ async def decide_credit_transfer(request: Request, request_id: str, body: dict) 
 
 
 @router.get("/credit-transfer")
+@require_permission(Permission.STUDENT_READ)
 async def list_credit_transfers(
     request: Request,
     student_id: Optional[str] = None,
@@ -2101,6 +2111,7 @@ async def list_credit_transfers(
 # ---------------------------------------------------------------------------
 
 @router.get("/students/duplicates")
+@require_permission(Permission.STUDENT_READ)
 async def find_student_duplicates(
     request: Request,
     threshold: float = 0.90,
@@ -2112,6 +2123,7 @@ async def find_student_duplicates(
 
 
 @router.post("/students/merge/initiate")
+@require_permission(Permission.OVERRIDE_APPROVE)
 async def initiate_student_merge(request: Request, body: dict) -> JSONResponse:
     """Initiate dual-auth merge workflow (Registrar + Super Admin required)."""
     from server.admissions.deduplication_service import StudentDeduplicationService
@@ -2125,6 +2137,7 @@ async def initiate_student_merge(request: Request, body: dict) -> JSONResponse:
 
 
 @router.post("/students/merge/execute")
+@require_permission(Permission.OVERRIDE_APPROVE)
 async def execute_student_merge(request: Request, body: dict) -> JSONResponse:
     """Execute the student merge (called after dual-auth approval)."""
     from server.admissions.deduplication_service import StudentDeduplicationService

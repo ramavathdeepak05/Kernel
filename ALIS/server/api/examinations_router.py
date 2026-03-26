@@ -311,3 +311,20 @@ async def semester_ai_insights(
     return JSONResponse(
         content=_jsonify(GradeAnalyticsService.generate_ai_insights(_org(request), academic_year, semester))
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# E06-S05 — AI Evaluation Faculty Review Queue
+# ──────────────────────────────────────────────────────────────
+
+@router.get("/ai-eval/faculty-review-queue")
+@require_permission(Permission.MARKS_READ)
+async def get_ai_faculty_review_queue(
+    request: Request,
+    faculty_id: Optional[str] = Query(None),
+) -> JSONResponse:
+    """Return AI evaluation records pending faculty confirmation (confidence < threshold)."""
+    from server.examinations.ai_evaluation_guard import AIEvaluationGuard
+    fid = faculty_id or _actor(request)
+    items = AIEvaluationGuard.get_faculty_review_queue(_org(request), fid)
+    return JSONResponse(content=_jsonify({"items": items, "total": len(items)}))

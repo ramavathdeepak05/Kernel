@@ -248,18 +248,38 @@ class TaskService:
         
         # Determine recipient
         if task.assignee_id:
-            # Direct user notification
-            # In real system, look up email. Using placeholder.
-            dispatcher.send(
-                template_id="task_assigned",
-                recipient_id=task.assignee_id,
-                recipient_address="user@example.com", # Mock
-                context=context
-            )
+            try:
+                from server.db_service import execute_query
+                rows = execute_query(
+                    "SELECT email FROM users WHERE id = %s LIMIT 1",
+                    (task.assignee_id,),
+                )
+                email = rows[0]["email"] if rows else None
+            except Exception:
+                email = None
+            if email:
+                dispatcher.send(
+                    template_id="task_assigned",
+                    recipient_id=task.assignee_id,
+                    recipient_address=email,
+                    context=context,
+                )
         elif task.assignee_role:
-            # Role-based notification (Broadcasting not implemented in basic dispatcher yet)
-            # We would typically find all users with role and notify them
-            pass
+            try:
+                from server.db_service import execute_query
+                rows = execute_query(
+                    "SELECT id, email FROM users WHERE role = %s AND status = 'ACTIVE'",
+                    (task.assignee_role,),
+                )
+                for row in rows:
+                    dispatcher.send(
+                        template_id="task_assigned",
+                        recipient_id=row["id"],
+                        recipient_address=row["email"],
+                        context=context,
+                    )
+            except Exception as exc:
+                logger.warning("TaskService: role-broadcast failed for role=%s: %s", task.assignee_role, exc)
 
     @classmethod
     def _notify_reminder(cls, task: Task):
@@ -274,11 +294,21 @@ class TaskService:
         }
         
         if task.assignee_id:
-            dispatcher.send(
-                template_id="task_due_soon",
-                recipient_id=task.assignee_id,
-                recipient_address="user@example.com", # Mock
-                context=context
-            )
+            try:
+                from server.db_service import execute_query
+                rows = execute_query(
+                    "SELECT email FROM users WHERE id = %s LIMIT 1",
+                    (task.assignee_id,),
+                )
+                email = rows[0]["email"] if rows else None
+            except Exception:
+                email = None
+            if email:
+                dispatcher.send(
+                    template_id="task_due_soon",
+                    recipient_id=task.assignee_id,
+                    recipient_address=email,
+                    context=context,
+                )
 
 

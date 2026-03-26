@@ -109,7 +109,7 @@ class LMSSyncClient:
                     username=self._username(roll_number),
                     email=email,
                     full_name=full_name,
-                    temp_password="Stub@1234",
+                    temp_password=_generate_temp_password(),
                 ),
                 is_stub=True,
             )

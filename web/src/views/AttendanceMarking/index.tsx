@@ -49,6 +49,9 @@ export function AttendanceMarking({ sessionId, courseCode, courseName, date, ten
   const [syncMsg, setSyncMsg] = useState('')
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState<Set<string>>(new Set())
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const loadStudents = () => setRefreshKey(k => k + 1)
 
   const headers = { Authorization: `Bearer ${authToken}`, 'X-Tenant-ID': tenantId }
 
@@ -65,27 +68,40 @@ export function AttendanceMarking({ sessionId, courseCode, courseName, date, ten
   }, [])
 
   // ── Load student roster ──────────────────────────────────────────────────
-  const loadStudents = useCallback(async () => {
-    setLoading(true)
-    try {
-      if (online) {
-        const res = await fetch(`/api/v1/attendance/sessions/${sessionId}/students`, { headers })
-        if (res.ok) {
-          const data: CachedStudent[] = await res.json()
-          setStudents(data)
-          // Pre-cache for offline use
-          await cacheSession({ sessionId, courseCode, courseName, date, cachedAt: new Date().toISOString(), students: data })
-        }
-      } else {
-        const cached = await getCachedSession(sessionId)
-        if (cached) setStudents(cached.students)
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [sessionId, online])
+  useEffect(() => {
+    const controller = new AbortController()
+    let cancelled = false
 
-  useEffect(() => { loadStudents() }, [loadStudents])
+    const load = async () => {
+      setLoading(true)
+      try {
+        if (online) {
+          const res = await fetch(`/api/v1/attendance/sessions/${sessionId}/students`, {
+            headers,
+            signal: controller.signal,
+          })
+          if (!cancelled && res.ok) {
+            const data: CachedStudent[] = await res.json()
+            setStudents(data)
+            await cacheSession({ sessionId, courseCode, courseName, date, cachedAt: new Date().toISOString(), students: data })
+          }
+        } else {
+          const cached = await getCachedSession(sessionId)
+          if (!cancelled && cached) setStudents(cached.students)
+        }
+      } catch (err: unknown) {
+        if ((err as { name?: string })?.name === 'AbortError') return
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    load()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [sessionId, online, refreshKey])
 
   // ── Pending sync badge ───────────────────────────────────────────────────
   const refreshPendingCount = useCallback(async () => {

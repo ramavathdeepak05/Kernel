@@ -66,7 +66,9 @@ class RecalibrationService:
         # ---------------------------------------------------------------
         # 1. Find affected sessions
         # ---------------------------------------------------------------
-        scope_clause = cls._scope_clause(request)
+        scope_sql, scope_params = cls._scope_clause(request)
+        # Build the same clause replacing the 's.' alias with 'd.' for deadline queries
+        scope_sql_d = scope_sql.replace("s.", "d.")
 
         affected_sessions_rows = execute_query(f"""
             SELECT s.id, s.course_id, s.session_date
@@ -74,8 +76,8 @@ class RecalibrationService:
             WHERE s.org_id = %s
               AND s.session_date BETWEEN %s AND %s
               AND s.status NOT IN ('EXCUSED_DISRUPTION', 'EXAM')
-              {scope_clause}
-        """, (org_id, request.disruption_start, request.disruption_end))
+              {scope_sql}
+        """, (org_id, request.disruption_start, request.disruption_end, *scope_params))
 
         affected_session_ids = [str(r["id"]) for r in affected_sessions_rows]
 
@@ -88,8 +90,8 @@ class RecalibrationService:
             WHERE d.org_id = %s
               AND d.due_date >= %s
               AND d.is_exam_date = FALSE
-              {scope_clause.replace('s.', 'd.')}
-        """, (org_id, request.disruption_start))
+              {scope_sql_d}
+        """, (org_id, request.disruption_start, *scope_params))
 
         # Exam deadlines that are immovable
         locked_exam_rows = execute_query(f"""
@@ -98,8 +100,8 @@ class RecalibrationService:
             WHERE d.org_id = %s
               AND d.due_date >= %s
               AND d.is_exam_date = TRUE
-              {scope_clause.replace('s.', 'd.')}
-        """, (org_id, request.disruption_start))
+              {scope_sql_d}
+        """, (org_id, request.disruption_start, *scope_params))
 
         # ---------------------------------------------------------------
         # 3 & 4. Apply changes (in a single transaction)
@@ -190,14 +192,14 @@ class RecalibrationService:
         }
 
     @classmethod
-    def _scope_clause(cls, request: RecalibrationRequest) -> str:
-        """Build scope-specific WHERE clause fragment."""
+    def _scope_clause(cls, request: RecalibrationRequest) -> tuple[str, tuple]:
+        """Return (sql_fragment_with_%s, params_tuple) for scope filtering."""
         if request.scope == RecalibrationScope.INSTITUTION_WIDE:
-            return ""
+            return "", ()
         if request.scope == RecalibrationScope.DEPARTMENT and request.scope_ref:
-            return f"AND s.department_id = '{request.scope_ref}'"
+            return "AND s.department_id = %s", (request.scope_ref,)
         if request.scope == RecalibrationScope.PROGRAM and request.scope_ref:
-            return f"AND s.program_id = '{request.scope_ref}'"
+            return "AND s.program_id = %s", (request.scope_ref,)
         if request.scope == RecalibrationScope.SECTION and request.scope_ref:
-            return f"AND s.section_id = '{request.scope_ref}'"
-        return ""
+            return "AND s.section_id = %s", (request.scope_ref,)
+        return "", ()

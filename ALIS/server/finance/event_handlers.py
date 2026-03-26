@@ -44,8 +44,8 @@ def on_student_enrolled(event: dict) -> None:
         if not student_rows:
             return
 
-        from datetime import datetime
-        academic_year = payload.get("academic_year") or str(datetime.now().year)
+        from datetime import datetime, timezone
+        academic_year = payload.get("academic_year") or str(datetime.now(timezone.utc).year)
 
         # Find applicable fee structure (program-specific or org-wide)
         structures = execute_query(

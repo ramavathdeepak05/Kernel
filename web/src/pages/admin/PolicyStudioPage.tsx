@@ -127,7 +127,7 @@ export function PolicyStudioPage() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!selectedPolicy) return;
+    if (!selectedPolicy || saveState === 'saving') return;
     setSaveState('saving');
     setSaveError(null);
     try {
@@ -157,7 +157,7 @@ export function PolicyStudioPage() {
       setSaveState('error');
       setSaveError(err instanceof Error ? err.message : 'Save failed.');
     }
-  }, [selectedPolicy, editValue, editJustification]);
+  }, [selectedPolicy, editValue, editJustification, saveState]);
 
   const handleGenerateDraft = useCallback(async () => {
     if (!selectedPolicy) return;

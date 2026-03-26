@@ -8,14 +8,14 @@
  * Revaluation / supplementary overlap alerts
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { DataTable, type Column } from '../components/DataTable'
 import { Badge } from '../components/Badge'
 
 // ---------------------------------------------------------------------------
-// Types + mock data
+// Types + static fallback data
 // ---------------------------------------------------------------------------
 
 type DispatchMode = 'ONLINE_VAULT' | 'OFFLINE_USB' | 'EMERGENCY_PRINT'
@@ -47,34 +47,16 @@ interface RevalAlert {
   severity: 'HIGH' | 'MEDIUM' | 'LOW'
 }
 
-const STATS = [
-  { label: 'Eligible students', value: '1,842', delta: '96.4% of enrolled', deltaColor: '#1D9E75' },
-  { label: 'Hall tickets dispatched', value: '1,786', delta: '97% issued', deltaColor: '#1D9E75' },
-  { label: 'Papers in vault', value: '24', delta: '8 programs', deltaColor: '#5D5FEF' },
-  { label: 'Days to exam', value: '7', delta: 'Nov 18 start', deltaColor: '#EF9F27' },
+const STATS_DEFAULT = [
+  { label: 'Eligible students', value: '—', delta: 'Loading…', deltaColor: '#7B82A8' },
+  { label: 'Hall tickets dispatched', value: '—', delta: 'Loading…', deltaColor: '#7B82A8' },
+  { label: 'Papers in vault', value: '—', delta: 'Loading…', deltaColor: '#5D5FEF' },
+  { label: 'Days to exam', value: '—', delta: 'Loading…', deltaColor: '#EF9F27' },
 ]
 
-const DISPATCH_TABLE: PaperDispatch[] = [
-  { id: 'p1', program: 'B.Tech CSE', examDate: '2025-11-18', mode: 'ONLINE_VAULT', status: 'IN_VAULT', papers: 62 },
-  { id: 'p2', program: 'B.Tech ECE', examDate: '2025-11-18', mode: 'ONLINE_VAULT', status: 'IN_VAULT', papers: 48 },
-  { id: 'p3', program: 'B.Tech ME', examDate: '2025-11-19', mode: 'OFFLINE_USB', status: 'PENDING', papers: 41 },
-  { id: 'p4', program: 'MBA', examDate: '2025-11-20', mode: 'ONLINE_VAULT', status: 'DISPATCHED', papers: 93 },
-  { id: 'p5', program: 'BCA', examDate: '2025-11-21', mode: 'OFFLINE_USB', status: 'DELIVERED', papers: 56 },
-  { id: 'p6', program: 'B.Sc CS', examDate: '2025-11-22', mode: 'EMERGENCY_PRINT', status: 'PENDING', papers: 34 },
-]
-
-const AI_SCORE_QUEUE: AIScoreItem[] = [
-  { id: 'ai1', studentRoll: '22CS041', course: 'DS Lab', question: 'Q7 — Linked List impl.', aiConfidence: 0.38, status: 'FACULTY_REVIEW', waitingHours: 14 },
-  { id: 'ai2', studentRoll: '22EC017', course: 'Signals', question: 'Q3 — Fourier analysis', aiConfidence: 0.52, status: 'FACULTY_REVIEW', waitingHours: 6 },
-  { id: 'ai3', studentRoll: '22CS008', course: 'DS Lab', question: 'Q12 — Graph BFS', aiConfidence: 0.71, status: 'AI_PENDING', waitingHours: 2 },
-  { id: 'ai4', studentRoll: '22ME021', course: 'Thermodynamics', question: 'Q5 — Carnot cycle', aiConfidence: 0.45, status: 'FACULTY_REVIEW', waitingHours: 20 },
-]
-
-const REVAL_ALERTS: RevalAlert[] = [
-  { id: 'r1', student: 'Arjun Mehta (22CS041)', course: 'CS301', issue: 'Revaluation result overlaps with supplementary exam date', severity: 'HIGH' },
-  { id: 'r2', student: 'Priya Nair (22EC017)', course: 'EC201', issue: 'Grace mark application pending — hall ticket blocked', severity: 'HIGH' },
-  { id: 'r3', student: 'Rohit Bose (22CS008)', course: 'CS302', issue: 'Supplementary result not yet declared — enrollment hold', severity: 'MEDIUM' },
-]
+const DISPATCH_FALLBACK: PaperDispatch[] = []
+const AI_QUEUE_FALLBACK: AIScoreItem[] = []
+const REVAL_FALLBACK: RevalAlert[] = []
 
 // ---------------------------------------------------------------------------
 // Mode badge
@@ -152,19 +134,110 @@ const AI_COLS: Column<AIScoreItem>[] = [
 // Component
 // ---------------------------------------------------------------------------
 
+const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` })
+
 export function ExamControllerDashboard() {
   const [tab, setTab] = useState<'dispatch' | 'ai_queue' | 'reval'>('dispatch')
+  const [stats, setStats] = useState(STATS_DEFAULT)
+  const [schedules, setSchedules] = useState<PaperDispatch[]>(DISPATCH_FALLBACK)
+  const [aiQueue, setAiQueue] = useState<AIScoreItem[]>(AI_QUEUE_FALLBACK)
+  const [revalAlerts, setRevalAlerts] = useState<RevalAlert[]>(REVAL_FALLBACK)
+
+  useEffect(() => {
+    const h = authHeader()
+    const currentYear = new Date().getFullYear().toString()
+
+    // Paper dispatch schedule list
+    fetch(`/api/v1/examinations/schedules?academic_year=${currentYear}`, { headers: h })
+      .then(r => r.json())
+      .then(d => {
+        if (d.schedules?.length) {
+          const rows: PaperDispatch[] = d.schedules.map((s: any) => ({
+            id: s.id,
+            program: s.program_name || s.course_code || 'Unknown',
+            examDate: s.exam_date || '',
+            mode: (s.dispatch_mode || 'ONLINE_VAULT') as DispatchMode,
+            status: (s.status || 'PENDING') as PaperDispatch['status'],
+            papers: s.registered_count || 0,
+          }))
+          setSchedules(rows)
+
+          const inVault = d.schedules.filter((s: any) => s.status === 'IN_VAULT').length
+          const upcoming = d.schedules
+            .map((s: any) => new Date(s.exam_date))
+            .filter((dt: Date) => dt > new Date())
+            .sort((a: Date, b: Date) => a.getTime() - b.getTime())
+          const days = upcoming.length
+            ? Math.ceil((upcoming[0].getTime() - Date.now()) / 86400000)
+            : null
+          const dateLabel = upcoming.length
+            ? upcoming[0].toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+            : '—'
+
+          setStats(prev => prev.map(s => {
+            if (s.label === 'Papers in vault')
+              return { ...s, value: String(inVault), delta: `${d.total} programs`, deltaColor: '#5D5FEF' }
+            if (s.label === 'Days to exam' && days !== null)
+              return { ...s, value: String(days), delta: `${dateLabel} start`, deltaColor: '#EF9F27' }
+            return s
+          }))
+        }
+      })
+      .catch(() => {})
+
+    // AI eval faculty review queue
+    fetch('/api/v1/examinations/ai-eval/faculty-review-queue', { headers: h })
+      .then(r => r.json())
+      .then(d => {
+        if (d.items?.length) {
+          const rows: AIScoreItem[] = d.items.map((item: any) => ({
+            id: item.id,
+            studentRoll: item.roll_number || item.student_id?.slice(0, 8) || '—',
+            course: item.course_code || '—',
+            question: item.question_id || '—',
+            aiConfidence: Number(item.ai_confidence) || 0,
+            status: (item.status || 'FACULTY_REVIEW') as AIScoreItem['status'],
+            waitingHours: item.waiting_hours || 0,
+          }))
+          setAiQueue(rows)
+        }
+      })
+      .catch(() => {})
+
+    // Revaluation pending
+    fetch('/api/v1/examinations/reeval/pending', { headers: h })
+      .then(r => r.json())
+      .then(d => {
+        if (d.reeval_requests?.length) {
+          const rows: RevalAlert[] = d.reeval_requests.map((r: any) => ({
+            id: r.id,
+            student: `${r.student_name || 'Student'} (${r.roll_number || r.student_id?.slice(0, 8) || '?'})`,
+            course: r.course_code || r.exam_schedule_id || '—',
+            issue: r.reason || r.notes || 'Revaluation pending',
+            severity: (
+              r.urgency === 'HIGH' || (r.days_pending && r.days_pending > 14)
+                ? 'HIGH'
+                : r.days_pending && r.days_pending > 7
+                  ? 'MEDIUM'
+                  : 'LOW'
+            ) as RevalAlert['severity'],
+          }))
+          setRevalAlerts(rows)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <StatsRow stats={STATS} />
+      <StatsRow stats={stats} />
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 8 }}>
         {[
           { key: 'dispatch', label: 'Paper Dispatch' },
-          { key: 'ai_queue', label: `AI Score Review (${AI_SCORE_QUEUE.length})` },
-          { key: 'reval', label: `Reval Alerts (${REVAL_ALERTS.length})` },
+          { key: 'ai_queue', label: `AI Score Review (${aiQueue.length})` },
+          { key: 'reval', label: `Reval Alerts (${revalAlerts.length})` },
         ].map(t => (
           <button
             key={t.key}
@@ -185,7 +258,7 @@ export function ExamControllerDashboard() {
         <DataTable
           title="Paper Dispatch Status"
           columns={DISPATCH_COLS}
-          rows={DISPATCH_TABLE}
+          rows={schedules}
           onRowClick={() => {}}
         />
       )}
@@ -194,7 +267,7 @@ export function ExamControllerDashboard() {
         <DataTable
           title="AI Score Confirmation Queue — Faculty Review Required"
           columns={AI_COLS}
-          rows={AI_SCORE_QUEUE}
+          rows={aiQueue}
           onRowClick={() => {}}
         />
       )}
@@ -206,30 +279,34 @@ export function ExamControllerDashboard() {
           <p style={{ color: '#7B82A8', fontSize: 12, margin: '0 0 16px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Revaluation / Supplementary Overlap Alerts
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {REVAL_ALERTS.map(alert => (
-              <div key={alert.id} style={{
-                display: 'flex', alignItems: 'flex-start', gap: 12,
-                padding: '12px 16px', borderRadius: 8,
-                background: alert.severity === 'HIGH' ? '#E24B4A11' : '#EF9F2711',
-                border: `1px solid ${alert.severity === 'HIGH' ? '#E24B4A33' : '#EF9F2733'}`,
-              }}>
-                <span style={{
-                  fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700, flexShrink: 0, marginTop: 2,
-                  background: alert.severity === 'HIGH' ? '#E24B4A22' : '#EF9F2722',
-                  color: alert.severity === 'HIGH' ? '#E24B4A' : '#EF9F27',
+          {revalAlerts.length === 0 ? (
+            <p style={{ color: '#7B82A8', fontSize: 13, margin: 0 }}>No pending alerts.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {revalAlerts.map(alert => (
+                <div key={alert.id} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 12,
+                  padding: '12px 16px', borderRadius: 8,
+                  background: alert.severity === 'HIGH' ? '#E24B4A11' : '#EF9F2711',
+                  border: `1px solid ${alert.severity === 'HIGH' ? '#E24B4A33' : '#EF9F2733'}`,
                 }}>
-                  {alert.severity}
-                </span>
-                <div>
-                  <p style={{ margin: 0, color: '#C9D1E9', fontSize: 13, fontWeight: 600 }}>{alert.student}</p>
-                  <p style={{ margin: '2px 0 0', color: '#7B82A8', fontSize: 12 }}>
-                    {alert.course} — {alert.issue}
-                  </p>
+                  <span style={{
+                    fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700, flexShrink: 0, marginTop: 2,
+                    background: alert.severity === 'HIGH' ? '#E24B4A22' : '#EF9F2722',
+                    color: alert.severity === 'HIGH' ? '#E24B4A' : '#EF9F27',
+                  }}>
+                    {alert.severity}
+                  </span>
+                  <div>
+                    <p style={{ margin: 0, color: '#C9D1E9', fontSize: 13, fontWeight: 600 }}>{alert.student}</p>
+                    <p style={{ margin: '2px 0 0', color: '#7B82A8', fontSize: 12 }}>
+                      {alert.course} — {alert.issue}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

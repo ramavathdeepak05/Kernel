@@ -374,6 +374,7 @@ async def get_ai_metrics(
 # =============================================================================
 
 @router.get("/health")
+@require_permission(Permission.AI_INVOKE)
 async def ai_health_check() -> JSONResponse:
     """
     Check health of the AI subsystem.

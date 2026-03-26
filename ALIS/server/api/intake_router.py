@@ -261,7 +261,7 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
 
     order_id     = payment.get("order_id")
     amount_paise = payment.get("amount", 0)
-    amount_inr   = amount_paise / 100
+    amount_inr   = amount_paise // 100
 
     if not order_id:
         execute_transaction([(

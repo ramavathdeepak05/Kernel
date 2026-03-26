@@ -212,7 +212,11 @@ class PaymentGatewayClient:
         txn_id = receipt  # Use receipt as the unique txn ID
 
         # PayU hash: sha512(key|txnid|amount|productinfo|firstname|email|||||||||||salt)
-        hash_string = f"{merchant_key}|{txn_id}|{amount_rupees}|admission_fee|applicant|noreply@alis.edu|||||||||||{merchant_salt}"
+        # Must use the same values that will be submitted in the checkout form.
+        productinfo = notes.get("productinfo", "admission_fee")
+        firstname   = notes.get("firstname", "applicant")
+        email       = notes.get("email", "noreply@alis.edu")
+        hash_string = f"{merchant_key}|{txn_id}|{amount_rupees}|{productinfo}|{firstname}|{email}|||||||||||{merchant_salt}"
         payment_hash = hashlib.sha512(hash_string.encode("utf-8")).hexdigest()
 
         logger.info("PayU: order hash generated for txn=%s amount=%s", txn_id, amount_rupees)
@@ -224,7 +228,10 @@ class PaymentGatewayClient:
             gateway_key=merchant_key,
             provider=GatewayProvider.PAYU,
             status="created",
-            raw={"hash": payment_hash, "txn_id": txn_id, "amount": amount_rupees},
+            raw={
+                "hash": payment_hash, "txn_id": txn_id, "amount": amount_rupees,
+                "productinfo": productinfo, "firstname": firstname, "email": email,
+            },
         )
 
     # -------------------------------------------------------------------------
@@ -529,8 +536,47 @@ class PaymentGatewayClient:
 
         if self._provider == GatewayProvider.RAZORPAY:
             return self._razorpay_fetch_order(order_id)
+        elif self._provider == GatewayProvider.PAYU:
+            return self._payu_fetch_order(order_id)
         else:
             return {"error": f"fetch_order_status not implemented for {self._provider}"}
+
+    def _payu_fetch_order(self, order_id: str) -> Dict[str, Any]:
+        """
+        PayU transaction status API (verify_payment).
+        Endpoint: POST https://info.payu.in/merchant/postservice.php?form=2
+        Hash: sha512(key|command|var1|salt)  where var1 = txnid
+        """
+        import httpx
+
+        merchant_key  = self._settings.payu_merchant_key
+        merchant_salt = self._settings.payu_merchant_salt
+        timeout       = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
+
+        hash_seq  = f"{merchant_key}|verify_payment|{order_id}|{merchant_salt}"
+        req_hash  = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
+
+        try:
+            resp = httpx.post(
+                "https://info.payu.in/merchant/postservice.php?form=2",
+                data={
+                    "key":     merchant_key,
+                    "command": "verify_payment",
+                    "var1":    order_id,
+                    "hash":    req_hash,
+                },
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            # PayU wraps results in {"status": 1, "transaction_details": {...}}
+            details = data.get("transaction_details", {})
+            if isinstance(details, dict) and order_id in details:
+                return details[order_id]
+            return data
+        except Exception as exc:
+            logger.error("PayU: fetch order status failed — %s", exc)
+            return {"error": str(exc)}
 
     def _razorpay_fetch_order(self, order_id: str) -> Dict[str, Any]:
         import httpx

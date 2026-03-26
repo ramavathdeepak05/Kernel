@@ -135,8 +135,9 @@ class PolicyAuthoringAgent:
         )
 
         try:
+            from server.core.settings import settings as _settings
             resp = httpx.post(
-                "http://localhost:11434/api/generate",
+                f"{_settings.ollama_base_url}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": False},
                 timeout=30,
             )

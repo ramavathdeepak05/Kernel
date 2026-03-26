@@ -270,6 +270,6 @@ class EmailProvisionClient:
         return EmailProvisionResult(
             success=True,
             university_email=email,
-            temp_password="Stub@123456",
+            temp_password=_temp_password(),
             provider="STUB",
         )
