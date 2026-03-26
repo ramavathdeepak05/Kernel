@@ -144,6 +144,24 @@ def _get_role_permissions(role_id: str, tenant_id: str) -> List[Dict[str, Any]]:
     ))
 
 
+def _get_user_delegatable_permissions(user_id: str, tenant_id: str) -> set:
+    """
+    Returns all permission strings this user holds via approved custom roles.
+    Used to enforce: you can only delegate permissions you yourself hold.
+    """
+    rows = execute_query(
+        """
+        SELECT DISTINCT crp.permission
+        FROM user_custom_roles ucr
+        JOIN custom_role_permissions crp ON crp.role_id = ucr.role_id
+        WHERE ucr.user_id = %s AND crp.status = 'APPROVED'
+        """,
+        (user_id,),
+        tenant_id=tenant_id,
+    )
+    return {r["permission"] for r in rows}
+
+
 def _serialize_role(role: Dict[str, Any], perms: Optional[List] = None) -> Dict[str, Any]:
     out = {
         "id": str(role["id"]),
@@ -218,10 +236,19 @@ async def create_custom_role(
     except ValueError:
         return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
 
-    if not _is_manager_or_super(caller_role):
-        return _err(403, "Module Manager or SUPER_ADMIN required", "ERR_LAYER5_ACCESS")
+    # Also allow users who hold role:create via a custom role (delegation chain)
+    custom_perms = _get_user_delegatable_permissions(session.user_id, session.tenant_id)
+    can_create = _is_manager_or_super(caller_role) or Permission.ROLE_CREATE.value in custom_perms
 
-    module = get_manager_module(caller_role) or "SYSTEM"
+    if not can_create:
+        return _err(
+            403,
+            "ROLE_CREATE permission required — ask your manager to grant it",
+            "ERR_LAYER5_ACCESS",
+        )
+
+    # Module scope: built-in managers get their module; custom-role managers get 'DELEGATED'
+    module = get_manager_module(caller_role) or ("DELEGATED" if not _is_manager_or_super(caller_role) else "SYSTEM")
     role_id = str(uuid4())
     now = datetime.now(timezone.utc)
 
@@ -578,6 +605,49 @@ async def deny_permission_request(
 
 
 # =============================================================================
+# GET /api/roles/my-permissions — Caller's full delegatable permission set
+# =============================================================================
+
+@router.get("/my-permissions")
+async def my_delegatable_permissions(
+    authorization: Optional[str] = Header(default=None),
+) -> JSONResponse:
+    """
+    Returns all permissions the caller can delegate to sub-roles.
+
+    For SUPER_ADMIN: all permissions in the system.
+    For M*_MANAGER: their built-in module permissions.
+    For custom-role managers: permissions from all their approved custom roles.
+    """
+    session, error = _require_session(authorization)
+    if error:
+        return _err(401, error, "ERR_AUTH_REQUIRED")
+
+    caller = _fetch_caller_user(session)
+    if not caller:
+        return _err(401, "Caller not found", "ERR_AUTH_REQUIRED")
+
+    try:
+        caller_role = Role(caller["role"])
+    except ValueError:
+        return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
+
+    from server.core.rbac import ROLE_PERMISSIONS
+
+    if caller_role == Role.SUPER_ADMIN:
+        perms = [p.value for p in Permission]
+    elif is_manager_role(caller_role):
+        # Built-in module permissions
+        role_perms = ROLE_PERMISSIONS.get(caller_role, [])
+        custom_perms = _get_user_delegatable_permissions(session.user_id, session.tenant_id)
+        perms = list({p.value for p in role_perms} | custom_perms)
+    else:
+        perms = list(_get_user_delegatable_permissions(session.user_id, session.tenant_id))
+
+    return JSONResponse(content={"permissions": sorted(perms), "total": len(perms)})
+
+
+# =============================================================================
 # GET /api/roles/{role_id} — Get role with full permission list
 # =============================================================================
 
@@ -652,8 +722,10 @@ async def request_permissions(
     except ValueError:
         return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
 
-    if not _is_manager_or_super(caller_role):
-        return _err(403, "Module Manager or SUPER_ADMIN required", "ERR_LAYER5_ACCESS")
+    custom_perms = _get_user_delegatable_permissions(session.user_id, session.tenant_id)
+    can_manage = _is_manager_or_super(caller_role) or Permission.ROLE_MANAGE.value in custom_perms
+    if not can_manage:
+        return _err(403, "ROLE_MANAGE permission required", "ERR_LAYER5_ACCESS")
 
     if not body.permissions:
         return _err(422, "permissions list must not be empty", "ERR_VALIDATION")
@@ -669,6 +741,9 @@ async def request_permissions(
             "Only the role creator or SUPER_ADMIN can add permissions to this role",
             "ERR_LAYER5_ACCESS",
         )
+
+    # Refresh custom perms for delegation check below
+    caller_custom_perms = _get_user_delegatable_permissions(session.user_id, session.tenant_id)
 
     manager_module = get_manager_module(caller_role)  # None for SUPER_ADMIN
     now = datetime.now(timezone.utc)
@@ -707,14 +782,14 @@ async def request_permissions(
         owning_module = PERMISSION_TO_MODULE.get(perm_enum)  # None = platform-level
         if caller_role == Role.SUPER_ADMIN:
             approval_status = "APPROVED"
+        elif perm_str in caller_custom_perms:
+            # Delegation principle: you can grant any permission you yourself hold
+            approval_status = "APPROVED"
         elif owning_module is None:
-            # Platform-level permission (USER_READ, AI_INVOKE, etc.) — auto-approve
             approval_status = "APPROVED"
         elif owning_module == manager_module:
-            # Same-module permission — auto-approve
             approval_status = "APPROVED"
         else:
-            # Cross-module — requires owning module manager's approval
             approval_status = "PENDING"
 
         req_id = str(uuid4())

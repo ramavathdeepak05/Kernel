@@ -27,6 +27,7 @@ export type ALISModule =
   | 'reports'
   | 'settings'
   | 'onboarding'
+  | 'team'
 
 export type CanvasView =
   | 'approval_queue'

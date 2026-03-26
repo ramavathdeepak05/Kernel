@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 import { queryClient } from "./lib/queryClient";
 import { useAuthStore } from "./store/authStore";
 import { useEffect } from "react";
+import { useALISRole } from "./hooks/useALISRole";
 
 // New three-column ALIS shell (FE-1)
 import { ALISShell } from "./shell/ALISShell";
@@ -54,9 +55,22 @@ import { GuardianPortalPage } from './pages/portal/GuardianPortalPage';
 import { WorkflowsPage } from './pages/workflows/WorkflowsPage';
 import { ProcessEnginePage } from './pages/process-engine/ProcessEnginePage';
 import { ConsentPage } from './pages/consent/ConsentPage';
+import { TeamManagementPage } from './pages/admin/TeamManagementPage';
 
 // P28 — Offline PWA attendance (standalone, no shell — loads as installable page)
 import { OfflineAttendancePage } from './pages/attendance/OfflineAttendancePage';
+
+function RoleDashboard() {
+  const { role } = useALISRole();
+  const map: Record<string, JSX.Element> = {
+    faculty:         <FacultyDashboard />,
+    student:         <StudentDashboard />,
+    finance:         <FinanceDashboard />,
+    hod:             <HODDashboard />,
+    exam_controller: <ExamControllerDashboard />,
+  };
+  return map[role] ?? <RegistrarDashboard />;
+}
 
 function ProtectedRoute() {
   const { isAuthenticated, hydrate } = useAuthStore();
@@ -98,8 +112,8 @@ export default function App() {
             <Route element={<ALISShell />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-              {/* Role dashboards */}
-              <Route path="/dashboard" element={<RegistrarDashboard />} />
+              {/* Role dashboards — RoleDashboard selects the right view by role */}
+              <Route path="/dashboard" element={<RoleDashboard />} />
               <Route path="/dashboard/faculty" element={<FacultyDashboard />} />
               <Route path="/dashboard/student" element={<StudentDashboard />} />
               <Route path="/dashboard/finance" element={<FinanceDashboard />} />
@@ -130,6 +144,9 @@ export default function App() {
               <Route path="/workflows" element={<WorkflowsPage />} />
               <Route path="/process-engine" element={<ProcessEnginePage />} />
               <Route path="/consent" element={<ConsentPage />} />
+
+              {/* Team management */}
+              <Route path="/admin/team" element={<TeamManagementPage />} />
             </Route>
           </Route>
 

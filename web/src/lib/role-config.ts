@@ -58,8 +58,8 @@ export const ROLE_MODULES: Record<ALISRole, ALISModule[]> = {
   finance:         ['dashboard', 'finance', 'reports'],
   hod:             ['dashboard', 'academics', 'hr', 'student_services', 'phd', 'obe', 'reports'],
   exam_controller: ['dashboard', 'examinations', 'academics', 'convocation'],
-  admin:           ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'obe', 'workflows', 'process_engine', 'consent', 'regulatory', 'reports', 'settings'],
-  super_admin:     ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'obe', 'workflows', 'process_engine', 'consent', 'regulatory', 'reports', 'settings', 'onboarding'],
+  admin:           ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'obe', 'workflows', 'process_engine', 'consent', 'regulatory', 'reports', 'settings', 'team'],
+  super_admin:     ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'obe', 'workflows', 'process_engine', 'consent', 'regulatory', 'reports', 'settings', 'onboarding', 'team'],
 }
 
 export const MODULE_ICONS: Record<ALISModule, string> = {
@@ -84,6 +84,7 @@ export const MODULE_ICONS: Record<ALISModule, string> = {
   reports:          '↗',
   settings:         '⚙',
   onboarding:       '⬡',
+  team:             '◎',
 }
 
 export const MODULE_LABELS: Record<ALISModule, string> = {
@@ -108,6 +109,7 @@ export const MODULE_LABELS: Record<ALISModule, string> = {
   reports:          'Reports',
   settings:         'Settings',
   onboarding:       'Onboarding',
+  team:             'My Team',
 }
 
 export const MODULE_ROUTES: Record<ALISModule, string> = {
@@ -132,4 +134,5 @@ export const MODULE_ROUTES: Record<ALISModule, string> = {
   reports:          '/reports',
   settings:         '/settings',
   onboarding:       '/admin/onboarding',
+  team:             '/admin/team',
 }

@@ -16,6 +16,7 @@ import {
   Building2, Users, GitBranch, UserCheck, ScrollText, Rocket,
   ChevronDown, Eye, EyeOff, Link2,
 } from 'lucide-react'
+import { PermissionPicker } from '../../components/PermissionPicker'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,15 @@ interface School { id: string; name: string; code: string; depts: Dept[] }
 
 interface ManagerEntry { name: string; email: string; password: string; skip: boolean }
 interface HODEntry     { name: string; email: string; password: string; skip: boolean }
+
+interface DynamicManager {
+  id: string
+  title: string       // e.g. "Admissions Head"
+  name: string
+  email: string
+  password: string
+  permissions: Set<string>
+}
 
 // moduleScope[moduleKey] = Set of school IDs it oversees
 // crossGrants[moduleKey] = Set of other module keys whose READ perms are granted
@@ -173,10 +183,16 @@ export function OnboardingWizardPage() {
   ])
   const [expandedSchools, setExpandedSchools] = useState<Set<string>>(new Set())
 
-  // Step 2: Module Managers
-  const [managers, setManagers] = useState<Record<string, ManagerEntry>>(() =>
+  // Step 2: Module Managers (legacy — kept for Step 3 cross-grants scope matrix)
+  const [managers] = useState<Record<string, ManagerEntry>>(() =>
     Object.fromEntries(MODULE_DEFS.map(m => [m.key, { name: '', email: '', password: tempPwd(), skip: false }]))
   )
+
+  // Step 2: Dynamic managers (new — replaces MODULE_DEFS-based form)
+  const [dynamicManagers, setDynamicManagers] = useState<DynamicManager[]>([
+    { id: uid(), title: '', name: '', email: '', password: tempPwd(), permissions: new Set() },
+  ])
+  const [collapsedManagers, setCollapsedManagers] = useState<Set<string>>(new Set())
 
   // Step 3: Module Scope
   // moduleScope[moduleKey] = set of school IDs this module oversees
@@ -295,21 +311,40 @@ export function OnboardingWizardPage() {
       }
     }
 
-    // 2. Module managers
-    const managerUserIds: Record<string, string> = {}
-    for (const mod of activeMods) {
-      const m = managers[mod.key]
-      if (!m.email.trim() || !m.name.trim()) continue
-      const data = await run(`${mod.module} Manager: ${m.email}`, () =>
-        apiFetch('/api/auth/register', { username: m.email, email: m.email, display_name: m.name, password: m.password, role: mod.key })
+    // 2. Dynamic managers — create user, create custom role, assign permissions, assign role
+    for (const mgr of dynamicManagers) {
+      if (!mgr.email.trim() || !mgr.name.trim()) continue
+      const title = mgr.title.trim() || mgr.name.trim()
+
+      const userData = await run(`Manager: ${title} (${mgr.email})`, () =>
+        apiFetch('/api/auth/register', { username: mgr.email, email: mgr.email, display_name: mgr.name, password: mgr.password, role: 'admin' })
       )
-      if (data?.id) managerUserIds[mod.key] = data.id
+      if (!userData?.id) continue
+
+      // Create the custom role for this manager
+      const roleName = title.replace(/\s+/g, '_').toUpperCase()
+      const roleData = await run(`  └─ Create role: ${roleName}`, () =>
+        apiFetch('/api/roles', { role_name: roleName, description: `Auto-created for ${title}` })
+      )
+      if (!roleData?.id) continue
+
+      // Assign permissions to the role
+      if (mgr.permissions.size > 0) {
+        await run(`  └─ Assign ${mgr.permissions.size} permissions`, () =>
+          apiFetch(`/api/roles/${roleData.id}/permissions`, { permissions: [...mgr.permissions] })
+        )
+      }
+
+      // Assign role to the manager user
+      await run(`  └─ Assign role to user`, () =>
+        apiFetch(`/api/users/${userData.id}/roles`, { role_id: roleData.id })
+      )
     }
 
     // 3. Cross-module grants via custom roles (SUPER_ADMIN → auto-approved)
     for (const mod of activeMods) {
       const grants = [...crossGrants[mod.key]]
-      if (!grants.length || !managerUserIds[mod.key]) continue
+      if (!grants.length) continue
 
       // Create a cross-grant custom role for this manager
       const roleName = `${mod.module}_with_${grants.map(g => MODULE_DEFS.find(x => x.key === g)?.module).join('_')}_access`
@@ -339,10 +374,6 @@ export function OnboardingWizardPage() {
               return permMap[gMod?.module ?? ''] ?? []
             }),
           })
-        )
-        // Assign the custom role to the manager user
-        await run(`  └─ Assign role to user`, () =>
-          apiFetch(`/api/users/${managerUserIds[mod.key]}/roles`, { role_id: roleData.id })
         )
       }
     }
@@ -443,39 +474,87 @@ export function OnboardingWizardPage() {
         </div>
       )}
 
-      {/* ──────────── STEP 2: Module Managers ──────────── */}
+      {/* ──────────── STEP 2: Dynamic Manager Builder ──────────── */}
       {step === 2 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 4px' }}>
-            Assign a functional head for each module. Scope and cross-module access are configured in Step 3.
+            Define functional heads with custom permission sets. Each manager gets a dedicated role built from your institution's permission catalogue.
           </p>
-          {MODULE_DEFS.map(mod => {
-            const m = managers[mod.key]
+          {dynamicManagers.map((mgr, idx) => {
+            const isCollapsed = collapsedManagers.has(mgr.id)
             return (
-              <div key={mod.key} style={{ ...CARD, opacity: m.skip ? 0.45 : 1, transition: 'opacity 0.15s' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: m.skip ? 0 : 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 5, background: `${mod.color}18`, color: mod.color, border: `1px solid ${mod.color}33`, letterSpacing: '0.5px' }}>{mod.module}</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>{mod.label}</div>
-                      <div style={{ fontSize: 10, color: '#475569' }}>{mod.desc}</div>
-                    </div>
-                  </div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 11, color: '#475569' }}>
-                    <input type="checkbox" checked={m.skip} onChange={e => setManagers(p => ({ ...p, [mod.key]: { ...p[mod.key], skip: e.target.checked } }))} />
-                    Skip
-                  </label>
+              <div key={mgr.id} style={{ ...CARD, overflow: 'hidden' }}>
+                {/* Card header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'rgba(129,140,248,0.04)', borderBottom: isCollapsed ? 'none' : '1px solid rgba(255,255,255,0.06)' }}>
+                  <button
+                    onClick={() => setCollapsedManagers(p => { const n = new Set(p); n.has(mgr.id) ? n.delete(mgr.id) : n.add(mgr.id); return n })}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#818cf8', padding: 2 }}
+                  >
+                    <ChevronDown size={15} style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }} />
+                  </button>
+                  <input
+                    value={mgr.title}
+                    onChange={e => setDynamicManagers(p => p.map((m, i) => i === idx ? { ...m, title: e.target.value } : m))}
+                    placeholder="Role title (e.g. Admissions Head, Lab Coordinator)"
+                    style={{ ...INPUT, flex: 1, fontWeight: 600, fontSize: 13, background: 'transparent', border: 'none', padding: '4px 0' }}
+                  />
+                  <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 20, background: 'rgba(129,140,248,0.1)', color: '#818cf8', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                    {mgr.permissions.size} perms
+                  </span>
+                  <button
+                    onClick={() => setDynamicManagers(p => p.filter((_, i) => i !== idx))}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#475569', padding: 4 }}
+                  >
+                    <Trash2 size={13} />
+                  </button>
                 </div>
-                {!m.skip && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                    <input value={m.name} onChange={e => setManagers(p => ({ ...p, [mod.key]: { ...p[mod.key], name: e.target.value } }))} placeholder="Full name" style={INPUT} />
-                    <input value={m.email} onChange={e => setManagers(p => ({ ...p, [mod.key]: { ...p[mod.key], email: e.target.value } }))} placeholder="Email" type="email" style={INPUT} />
-                    <PasswordField value={m.password} onChange={v => setManagers(p => ({ ...p, [mod.key]: { ...p[mod.key], password: v } }))} />
+
+                {!isCollapsed && (
+                  <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    {/* Identity fields */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                      <input
+                        value={mgr.name}
+                        onChange={e => setDynamicManagers(p => p.map((m, i) => i === idx ? { ...m, name: e.target.value } : m))}
+                        placeholder="Full name"
+                        style={INPUT}
+                      />
+                      <input
+                        value={mgr.email}
+                        onChange={e => setDynamicManagers(p => p.map((m, i) => i === idx ? { ...m, email: e.target.value } : m))}
+                        placeholder="Email"
+                        type="email"
+                        style={INPUT}
+                      />
+                      <PasswordField
+                        value={mgr.password}
+                        onChange={v => setDynamicManagers(p => p.map((m, i) => i === idx ? { ...m, password: v } : m))}
+                      />
+                    </div>
+
+                    {/* Permission picker */}
+                    <div style={{ background: 'rgba(255,255,255,0.015)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)', padding: '10px 12px', maxHeight: 340, overflowY: 'auto' }}>
+                      <p style={{ fontSize: 10, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 8px' }}>
+                        Assign Permissions
+                      </p>
+                      <PermissionPicker
+                        selected={mgr.permissions}
+                        onChange={perms => setDynamicManagers(p => p.map((m, i) => i === idx ? { ...m, permissions: perms } : m))}
+                        compact
+                      />
+                    </div>
                   </div>
                 )}
               </div>
             )
           })}
+
+          <button
+            onClick={() => setDynamicManagers(p => [...p, { id: uid(), title: '', name: '', email: '', password: tempPwd(), permissions: new Set() }])}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '10px 0', borderRadius: 10, fontSize: 12, fontWeight: 500, background: 'transparent', color: '#818cf8', border: '1px dashed rgba(129,140,248,0.3)', cursor: 'pointer' }}
+          >
+            <Plus size={13} /> Add Manager
+          </button>
         </div>
       )}
 
@@ -659,10 +738,10 @@ export function OnboardingWizardPage() {
                 {[
                   { label: 'Schools',        count: schools.filter(s => s.name).length,  color: '#818cf8' },
                   { label: 'Departments',    count: allDepts.filter(d => d.name).length,  color: '#60a5fa' },
-                  { label: 'Mod. Managers',  count: activeMods.filter(m => managers[m.key].email).length, color: '#1D9E75' },
+                  { label: 'Managers',       count: dynamicManagers.filter(m => m.email.trim()).length, color: '#1D9E75' },
                   { label: 'Cross-Grants',   count: activeMods.reduce((n, m) => n + (crossGrants[m.key]?.size ?? 0), 0), color: '#fbbf24' },
                   { label: 'HODs',           count: allDepts.filter(d => !hods[d.id]?.skip && hods[d.id]?.email).length, color: '#f472b6' },
-                  { label: 'Total Users',    count: activeMods.filter(m => managers[m.key].email).length + allDepts.filter(d => !hods[d.id]?.skip && hods[d.id]?.email).length, color: '#34d399' },
+                  { label: 'Total Users',    count: dynamicManagers.filter(m => m.email.trim()).length + allDepts.filter(d => !hods[d.id]?.skip && hods[d.id]?.email).length, color: '#34d399' },
                 ].map(item => (
                   <div key={item.label} style={{ ...CARD, textAlign: 'center' }}>
                     <div style={{ fontSize: 26, fontWeight: 700, color: item.color }}>{item.count}</div>
