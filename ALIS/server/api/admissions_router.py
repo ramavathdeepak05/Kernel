@@ -2110,6 +2110,96 @@ async def list_credit_transfers(
 # Student Deduplication Routes (P22 — distinct from lead dedup)
 # ---------------------------------------------------------------------------
 
+# ──────────────────────────────────────────────────────────────────────────────
+# EC-ADM-01 — Identity Mismatch Check (cross-document name consistency)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@router.post("/applications/{application_id}/identity-check")
+@require_permission(Permission.STUDENT_READ)
+async def run_identity_check(request: Request, application_id: str) -> JSONResponse:
+    """
+    Run Jaro-Winkler cross-document name consistency check (EC-ADM-01).
+
+    Compares applicant_name, aadhaar_name, and jee_name.
+    If any pair scores < 0.85 → routes application to KYC_RECONCILIATION queue.
+    Safe to call multiple times — idempotent.
+    """
+    from server.admissions.identity_match import IdentityMatchService
+    result = IdentityMatchService.check(
+        application_id=application_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=result)
+
+
+@router.post("/applications/{application_id}/identity-source")
+@require_permission(Permission.STUDENT_READ)
+async def update_identity_source(
+    request: Request,
+    application_id: str,
+    body: dict,
+) -> JSONResponse:
+    """
+    Store a name from an external source and re-run the identity check.
+
+    body: { "source": "aadhaar" | "entrance_scorecard", "name": "..." }
+
+    Called by:
+      - Aadhaar eKYC webhook after OTP verification
+      - NTA/JEE score import pipeline after scorecard ingestion
+    """
+    from server.admissions.identity_match import IdentityMatchService
+    result = IdentityMatchService.update_name_source(
+        application_id=application_id,
+        org_id=_org(request),
+        source=body["source"],
+        name=body["name"],
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=result)
+
+
+@router.post("/applications/{application_id}/kyc-clear")
+@require_permission(Permission.OVERRIDE_APPROVE)
+async def clear_kyc_hold(request: Request, application_id: str, body: dict) -> JSONResponse:
+    """
+    Admissions officer clears the KYC_RECONCILIATION hold after manual review.
+
+    body: { "resolution_note": "..." }
+    Sets kyc_status = CLEARED, restores application status to ELIGIBILITY_SCREENING.
+    """
+    from server.admissions.identity_match import IdentityMatchService
+    result = IdentityMatchService.clear_kyc_hold(
+        application_id=application_id,
+        org_id=_org(request),
+        actor_id=_actor(request),
+        resolution_note=body.get("resolution_note", ""),
+    )
+    return JSONResponse(content=result)
+
+
+@router.get("/applications/kyc-queue")
+@require_permission(Permission.STUDENT_READ)
+async def list_kyc_queue(request: Request) -> JSONResponse:
+    """
+    List all applications currently in KYC_RECONCILIATION queue.
+    Used by the Admissions Officer dashboard.
+    """
+    from server.db_service import execute_query as _eq
+    rows = _eq(
+        """
+        SELECT id, applicant_name, aadhaar_name, jee_name,
+               name_variants, kyc_status, status, created_at
+        FROM   applications
+        WHERE  org_id = %s AND kyc_status = 'KYC_RECONCILIATION'
+        ORDER BY created_at DESC
+        """,
+        (_org(request),),
+    )
+    return JSONResponse(content={"queue": _jsonify(rows), "total": len(rows)})
+
+
 @router.get("/students/duplicates")
 @require_permission(Permission.STUDENT_READ)
 async def find_student_duplicates(

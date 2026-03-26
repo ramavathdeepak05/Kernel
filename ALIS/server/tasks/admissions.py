@@ -136,3 +136,51 @@ def check_fee_overdue() -> dict:
     except Exception as exc:
         logger.error("check_fee_overdue failed: %s", exc)
         return {"status": "error", "error": str(exc)}
+
+
+@celery_app.task(name="tasks.expire_utr_access_lifts")
+def expire_utr_access_lifts() -> dict:
+    """
+    EC-ADM-05 — Expire 48-hour access lifts for UTR payment disputes.
+
+    Scheduled every 30 minutes. Marks disputes whose access_lifted_until
+    has passed as access_expired = TRUE, restoring normal access restrictions.
+    """
+    from server.db_service import execute_query, execute_transaction
+    from server.core.domain_events import DomainEvent, DomainEventBus
+    try:
+        rows = execute_query(
+            """
+            SELECT id, org_id, payment_id
+            FROM   payment_utr_disputes
+            WHERE  access_lifted_until IS NOT NULL
+              AND  access_lifted_until <= NOW()
+              AND  access_expired = FALSE
+            """,
+            (),
+        )
+        expired = 0
+        for row in rows:
+            execute_transaction([(
+                """
+                UPDATE payment_utr_disputes
+                   SET access_expired = TRUE
+                 WHERE id = %s
+                """,
+                (row["id"],),
+            )])
+            DomainEventBus.publish(DomainEvent(
+                event_type="DisputeAccessLiftExpired",
+                entity_type="payment_utr_dispute",
+                entity_id=str(row["id"]),
+                org_id=str(row["org_id"]),
+                payload={"payment_id": str(row["payment_id"])},
+                actor_id="system",
+            ))
+            expired += 1
+
+        logger.info("expire_utr_access_lifts: expired %d access lifts", expired)
+        return {"status": "ok", "expired": expired}
+    except Exception as exc:
+        logger.error("expire_utr_access_lifts failed: %s", exc)
+        return {"status": "error", "error": str(exc)}

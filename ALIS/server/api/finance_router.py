@@ -470,13 +470,19 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
 @router.post("/disputes", status_code=201)
 @require_permission(Permission.PAYMENT_PROCESS)
 async def raise_utr_dispute(request: Request, body: dict) -> JSONResponse:
-    """Raise a UTR-level payment dispute."""
+    """Raise a UTR-level payment dispute.
+
+    EC-ADM-05: sets access_lifted_until = NOW() + 48 hours so the student
+    retains system access while the payment is being verified.
+    """
     rows = execute_query(
         """
         INSERT INTO payment_utr_disputes
-            (org_id, payment_id, utr_number, disputed_amount, reason, raised_by)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING id, raised_at
+            (org_id, payment_id, utr_number, disputed_amount, reason, raised_by,
+             access_lifted_until)
+        VALUES (%s, %s, %s, %s, %s, %s,
+                NOW() + INTERVAL '48 hours')
+        RETURNING id, raised_at, access_lifted_until
         """,
         (
             _org(request),
@@ -489,9 +495,14 @@ async def raise_utr_dispute(request: Request, body: dict) -> JSONResponse:
     )
     if not rows:
         return JSONResponse(status_code=500, content={"error": "failed_to_create"})
+    row = rows[0]
     return JSONResponse(
         status_code=201,
-        content={"dispute_id": str(rows[0]["id"]), "raised_at": rows[0]["raised_at"].isoformat()},
+        content={
+            "dispute_id":          str(row["id"]),
+            "raised_at":           row["raised_at"].isoformat(),
+            "access_lifted_until": row["access_lifted_until"].isoformat(),
+        },
     )
 
 

@@ -145,6 +145,11 @@ celery_app.conf.beat_schedule = {
         "task": "server.tasks.admissions.check_fee_overdue",
         "schedule": crontab(hour=9, minute=0),
     },
+    # EC-ADM-05: expire UTR payment dispute access lifts every 30 minutes
+    "expire-utr-access-lifts": {
+        "task": "tasks.expire_utr_access_lifts",
+        "schedule": crontab(minute="*/30"),
+    },
     # Invoice overdue check: daily at 9:05 AM (mark UNPAID→OVERDUE)
     "invoice-overdue-check": {
         "task": "finance.check_invoice_overdue",
