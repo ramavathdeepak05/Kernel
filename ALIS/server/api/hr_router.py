@@ -40,6 +40,18 @@ Endpoints:
            GET    /hr/analytics/leave-patterns
            GET    /hr/analytics/department-performance
            GET    /hr/analytics/ai-insights
+
+  EC-HR-01 POST   /hr/visiting-faculty/sessions
+           GET    /hr/visiting-faculty/sessions/{faculty_id}
+           POST   /hr/visiting-faculty/sessions/{session_id}/generate-otp
+           POST   /hr/visiting-faculty/sessions/{session_id}/confirm
+           POST   /hr/visiting-faculty/sessions/{session_id}/hod-verify
+           POST   /hr/visiting-faculty/sessions/{session_id}/cancel
+           POST   /hr/visiting-faculty/payroll-input/{faculty_id}
+
+  EC-HR-03 GET    /hr/employee-departments/{staff_id}
+           POST   /hr/employee-departments
+           DELETE /hr/employee-departments/{assignment_id}
 """
 from __future__ import annotations
 
@@ -397,3 +409,125 @@ async def hr_ai_insights(
     return JSONResponse(
         content=HRAnalyticsService.generate_ai_insights(_org(request), academic_year)
     )
+
+
+# ──────────────────────────────────────────────────────────────
+# EC-HR-01 — Visiting Faculty Session Billing
+# ──────────────────────────────────────────────────────────────
+
+from server.hr.visiting_faculty_sessions import (
+    VisitingFacultySessionService,
+    SessionCreate,
+    SessionOTPConfirm,
+)
+
+
+@router.post("/visiting-faculty/sessions", status_code=201)
+@require_permission(Permission.STAFF_CREATE)
+async def create_visiting_session(request: Request, body: SessionCreate) -> JSONResponse:
+    result = VisitingFacultySessionService.create_session(_org(request), body, _actor(request))
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.get("/visiting-faculty/sessions/{faculty_id}")
+@require_permission(Permission.STAFF_READ)
+async def list_visiting_sessions(
+    request: Request,
+    faculty_id: str,
+    month: Optional[str] = Query(None, description="YYYY-MM-DD — any day in target month"),
+    payable_only: bool = Query(False),
+) -> JSONResponse:
+    from datetime import date as _date
+    month_date = _date.fromisoformat(month) if month else None
+    items = VisitingFacultySessionService.list_sessions(
+        _org(request), faculty_id, month_date, payable_only
+    )
+    return JSONResponse(content={"sessions": _jsonify(items), "total": len(items)})
+
+
+@router.post("/visiting-faculty/sessions/{session_id}/generate-otp")
+@require_permission(Permission.STAFF_UPDATE)
+async def generate_session_otp(request: Request, session_id: str) -> JSONResponse:
+    otp = VisitingFacultySessionService.generate_otp(_org(request), session_id)
+    # OTP returned to caller (HR Officer / Celery task) for SMS dispatch
+    return JSONResponse(content={"otp": otp, "session_id": session_id})
+
+
+@router.post("/visiting-faculty/sessions/{session_id}/confirm")
+@require_permission(Permission.STAFF_UPDATE)
+async def confirm_visiting_session(
+    request: Request, session_id: str, body: SessionOTPConfirm
+) -> JSONResponse:
+    result = VisitingFacultySessionService.confirm_session(
+        _org(request), session_id, body, _actor(request)
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.post("/visiting-faculty/sessions/{session_id}/hod-verify")
+@require_permission(Permission.STAFF_UPDATE)
+async def hod_verify_session(request: Request, session_id: str) -> JSONResponse:
+    result = VisitingFacultySessionService.hod_verify_unscheduled(
+        _org(request), session_id, _actor(request)
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.post("/visiting-faculty/sessions/{session_id}/cancel")
+@require_permission(Permission.STAFF_UPDATE)
+async def cancel_visiting_session(request: Request, session_id: str) -> JSONResponse:
+    result = VisitingFacultySessionService.cancel_session(
+        _org(request), session_id, _actor(request)
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.post("/visiting-faculty/payroll-input/{faculty_id}")
+@require_permission(Permission.STAFF_UPDATE)
+async def generate_visiting_payroll_input(
+    request: Request,
+    faculty_id: str,
+    payroll_month: str = Query(..., description="YYYY-MM-DD — first day of payroll month"),
+) -> JSONResponse:
+    from datetime import date as _date
+    result = VisitingFacultySessionService.generate_payroll_input(
+        _org(request), faculty_id, _date.fromisoformat(payroll_month), _actor(request)
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+# ──────────────────────────────────────────────────────────────
+# EC-HR-03 — Employee Department Assignments (shared faculty)
+# ──────────────────────────────────────────────────────────────
+
+from server.hr.employee_departments import (
+    EmployeeDepartmentService,
+    DepartmentAssignmentCreate,
+)
+
+
+@router.get("/employee-departments/{staff_id}")
+@require_permission(Permission.STAFF_READ)
+async def get_employee_departments(
+    request: Request, staff_id: str, active_only: bool = Query(True)
+) -> JSONResponse:
+    items = EmployeeDepartmentService.list_assignments(_org(request), staff_id, active_only)
+    return JSONResponse(content={"assignments": _jsonify(items), "total": len(items)})
+
+
+@router.post("/employee-departments", status_code=201)
+@require_permission(Permission.STAFF_CREATE)
+async def assign_employee_department(
+    request: Request, body: DepartmentAssignmentCreate
+) -> JSONResponse:
+    result = EmployeeDepartmentService.assign(_org(request), body, _actor(request))
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.delete("/employee-departments/{assignment_id}", status_code=204)
+@require_permission(Permission.STAFF_UPDATE)
+async def remove_employee_department(
+    request: Request, assignment_id: str
+) -> JSONResponse:
+    EmployeeDepartmentService.remove(_org(request), assignment_id, _actor(request))
+    return JSONResponse(status_code=204, content=None)

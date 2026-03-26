@@ -44,6 +44,23 @@ Endpoints:
     PATCH  /services/counselling/referrals/{id}/status
     GET    /services/counselling/referrals
     GET    /services/counselling/summary
+
+  SS-3 Placement Drive Management (EC-SS-02/03)
+    POST   /services/placement/drives
+    GET    /services/placement/drives
+    GET    /services/placement/drives/{drive_id}
+    POST   /services/placement/drives/{drive_id}/open
+    POST   /services/placement/drives/{drive_id}/register
+    POST   /services/placement/drives/{drive_id}/offer-accepted
+    GET    /services/placement/drives/{drive_id}/registrations
+    GET    /services/placement/student/{student_id}/status
+
+    POST   /services/placement/offer-revocations          (EC-SS-02)
+    GET    /services/placement/offer-revocations/pending
+    POST   /services/placement/offer-revocations/{id}/verify
+
+    POST   /services/placement/verbal-locks              (EC-SS-03)
+    POST   /services/placement/verbal-locks/expire-overdue
 """
 from __future__ import annotations
 
@@ -397,3 +414,127 @@ async def list_referrals(
 @require_permission(Permission.SERVICE_READ)
 async def counselling_summary(request: Request) -> JSONResponse:
     return JSONResponse(content=CounsellingService.summary(_org(request)))
+
+
+# ══════════════════════════════════════════════════════════════
+# SS-3 — Placement Drive Management (EC-SS-02/03)
+# ══════════════════════════════════════════════════════════════
+
+from server.alumni.placement_drives import (
+    PlacementDriveService,
+    OfferRevocationService,
+    VerbalLockService,
+    DriveCreate as PlacementDriveCreate,
+    OfferRevocationCreate,
+    VerbalLockCreate,
+)
+
+
+@router.post("/placement/drives", status_code=201)
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def create_placement_drive(request: Request, body: PlacementDriveCreate) -> JSONResponse:
+    result = PlacementDriveService.create(_org(request), body, _actor(request))
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.get("/placement/drives")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def list_placement_drives(
+    request: Request,
+    status: Optional[str] = Query(None),
+    drive_type: Optional[str] = Query(None),
+) -> JSONResponse:
+    items = PlacementDriveService.list(_org(request), status, drive_type)
+    return JSONResponse(content=_jsonify({"drives": items, "total": len(items)}))
+
+
+@router.get("/placement/drives/{drive_id}")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def get_placement_drive(request: Request, drive_id: str) -> JSONResponse:
+    return JSONResponse(content=_jsonify(PlacementDriveService.get(_org(request), drive_id)))
+
+
+@router.post("/placement/drives/{drive_id}/open")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def open_placement_drive(request: Request, drive_id: str) -> JSONResponse:
+    result = PlacementDriveService.open_drive(_org(request), drive_id, _actor(request))
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.post("/placement/drives/{drive_id}/register", status_code=201)
+@require_permission(Permission.SERVICE_READ)
+async def register_for_placement_drive(
+    request: Request,
+    drive_id: str,
+    student_id: Optional[str] = Query(None),
+) -> JSONResponse:
+    sid = student_id or _actor(request)
+    result = PlacementDriveService.register_student(_org(request), drive_id, sid, _actor(request))
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.post("/placement/drives/{drive_id}/offer-accepted")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def record_offer_accepted(request: Request, drive_id: str, body: dict) -> JSONResponse:
+    result = PlacementDriveService.record_offer_accepted(
+        _org(request), drive_id,
+        student_id=body["student_id"],
+        ctc_lpa=float(body.get("ctc_lpa", 0)),
+        offer_letter_url=body.get("offer_letter_url"),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+@router.get("/placement/student/{student_id}/status")
+@require_permission(Permission.SERVICE_READ)
+async def student_placement_status(request: Request, student_id: str) -> JSONResponse:
+    from server.db_service import execute_query as _eq
+    rows = _eq(
+        "SELECT * FROM student_placement_status WHERE org_id = %s AND student_id = %s",
+        (_org(request), student_id),
+    )
+    return JSONResponse(content=_jsonify(dict(rows[0]) if rows else {"student_id": student_id, "profile_active": False, "student_offer_locked": False}))
+
+
+# EC-SS-02 — Offer Revocation
+
+@router.post("/placement/offer-revocations", status_code=201)
+@require_permission(Permission.SERVICE_READ)
+async def submit_offer_revocation(request: Request, body: OfferRevocationCreate) -> JSONResponse:
+    result = OfferRevocationService.submit_revocation(_org(request), body, _actor(request))
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.get("/placement/offer-revocations/pending")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def pending_offer_revocations(request: Request) -> JSONResponse:
+    items = OfferRevocationService.list_pending(_org(request))
+    return JSONResponse(content=_jsonify({"revocations": items, "total": len(items)}))
+
+
+@router.post("/placement/offer-revocations/{revocation_id}/verify")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def verify_offer_revocation(request: Request, revocation_id: str, body: dict) -> JSONResponse:
+    result = OfferRevocationService.tpo_verify(
+        _org(request), revocation_id,
+        approved=bool(body.get("approved", False)),
+        actor_id=_actor(request),
+    )
+    return JSONResponse(content=_jsonify(result))
+
+
+# EC-SS-03 — Verbal Offer Lock
+
+@router.post("/placement/verbal-locks", status_code=201)
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def create_verbal_lock(request: Request, body: VerbalLockCreate) -> JSONResponse:
+    result = VerbalLockService.create_lock(_org(request), body, _actor(request))
+    return JSONResponse(status_code=201, content=_jsonify(result))
+
+
+@router.post("/placement/verbal-locks/expire-overdue")
+@require_permission(Permission.PLACEMENT_MANAGE)
+async def expire_overdue_verbal_locks(request: Request) -> JSONResponse:
+    count = VerbalLockService.expire_overdue_locks(_org(request))
+    return JSONResponse(content={"expired_count": count})
