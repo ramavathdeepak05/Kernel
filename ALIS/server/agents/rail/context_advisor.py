@@ -106,7 +106,7 @@ def _detect_and_fetch_entity(
                    a.created_at::date AS submitted_date,
                    COUNT(d.id)                              AS total_docs,
                    COUNT(d.id) FILTER (WHERE d.status='APPROVED') AS approved_docs
-            FROM applications a
+            FROM applicants a
             LEFT JOIN application_documents d ON d.application_id = a.id
             WHERE a.id = %s AND a.org_id = %s
             GROUP BY a.id, a.status, a.stage, a.intended_program, a.created_at
@@ -627,6 +627,22 @@ def execute_context_advisor(
         }
     """
     t0 = time.monotonic()
+
+    # Guard: coerce dict to AIGatewayContext in case caller passes a raw dict
+    # (defensive — production path always passes AIGatewayContext via registry)
+    if isinstance(context, dict):
+        from server.core.rbac import Role as _Role
+        context = AIGatewayContext(
+            actor_id=context.get("actor_id", ""),
+            actor_type=context.get("actor_type", "system"),
+            actor_role=context.get("actor_role", _Role.SYSTEM),
+            org_id=context.get("org_id"),
+            module=context.get("module"),
+            wizard=context.get("wizard"),
+            correlation_id=context.get("correlation_id"),
+            metadata=context.get("metadata"),
+        )
+
     tenant_id = context.org_id or ""
     actor_id  = context.actor_id or ""
     view:    str = input_data.get("view", "home")

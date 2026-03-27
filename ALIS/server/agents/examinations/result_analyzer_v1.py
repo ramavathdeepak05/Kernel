@@ -10,8 +10,8 @@ Decision:
 AI Role: Analytical — detect unusual clustering, bimodal distributions, or outlier
          scores from raw grade data.
 
-Confidence Rules:
-    Score >= 0.75 → HIGH anomaly   (flag for COE review + moderation committee)
+Confidence Rules (thresholds configurable via tenant policy):
+    Score >= ai.examinations.anomaly_high_threshold (default 75%) → HIGH anomaly
     Score >= 0.45 → MEDIUM anomaly (HOD review recommended)
     Score <  0.45 → NORMAL         (distribution within expected parameters)
 
@@ -30,8 +30,11 @@ from server.core.ai_gateway import (
     AIGatewayContext,
     AIInvocationResult,
 )
+from server.core.policy_store import PolicyStore
 
 logger = logging.getLogger(__name__)
+
+_HIGH_TIER_DEFAULT = 3 / 4
 
 
 def execute_result_analyzer(
@@ -84,7 +87,11 @@ def execute_result_analyzer(
         if result.validated_output:
             vo = result.validated_output
             score = vo.confidence_score
-            if score >= 0.75:
+            high_threshold = float(
+                PolicyStore.get(context.org_id or "", "ai.examinations.anomaly_high_threshold")
+                or _HIGH_TIER_DEFAULT
+            )
+            if score >= high_threshold:
                 level = "HIGH"
                 action = "Refer to Moderation Committee. COE must review before results are published."
             elif score >= 0.45:

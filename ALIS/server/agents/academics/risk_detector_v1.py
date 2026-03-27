@@ -9,8 +9,8 @@ Decision:
 
 AI Role: Analytical — synthesise multiple weak signals into a risk tier.
 
-Confidence Rules:
-    Score >= 0.75 → HIGH risk   (flag for immediate counsellor intervention)
+Confidence Rules (thresholds configurable via tenant policy):
+    Score >= ai.academics.risk_high_threshold (default 75%) → HIGH risk
     Score >= 0.45 → MEDIUM risk (schedule check-in)
     Score <  0.45 → LOW risk    (routine monitoring)
 
@@ -29,8 +29,12 @@ from server.core.ai_gateway import (
     AIGatewayContext,
     AIInvocationResult,
 )
+from server.core.policy_store import PolicyStore
 
 logger = logging.getLogger(__name__)
+
+# Default high-risk threshold — overridden per-tenant via ai.academics.risk_high_threshold
+_HIGH_TIER_DEFAULT = 3 / 4
 
 
 def execute_risk_detector(
@@ -77,7 +81,11 @@ def execute_risk_detector(
         if result.validated_output:
             vo = result.validated_output
             score = vo.confidence_score
-            if score >= 0.75:
+            high_threshold = float(
+                PolicyStore.get(context.org_id or "", "ai.academics.risk_high_threshold")
+                or _HIGH_TIER_DEFAULT
+            )
+            if score >= high_threshold:
                 tier = "HIGH"
                 action = "Immediate counsellor referral and faculty alert."
             elif score >= 0.45:

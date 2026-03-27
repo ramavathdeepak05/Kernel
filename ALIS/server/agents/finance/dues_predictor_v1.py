@@ -9,8 +9,8 @@ Decision:
 
 AI Role: Evaluative — assess default probability from payment behaviour signals.
 
-Confidence Rules:
-    Score >= 0.75 → HIGH risk   (proactive intervention: payment plan or waiver referral)
+Confidence Rules (thresholds configurable via tenant policy):
+    Score >= ai.finance.dues_high_risk_threshold (default 75%) → HIGH risk
     Score >= 0.45 → MEDIUM risk (early reminder + soft follow-up)
     Score <  0.45 → LOW risk    (standard dunning schedule)
 
@@ -29,8 +29,11 @@ from server.core.ai_gateway import (
     AIGatewayContext,
     AIInvocationResult,
 )
+from server.core.policy_store import PolicyStore
 
 logger = logging.getLogger(__name__)
+
+_HIGH_TIER_DEFAULT = 3 / 4
 
 
 def execute_dues_predictor(
@@ -81,7 +84,11 @@ def execute_dues_predictor(
         if result.validated_output:
             vo = result.validated_output
             score = vo.confidence_score
-            if score >= 0.75:
+            high_threshold = float(
+                PolicyStore.get(context.org_id or "", "ai.finance.dues_high_risk_threshold")
+                or _HIGH_TIER_DEFAULT
+            )
+            if score >= high_threshold:
                 tier = "HIGH"
                 action = "Initiate payment plan discussion or refer to Finance Officer for waiver assessment."
             elif score >= 0.45:

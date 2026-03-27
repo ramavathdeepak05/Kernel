@@ -31,8 +31,11 @@ from server.core.ai_gateway import (
     AIGatewayContext,
     AIInvocationResult,
 )
+from server.core.policy_store import PolicyStore
 
 logger = logging.getLogger(__name__)
+
+_HIGH_TIER_DEFAULT = 3 / 4
 
 
 def execute_compliance_auditor(
@@ -86,7 +89,11 @@ def execute_compliance_auditor(
         if result.validated_output:
             vo = result.validated_output
             score = vo.confidence_score
-            if score >= 0.75:
+            high_threshold = float(
+                PolicyStore.get(context.org_id or "", "ai.regulatory.compliance_critical_threshold")
+                or _HIGH_TIER_DEFAULT
+            )
+            if score >= high_threshold:
                 risk = "CRITICAL"
                 action = "Immediate IQAC action plan required. Present to Management Committee."
             elif score >= 0.50:

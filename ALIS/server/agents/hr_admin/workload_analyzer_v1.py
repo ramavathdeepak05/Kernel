@@ -9,8 +9,8 @@ Decision:
 
 AI Role: Analytical — detect overload or underutilisation from teaching + admin signals.
 
-Confidence Rules (applied to deviation severity):
-    Score >= 0.75 → OVERLOADED      (immediate HOD intervention needed)
+Confidence Rules (thresholds configurable via tenant policy):
+    Score >= ai.hr.workload_overloaded_threshold (default 75%) → OVERLOADED
     Score >= 0.45 → REVIEW_NEEDED   (flag for next workload review cycle)
     Score <  0.45 → BALANCED        (within policy norms)
 
@@ -32,8 +32,11 @@ from server.core.ai_gateway import (
     AIGatewayContext,
     AIInvocationResult,
 )
+from server.core.policy_store import PolicyStore
 
 logger = logging.getLogger(__name__)
+
+_HIGH_TIER_DEFAULT = 3 / 4
 
 
 def execute_workload_analyzer(
@@ -89,7 +92,11 @@ def execute_workload_analyzer(
             teaching_hrs = input_data.get("teaching_hours_per_week", 0)
             policy_min = input_data.get("policy_min_hours", 10)
 
-            if score >= 0.75:
+            high_threshold = float(
+                PolicyStore.get(context.org_id or "", "ai.hr.workload_overloaded_threshold")
+                or _HIGH_TIER_DEFAULT
+            )
+            if score >= high_threshold:
                 tier = "OVERLOADED"
                 action = "Immediate HOD review. Reassign at least one course or reduce admin duties."
             elif score >= 0.45:

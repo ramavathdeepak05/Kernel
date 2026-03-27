@@ -442,11 +442,11 @@ async def razorpay_webhook(request: Request) -> JSONResponse:
             payment_entity = body.get("payload", {}).get("payment", {}).get("entity", {})
             razorpay_payment_id = payment_entity.get("id")
             if razorpay_payment_id:
-                execute_transaction([(
-                    "UPDATE payments SET status='CAPTURED', gateway_response=%s "
-                    "WHERE gateway_payment_id=%s AND org_id=%s",
-                    (_json.dumps(payment_entity), razorpay_payment_id, _org(request)),
-                )])
+                PaymentService.apply_webhook_capture(
+                    org_id=_org(request),
+                    gateway_payment_id=razorpay_payment_id,
+                    gateway_response=payment_entity,
+                )
 
         execute_transaction([(
             "UPDATE payment_webhook_log SET status='PROCESSED', processed_at=NOW() WHERE id=%s",

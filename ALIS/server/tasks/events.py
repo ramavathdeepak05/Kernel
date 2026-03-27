@@ -78,35 +78,47 @@ def retry_failed_events() -> None:
     ignore_result=True,
 )
 def retry_stuck_events(
-    topics: List[str],
+    topics: List[str] = None,
     stuck_after_seconds: int = 120,
 ) -> None:
     """
     Beat task: find PROCESSING events whose worker crashed before completing.
 
-    Without processing_started_at we cannot distinguish 'actively processing'
-    from 'stuck forever'.  This task resets any PROCESSING event that has been
-    in that state for more than `stuck_after_seconds` back to PENDING, then
-    re-queues it for immediate dispatch.
-
-    Called every 30 seconds for FINANCE and EXAMINATION topics — these carry
-    the highest inconsistency cost (payment → enrollment, grade → transcript).
+    Resets any PROCESSING event that has been in that state for more than
+    `stuck_after_seconds` back to PENDING, then re-queues it for dispatch.
 
     Args:
-        topics: List of event_type topic prefixes to scope the search.
+        topics: Optional list of event_type prefixes to scope the search.
+                If None or empty, ALL stuck PROCESSING events are reset.
         stuck_after_seconds: Age threshold — events older than this are stuck.
     """
-    rows = execute_system_query(
-        """
-        SELECT id, event_type FROM domain_events
-        WHERE status = 'PROCESSING'
-          AND event_type = ANY(%s)
-          AND processing_started_at < NOW() - INTERVAL '1 second' * %s
-        ORDER BY processing_started_at ASC
-        LIMIT 20
-        """,
-        (topics, stuck_after_seconds),
-    )
+    if topics:
+        # Match if event_type starts with any of the given topic prefixes
+        # Build LIKE conditions: event_type LIKE 'FINANCE%' OR LIKE 'Fee%' etc.
+        like_conditions = " OR ".join(["event_type LIKE %s" for _ in topics])
+        params: tuple = tuple(f"{t}%" for t in topics) + (stuck_after_seconds,)
+        rows = execute_system_query(
+            f"""
+            SELECT id, event_type FROM domain_events
+            WHERE status = 'PROCESSING'
+              AND ({like_conditions})
+              AND processing_started_at < NOW() - INTERVAL '1 second' * %s
+            ORDER BY processing_started_at ASC
+            LIMIT 50
+            """,
+            params,
+        )
+    else:
+        rows = execute_system_query(
+            """
+            SELECT id, event_type FROM domain_events
+            WHERE status = 'PROCESSING'
+              AND processing_started_at < NOW() - INTERVAL '1 second' * %s
+            ORDER BY processing_started_at ASC
+            LIMIT 50
+            """,
+            (stuck_after_seconds,),
+        )
     if not rows:
         return
 

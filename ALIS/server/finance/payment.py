@@ -134,6 +134,63 @@ class PaymentService:
         return {"status": "captured", "invoice_id": invoice_id}
 
     # ------------------------------------------------------------------
+    # S03b — Gateway Webhook Capture (Razorpay webhook path)
+    # Signature already verified at the router layer; this method applies
+    # the state transition (PENDING → CAPTURED) and emits domain events.
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def apply_webhook_capture(
+        cls,
+        org_id: str,
+        gateway_payment_id: str,
+        gateway_response: dict,
+    ) -> dict:
+        """Update a payment row to CAPTURED from a verified gateway webhook.
+
+        Called by the Razorpay webhook handler after HMAC verification.
+        Idempotent — returns 'already_captured' if the row is already CAPTURED.
+        """
+        already = execute_query(
+            "SELECT id, invoice_id, amount, student_id FROM payments "
+            "WHERE gateway_payment_id = %s AND org_id = %s",
+            (gateway_payment_id, org_id),
+        )
+        if not already:
+            logger.warning(
+                "apply_webhook_capture: payment %s not found for org %s",
+                gateway_payment_id, org_id,
+            )
+            return {"status": "not_found"}
+
+        row = dict(already[0])
+        if row.get("status") == "CAPTURED":
+            return {"status": "already_captured"}
+
+        captured_status = "CAPTURED"
+        execute_transaction([(
+            "UPDATE payments SET status=%s, gateway_response=%s "
+            "WHERE gateway_payment_id=%s AND org_id=%s",
+            (captured_status, str(gateway_response), gateway_payment_id, org_id),
+        )])
+
+        if row.get("invoice_id"):
+            try:
+                cls._apply_payment_to_invoice(
+                    org_id,
+                    str(row["invoice_id"]),
+                    float(row["amount"]),
+                    str(row["student_id"]),
+                )
+            except Exception as exc:
+                logger.error(
+                    "apply_webhook_capture: invoice update failed for payment %s: %s",
+                    gateway_payment_id, exc,
+                )
+
+        return {"status": "captured", "payment_id": str(row["id"])}
+
+    # ------------------------------------------------------------------
     # S04 — Manual Payment
     # ------------------------------------------------------------------
 

@@ -19,12 +19,41 @@ Authorization hierarchy (checked in order):
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from typing import Optional
 
 from server.db_service import execute_query, execute_transaction
 from server.core.domain_events import DomainEventBus
+from server.core.state_registry import StateRegistry
 
 logger = logging.getLogger(__name__)
+
+
+class _TAStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
+
+
+# Register TA assignment state machine: ACTIVE is the only state that can
+# transition to REVOKED (terminal state — cannot be un-revoked).
+StateRegistry.register_entity(
+    "ta_assignment",
+    {_TAStatus.ACTIVE: {_TAStatus.REVOKED}},
+)
+
+
+def _revoke_ta(table: str, where_col: str, where_val: str, actor_id: str) -> None:
+    """Validate ACTIVE→REVOKED through StateRegistry then write the transition."""
+    result = StateRegistry.validate_transition(
+        "ta_assignment", _TAStatus.ACTIVE, _TAStatus.REVOKED
+    )
+    if not result.allowed:
+        raise ValueError(result.reason)
+    new_status = _TAStatus.REVOKED.value
+    execute_transaction([(
+        f"UPDATE {table} SET status=%s, revoked_at=NOW(), revoked_by=%s WHERE {where_col}=%s AND status=%s",
+        (new_status, actor_id, where_val, _TAStatus.ACTIVE.value),
+    )])
 
 
 class TAAssignmentService:
@@ -199,14 +228,7 @@ class TAAssignmentService:
         if str(row["faculty_id"]) != str(faculty_id):
             raise PermissionError("Only the assigning faculty can revoke this TA")
 
-        execute_transaction([(
-            """
-            UPDATE course_ta_assignments
-            SET status='REVOKED', revoked_at=NOW(), revoked_by=$1
-            WHERE id=$2
-            """,
-            (faculty_id, assignment_id),
-        )])
+        _revoke_ta("course_ta_assignments", "id", assignment_id, faculty_id)
 
         DomainEventBus.publish(
             "attendance.ta_revoked",
@@ -325,14 +347,7 @@ class TAAssignmentService:
         faculty_id: str,
     ) -> dict:
         """Revoke all active TAs for a specific session."""
-        execute_transaction([(
-            """
-            UPDATE session_ta_assignments
-            SET status='REVOKED', revoked_at=NOW(), revoked_by=$1
-            WHERE session_ref=$2 AND status='ACTIVE'
-            """,
-            (faculty_id, session_ref),
-        )])
+        _revoke_ta("session_ta_assignments", "session_ref", session_ref, faculty_id)
         return {"session_ref": session_ref, "status": "REVOKED"}
 
     # ── authorization ─────────────────────────────────────────────────────────

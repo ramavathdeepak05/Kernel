@@ -193,8 +193,12 @@ class DomainEventBus:
 
     @classmethod
     def _dispatch_sync(cls, event_id: str) -> None:
-        """Called by Celery task OR publish_sync to run handlers."""
-        rows = execute_query(
+        """Called by Celery task OR publish_sync to run handlers.
+
+        Uses execute_system_* throughout because domain_events has RLS enabled
+        and this method runs in the Celery worker context (no tenant scope).
+        """
+        rows = execute_system_query(
             "SELECT * FROM domain_events WHERE id = %s",
             (event_id,),
         )
@@ -206,8 +210,8 @@ class DomainEventBus:
         event_type = row["event_type"]
         payload = row["payload"] if isinstance(row["payload"], dict) else json.loads(row["payload"])
 
-        # Mark as PROCESSING
-        execute_transaction([(
+        # Mark as PROCESSING (idempotent — task may have already done this)
+        execute_system_transaction([(
             "UPDATE domain_events SET status = 'PROCESSING', processed_at = %s WHERE id = %s",
             (datetime.now(timezone.utc), event_id),
         )])
@@ -215,65 +219,87 @@ class DomainEventBus:
         handlers = get_handlers(event_type)
         errors = []
 
-        for handler in handlers:
-            handler_name = f"{handler.__module__}.{handler.__name__}"
-            # EC-CROSS-01: idempotency guard — skip if this handler already ran
+        # Set tenant context so handlers can call tenant-scoped DB operations.
+        # Event handlers are cross-module and may call services that use execute_transaction
+        # (which requires tenant context via ContextVar). We set it here from the event's
+        # org_id and clear it in the finally block regardless of success or failure.
+        org_id = row.get("org_id", "")
+        _ctx_token = None
+        if org_id:
             try:
-                execute_system_transaction([
-                    (
-                        "INSERT INTO domain_event_handler_log "
-                        "(event_id, handler_name, status) VALUES (%s, %s, 'PROCESSING') "
-                        "ON CONFLICT (event_id, handler_name) DO NOTHING",
-                        (event_id, handler_name),
-                    )
-                ])
-                # If the INSERT was a no-op (conflict), the row exists → already ran
-                already_ran = execute_system_query(
-                    "SELECT status FROM domain_event_handler_log "
-                    "WHERE event_id = %s AND handler_name = %s",
-                    (event_id, handler_name),
-                )
-                if already_ran and already_ran[0]["status"] in ("SUCCESS", "PROCESSING"):
-                    if already_ran[0]["status"] == "SUCCESS":
-                        logger.info(
-                            "DomainEventBus: skipping handler %s (already ran for event %s)",
-                            handler_name, event_id,
-                        )
-                        continue
-                    # PROCESSING → this worker previously crashed mid-handler → retry is OK
-            except Exception as idem_err:
-                logger.warning("EC-CROSS-01: idempotency check failed for %s: %s", handler_name, idem_err)
+                from server.core.security import _current_tenant_id as _tid_var
+                _ctx_token = _tid_var.set(org_id)
+            except Exception as _ctx_err:
+                logger.warning("DomainEventBus: could not set tenant context for org %s: %s", org_id, _ctx_err)
 
-            try:
-                handler(
-                    event_type=event_type,
-                    entity_type=row["entity_type"],
-                    entity_id=row["entity_id"],
-                    org_id=row["org_id"],
-                    payload=payload,
-                    actor_id=row["actor_id"],
-                    correlation_id=row["correlation_id"],
-                )
-                # Mark handler as successfully completed
-                execute_system_transaction([
-                    (
-                        "UPDATE domain_event_handler_log SET status = 'SUCCESS' "
-                        "WHERE event_id = %s AND handler_name = %s",
-                        (event_id, handler_name),
-                    )
-                ])
-            except Exception as e:
-                logger.error("DomainEventBus: handler %s failed for event %s: %s",
-                             handler.__name__, event_id, e)
-                errors.append(str(e))
+        try:
+            for handler in handlers:
+                handler_name = f"{handler.__module__}.{handler.__name__}"
+                # EC-CROSS-01: idempotency guard — skip if this handler already ran
                 try:
                     execute_system_transaction([
                         (
-                            "UPDATE domain_event_handler_log SET status = 'FAILED', "
-                            "error_detail = %s WHERE event_id = %s AND handler_name = %s",
-                            (str(e), event_id, handler_name),
+                            "INSERT INTO domain_event_handler_log "
+                            "(event_id, handler_name, status) VALUES (%s, %s, 'PROCESSING') "
+                            "ON CONFLICT (event_id, handler_name) DO NOTHING",
+                            (event_id, handler_name),
                         )
                     ])
+                    # If the INSERT was a no-op (conflict), the row exists → already ran
+                    already_ran = execute_system_query(
+                        "SELECT status FROM domain_event_handler_log "
+                        "WHERE event_id = %s AND handler_name = %s",
+                        (event_id, handler_name),
+                    )
+                    if already_ran and already_ran[0]["status"] in ("SUCCESS", "PROCESSING"):
+                        if already_ran[0]["status"] == "SUCCESS":
+                            logger.info(
+                                "DomainEventBus: skipping handler %s (already ran for event %s)",
+                                handler_name, event_id,
+                            )
+                            continue
+                        # PROCESSING → this worker previously crashed mid-handler → retry is OK
+                except Exception as idem_err:
+                    logger.warning("EC-CROSS-01: idempotency check failed for %s: %s", handler_name, idem_err)
+
+                try:
+                    handler(
+                        event_type=event_type,
+                        entity_type=row["entity_type"],
+                        entity_id=row["entity_id"],
+                        org_id=row["org_id"],
+                        payload=payload,
+                        actor_id=row["actor_id"],
+                        correlation_id=row["correlation_id"],
+                    )
+                    # Mark handler as successfully completed
+                    execute_system_transaction([
+                        (
+                            "UPDATE domain_event_handler_log SET status = 'SUCCESS' "
+                            "WHERE event_id = %s AND handler_name = %s",
+                            (event_id, handler_name),
+                        )
+                    ])
+                except Exception as e:
+                    logger.error("DomainEventBus: handler %s failed for event %s: %s",
+                                 handler.__name__, event_id, e)
+                    errors.append(str(e))
+                    try:
+                        execute_system_transaction([
+                            (
+                                "UPDATE domain_event_handler_log SET status = 'FAILED', "
+                                "error_detail = %s WHERE event_id = %s AND handler_name = %s",
+                                (str(e), event_id, handler_name),
+                            )
+                        ])
+                    except Exception:
+                        pass
+        finally:
+            # Always restore tenant context after handler execution
+            if _ctx_token is not None:
+                try:
+                    from server.core.security import _current_tenant_id as _tid_var
+                    _tid_var.reset(_ctx_token)
                 except Exception:
                     pass
 
@@ -282,13 +308,13 @@ class DomainEventBus:
             max_retries = 3
             final_status = "FAILED" if retry_count >= max_retries else "PENDING"
             if retry_count >= max_retries:
-                execute_transaction([(
+                execute_system_transaction([(
                     "UPDATE domain_events SET status = 'FAILED', retry_count = %s, "
                     "failure_reason = %s WHERE id = %s",
                     (retry_count, "; ".join(errors), event_id),
                 )])
             else:
-                execute_transaction([(
+                execute_system_transaction([(
                     "UPDATE domain_events SET status = 'PENDING', retry_count = %s WHERE id = %s",
                     (retry_count, event_id),
                 )])
@@ -298,7 +324,7 @@ class DomainEventBus:
                 except Exception:
                     pass
         else:
-            execute_transaction([(
+            execute_system_transaction([(
                 "UPDATE domain_events SET status = 'DONE', processed_at = %s WHERE id = %s",
                 (datetime.now(timezone.utc), event_id),
             )])

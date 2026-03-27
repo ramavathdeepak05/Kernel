@@ -26,7 +26,7 @@ from typing import Any
 
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import task_failure
+from celery.signals import task_failure, worker_ready
 from kombu import Queue
 
 from server.core.settings import settings
@@ -83,6 +83,74 @@ celery_app.conf.task_queues = (
     Queue("dead_letter"),   # Receives tasks that exhausted all retries
 )
 celery_app.conf.task_default_queue = "default"
+
+# ---------------------------------------------------------------------------
+# Domain Event Handler Registration — worker_ready signal
+#
+# Each module's event_handlers.py uses DomainEventBus.subscribe() at module
+# level. Those subscriptions only take effect in the process that imports
+# the module. We must import every handler module here so that the Celery
+# worker process has all handlers registered before it starts dispatching.
+# ---------------------------------------------------------------------------
+
+@worker_ready.connect
+def _register_all_domain_event_handlers(**kwargs: object) -> None:
+    """Import all event handler modules so their subscriptions are active."""
+    try:
+        from server.finance.event_handlers import register_all as _fin
+        _fin()
+        logger.info("worker: finance event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register finance event handlers: %s", e)
+    try:
+        from server.admissions.event_handlers import register_all as _adm
+        _adm()
+        logger.info("worker: admissions event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register admissions event handlers: %s", e)
+    try:
+        from server.academics.event_handlers import register_all as _acm
+        _acm()
+        logger.info("worker: academics event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register academics event handlers: %s", e)
+    try:
+        from server.hr.event_handlers import register_all as _hr
+        _hr()
+        logger.info("worker: hr event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register hr event handlers: %s", e)
+    try:
+        from server.examinations.event_handlers import register_all as _exm
+        _exm()
+        logger.info("worker: examinations event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register examinations event handlers: %s", e)
+    try:
+        from server.communication.event_handlers import register_all as _com
+        _com()
+        logger.info("worker: communication event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register communication event handlers: %s", e)
+    try:
+        from server.student_services.event_handlers import register_all as _stu
+        _stu()
+        logger.info("worker: student_services event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register student_services event handlers: %s", e)
+    try:
+        from server.alumni.event_handlers import register_all as _alu
+        _alu()
+        logger.info("worker: alumni event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register alumni event handlers: %s", e)
+    try:
+        from server.regulatory.event_handlers import register_all as _reg
+        _reg()
+        logger.info("worker: regulatory event handlers registered")
+    except Exception as e:
+        logger.error("worker: failed to register regulatory event handlers: %s", e)
+
 
 # ---------------------------------------------------------------------------
 # Dead-Letter Queue — task_failure signal
@@ -166,14 +234,12 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/5"),
     },
     # Detect PROCESSING events whose worker crashed mid-flight.
-    # Targets FINANCE and EXAMINATION topics only — these have near-zero
-    # acceptable inconsistency windows (payment confirmation → enrollment,
-    # grade finalization → transcript generation).
-    # Runs every 30 seconds via a timedelta schedule (not a crontab).
+    # Runs every 30 seconds — no topic filter, catches ALL stuck events.
+    # stuck_after_seconds=120: any event in PROCESSING > 2 min is considered stuck.
     "retry-stuck-critical-events": {
         "task": "server.tasks.events.retry_stuck_events",
         "schedule": 30.0,  # seconds
-        "kwargs": {"topics": ["FINANCE", "EXAMINATION"], "stuck_after_seconds": 120},
+        "kwargs": {"topics": None, "stuck_after_seconds": 120},
     },
     # KPI snapshots: daily at 00:30 AM (after calendar check)
     "refresh-kpi-snapshots": {

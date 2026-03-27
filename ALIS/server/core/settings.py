@@ -238,8 +238,12 @@ class Settings(BaseSettings):
         description="Vault server address. Set VAULT_ADDR env var in production.",
     )
     vault_token: str = Field(
-        default="alis-dev-root-token",
-        description="Vault token. Use AppRole in production — never commit root token.",
+        default="",
+        description=(
+            "Vault token. Set VAULT_TOKEN env var — never hardcode. "
+            "Generate via 'vault operator init' on first boot. "
+            "Use AppRole auth for long-running services."
+        ),
     )
     vault_transit_mount: str = Field(default="transit")
     vault_kv_mount: str = Field(default="secret")
