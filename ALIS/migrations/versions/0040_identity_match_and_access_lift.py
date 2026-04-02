@@ -31,7 +31,7 @@ def upgrade() -> None:
     # 1. EC-ADM-01 — identity match columns on applications
     # -------------------------------------------------------------------------
     op.execute("""
-    ALTER TABLE applications
+    ALTER TABLE applicants
         ADD COLUMN IF NOT EXISTS aadhaar_name       VARCHAR(300),
         ADD COLUMN IF NOT EXISTS jee_name           VARCHAR(300),
         ADD COLUMN IF NOT EXISTS name_variants      JSONB,
@@ -42,7 +42,7 @@ def upgrade() -> None:
 
     -- Index for the KYC reconciliation queue (officers pull this view)
     CREATE INDEX IF NOT EXISTS idx_applications_kyc_status
-        ON applications(org_id, kyc_status)
+        ON applicants(org_id, kyc_status)
         WHERE kyc_status = 'KYC_RECONCILIATION';
     """)
 
@@ -71,7 +71,7 @@ def downgrade() -> None:
 
     op.execute("""
     DROP INDEX IF EXISTS idx_applications_kyc_status;
-    ALTER TABLE applications
+    ALTER TABLE applicants
         DROP COLUMN IF EXISTS kyc_status,
         DROP COLUMN IF EXISTS name_variants,
         DROP COLUMN IF EXISTS jee_name,

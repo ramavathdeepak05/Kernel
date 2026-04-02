@@ -110,14 +110,14 @@ ALIS Production/
 ## Build Status
 
 ### Backend (FastAPI)
-All 13 core epics complete. 846 tests passing.
+All 21 core epics complete. 1055 tests passing (883 data-plane + 172 SaaS). S1-S10 SaaS transformation complete.
 
 | Epic | Module | Backend | Frontend |
 |------|--------|---------|----------|
 | E01 | Auth + RBAC + MFA/TOTP | ✅ | ✅ login/session |
 | E02 | Workflow Engine + Approval Quorum | ✅ | — |
 | E03 | AI Gateway + RAG + PGVector | ✅ | — |
-| E04 | Admissions (10-stage, 87 routes) | ✅ | 🔲 pending |
+| E04 | Admissions (10-stage, 87 routes) | ✅ | ✅ |
 | E05 | Academics | ✅ | ✅ |
 | E06 | Examinations & Grades | ✅ | ✅ |
 | E07 | Finance | ✅ | ✅ |
@@ -127,7 +127,14 @@ All 13 core epics complete. 846 tests passing.
 | E11 | Reporting & Analytics | ✅ | ✅ |
 | E12 | Alumni & Placement | ✅ | ✅ |
 | E13 | Dynamic Process Engine | ✅ | — |
-| E21 | DPDP Consent Management | ✅ | 🔲 pending |
+| E14 | Regulatory & Accreditation | ✅ | — |
+| E15 | PhD / Doctoral Research | ✅ | — |
+| E16 | Parent / Guardian Portal | 🔲 pending | — |
+| E17 | Re-admission & Credit Transfer | ✅ | — |
+| E18 | Convocation Management | ✅ | — |
+| E19 | Quota Seat Matrix Engine | ✅ | — |
+| E20 | OBE / CO-PO Mapping | ✅ | — |
+| E21 | DPDP Consent Management | ✅ | ✅ |
 
 ### Phase 1 Hardening
 
@@ -136,14 +143,14 @@ All 13 core epics complete. 846 tests passing.
 | EC-CROSS-01/02/03 — idempotency, audit RLS, tenant isolation | ✅ |
 | MFA/TOTP — enroll, verify, trusted devices | ✅ |
 | DPDP Consent — middleware, erasure, 451 enforcement | ✅ |
-| Observability — Prometheus + Grafana + Loki | 🔲 pending |
-| Fee structure versioning (intake_year lock) | 🔲 pending |
-| Payment webhook idempotency + UTR disputes | 🔲 pending |
-| EC-FIN-01/02 — DBT exemption + promissory ledger | 🔲 pending |
+| Observability — Prometheus + Grafana + Loki | ✅ |
+| Fee structure versioning (intake_year lock) | ✅ |
+| Payment webhook idempotency + UTR disputes | ✅ |
+| EC-FIN-01/02 — DBT exemption + promissory ledger | ✅ |
 | E10 WhatsApp Business API (MSG91 + templates) | 🔲 pending |
 | E16 Parent/Guardian portal | 🔲 pending |
-| DigiLocker live integration | 🔲 pending |
-| Data migration pipeline (validate → dry-run → commit) | 🔲 pending |
+| DigiLocker live integration | ✅ |
+| Data migration pipeline (validate → dry-run → commit) | ✅ |
 
 ---
 

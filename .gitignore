@@ -46,3 +46,6 @@ nginx/certs/*.pem
 
 # Logs
 *.log
+
+# Claude Code
+.claude/settings.local.json

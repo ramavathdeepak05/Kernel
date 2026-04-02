@@ -97,6 +97,7 @@ class TestAIGateway:
         """Return a mock settings object that disables external LLM (forces Ollama path)."""
         mock_settings = Mock()
         mock_settings.use_external_llm = False
+        mock_settings.ai_service_url = ""
         return mock_settings
 
     def test_get_llm_returns_instrumented_llm(self):
@@ -223,6 +224,7 @@ class TestRBACEnforcement:
     def _ollama_settings():
         s = Mock()
         s.use_external_llm = False
+        s.ai_service_url = ""
         return s
 
     def test_student_role_denied_ai_invoke(self):

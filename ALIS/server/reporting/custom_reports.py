@@ -146,7 +146,7 @@ class CustomReportService:
                 SELECT a.applicant_name, a.email, a.program_applied, a.academic_year,
                        a.status, a.submitted_at, a.source_channel,
                        c.name AS assigned_counsellor
-                FROM applications a
+                FROM applicants a
                 LEFT JOIN counsellors c ON c.id = a.assigned_counsellor_id
                 WHERE a.org_id = %s
             """

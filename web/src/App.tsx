@@ -49,6 +49,7 @@ import { PhDPage } from './pages/phd/PhDPage';
 import { ReadmissionPage } from './pages/admissions/ReadmissionPage';
 import { ConvocationPage } from './pages/convocation/ConvocationPage';
 import { OBEPage } from './pages/academics/OBEPage';
+import { LearningPage } from './pages/academics/LearningPage';
 import { GuardianPortalPage } from './pages/portal/GuardianPortalPage';
 
 // P23 new pages
@@ -142,6 +143,7 @@ export default function App() {
               <Route path="/phd" element={<PhDPage />} />
               <Route path="/convocation" element={<ConvocationPage />} />
               <Route path="/academics/obe" element={<OBEPage />} />
+              <Route path="/academics/learning" element={<LearningPage />} />  {/* P40 In-house LMS */}
 
               {/* P23 new pages */}
               <Route path="/workflows" element={<WorkflowsPage />} />

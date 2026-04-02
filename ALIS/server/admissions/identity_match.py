@@ -157,7 +157,7 @@ class IdentityMatchService:
         # Persist to DB
         execute_transaction([(
             """
-            UPDATE applications
+            UPDATE applicants
                SET name_variants = %s,
                    kyc_status    = %s
              WHERE id = %s AND org_id = %s
@@ -169,7 +169,7 @@ class IdentityMatchService:
             # Route to KYC queue — update application status
             execute_transaction([(
                 """
-                UPDATE applications
+                UPDATE applicants
                    SET status = 'KYC_RECONCILIATION'
                  WHERE id = %s AND org_id = %s
                    AND status NOT IN ('ENROLLED', 'CANCELLED', 'WITHDRAWN')
@@ -217,7 +217,7 @@ class IdentityMatchService:
         Sets kyc_status = CLEARED and restores the pre-KYC application status.
         """
         rows = execute_query(
-            "SELECT id, status FROM applications WHERE id = %s AND org_id = %s",
+            "SELECT id, status FROM applicants WHERE id = %s AND org_id = %s",
             (application_id, org_id),
         )
         if not rows:
@@ -225,7 +225,7 @@ class IdentityMatchService:
 
         execute_transaction([(
             """
-            UPDATE applications
+            UPDATE applicants
                SET kyc_status = 'CLEARED',
                    status     = 'ELIGIBILITY_SCREENING'
              WHERE id = %s AND org_id = %s
@@ -269,7 +269,7 @@ class IdentityMatchService:
             raise ValueError(f"Unknown name source '{source}'. Must be: {list(col_map)}")
 
         execute_transaction([(
-            f"UPDATE applications SET {col} = %s WHERE id = %s AND org_id = %s",  # noqa: S608
+            f"UPDATE applicants SET {col} = %s WHERE id = %s AND org_id = %s",  # noqa: S608
             (name.strip(), application_id, org_id),
         )])
 

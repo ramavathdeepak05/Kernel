@@ -31,10 +31,13 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
-from typing import List, Dict, Any, Optional, Tuple
-from contextlib import contextmanager
+import threading
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+from contextlib import asynccontextmanager, contextmanager
 
 try:
     import psycopg2
@@ -54,9 +57,163 @@ except ImportError:
 # Configure Logging
 logger = logging.getLogger(__name__)
 
-# Connection Pools (Global)
-_pg_pool = None           # psycopg2 — used by Celery sync workers
-_asyncpg_pool = None      # asyncpg  — used by FastAPI async handlers
+# System pools — used by execute_system_query* (no tenant scoping)
+_pg_pool = None           # psycopg2 — Celery sync workers, system queries
+_asyncpg_pool = None      # asyncpg  — FastAPI async handlers, system queries
+
+
+# ---------------------------------------------------------------------------
+# S1: DBRouter — per-tenant connection pool manager
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _TenantDBConfig:
+    """Resolved DB connection info for a single tenant."""
+    tenant_id: str
+    db_url: str       # asyncpg DSN  (postgresql://...)
+    db_url_sync: str  # psycopg2 DSN (postgresql://...)
+
+
+class DBRouter:
+    """
+    Per-tenant connection pool manager (S1 — SaaS multi-tenant foundation).
+
+    Maintains a map of asyncpg + psycopg2 pools, one per tenant.
+    Pools are created lazily on first request and reused thereafter.
+
+    Backward compat:
+    - When CONTROL_PLANE_URL is not set, TenantRegistry returns a fallback
+      TenantRecord that points at settings.db_url — identical to the old
+      single-pool behavior.
+    - All execute_query* / execute_transaction* functions transparently route
+      through this class; callers require zero changes.
+
+    Thread safety:
+    - asyncpg pools: protected by asyncio.Lock (lazy-created per event loop).
+    - psycopg2 pools: protected by threading.Lock.
+    """
+
+    def __init__(self) -> None:
+        self._async_pools: dict[str, Any] = {}      # tenant_id → asyncpg.Pool
+        self._sync_pools: dict[str, Any] = {}        # tenant_id → psycopg2.ThreadedConnectionPool
+        self._async_lock: Optional[asyncio.Lock] = None
+        self._sync_lock = threading.Lock()
+
+    @property
+    def _alock(self) -> asyncio.Lock:
+        """Lazy asyncio.Lock — avoids binding to event loop at import time."""
+        if self._async_lock is None:
+            self._async_lock = asyncio.Lock()
+        return self._async_lock
+
+    # ------------------------------------------------------------------
+    # Config resolution
+    # ------------------------------------------------------------------
+
+    async def _resolve_config(self, tenant_id: str) -> _TenantDBConfig:
+        from server.core.tenant_registry import TenantRegistry
+        record = await TenantRegistry.get_by_id(tenant_id)
+        return _TenantDBConfig(
+            tenant_id=record.tenant_id,
+            db_url=record.db_url,
+            db_url_sync=record.db_url_sync,
+        )
+
+    def _resolve_config_sync(self, tenant_id: str) -> _TenantDBConfig:
+        from server.core.tenant_registry import TenantRegistry
+        record = TenantRegistry.get_by_id_sync(tenant_id)
+        return _TenantDBConfig(
+            tenant_id=record.tenant_id,
+            db_url=record.db_url,
+            db_url_sync=record.db_url_sync,
+        )
+
+    # ------------------------------------------------------------------
+    # Async (asyncpg) pool
+    # ------------------------------------------------------------------
+
+    async def get_async_pool(self, tenant_id: str):
+        """Return the asyncpg pool for tenant_id, creating it if needed."""
+        if asyncpg is None:
+            return None
+        if tenant_id in self._async_pools:
+            return self._async_pools[tenant_id]
+
+        async with self._alock:
+            # Double-checked locking — another coroutine may have created it.
+            if tenant_id in self._async_pools:
+                return self._async_pools[tenant_id]
+
+            config = await self._resolve_config(tenant_id)
+            from server.core.settings import settings
+            pool = await asyncpg.create_pool(
+                dsn=config.db_url,
+                min_size=settings.tenant_pool_min,
+                max_size=settings.tenant_pool_max,
+                statement_cache_size=0,   # required for SET LOCAL + pgbouncer
+                init=_init_connection,
+                command_timeout=30,
+            )
+            self._async_pools[tenant_id] = pool
+            logger.info(
+                "DBRouter: asyncpg pool created for tenant=%s (min=%s max=%s)",
+                tenant_id, settings.tenant_pool_min, settings.tenant_pool_max,
+            )
+            return pool
+
+    async def close_all_async_pools(self) -> None:
+        """Gracefully close all asyncpg pools. Called from FastAPI lifespan shutdown."""
+        for tenant_id, pool in list(self._async_pools.items()):
+            try:
+                await pool.close()
+                logger.info("DBRouter: asyncpg pool closed for tenant=%s", tenant_id)
+            except Exception as exc:
+                logger.warning("DBRouter: error closing pool for tenant=%s: %s", tenant_id, exc)
+        self._async_pools.clear()
+
+    # ------------------------------------------------------------------
+    # Sync (psycopg2) pool
+    # ------------------------------------------------------------------
+
+    def get_sync_pool(self, tenant_id: str):
+        """Return the psycopg2 pool for tenant_id, creating it if needed."""
+        if psycopg2 is None:
+            return None
+        if tenant_id in self._sync_pools:
+            return self._sync_pools[tenant_id]
+
+        with self._sync_lock:
+            if tenant_id in self._sync_pools:
+                return self._sync_pools[tenant_id]
+
+            config = self._resolve_config_sync(tenant_id)
+            from server.core.settings import settings
+            pool = psycopg2.pool.ThreadedConnectionPool(
+                settings.tenant_pool_min,
+                settings.tenant_pool_max,
+                config.db_url_sync,   # psycopg2 accepts postgresql:// DSN as positional arg
+            )
+            self._sync_pools[tenant_id] = pool
+            logger.info(
+                "DBRouter: psycopg2 pool created for tenant=%s (min=%s max=%s)",
+                tenant_id, settings.tenant_pool_min, settings.tenant_pool_max,
+            )
+            return pool
+
+    def close_all_sync_pools(self) -> None:
+        """Close all psycopg2 pools."""
+        with self._sync_lock:
+            for tenant_id, pool in list(self._sync_pools.items()):
+                try:
+                    pool.closeall()
+                    logger.info("DBRouter: psycopg2 pool closed for tenant=%s", tenant_id)
+                except Exception as exc:
+                    logger.warning("DBRouter: error closing sync pool for tenant=%s: %s", tenant_id, exc)
+            self._sync_pools.clear()
+
+
+# Module-level DBRouter singleton — pools created lazily on first request.
+_db_router = DBRouter()
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +269,11 @@ async def close_pool() -> None:
     if _asyncpg_pool is not None:
         await _asyncpg_pool.close()
         _asyncpg_pool = None
-        logger.info("asyncpg pool closed.")
+        logger.info("asyncpg system pool closed.")
+
+    # Close all per-tenant asyncpg pools managed by DBRouter.
+    await _db_router.close_all_async_pools()
+    _db_router.close_all_sync_pools()
 
 
 def _get_async_pool():
@@ -149,12 +310,34 @@ def get_db_pool():
 @contextmanager
 def get_db_connection():
     """
-    Context manager to get a connection from the pool.
-    Ensures connection is returned to the pool even on error.
+    System-level context manager (psycopg2) — uses the global system pool.
+    Reserved for execute_system_query* (health checks, migrations, init_db).
+    Tenant-scoped code should use get_tenant_db_connection() instead.
     """
     pool = get_db_pool()
     if not pool:
         raise RuntimeError("Database connection pool is not available.")
+
+    conn = pool.getconn()
+    try:
+        yield conn
+    finally:
+        pool.putconn(conn)
+
+
+@contextmanager
+def get_tenant_db_connection(tenant_id: str):
+    """
+    Tenant-scoped context manager (psycopg2) — routes to per-tenant DBRouter pool.
+
+    Used by execute_query and execute_transaction to obtain a connection
+    from the correct per-tenant database.
+    """
+    if not psycopg2:
+        raise RuntimeError("psycopg2 not available.")
+    pool = _db_router.get_sync_pool(tenant_id)
+    if not pool:
+        raise RuntimeError(f"Could not obtain sync pool for tenant={tenant_id}")
 
     conn = pool.getconn()
     try:
@@ -213,9 +396,11 @@ async def execute_query_async(
     q = _convert_params(query)
     p = list(params) if params else []
 
-    async with _get_async_pool().acquire() as conn:
+    # S1: route to per-tenant pool via DBRouter
+    pool = await _db_router.get_async_pool(resolved_tenant)
+    async with pool.acquire() as conn:
         async with conn.transaction():
-            # EC-CROSS-03: isolate tenant per transaction
+            # EC-CROSS-03: isolate tenant per transaction (defense-in-depth RLS)
             await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
             rows = await conn.fetch(q, *p)
     return [dict(r) for r in rows]
@@ -239,7 +424,8 @@ def execute_query(
 
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
 
-    with get_db_connection() as conn:
+    # S1: route to per-tenant pool via DBRouter
+    with get_tenant_db_connection(resolved_tenant) as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
             try:
                 _set_tenant_on_connection(cursor, resolved_tenant)
@@ -273,7 +459,9 @@ async def execute_transaction_async(
 
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
 
-    async with _get_async_pool().acquire() as conn:
+    # S1: route to per-tenant pool via DBRouter
+    pool = await _db_router.get_async_pool(resolved_tenant)
+    async with pool.acquire() as conn:
         async with conn.transaction():
             await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
             for query, params in queries:
@@ -301,7 +489,8 @@ def execute_transaction(
 
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
 
-    with get_db_connection() as conn:
+    # S1: route to per-tenant pool via DBRouter
+    with get_tenant_db_connection(resolved_tenant) as conn:
         try:
             with conn.cursor() as cursor:
                 _set_tenant_on_connection(cursor, resolved_tenant)

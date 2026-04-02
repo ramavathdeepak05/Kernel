@@ -3,11 +3,14 @@
  * Always visible, always aware.
  *
  * EXECUTE two-step pattern:
- *   When the agent returns a canvasAction of type EXECUTE, it must not fire
- *   immediately. Instead the agent posts an action-card message with explicit
- *   confirm/skip chips. Only when the user taps the confirm chip does EXECUTE
- *   fire through the canvas. This preserves Layer 2 compliance — the chip
- *   click is the human approval step for low-stakes single-step operations.
+ *   When the agent returns a canvasAction of type EXECUTE or EXECUTE_MODULE,
+ *   it must not fire immediately. Instead the agent posts an action-card message
+ *   with explicit confirm/skip chips. Only when the user taps the confirm chip
+ *   does the action fire. This preserves Layer 2 compliance — the chip click
+ *   is the human approval step.
+ *
+ *   EXECUTE_MODULE actions are dispatched to the module's REST endpoint.
+ *   The payload always has status="DRAFT" enforced by the backend parser.
  *
  * Reference: ALIS-skills/references/frontend.md §6
  */
@@ -22,6 +25,7 @@ import { ChatThread } from './ChatThread'
 import { QuickActions } from './QuickActions'
 import { ChatInput } from './ChatInput'
 import { invokeRailAgent } from '../../lib/agent-gateway'
+import { alisApi } from '../../lib/alis-api'
 import type { CanvasAction } from '../../lib/canvas-actions'
 
 // Blink animation injected once
@@ -39,11 +43,28 @@ void blinkStyle
 
 /**
  * Determine whether a canvasAction requires an explicit second confirmation.
- * EXECUTE actions proposing a write operation must never fire automatically —
- * they become an action-card with confirm/skip chips.
+ * EXECUTE and EXECUTE_MODULE actions must become action-cards with confirm/skip chips.
  */
 function requiresConfirmation(action: CanvasAction | null): boolean {
-  return action?.type === 'EXECUTE'
+  return action?.type === 'EXECUTE' || action?.type === 'EXECUTE_MODULE'
+}
+
+/** Map copilot module names to REST API path prefixes */
+const MODULE_API_MAP: Record<string, string> = {
+  ACADEMICS:        '/academics',
+  FINANCE:          '/finance',
+  ADMISSIONS:       '/admissions',
+  EXAMINATIONS:     '/examinations',
+  HR:               '/hr',
+  STUDENT_SERVICES: '/student-services',
+  COMMUNICATIONS:   '/communications',
+  REGULATORY:       '/regulatory',
+  ALUMNI:           '/alumni',
+  PHD:              '/phd',
+  POLICY:           '/policy',
+  SETTINGS:         '/admin',
+  WORKFLOWS:        '/workflows',
+  REPORTS:          '/reporting',
 }
 
 export function AgentRail() {
@@ -90,18 +111,31 @@ export function AgentRail() {
       setAgentContextHint(resp.agentContext ?? null)
     }
 
-    // EXECUTE actions: post a confirmation action-card instead of firing immediately.
-    // The user must explicitly tap "Confirm" for the action to dispatch.
+    // EXECUTE / EXECUTE_MODULE: post a confirmation action-card.
     if (requiresConfirmation(resp.canvasAction)) {
-      const execAction = resp.canvasAction as Extract<CanvasAction, { type: 'EXECUTE' }>
+      const action = resp.canvasAction!
+
+      // Build confirmation chips
+      let confirmChips: string[]
+      if (action.type === 'EXECUTE_MODULE') {
+        confirmChips = action.is_batch
+          ? ['Confirm Batch', 'Review Items First', 'Skip']
+          : ['Confirm', 'Skip']
+      } else if (action.type === 'EXECUTE') {
+        confirmChips = [`Confirm ${action.action}`, 'Skip']
+      } else {
+        confirmChips = ['Confirm', 'Skip']
+      }
+
+      // Merge copilot-suggested chips (if any) with default confirm/skip
+      if (resp.chips && resp.chips.length > 0) {
+        confirmChips = resp.chips
+      }
+
       addMessage({
         role: 'agent',
-        text: resp.message ?? `Confirm: ${execAction.action} this item?`,
-        chips: [
-          `Confirm ${execAction.action}`,
-          'Skip',
-        ],
-        // Store the pending action in the message so the chip handler can access it
+        text: resp.message ?? 'Please confirm this action.',
+        chips: confirmChips,
         canvasAction: resp.canvasAction,
       })
       return
@@ -112,10 +146,13 @@ export function AgentRail() {
       dispatchAgentAction(resp.canvasAction)
     }
 
+    // Use copilot-provided chips, falling back to quickActions
+    const responseChips = resp.chips ?? resp.quickActions
+
     addMessage({
       role: 'agent',
       text: resp.message ?? 'Done.',
-      chips: resp.quickActions,
+      chips: responseChips,
       canvasAction: resp.canvasAction ?? null,
     })
   }
@@ -125,16 +162,50 @@ export function AgentRail() {
    * Confirm chips (prefixed with "Confirm ") fire the pending EXECUTE action
    * from the most recent action-card message. All other chips send as text.
    */
-  const handleChipAction = (chip: string, sourceMsgCanvasAction?: CanvasAction | null) => {
+  const handleChipAction = async (chip: string, sourceMsgCanvasAction?: CanvasAction | null) => {
+    // --- EXECUTE confirm ---
     if (chip.startsWith('Confirm ') && sourceMsgCanvasAction?.type === 'EXECUTE') {
       dispatchAgentAction(sourceMsgCanvasAction)
       addMessage({ role: 'agent', text: 'Done.' })
       return
     }
+
+    // --- EXECUTE_MODULE confirm ---
+    if (
+      (chip === 'Confirm' || chip === 'Confirm Batch') &&
+      sourceMsgCanvasAction?.type === 'EXECUTE_MODULE'
+    ) {
+      const { module, actionEndpoint, payload, is_batch } = sourceMsgCanvasAction
+      const apiPath = MODULE_API_MAP[module] ?? `/${module.toLowerCase()}`
+
+      addMessage({ role: 'agent', text: is_batch ? 'Processing batch action...' : 'Processing...' })
+      try {
+        await alisApi.post(`${apiPath}/${actionEndpoint}`, payload)
+        addMessage({ role: 'agent', text: is_batch ? 'Batch action submitted successfully.' : 'Action submitted successfully.' })
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown error'
+        addMessage({ role: 'agent', text: `Action failed: ${errMsg}` })
+      }
+      return
+    }
+
+    // --- Review Items First (batch) ---
+    if (chip === 'Review Items First' && sourceMsgCanvasAction?.type === 'EXECUTE_MODULE') {
+      addMessage({ role: 'agent', text: 'Opening items for review...' })
+      // Navigate to the relevant module view so the user can inspect before confirming
+      const { module } = sourceMsgCanvasAction
+      const moduleKey = module.toLowerCase()
+      dispatchAgentAction({ type: 'NAVIGATE', view: `${moduleKey}_dashboard` as never, module: moduleKey as never })
+      return
+    }
+
+    // --- Skip ---
     if (chip === 'Skip') {
       addMessage({ role: 'agent', text: 'Skipped.' })
       return
     }
+
+    // --- All other chips: send as text to the copilot ---
     handleSend(chip)
   }
 

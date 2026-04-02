@@ -202,6 +202,10 @@ class Permission(str, Enum):
     CONVOCATION_READ   = "convocation:read"
     CONVOCATION_MANAGE = "convocation:manage"
 
+    # In-house Learning (replaces Moodle stub)
+    LEARNING_READ   = "learning:read"    # students: browse materials, submit assignments
+    LEARNING_MANAGE = "learning:manage"  # faculty/HOD: create, publish, grade
+
 
 # --- Role-Permission Mapping ---
 
@@ -214,6 +218,7 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.NOTIFICATION_READ,  # E10
         Permission.SERVICE_READ,       # E09
         Permission.ALUMNI_READ,        # E12 — students can browse job board & drives
+        Permission.LEARNING_READ,      # in-house LMS
     ],
     Role.FACULTY: [
         Permission.STUDENT_READ,
@@ -221,6 +226,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.MARKS_READ,
         Permission.MARKS_ENTRY,
         Permission.NOTIFICATION_READ,  # E10
+        Permission.LEARNING_READ,      # in-house LMS
+        Permission.LEARNING_MANAGE,    # create/publish/grade
     ],
     Role.HOD: [
         Permission.STUDENT_READ,
@@ -233,6 +240,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.MARKS_FINALIZE,
         Permission.OVERRIDE_REQUEST,
         Permission.ESCALATION_REQUEST,  # E00-S04
+        Permission.LEARNING_READ,
+        Permission.LEARNING_MANAGE,
     ],
     Role.REGISTRAR: [
         Permission.STUDENT_READ,

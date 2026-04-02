@@ -53,7 +53,7 @@ celery_app = Celery(
         "server.tasks.webhook_retry",    # P21 outbound webhook retry
         "server.tasks.backup",           # P22 daily database backup
         "server.tasks.plagiarism_poll",  # E15 Drillbit plagiarism result polling
-        "server.tasks.lms_sync",         # P14 Moodle LMS grade sync
+        "server.tasks.learning_tasks",   # P40 In-house LMS — close overdue assignments
     ],
 )
 
@@ -83,6 +83,10 @@ celery_app.conf.task_queues = (
     Queue("dead_letter"),   # Receives tasks that exhausted all retries
 )
 celery_app.conf.task_default_queue = "default"
+
+# S5: Per-tenant task routing — routes tasks to default:{tenant_id} queues
+from server.core.tenant_tasks import TenantTaskRouter  # noqa: E402
+celery_app.conf.task_routes = (TenantTaskRouter(),)
 
 # ---------------------------------------------------------------------------
 # Domain Event Handler Registration — worker_ready signal
@@ -277,9 +281,9 @@ celery_app.conf.beat_schedule = {
         "task": "server.tasks.plagiarism_poll.poll_drillbit_results",
         "schedule": 300.0,  # seconds (5 minutes)
     },
-    # P14 — Moodle LMS grade sync: weekly, Sunday 01:00 UTC
-    "lms-grade-sync": {
-        "task": "server.tasks.lms_sync.sync_lms_grades",
-        "schedule": crontab(hour=1, minute=0, day_of_week=0),  # 0 = Sunday
+    # P40 — In-house LMS: close assignments past due date every hour
+    "learning-close-overdue": {
+        "task": "server.tasks.learning_tasks.close_overdue_assignments",
+        "schedule": crontab(minute=0),  # every hour on the hour
     },
 }

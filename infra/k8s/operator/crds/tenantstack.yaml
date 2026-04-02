@@ -1,0 +1,153 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: tenantstacks.alis.app
+  annotations:
+    description: >-
+      TenantStack represents a fully provisioned tenant in the ALIS SaaS platform.
+      Creating a TenantStack triggers the operator to: provision a database, create
+      an S3 bucket, write Vault secrets, configure per-tenant Celery queues, and
+      update the control plane registry.
+spec:
+  group: alis.app
+  names:
+    kind: TenantStack
+    listKind: TenantStackList
+    plural: tenantstacks
+    singular: tenantstack
+    shortNames:
+      - ts
+      - tenant
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - subdomain
+                - plan
+              properties:
+                subdomain:
+                  type: string
+                  pattern: "^[a-z0-9][a-z0-9\\-]{1,61}[a-z0-9]$"
+                  description: >-
+                    Unique subdomain slug for the tenant (e.g. "iitb").
+                    Maps to {subdomain}.alis.app in DNS.
+                displayName:
+                  type: string
+                  maxLength: 255
+                  description: "Human-readable institution name"
+                plan:
+                  type: string
+                  enum:
+                    - starter
+                    - growth
+                    - enterprise
+                  description: "Billing plan tier"
+                region:
+                  type: string
+                  enum:
+                    - in-central
+                    - in-south
+                    - uae-north
+                    - eu-west
+                    - us-east
+                  default: in-central
+                  description: "Deployment region"
+                featureFlags:
+                  type: object
+                  additionalProperties:
+                    type: boolean
+                  default: {}
+                  description: "Per-tenant feature toggles"
+                database:
+                  type: object
+                  description: >-
+                    Optional override for database provisioning.
+                    If omitted, the operator auto-provisions via the control plane.
+                  properties:
+                    host:
+                      type: string
+                    port:
+                      type: integer
+                      default: 5432
+                    externalDSN:
+                      type: string
+                      description: >-
+                        Pre-existing DSN. If set, the operator skips DB creation
+                        and uses this DSN directly (BYOD — Bring Your Own Database).
+                storage:
+                  type: object
+                  description: "Optional S3/MinIO override"
+                  properties:
+                    bucketName:
+                      type: string
+                      description: "Pre-existing bucket name. If set, skip bucket creation."
+                suspended:
+                  type: boolean
+                  default: false
+                  description: "If true, the tenant is suspended (data plane rejects all requests)."
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Provisioning
+                    - Active
+                    - Suspended
+                    - Deleting
+                    - Failed
+                  description: "Current lifecycle phase"
+                tenantId:
+                  type: string
+                  description: "UUID assigned by the control plane"
+                databaseReady:
+                  type: boolean
+                  default: false
+                bucketReady:
+                  type: boolean
+                  default: false
+                vaultReady:
+                  type: boolean
+                  default: false
+                queuesReady:
+                  type: boolean
+                  default: false
+                controlPlaneRegistered:
+                  type: boolean
+                  default: false
+                message:
+                  type: string
+                  description: "Human-readable status message or error detail"
+                lastReconcileTime:
+                  type: string
+                  format: date-time
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Subdomain
+          type: string
+          jsonPath: .spec.subdomain
+        - name: Plan
+          type: string
+          jsonPath: .spec.plan
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Tenant-ID
+          type: string
+          jsonPath: .status.tenantId
+          priority: 1
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

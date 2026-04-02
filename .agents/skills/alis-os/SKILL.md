@@ -241,7 +241,7 @@ NEVER process a payment webhook without idempotency check first
 
 ## Current build status — what exists, what doesn't
 
-**Last updated:** 2026-03-20 | Migrations 0001–0034 complete | P22–P29 done
+**Last updated:** 2026-04-02 | Migrations 0001–0041 complete | P30–P40 done | S1–S10 SaaS complete | 1055 tests (172 SaaS + 883 data-plane)
 
 | Epic | Module | Backend | Frontend | Status |
 |---|---|---|---|---|
@@ -279,14 +279,20 @@ NEVER process a payment webhook without idempotency check first
 | Platform | API versioning (v1/v2) | ✅ api_versioning.py | — | **GA** |
 | Platform | Regional languages (6) | — | ✅ i18n/ (EN/TE/HI/KN/TA/MR) | **GA** |
 
-**846 tests passing** (covers E01–E14 era). P15–P34 features have no dedicated tests yet — write these next.
+**1055 tests passing** — 883 data-plane unit tests + 172 SaaS tests (control_plane, ai_service, k8s operator). ~160 @integration tests skipped without running infra.
+
+**SaaS Platform (S1–S10 complete):**
+- `control_plane/` — Tenant CRUD, billing engine, DNS provisioning
+- `ai_service/` — PII masking, per-tenant budget, provider routing
+- `infra/k8s/helm/` — 3 Helm charts (data-plane, control-plane, ai-service)
+- `infra/terraform/` — AWS/Azure/GCP + shared Vault modules
+- `infra/k8s/operator/` — TenantStack CRD + kopf reconciler
 
 **Remaining work (priority order):**
 1. PAA "Draft with AI" button in PolicyStudioPage (small FE wire-up)
 2. Multi-campus UI page (`web/src/pages/admin/CampusPage.tsx`)
-3. E2E tests for P22–P29 features (PhD, Convocation, OBE, WiFi attendance, etc.)
+3. SaaS admin dashboard frontend (control plane UI)
 4. Live integrations: DigiLocker, WhatsApp Cloud API, Razorpay webhooks, Drillbit, NIC e-Invoice
-5. ILL (Institutional Logic Layer) — sandboxed custom algorithm execution (not yet designed)
 
 ---
 
@@ -306,8 +312,8 @@ Vault 1.17 service added to `docker-compose.yml`. `vault_client.py` in `server/c
 **✅ FIXED — RBAC scope_id**
 Migration `0015_rbac_scope_and_event_hardening.py` adds `scope_id` to `role_assignments`. HODs are now department-scoped.
 
-**⚠️ OPEN — E2E tests for P15–P34**
-846 tests cover E01–E14 era only. PhD, Convocation, OBE, WiFi attendance, offline PWA, and all P22–P29 features have zero dedicated test coverage. Write before pilot deployment.
+**✅ FIXED — Test coverage expanded**
+1055 tests now passing: 883 data-plane (unit/mock) + 172 SaaS tests (S2-S10). Coverage includes P30-P40 modules and full SaaS platform.
 
 **⚠️ OPEN — Live integrations (stubs only)**
 DigiLocker, WhatsApp Cloud API, Razorpay webhooks, Drillbit plagiarism, NIC e-Invoice — all implemented as stubs. Activate by setting the corresponding env vars (keys are already defined in `settings.py`).

@@ -1,0 +1,17 @@
+apiVersion: v2
+name: alis-data-plane
+description: >-
+  ALIS Data Plane — FastAPI application server, Celery workers, and
+  beat scheduler for the multi-tenant university ERP.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - alis
+  - erp
+  - saas
+  - multi-tenant
+  - education
+maintainers:
+  - name: ALIS Engineering
+    email: eng@alis.app

@@ -44,16 +44,24 @@ class PolicyKey:
     # Academics
     MIN_ATTENDANCE_PCT      = "academics.attendance.min_percentage"
 
+    # Learning (in-house LMS)
+    LEARNING_LATE_PENALTY_PCT = "learning.assignment.late_penalty_pct_default"
+    LEARNING_MAX_LATE_DAYS    = "learning.assignment.max_late_days"
+    LEARNING_AUTO_BEGIN_REVIEW = "learning.auto_begin_review"
+
     # Defaults (used when no DB row exists for an org)
     _DEFAULTS: dict[str, Any] = {
-        MIN_ACADEMIC_PCT:        55.0,
-        REVIEW_BAND_LOWER:       50.0,
-        MIN_ENTRANCE_SCORE:      40.0,
-        DOCS_REQUIRED_FOR_OFFER: True,
-        MAX_COUNSELLOR_LOAD:     30,
-        OFFER_VALIDITY_DAYS:     30,
-        FEE_OVERDUE_GRACE_DAYS:  7,
-        MIN_ATTENDANCE_PCT:      75.0,
+        MIN_ACADEMIC_PCT:          55.0,
+        REVIEW_BAND_LOWER:         50.0,
+        MIN_ENTRANCE_SCORE:        40.0,
+        DOCS_REQUIRED_FOR_OFFER:   True,
+        MAX_COUNSELLOR_LOAD:       30,
+        OFFER_VALIDITY_DAYS:       30,
+        FEE_OVERDUE_GRACE_DAYS:    7,
+        MIN_ATTENDANCE_PCT:        75.0,
+        LEARNING_LATE_PENALTY_PCT: 10.0,
+        LEARNING_MAX_LATE_DAYS:    3,
+        LEARNING_AUTO_BEGIN_REVIEW: False,
     }
 
 

@@ -1,26 +1,38 @@
 """
-ALIS Agent Rail — Context Advisor (RAIL-v1)
+ALIS Agent Rail — Context Advisor + Copilot (RAIL-v1)
 
 MODULE: RAIL — Agent Rail Intelligence
 LAYER: Layer 2 (Agentic Decisions)
 
-Provides context-aware intelligence for the 320px agent rail panel.
+Provides context-aware intelligence and copilot capabilities
+for the 320px agent rail panel.
 
-Handles two call patterns:
+Handles three call patterns:
   1. __view_change__ — triggered when the user navigates to a new canvas view.
      Queries live counts, evaluates the tenant's agent_rail_silence policy,
      and returns a proactive brief only if the policy returns SURFACE.
      Returns message=null if the policy returns anything else (stays silent).
 
-  2. User message (chip tap or free text) — interprets intent, queries relevant
-     data, returns a message + optional CanvasAction.
+  2. Known chip action — programmatic query + highlight for pre-configured
+     quick action chips (e.g. "show urgent items", "what should I do today").
+
+  3. Free-text copilot — Full LLM-powered copilot that:
+     - Understands natural language intent
+     - Knows which actions the current actor_role can perform
+     - Returns structured JSON with message + canvasAction + chips
+     - Drafts EXECUTE_MODULE payloads with status="DRAFT" for HITL confirmation
+     - Supports batch/aggregate actions (e.g. "approve all routine items")
+     - Supports multi-turn reference resolution ("open the first one")
+     - Personality is configurable per tenant via policy engine
 
 Decision Declaration (Layer 2 — Mandatory Format):
     Decision Made:
         "What, if anything, requires this user's immediate attention right now?"
+        "What action does the user want to perform, and can their role do it?"
 
     AI Role:
-        Summarise — never decide, never mutate state.
+        Summarise and draft — never decide, never mutate state.
+        All EXECUTE_MODULE payloads are DRAFT-only.
 
     Silence Rule (via policy engine):
         SLA breach (>= 1) is always surfaced — hardcoded, non-configurable.
@@ -601,6 +613,388 @@ def _handle_chip(message: str, tenant_id: str, role: str, actor_id: str) -> Opti
 
 
 # ---------------------------------------------------------------------------
+# ROLE-ACTION MATRIX — embedded in copilot system prompt
+# Defines what each role can ask the copilot to draft.
+# ---------------------------------------------------------------------------
+
+_ROLE_ACTION_MATRIX: Dict[str, Dict[str, List[str]]] = {
+    "super_admin": {
+        "ACADEMICS":        ["create_course", "update_course", "assign_faculty",
+                             "create_program", "update_curriculum", "approve_syllabus"],
+        "FINANCE":          ["create_fee_structure", "request_waiver", "process_refund",
+                             "generate_demand_note", "reconcile_payments",
+                             "approve_scholarship", "close_financial_year"],
+        "ADMISSIONS":       ["create_intake", "update_merit_list", "send_offer_letter",
+                             "approve_application", "reject_application",
+                             "publish_merit_list", "create_admission_cycle"],
+        "EXAMINATIONS":     ["create_exam_schedule", "generate_hall_tickets",
+                             "publish_results", "create_seating_plan",
+                             "flag_malpractice", "approve_revaluation"],
+        "HR":               ["onboard_staff", "approve_leave", "process_payroll",
+                             "update_designation", "terminate_contract",
+                             "assign_duties", "approve_reimbursement"],
+        "STUDENT_SERVICES": ["create_hostel_allotment", "issue_id_card",
+                             "process_transport_request", "create_scholarship",
+                             "approve_library_access", "manage_locker"],
+        "COMMUNICATIONS":   ["send_notification", "send_bulk_message",
+                             "create_announcement", "schedule_communication"],
+        "REGULATORY":       ["submit_naac_data", "compute_nirf_score",
+                             "generate_compliance_report", "update_aishe_data"],
+        "ALUMNI":           ["create_alumni_event", "update_alumni_record",
+                             "post_job_listing", "schedule_placement_drive"],
+        "PHD":              ["register_phd_scholar", "assign_supervisor",
+                             "schedule_review", "approve_synopsis"],
+        "POLICY":           ["create_policy_draft", "submit_policy",
+                             "approve_policy", "update_policy_rules"],
+        "SETTINGS":         ["update_tenant_config", "manage_feature_flags",
+                             "create_custom_role", "manage_integrations",
+                             "update_branding"],
+        "WORKFLOWS":        ["create_workflow", "update_workflow_step",
+                             "assign_workflow_task", "escalate_task"],
+        "REPORTS":          ["generate_report", "schedule_report",
+                             "export_data", "create_dashboard_widget"],
+    },
+    "admin": {
+        "ACADEMICS":        ["create_course", "update_course", "assign_faculty",
+                             "create_program", "update_curriculum"],
+        "FINANCE":          ["create_fee_structure", "request_waiver",
+                             "generate_demand_note", "reconcile_payments"],
+        "ADMISSIONS":       ["create_intake", "update_merit_list", "send_offer_letter",
+                             "approve_application", "reject_application",
+                             "publish_merit_list"],
+        "EXAMINATIONS":     ["create_exam_schedule", "generate_hall_tickets",
+                             "publish_results", "create_seating_plan"],
+        "HR":               ["onboard_staff", "approve_leave",
+                             "update_designation", "assign_duties"],
+        "STUDENT_SERVICES": ["create_hostel_allotment", "issue_id_card",
+                             "process_transport_request"],
+        "COMMUNICATIONS":   ["send_notification", "send_bulk_message",
+                             "create_announcement"],
+        "REGULATORY":       ["submit_naac_data", "compute_nirf_score",
+                             "generate_compliance_report"],
+        "ALUMNI":           ["create_alumni_event", "post_job_listing"],
+        "POLICY":           ["create_policy_draft", "submit_policy",
+                             "approve_policy"],
+        "SETTINGS":         ["update_tenant_config", "manage_feature_flags",
+                             "create_custom_role"],
+        "WORKFLOWS":        ["create_workflow", "update_workflow_step",
+                             "assign_workflow_task"],
+        "REPORTS":          ["generate_report", "export_data"],
+    },
+    "registrar": {
+        "ACADEMICS":        ["create_course", "update_course", "assign_faculty",
+                             "create_program", "update_curriculum"],
+        "ADMISSIONS":       ["create_intake", "update_merit_list", "send_offer_letter",
+                             "approve_application", "reject_application",
+                             "publish_merit_list", "create_admission_cycle"],
+        "EXAMINATIONS":     ["create_exam_schedule", "generate_hall_tickets",
+                             "publish_results", "create_seating_plan",
+                             "approve_revaluation"],
+        "STUDENT_SERVICES": ["create_hostel_allotment", "issue_id_card",
+                             "process_transport_request"],
+        "REGULATORY":       ["submit_naac_data", "compute_nirf_score",
+                             "generate_compliance_report", "update_aishe_data"],
+        "REPORTS":          ["generate_report", "export_data"],
+        "WORKFLOWS":        ["assign_workflow_task", "escalate_task"],
+    },
+    "hod": {
+        "ACADEMICS":        ["create_course", "update_course", "assign_faculty",
+                             "update_curriculum", "approve_syllabus"],
+        "EXAMINATIONS":     ["flag_malpractice"],
+        "REPORTS":          ["generate_report"],
+    },
+    "faculty": {
+        "ACADEMICS":        ["update_course"],
+        "EXAMINATIONS":     [],
+    },
+    "finance_officer": {
+        "FINANCE":          ["create_fee_structure", "request_waiver", "process_refund",
+                             "generate_demand_note", "reconcile_payments",
+                             "approve_scholarship", "close_financial_year"],
+        "REPORTS":          ["generate_report", "export_data"],
+    },
+    "hr_admin": {
+        "HR":               ["onboard_staff", "approve_leave", "process_payroll",
+                             "update_designation", "terminate_contract",
+                             "assign_duties", "approve_reimbursement"],
+        "REPORTS":          ["generate_report"],
+    },
+    "dean": {
+        "ACADEMICS":        ["approve_syllabus", "update_curriculum"],
+        "EXAMINATIONS":     ["approve_revaluation"],
+        "REPORTS":          ["generate_report"],
+    },
+    "student": {
+        # Students cannot draft any module-level mutations via copilot.
+        # They can only query information.
+    },
+}
+
+
+def _load_tenant_personality(tenant_id: str) -> Dict[str, str]:
+    """Load copilot personality config from tenant policy engine.
+
+    Returns a dict with keys:
+        tone:     e.g. "formal", "friendly", "concise"
+        greeting: e.g. "Good morning" style
+        language: e.g. "en" (future: multi-language support)
+
+    Falls back to professional defaults if no tenant config exists.
+    """
+    defaults = {
+        "tone": "professional",
+        "greeting": "neutral",
+        "language": "en",
+    }
+    try:
+        tone = policy_engine.get_value("copilot.tone", tenant_id, default="professional")
+        greeting = policy_engine.get_value("copilot.greeting_style", tenant_id, default="neutral")
+        language = policy_engine.get_value("copilot.language", tenant_id, default="en")
+        return {"tone": tone, "greeting": greeting, "language": language}
+    except Exception:
+        return defaults
+
+
+# ---------------------------------------------------------------------------
+# COPILOT SYSTEM PROMPT BUILDER
+# ---------------------------------------------------------------------------
+
+def _build_copilot_prompt(
+    role: str,
+    view: str,
+    message: str,
+    counts: Dict[str, Any],
+    entity_data: Optional[Dict[str, Any]],
+    prev_context: str,
+    recent_messages: List[Dict[str, str]],
+    tenant_id: str,
+) -> str:
+    """Build the full copilot prompt with role-scoping and structured output schema."""
+
+    # Load actions this role can perform
+    role_key = role.lower().replace(" ", "_") if role else ""
+    allowed_actions = _ROLE_ACTION_MATRIX.get(role_key, {})
+
+    # Flatten for prompt
+    if allowed_actions:
+        action_list = "\n".join(
+            f"  - {module}: {', '.join(actions)}"
+            for module, actions in allowed_actions.items()
+            if actions
+        )
+    else:
+        action_list = "  (This role cannot draft any actions — information queries only.)"
+
+    # Entity context
+    entity_clause = ""
+    if entity_data:
+        entity_clause = f"\nEntity lookup result (from database, trustworthy): {json.dumps(entity_data)}"
+
+    # Conversation history
+    conv_history = ""
+    if recent_messages:
+        lines = []
+        for m in recent_messages[-5:]:
+            speaker = "User" if m.get("role") == "user" else "Copilot"
+            lines.append(f"  {speaker}: {m.get('text', '')}")
+        conv_history = "\nRecent conversation:\n" + "\n".join(lines)
+
+    # Tenant personality
+    personality = _load_tenant_personality(tenant_id)
+    tone_instruction = {
+        "formal": "Use formal, institutional language. Address the user respectfully.",
+        "friendly": "Be warm and approachable while remaining professional.",
+        "concise": "Be extremely brief — 1 sentence max unless detail is needed.",
+        "professional": "Be concise, direct, and professional. No excessive pleasantries.",
+    }.get(personality.get("tone", ""), "Be concise, direct, and professional.")
+
+    prompt = f"""You are the ALIS Copilot — the AI assistant embedded in an institutional ERP system for universities and colleges. You are speaking to a {role or 'staff member'} who is currently on the {view.replace('_', ' ')} screen.
+
+{tone_instruction}
+
+# YOUR CAPABILITIES
+You can:
+1. Answer questions about dashboard data, student records, fee status, exam schedules, etc.
+2. Draft module actions (create, update, approve, reject) as EXECUTE_MODULE payloads — but ONLY with status="DRAFT". You NEVER execute directly.
+3. Navigate the user to different canvas views via NAVIGATE actions.
+4. Highlight specific items on the canvas via HIGHLIGHT actions.
+
+# ACTIONS THIS ROLE CAN DRAFT
+The current user role is "{role}". They can draft actions for:
+{action_list}
+
+If the user asks to do something NOT in the above list, politely refuse and explain which role is required.
+
+# RESPONSE FORMAT
+You MUST respond with a valid JSON object. No markdown, no explanation outside the JSON.
+
+For informational queries (no action needed):
+{{
+  "message": "Your concise answer here.",
+  "canvasAction": null,
+  "chips": ["Relevant follow-up 1", "Follow-up 2"],
+  "agentContext": "{prev_context}"
+}}
+
+For drafting an action (user asks to create/update/approve/process something):
+{{
+  "message": "I have drafted [description]. Please review and confirm.",
+  "canvasAction": {{
+    "type": "EXECUTE_MODULE",
+    "module": "TARGET_MODULE",
+    "actionEndpoint": "action_name",
+    "payload": {{
+      "field1": "value1",
+      "status": "DRAFT"
+    }},
+    "is_batch": false
+  }},
+  "chips": ["Confirm", "Skip"],
+  "agentContext": "execute:MODULE:action_name"
+}}
+
+For batch/aggregate actions (e.g. "approve all pending routine items"):
+{{
+  "message": "I have drafted a batch action to [description] for N items.",
+  "canvasAction": {{
+    "type": "EXECUTE_MODULE",
+    "module": "TARGET_MODULE",
+    "actionEndpoint": "batch_action_name",
+    "payload": {{
+      "action": "approve",
+      "filter_criteria": {{"status": "PENDING", "urgency": "LOW"}},
+      "estimated_count": N,
+      "status": "DRAFT"
+    }},
+    "is_batch": true
+  }},
+  "chips": ["Confirm Batch", "Review Items First", "Skip"],
+  "agentContext": "batch:MODULE:action"
+}}
+
+For navigation requests:
+{{
+  "message": "Navigating to the fee dashboard.",
+  "canvasAction": {{
+    "type": "NAVIGATE",
+    "view": "fee_dashboard",
+    "module": "finance"
+  }},
+  "chips": [],
+  "agentContext": null
+}}
+
+For unauthorized requests:
+{{
+  "message": "I cannot draft that action. [Explanation of which role is needed].",
+  "canvasAction": null,
+  "chips": ["Show my tasks"],
+  "agentContext": null
+}}
+
+# RULES
+- ALL mutation payloads MUST include "status": "DRAFT"
+- NEVER invent student IDs, application IDs, or UUIDs — use context from the conversation or entity lookup
+- NEVER approve, reject, or finalize anything directly — only draft the proposal
+- Only reference numbers from the live counts and entity data below — never guess
+- If you don't have enough information to draft an action, ask the user for clarification
+- Keep chips to 2-4 relevant follow-up actions
+- chips must NEVER be empty for action responses — always include ["Confirm", "Skip"] at minimum
+
+# LIVE CONTEXT
+Dashboard: {view.replace('_', ' ')}
+Live counts: {json.dumps(counts)}
+Session context: {prev_context or 'new session'}{entity_clause}{conv_history}
+
+# USER MESSAGE
+"{message}"
+
+Respond with valid JSON only:"""
+
+    return prompt
+
+
+# ---------------------------------------------------------------------------
+# COPILOT RESPONSE PARSER
+# ---------------------------------------------------------------------------
+
+def _parse_copilot_response(
+    raw_output: str,
+    prev_context: str,
+) -> Dict[str, Any]:
+    """Parse the LLM's copilot response into a structured AgentResponse dict.
+
+    Tries JSON parsing first. Falls back to plain text message if parsing fails.
+    Validates required fields and sanitises canvasAction types.
+    """
+    # Try to extract JSON from the output
+    text = raw_output.strip()
+
+    # Handle markdown code fences
+    if "```" in text:
+        import re as _re
+        fence_match = _re.search(r"```(?:json)?\s*\n?(\{.*?\})\s*\n?```", text, _re.DOTALL)
+        if fence_match:
+            text = fence_match.group(1).strip()
+
+    # Direct JSON detection
+    if not text.startswith("{"):
+        brace_start = text.find("{")
+        brace_end = text.rfind("}")
+        if brace_start != -1 and brace_end > brace_start:
+            text = text[brace_start:brace_end + 1]
+
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        # Fallback: treat entire response as a plain text message
+        logger.debug("context_advisor: copilot response not valid JSON — using as plain text")
+        return {
+            "message": raw_output.strip()[:500],
+            "canvasAction": None,
+            "agentContext": prev_context or None,
+        }
+
+    # Extract and validate fields
+    message = parsed.get("message")
+    if not message or not isinstance(message, str):
+        message = raw_output.strip()[:500]
+
+    canvas_action = parsed.get("canvasAction")
+    chips = parsed.get("chips")
+    agent_context = parsed.get("agentContext", prev_context)
+
+    # Validate canvasAction type if present
+    valid_action_types = {
+        "EXECUTE_MODULE", "NAVIGATE", "HIGHLIGHT", "HIGHLIGHT_MULTIPLE",
+        "FILTER", "OPEN_DETAIL", "EXECUTE", "CLEAR_HIGHLIGHT",
+    }
+    if canvas_action and isinstance(canvas_action, dict):
+        action_type = canvas_action.get("type")
+        if action_type not in valid_action_types:
+            logger.warning(
+                "context_advisor: copilot returned invalid canvasAction type %r — dropping",
+                action_type,
+            )
+            canvas_action = None
+
+        # Enforce DRAFT status on all EXECUTE_MODULE payloads
+        if action_type == "EXECUTE_MODULE" and isinstance(canvas_action.get("payload"), dict):
+            canvas_action["payload"]["status"] = "DRAFT"
+
+    response: Dict[str, Any] = {
+        "message": message,
+        "canvasAction": canvas_action,
+        "agentContext": agent_context,
+    }
+
+    if chips and isinstance(chips, list):
+        response["chips"] = [str(c) for c in chips[:6]]
+
+    return response
+
+
+# ---------------------------------------------------------------------------
 # EXECUTOR
 # ---------------------------------------------------------------------------
 
@@ -673,7 +1067,7 @@ def execute_context_advisor(
             chip_resp["agentContext"] = f"chip:{message.lower()[:40]}:{','.join(ids[:5])}" if ids else None
             response = chip_resp
 
-        # ── 3. Free text: Tier 2 entity lookup, then Tier 1 counts ──────
+        # ── 3. Free text: COPILOT mode — structured LLM with role-awareness ──
         else:
             counts = _query_counts(view, tenant_id, actor_id, role)
 
@@ -694,41 +1088,36 @@ def execute_context_advisor(
             except Exception:
                 entity_data = None
 
-            entity_clause = (
-                f" Entity lookup result: {json.dumps(entity_data)}."
-                if entity_data
-                else ""
+            # Build the copilot prompt
+            prompt = _build_copilot_prompt(
+                role=role,
+                view=view,
+                message=_strip_pii(message),
+                counts=counts,
+                entity_data=entity_data,
+                prev_context=prev_context,
+                recent_messages=safe_recent,
+                tenant_id=tenant_id,
             )
 
-            prompt = (
-                f"You are the ALIS ERP assistant embedded in a university management system. "
-                f"A {role or 'staff member'} on the {view.replace('_', ' ')} screen asked: \"{_strip_pii(message)}\". "
-                f"Live dashboard counts: {json.dumps(counts)}.{entity_clause} "
-                f"Session context hint: {prev_context or 'none'}. "
-                f"Recent conversation: {json.dumps(safe_recent)}. "
-                f"Reply in 1–2 concise sentences. Be specific. "
-                f"Only reference numbers and entity data provided above — never invent data. "
-                f"If the question requires detail not in the counts or entity lookup, "
-                f"say so clearly rather than guessing."
-            )
-
-            reply = None
+            raw_reply = None
             try:
                 from server.core.ai_gateway import AIGateway
                 llm = AIGateway.get_llm(context)
                 llm_result = llm.invoke(prompt)
-                reply = llm_result.content
+                raw_reply = llm_result.content
             except Exception as llm_exc:
-                logger.warning("context_advisor: LLM call failed — %s", llm_exc)
+                logger.warning("context_advisor: LLM copilot call failed — %s", llm_exc)
 
-            if not reply:
-                reply = _build_proactive_message(view, counts) or "No items currently require attention."
-
-            response = {
-                "message": reply,
-                "canvasAction": None,
-                "agentContext": prev_context or None,  # preserve existing context across free-text turns
-            }
+            if not raw_reply:
+                fallback = _build_proactive_message(view, counts) or "No items currently require attention."
+                response = {
+                    "message": fallback,
+                    "canvasAction": None,
+                    "agentContext": prev_context or None,
+                }
+            else:
+                response = _parse_copilot_response(raw_reply, prev_context)
 
     except Exception as exc:
         logger.exception("context_advisor: unhandled error — %s", exc)

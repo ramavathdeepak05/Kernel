@@ -131,7 +131,7 @@ Every state change, every AI decision, every approval, every policy evaluation *
 |---|---|---|
 | Primary DB | PostgreSQL 16 + pgvector | Schema-per-tenant isolation |
 | DB Driver | **Must migrate to asyncpg** | See Known Issues §14 |
-| Migrations | Alembic | 0001–0014 deployed |
+| Migrations | Alembic | 0001–0041 deployed |
 | Vector Store | pgvector (768-dim) | RAG / semantic search |
 | Cache | Redis | Sessions, feature flags, policy cache |
 | Object Store | MinIO | S3-compatible, on-prem |
@@ -1024,7 +1024,7 @@ ALIS/
 
 ## 19. Testing Standards
 
-- **846 tests, all passing** — do not break this
+- **1055 tests, all passing** (883 data-plane + 172 SaaS) — do not break this
 - Every new feature requires unit tests before merge
 - Integration tests marked with `@pytest.mark.integration`
 - AI tests excluded from CI (`test_e03_s02_model_registry.py` — standalone)

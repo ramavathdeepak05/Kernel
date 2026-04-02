@@ -61,8 +61,19 @@ Revision IDs are zero-padded 4-digit strings: `"0001"`, `"0012"`. Never use Alem
 | `0013_missing_indexes.py` | Performance indexes |
 | `0014_admissions_full_workflow.py` | Full 10-stage admissions pipeline (40+ tables) |
 | `0015_rbac_scope_and_event_hardening.py` | `role_assignments` with scope + `domain_events.processing_started_at` |
+| `0016_feature_flags.py` | Per-tenant feature flag system with audit trail |
+| `0017_e14_regulatory.py` | NAAC criteria, NIRF parameters, compliance_items |
+| `0018_dpdp_consent.py` | DPDP consent_records, erasure_requests, purpose_registry |
+| `0019_mfa_devices.py` | mfa_devices, trusted_devices (TOTP-based 2FA) |
+| `0020–0025` | Idempotency, fee versioning, DBT, WhatsApp, guardian portal, pilot hardening |
+| `0026–0031` | PhD, re-admission, convocation, OBE, multi-campus, e-invoice |
+| `0032–0034` | Drillbit submission, WiFi attendance, TA assignments |
+| `0035–0038` | workflow_tasks, tenant_policies, failed_task_log (Celery DLQ) |
+| `0039_hr_placement_workflow_gaps.py` | Visiting faculty session logs, placement drive management |
+| `0040_identity_match_and_access_lift.py` | EC-ADM-01 identity match + EC-ADM-05 UTR access lift |
+| `0041_in_house_learning.py` | course_materials, assignments, assignment_submissions + RLS (P40 LMS) |
 
-Next revision: `0016`.
+Next revision: `0042`.
 
 ## Required Extensions (already in 0001 — do NOT re-create)
 

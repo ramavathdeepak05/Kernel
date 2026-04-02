@@ -384,6 +384,58 @@ class Settings(BaseSettings):
     pgvector_dimensions: int = Field(default=768)  # nomic-embed-text output size
 
     # -------------------------------------------------------------------------
+    # AI Service (S3 — dedicated inference microservice)
+    # When ai_service_url is empty, AIGateway falls back to direct Ollama.
+    # -------------------------------------------------------------------------
+    ai_service_url: str = Field(
+        default="",
+        description="AI Service base URL (e.g. https://ai.alis.app). "
+                    "Empty = direct Ollama fallback.",
+    )
+    ai_service_token: str = Field(
+        default="change-me-ai-service-token",
+        description="Bearer token for data-plane → AI service calls.",
+    )
+
+    # -------------------------------------------------------------------------
+    # SaaS Multi-Tenant (S1 — DB-per-tenant routing)
+    # Empty control_plane_url = single-tenant mode (backward compat — all
+    # tenant queries use the same db_url as the system pool).
+    # -------------------------------------------------------------------------
+    control_plane_url: str = Field(
+        default="",
+        description="Control plane base URL (e.g. https://control.alis.app). "
+                    "Empty = single-tenant fallback mode.",
+    )
+    control_plane_token: str = Field(
+        default="",
+        description="Internal bearer token for control plane → data plane calls.",
+    )
+    static_tenant_id: str = Field(
+        default="",
+        description="Tier 2 (dedicated stack): hardcode a single tenant_id, "
+                    "bypassing all subdomain and JWT tenant resolution.",
+    )
+    saas_domain_suffix: str = Field(
+        default="alis.app",
+        description="Domain suffix used to extract subdomain tenant slug. "
+                    "E.g., 'alis.app' → iitb.alis.app → slug='iitb'.",
+    )
+    tenant_db_cache_ttl_seconds: int = Field(
+        default=300,
+        description="Redis TTL (seconds) for per-tenant DB config cache.",
+    )
+    tenant_pool_min: int = Field(
+        default=2,
+        description="Min connections per per-tenant DB pool (async + sync).",
+    )
+    tenant_pool_max: int = Field(
+        default=10,
+        description="Max connections per per-tenant DB pool. "
+                    "Total server connections ≈ tenant_count × tenant_pool_max.",
+    )
+
+    # -------------------------------------------------------------------------
     # Validators
     # -------------------------------------------------------------------------
     @field_validator("app_env")

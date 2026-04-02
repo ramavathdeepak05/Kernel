@@ -993,12 +993,39 @@ class AIGateway:
                 pass  # Non-fatal; gateway falls back to Ollama defaults
 
         # --- LLM Backend Selection ---
-        # If external API is configured (NVIDIA NIM / OpenAI-compatible), use it.
-        # Otherwise fall back to local Ollama.
+        # Priority order:
+        # 1. AI Service microservice (S3) — when AI_SERVICE_URL is configured
+        # 2. External OpenAI-compatible API (NVIDIA NIM, OpenAI, etc.)
+        # 3. Local Ollama (default, pre-S3 single-tenant path)
         from .settings import get_settings
         _settings = get_settings()
 
-        if _settings.use_external_llm and _OPENAI_AVAILABLE:
+        if _settings.ai_service_url:
+            # S3: proxy to the dedicated AI Service microservice.
+            # PII masking + provider routing happen server-side.
+            logger.info(
+                "AI Gateway: routing via AI Service at %s", _settings.ai_service_url
+            )
+            from .ai_service_provider import AIServiceLLM
+            from server.core.llm_router import LLMTaskClass
+            # Determine task class from capability name (best-effort mapping)
+            _task_class = "extraction"
+            if capability:
+                _cap_lower = capability.lower()
+                if any(k in _cap_lower for k in ("draft", "generat", "summar", "compos")):
+                    _task_class = "generation"
+                elif any(k in _cap_lower for k in ("reason", "score", "eligib", "risk", "plan")):
+                    _task_class = "reasoning"
+            llm = AIServiceLLM(
+                ai_service_url=_settings.ai_service_url,
+                ai_service_token=_settings.ai_service_token,
+                tenant_id=context.org_id or "",
+                task_class=_task_class,
+                temperature=temperature,
+                max_tokens=_settings.llm_api_max_tokens,
+                model_override=model if model_name else None,
+            )
+        elif _settings.use_external_llm and _OPENAI_AVAILABLE:
             logger.info(
                 f"AI Gateway: using external LLM backend — "
                 f"{_settings.llm_api_base_url} / {_settings.llm_api_model}"
@@ -1012,7 +1039,7 @@ class AIGateway:
                 streaming=False,
             )
         else:
-            # Local Ollama (default)
+            # Local Ollama (default — pre-S3 single-tenant path)
             llm = OllamaLLM(
                 base_url=base_url,
                 model=model,

@@ -15,7 +15,7 @@ class AdmissionsReportService:
         rows = execute_query(
             """
             SELECT status, COUNT(*) AS count
-            FROM applications
+            FROM applicants
             WHERE org_id = %s AND academic_year = %s
             GROUP BY status
             ORDER BY status
@@ -49,7 +49,7 @@ class AdmissionsReportService:
                 COUNT(*)                                        AS applications,
                 COUNT(*) FILTER (WHERE a.status = 'ENROLLED')  AS enrolled,
                 COUNT(*) FILTER (WHERE a.status IN ('REJECTED','AUTO_REJECTED')) AS rejected
-            FROM applications a
+            FROM applicants a
             WHERE a.org_id = %s AND a.academic_year = %s
             GROUP BY a.program_applied
             ORDER BY applications DESC
@@ -66,7 +66,7 @@ class AdmissionsReportService:
             SELECT
                 COALESCE(source_channel, 'DIRECT') AS source,
                 COUNT(*) AS count
-            FROM applications
+            FROM applicants
             WHERE org_id = %s AND academic_year = %s
             GROUP BY source_channel
             ORDER BY count DESC
@@ -88,7 +88,7 @@ class AdmissionsReportService:
                     100.0 * COUNT(*) FILTER (WHERE a.status = 'ENROLLED') /
                     NULLIF(COUNT(a.id), 0), 1
                 )                                                    AS conversion_rate
-            FROM applications a
+            FROM applicants a
             JOIN counsellors c ON c.id = a.assigned_counsellor_id
             WHERE a.org_id = %s AND a.academic_year = %s
             GROUP BY c.id, c.name
@@ -106,7 +106,7 @@ class AdmissionsReportService:
             SELECT
                 TO_CHAR(submitted_at, 'YYYY-MM') AS month,
                 COUNT(*) AS count
-            FROM applications
+            FROM applicants
             WHERE org_id = %s AND academic_year = %s
             GROUP BY 1
             ORDER BY 1

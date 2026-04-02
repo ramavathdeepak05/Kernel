@@ -53,17 +53,20 @@ class RailAgentRegistry:
         "context_advisor_v1": AgentMeta(
             agent_id="context_advisor_v1",
             module="RAIL",
-            model_version="programmatic+generation",
-            prompt_version="v1",
+            model_version="programmatic+copilot",
+            prompt_version="v2-copilot",
             invocation_class="ANALYTICAL",
             authorization_policy="any_authenticated_role",
             allowed_tools=(
                 "tool.db.workflow_tasks.count",
             ),
             description=(
-                "Provides context-aware proactive briefings for the agent rail. "
-                "Queries live workflow_tasks counts (role-assigned and personally-assigned) "
-                "and surfaces only what requires the user's immediate attention. "
+                "Context-aware copilot for the ALIS agent rail. "
+                "Three modes: (1) view_change — programmatic proactive briefing, "
+                "(2) chip action — pre-configured quick queries, "
+                "(3) copilot — structured LLM conversation with role-aware "
+                "intent parsing, EXECUTE_MODULE draft actions (all modules + "
+                "policy + settings), batch actions, and tenant-configurable personality. "
                 "Silence threshold is institution-configurable via agent_rail_silence policy."
             ),
             status="ACTIVE",

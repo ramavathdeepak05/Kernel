@@ -217,15 +217,15 @@ Applied uniformly across all 13+ epics:
 | E11 | Reporting & Analytics | ✅ Complete | kpi_snapshots, audit_reports |
 | E12 | Alumni & Placement | ✅ Complete | alumni_profiles, engagement_events |
 | E13 | Dynamic Process Engine | ✅ Complete | workflow_definitions (runtime DAG) |
-| **E14** | **Regulatory & Accreditation** | ❌ Not built | regulatory_metrics, naac_evidence, nirf_data |
-| **E15** | **PhD / Doctoral Research** | ❌ Not built | phd_scholars, dc_meetings, thesis_submissions |
+| **E14** | **Regulatory & Accreditation** | ✅ Built | regulatory_metrics, naac_evidence, nirf_data |
+| **E15** | **PhD / Doctoral Research** | ✅ Built | phd_scholars, dc_meetings, thesis_submissions |
 | **E16** | **Parent / Guardian Portal** | ❌ Not built | guardian_accounts, guardian_student_links |
-| **E17** | **Re-admission & Credit Transfer** | ❌ Not built | readmission_applications, credit_transfer_records |
-| **E18** | **Convocation Management** | ❌ Not built | convocation_cycles, degree_award_records |
-| **E19** | **Quota Seat Matrix Engine** | ❌ Not built | seat_matrix, quota_allocations, waitlist_positions |
-| **E20** | **OBE / CO-PO Mapping** | ❌ Not built | course_outcomes, program_outcomes, co_po_mappings |
-| **E21** | **DPDP Consent Management** | ❌ Not built | consent_records, data_subjects, erasure_requests |
-| **PAA** | **Policy Authoring Agent** | ❌ Not built | See §10b |
+| **E17** | **Re-admission & Credit Transfer** | ✅ Built | readmission_applications, credit_transfer_records |
+| **E18** | **Convocation Management** | ✅ Built | convocation_cycles, degree_award_records |
+| **E19** | **Quota Seat Matrix Engine** | ✅ Built | seat_matrix, quota_allocations, waitlist_positions |
+| **E20** | **OBE / CO-PO Mapping** | ✅ Built | course_outcomes, program_outcomes, co_po_mappings |
+| **E21** | **DPDP Consent Management** | ✅ Built | consent_records, data_subjects, erasure_requests |
+| **PAA** | **Policy Authoring Agent** | ✅ Built | See §10b |
 
 **Build order:** E14 → E21 → E16 → E19 → E15 → E17 → E18 → E20 → PAA
 Full implementation specs for E15–E21 are in `references/gaps.md`.

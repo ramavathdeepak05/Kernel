@@ -1,7 +1,7 @@
 # ALIS — Autonomous Learning & Institutional System
 ## Comprehensive Technical Reference
 
-*QUAICU Solutions Private Limited | Version 1.0 | March 2026 | Confidential*
+*QUAICU Solutions Private Limited | Version 2.0 | April 2026 | Confidential*
 
 ---
 
@@ -23,6 +23,9 @@
 14. [RBAC — Roles & Permissions](#14-rbac--roles--permissions)
 15. [Configuration Reference](#15-configuration-reference)
 16. [Production Quality Rules](#16-production-quality-rules)
+17. [SaaS Platform — Control Plane & Multi-Tenancy](#17-saas-platform--control-plane--multi-tenancy)
+18. [SaaS Infrastructure — Helm, Terraform, Operator](#18-saas-infrastructure--helm-terraform-operator)
+19. [SaaS Billing & DNS](#19-saas-billing--dns)
 
 ---
 
@@ -123,7 +126,7 @@ Worker processes 3 named queues: `default`, `ai_tasks`, `notifications`
 
 ## 4. Database — Migration History
 
-All migrations use Alembic. Current head: **0035**.
+All migrations use Alembic. Current head: **0041**.
 
 | Migration | Description |
 |---|---|
@@ -162,6 +165,12 @@ All migrations use Alembic. Current head: **0035**.
 | `0033_wifi_attendance` | attendance_wifi_sessions, attendance_wifi_verifications |
 | `0034_ta_assignments` | course_ta_assignments, session_ta_assignments |
 | `0035_workflow_tasks_audit_rls` | workflow_tasks table + immutability trigger on audit_ledger + RLS on leads + audit_ledger |
+| `0036_workflow_tasks_columns` | workflow_tasks gets tenant_id, urgency, assignee_role, assignee_actor_id columns |
+| `0037_tenant_policies` | tenant_policies table (required by policy_engine + agent_rail_silence) |
+| `0038_failed_task_log` | failed_task_log table — dead-letter store for Celery tasks that exhaust all retries |
+| `0039_hr_placement_workflow_gaps` | visiting faculty session logs and placement drive management |
+| `0040_identity_match_and_access_lift` | identity matching in applications; temporary access lifting for payment disputes (EC-ADM-01/05) |
+| `0041_in_house_learning` | course_materials, assignments, assignment_submissions; RLS; learning policy keys; 4 AI prompt seeds (P40) |
 
 ### Key DB Conventions
 - All IDs: `UUID v4`
@@ -236,6 +245,7 @@ All backend code lives under `ALIS/server/`. API prefix: `/api/v1/`.
 - Course handover workflow (`course_handover_workflow.py`)
 - TA assignments (course-level and session-level)
 - OBE / CO-PO mapping (`obe_service.py`) — outcome attainment calculation, NBA/NAAC reports
+- **In-house LMS** (`learning_service.py`) — course materials, assignments, submissions, grading (P40)
 
 ### E06 — Examinations & Grades
 **Path:** `server/examinations/`, `server/api/examinations_router.py`
@@ -350,10 +360,10 @@ All backend code lives under `ALIS/server/`. API prefix: `/api/v1/`.
 ### P14 — External Integrations
 **Path:** `server/integrations/`, `server/api/integrations_router.py`
 
-- DigiLocker (Indian Government document vault)
-- NTA (National Testing Agency) score import
-- LMS sync (Moodle / Canvas REST API)
-- Google Workspace / Microsoft 365 email provisioning
+- DigiLocker (Indian Government document vault) — stub; not blocking for manual pilot
+- NTA (National Testing Agency) score import — stub; not blocking for manual pilot
+- Google Workspace / Microsoft 365 email provisioning — stub; not blocking for pilot
+- **Moodle LMS sync tombstoned** — replaced by in-house LMS (P40); see `server/admissions/integrations/lms_sync.py`
 
 ### P21 — Admin & Platform Hardening
 **Path:** `server/api/admin_router.py`, `server/core/shadow_mode_middleware.py`
@@ -370,6 +380,25 @@ All backend code lives under `ALIS/server/`. API prefix: `/api/v1/`.
 - Students connect → public IP match → auto-marked PRESENT
 - Session countdown timer + live roster
 - Auto-mark absentees on session end
+
+### P40 — In-house Learning Management System
+**Path:** `server/academics/learning_service.py`, `server/api/learning_router.py`, `server/agents/academics/content_generator_v1.py`, `server/tasks/learning_tasks.py`
+
+Replaces Moodle LMS stub. Fully native — no external LMS dependency.
+
+| Service | Responsibility |
+|---|---|
+| `CourseMaterialService` | Create, publish, archive course materials (lecture notes, quizzes, lesson plans) |
+| `AssignmentService` | Create, publish, close assignments with late-submission policy |
+| `SubmissionService` | Student draft → submit → faculty review → grade → return workflow |
+| `content_generator_v1` | AI agent (REASONING tier) — generates lecture notes, quizzes, assignment questions, lesson plans from CO + syllabus data |
+
+- **Tables**: `course_materials`, `assignments`, `assignment_submissions` (migration 0041)
+- **Permissions**: `LEARNING_READ` (student + faculty), `LEARNING_MANAGE` (faculty + HOD)
+- **Beat task**: `close_overdue_assignments` runs hourly — transitions PUBLISHED assignments past due date to CLOSED
+- **Grading**: late deduction = `(penalty_pct/100) × max_marks × days_late` (from `learning.assignment.late_penalty_pct_default` policy)
+- **OBE integration**: `assignment.graded` event carries `co_id` → OBE attainment recalculation triggered
+- **AI state impact**: Always DRAFT — faculty reviews generated content before publishing
 
 ---
 
@@ -604,6 +633,29 @@ All routes are under prefix `/api/v1/` unless noted. `[auth]` = JWT required. `[
 | POST | `/attendance/wifi/verify` | Student self check-in |
 | POST | `/attendance/wifi/sessions/{id}/end` | End session, auto-mark absentees |
 
+### Learning — In-house LMS (`/api/v1/learning/`)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/learning/courses/{course_id}/materials` | Create course material [LEARNING_MANAGE] |
+| POST | `/learning/courses/{course_id}/materials/generate` | AI-generate material from CO context [LEARNING_MANAGE] |
+| GET | `/learning/courses/{course_id}/materials` | List materials (students see PUBLISHED only) [LEARNING_READ] |
+| GET | `/learning/materials/{material_id}` | Get material detail [LEARNING_READ] |
+| PATCH | `/learning/materials/{material_id}/publish` | Publish material [LEARNING_MANAGE] |
+| PATCH | `/learning/materials/{material_id}/archive` | Archive material [LEARNING_MANAGE] |
+| POST | `/learning/courses/{course_id}/assignments` | Create assignment [LEARNING_MANAGE] |
+| POST | `/learning/courses/{course_id}/assignments/generate` | AI-generate assignment questions [LEARNING_MANAGE] |
+| GET | `/learning/courses/{course_id}/assignments` | List assignments [LEARNING_READ] |
+| GET | `/learning/assignments/{assignment_id}` | Get assignment detail [LEARNING_READ] |
+| PATCH | `/learning/assignments/{assignment_id}/publish` | Publish assignment [LEARNING_MANAGE] |
+| PATCH | `/learning/assignments/{assignment_id}/close` | Close assignment [LEARNING_MANAGE] |
+| PUT | `/learning/assignments/{assignment_id}/my-submission` | Save submission draft [LEARNING_READ] |
+| POST | `/learning/assignments/{assignment_id}/my-submission/submit` | Submit assignment [LEARNING_READ] |
+| GET | `/learning/assignments/{assignment_id}/my-submission` | Get own submission [LEARNING_READ] |
+| GET | `/learning/assignments/{assignment_id}/submissions` | List all submissions (faculty) [LEARNING_MANAGE] |
+| PATCH | `/learning/submissions/{submission_id}/begin-review` | Begin review [LEARNING_MANAGE] |
+| PATCH | `/learning/submissions/{submission_id}/grade` | Grade submission [LEARNING_MANAGE] |
+| PATCH | `/learning/submissions/{submission_id}/return` | Return to student [LEARNING_MANAGE] |
+
 ### System
 | Method | Path | Description |
 |---|---|---|
@@ -675,7 +727,7 @@ Failed events are retried every 5 minutes by the `retry-failed-events` Beat task
 | `server.tasks.webhook_retry` | `retry_pending_webhooks` (every 5 minutes) |
 | `server.tasks.backup` | `run_daily_backup` (daily 03:00 UTC) — pg_dump to MinIO |
 | `server.tasks.plagiarism_poll` | `poll_drillbit_results` (every 5 minutes) |
-| `server.tasks.lms_sync` | `sync_lms_grades` (weekly Sunday 01:00 UTC) |
+| `server.tasks.learning_tasks` | `close_overdue_assignments` (hourly — P40 in-house LMS) |
 
 ### Beat Schedule Summary
 
@@ -692,7 +744,7 @@ Failed events are retried every 5 minutes by the `retry-failed-events` Beat task
 | Every 30 sec | Retry stuck critical events (FINANCE, EXAMINATION topics) |
 | Every 5 min | Webhook retry |
 | Every 5 min | Drillbit plagiarism result polling |
-| Weekly Sun 01:00 UTC | LMS grade sync |
+| Every hour | Close overdue assignments (in-house LMS) |
 | Annually 1 July 06:00 | AQAR annual draft compilation |
 
 ### Celery Configuration
@@ -779,6 +831,7 @@ Failed events are retried every 5 minutes by the `retry-failed-events` Beat task
 | `/admissions/readmission` | `ReadmissionPage` | Protected |
 | `/academics` | `AcademicsPage` | Protected |
 | `/academics/obe` | `OBEPage` | Protected |
+| `/academics/learning` | `LearningPage` | Protected (P40) |
 | `/examinations` | `ExaminationsPage` | Protected |
 | `/finance` | `FinancePage` | Protected |
 | `/hr` | `HRPage` | Protected |
@@ -835,9 +888,11 @@ Failed events are retried every 5 minutes by the `retry-failed-events` Beat task
 
 | Service | File | Endpoints covered |
 |---|---|---|
+| `academics` | `services/academics.ts` | Programs, courses, attendance, timetable |
 | `alumni` | `services/alumni.ts` | Alumni + placement |
 | `communication` | `services/communication.ts` | Notifications + bulk |
 | `reporting` | `services/reporting.ts` | KPI + reports |
+| `learning` | `services/learning.ts` | Course materials, assignments, submissions (P40) |
 
 ---
 
@@ -1014,7 +1069,7 @@ Each manager owns their module's permissions + can create dynamic roles within t
 | `system` | All permissions (internal operations only) |
 
 ### Full Permission Catalog
-`user:read/create/update/delete` · `student:read/create/update/read_pii` · `academics:read/manage` · `course:read/create/update` · `marks:read/entry/finalize` · `fee:read/create` · `payment:process` · `ledger:read` · `exam_paper:read/create` · `hall_ticket:generate` · `result:publish` · `override:request/approve` · `audit_log:read` · `config:read/write` · `global_lock:check` · `ai:invoke` · `escalation:request/grant/revoke` · `dual_control:approve` · `retention:manage/hard_delete` · `policy:draft/submit/approve/read` · `staff:read/create/update` · `leave:approve` · `payroll:read/process` · `service:read/manage` · `hostel:manage` · `transport:manage` · `notification:read/manage` · `announcement:create` · `bulk_message:send` · `report:read/create/export` · `alumni:read/manage` · `placement:manage` · `compliance:read/submit` · `grievance:manage` · `research:read/create/submit` · `process:read/manage` · `phd:read/manage` · `role:create/manage/approve` · `system:read` · `feature_flag:read/manage` · `convocation:read/manage`
+`user:read/create/update/delete` · `student:read/create/update/read_pii` · `academics:read/manage` · `course:read/create/update` · `marks:read/entry/finalize` · `fee:read/create` · `payment:process` · `ledger:read` · `exam_paper:read/create` · `hall_ticket:generate` · `result:publish` · `override:request/approve` · `audit_log:read` · `config:read/write` · `global_lock:check` · `ai:invoke` · `escalation:request/grant/revoke` · `dual_control:approve` · `retention:manage/hard_delete` · `policy:draft/submit/approve/read` · `staff:read/create/update` · `leave:approve` · `payroll:read/process` · `service:read/manage` · `hostel:manage` · `transport:manage` · `notification:read/manage` · `announcement:create` · `bulk_message:send` · `report:read/create/export` · `alumni:read/manage` · `placement:manage` · `compliance:read/submit` · `grievance:manage` · `research:read/create/submit` · `process:read/manage` · `phd:read/manage` · `role:create/manage/approve` · `system:read` · `feature_flag:read/manage` · `convocation:read/manage` · **`learning:read`** (student + faculty — view materials, submit assignments) · **`learning:manage`** (faculty + HOD — create, publish, grade)
 
 ---
 
@@ -1105,7 +1160,6 @@ All environment variables with their defaults (set in `.env`):
 |---|---|
 | `DIGILOCKER_CLIENT_ID/SECRET` | DigiLocker OAuth |
 | `NTA_API_KEY` | NTA score import |
-| `LMS_BASE_URL` / `LMS_API_TOKEN` | Moodle / Canvas |
 | `DRILLBIT_API_KEY` | Plagiarism detection (PhD module) |
 | `NIC_EINVOICE_*` | GST e-Invoice API |
 
@@ -1171,5 +1225,325 @@ grep -rn --include='*.py' "ollama\.\|openai\.\|anthropic\." server/ | grep -v ai
 
 ---
 
-*QUAICU Solutions Private Limited | ALIS OS v1.0 | March 2026 | Confidential*
-*Document generated: 2026-03-20*
+---
+
+## 17. SaaS Platform — Control Plane & Multi-Tenancy
+
+### Architecture Overview
+
+ALIS operates as a **multi-tenant SaaS platform** with two deployment tiers:
+
+| Tier | Description | Isolation |
+|---|---|---|
+| **Data Plane** | Per-tenant FastAPI + Celery + PostgreSQL (dedicated DB) | Full DB isolation via dedicated databases |
+| **Control Plane** | Central management service — tenant CRUD, billing, DNS | Shared `alis_control` database |
+| **AI Service** | Centralized LLM proxy — PII masking, budget, provider routing | Shared, per-tenant budget enforcement |
+
+```
+Browser → {subdomain}.alis.app
+       → Nginx / CDN (Cloudflare proxied)
+       → SubdomainTenantMiddleware → resolve tenant → inject DB DSN
+       → Data Plane (FastAPI handlers)
+       → Tenant's own PostgreSQL database
+```
+
+### Control Plane Service (`control_plane/`)
+
+Standalone FastAPI application. Manages tenant lifecycle, billing, and platform administration.
+
+| File | Purpose |
+|---|---|
+| `main.py` | FastAPI app factory, admin + internal + billing routers |
+| `settings.py` | Pydantic Settings for control plane (DB, Vault, S3, DNS, billing) |
+| `router.py` | Admin API (/admin/*), internal API (/internal/*), billing API, webhooks |
+| `provisioner.py` | TenantProvisioner — full tenant lifecycle (provision, suspend, reactivate, delete) |
+| `crypto.py` | AES-GCM encryption for tenant DB passwords (Fernet-wrapped) |
+| `db.py` | Control plane database pool + schema init (cp_tenants, cp_provisioning_log, cp_usage_events, cp_invoices, cp_plans, cp_payments) |
+| `billing_models.py` | Plan definitions, usage event types, Pydantic I/O models |
+| `billing_engine.py` | Monthly invoice computation with per-dimension overage |
+| `usage_store.py` | Immutable usage event recording + aggregation |
+| `plan_store.py` | Dynamic plan CRUD (cp_plans table, falls back to hardcoded defaults) |
+| `bucket_provisioner.py` | Per-tenant S3 bucket lifecycle (create, encrypt, archive, destroy) |
+| `vault_client.py` | HashiCorp Vault KV v2 client (AppRole auth, per-tenant secrets) |
+| `dns_manager.py` | Multi-provider DNS (Cloudflare, Route53, Azure DNS) |
+
+### Tenant Provisioning Flow
+
+```
+1. Admin POST /admin/tenants → enqueue Celery task
+2. Create DB user (alis_{subdomain})
+3. CREATE DATABASE alis_{subdomain}
+4. GRANT ALL PRIVILEGES
+5. Run Alembic migrations (full schema)
+6. Encrypt DB password → store in cp_tenants
+7. Provision S3 bucket (alis-tenant-{tenant_id})
+8. Write DB + S3 credentials to Vault
+9. Create DNS CNAME ({subdomain}.alis.app → lb.alis.app)
+10. Log to cp_provisioning_log
+```
+
+### Control Plane API Routes
+
+#### Admin API (JWT — SUPER_ADMIN role)
+| Method | Path | Description |
+|---|---|---|
+| POST | `/admin/tenants` | Provision new tenant (async → 202) |
+| GET | `/admin/tenants` | List all tenants |
+| GET | `/admin/tenants/{id}` | Get tenant detail |
+| PATCH | `/admin/tenants/{id}` | Update tenant (plan, flags) |
+| POST | `/admin/tenants/{id}/suspend` | Suspend tenant |
+| POST | `/admin/tenants/{id}/reactivate` | Reactivate tenant |
+| DELETE | `/admin/tenants/{id}` | Soft-delete tenant |
+| GET | `/admin/billing/invoices` | List invoices (all tenants) |
+| POST | `/admin/billing/invoices/generate` | Generate invoice for tenant |
+| POST | `/admin/billing/invoices/generate-all` | Generate invoices for all active tenants |
+| POST | `/admin/billing/invoices/{tenant}/{period}/issue` | Issue invoice |
+| POST | `/admin/billing/invoices/{tenant}/{period}/pay` | Mark invoice paid |
+| GET | `/admin/billing/plans` | List plans |
+| POST | `/admin/billing/plans` | Create plan |
+| DELETE | `/admin/billing/plans/{name}` | Archive plan |
+
+#### Internal API (X-Internal-Token header — data plane → control plane)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/internal/tenants/{id}/db-config` | Get tenant DB connection details |
+| GET | `/internal/tenants/by-subdomain/{sub}` | Resolve subdomain → tenant |
+| POST | `/internal/billing/usage` | Record usage event from data plane |
+| GET | `/internal/billing/usage/{tenant_id}` | Get usage summary |
+
+#### Tenant Portal (X-Internal-Token — proxied from data plane)
+| Method | Path | Description |
+|---|---|---|
+| GET | `/tenant/billing/usage` | Tenant views own usage |
+| GET | `/tenant/billing/invoices` | Tenant lists own invoices |
+| GET | `/tenant/billing/invoices/{period}` | Tenant views specific invoice |
+
+#### Payment Webhooks
+| Method | Path | Description |
+|---|---|---|
+| POST | `/webhook/payments/stripe` | Stripe payment_intent.succeeded |
+| POST | `/webhook/payments/razorpay` | Razorpay payment.captured |
+
+### Control Plane Database Schema
+
+| Table | Columns | Purpose |
+|---|---|---|
+| `cp_tenants` | tenant_id, subdomain (UNIQUE), display_name, region, db_host/port/name/user, db_password_enc, plan, feature_flags (JSONB), bucket_name, status, created_at, updated_at, suspended_at, deleted_at | Tenant registry |
+| `cp_provisioning_log` | tenant_id, action, status, finished_at, error | Audit trail for provisioning operations |
+| `cp_usage_events` | id (SERIAL), tenant_id, event_type, quantity, metadata (JSONB), recorded_at | Immutable usage event stream |
+| `cp_invoices` | tenant_id, period (UNIQUE with tenant_id), period_start/end, plan, line_items (JSONB), subtotal/tax/total, currency, status, created_at, issued_at | Monthly invoices |
+| `cp_plans` | name (PK), monthly_price_usd, token/storage/api/user quotas, overage rates, status | Dynamic plan configuration |
+| `cp_payments` | tenant_id, provider, provider_payment_id, amount, currency, status, created_at | Payment records from webhooks |
+
+### AI Service (`ai_service/`)
+
+Centralized LLM proxy microservice. Data planes send AI requests here instead of calling Ollama directly.
+
+| File | Purpose |
+|---|---|
+| `main.py` | FastAPI app with /v1/complete, /v1/embed, /v1/budget endpoints |
+| `router.py` | AI route handlers (PII masking → provider routing → budget tracking) |
+| `providers.py` | VpcOllamaProvider (default), ManagedAPIProvider (enterprise override) |
+| `pii_masker.py` | Regex-based PII detection + deterministic tokenization + unmask |
+| `budget.py` | Per-tenant token budget tracking (Redis-backed) |
+
+**PII masking** runs before every LLM call:
+- Aadhaar (`\d{4}\s?\d{4}\s?\d{4}`), email, phone, UUIDs, Application IDs
+- Deterministic tokens: same input → same `[PII-xxx]` token (preserves reasoning)
+- Unmask applied to LLM output before returning to caller
+
+**Budget enforcement**: Each plan has a monthly token quota. When exceeded, AI requests return HTTP 429. Enterprise plans get higher limits.
+
+**Provider routing**: Task class (extraction/generation/reasoning) maps to model tier. Enterprise tenants with `managed_api=true` flag route to external API instead of local Ollama.
+
+---
+
+## 18. SaaS Infrastructure — Helm, Terraform, Operator
+
+### Helm Charts (`infra/k8s/helm/`)
+
+Three Helm charts for Kubernetes deployment:
+
+#### alis-data-plane
+| Template | Key Config |
+|---|---|
+| `deployment.yaml` | FastAPI app, readiness/liveness on /health, resource limits |
+| `celery-worker.yaml` | Worker deployment, 300s terminationGracePeriodSeconds (drain in-flight tasks) |
+| `celery-beat.yaml` | **Recreate** strategy (singleton — only one beat scheduler at a time) |
+| `service.yaml` | ClusterIP on port 8000 |
+| `ingress.yaml` | Wildcard *.alis.app, TLS via cert-manager |
+| `hpa.yaml` | HorizontalPodAutoscaler (CPU target 70%) |
+| `external-secret.yaml` | ExternalSecret CRD → pulls from Vault KV v2 |
+| `network-policy.yaml` | Restrict ingress/egress per component |
+| `serviceaccount.yaml` | Workload identity for cloud IAM |
+| `configmap.yaml` | Non-secret config (APP_ENV, REDIS_HOST, etc.) |
+
+#### alis-control-plane
+Single template: deployment + service + secret + serviceaccount. Runs as single replica with direct Vault access.
+
+#### alis-ai-service
+Deployment + service + HPA + secret. GPU node affinity via `nvidia.com/gpu` resource requests.
+
+### Terraform Modules (`infra/terraform/`)
+
+Multi-cloud infrastructure-as-code:
+
+| Module | Resources |
+|---|---|
+| `modules/aws/main.tf` | VPC (3 AZ), KMS, EKS (app + worker node groups with taints), Aurora PostgreSQL, ElastiCache Redis, S3, Route53 |
+| `modules/azure/main.tf` | Resource Group, AKS + worker node pool, VNet + subnets (PG delegation), PostgreSQL Flex, Redis Cache, Blob Storage |
+| `modules/gcp/main.tf` | GKE Autopilot, VPC, Cloud SQL, Memorystore Redis, GCS, Cloud KMS |
+| `modules/shared/vault.tf` | Vault KV v2 mount, AppRole auth backend, data-plane + control-plane ACL policies, master_key seed |
+
+#### Environment Configurations
+
+| Environment | Cloud | Spec |
+|---|---|---|
+| `envs/dev/main.tf` | AWS | Small EKS (t3.large × 2), db.r6g.large Aurora, cache.t3.micro Redis |
+| `envs/staging/main.tf` | Azure | Standard_D4s_v5 × 3 AKS, GP_Gen5_4 PostgreSQL, C1 Redis |
+| `envs/prod/main.tf` | AWS | m6i.xlarge × 3 + worker pool, db.r6g.xlarge Aurora (2 read replicas), cache.r6g.large Redis + Vault |
+
+### Kubernetes Operator (`infra/k8s/operator/`)
+
+Custom operator for declarative tenant lifecycle management:
+
+#### TenantStack CRD (`alis.app/v1alpha1`)
+
+```yaml
+apiVersion: alis.app/v1alpha1
+kind: TenantStack
+metadata:
+  name: iitb
+spec:
+  subdomain: iitb
+  displayName: "IIT Bombay"
+  plan: enterprise
+  region: in-central
+  featureFlags:
+    ai_enabled: true
+    whatsapp_enabled: true
+  byod:                          # Bring-Your-Own-Database (Tier 2)
+    enabled: false
+status:
+  phase: Active                  # Pending | Provisioning | Active | Suspended | Deleting | Failed
+  tenantId: "uuid-..."
+  lastReconcileTime: "2026-04-01T..."
+  message: "Tenant provisioned successfully"
+```
+
+#### Reconciler (`src/reconciler.py`)
+
+kopf-based Python operator:
+- **on_create**: Generate tenant_id → call control plane `/admin/tenants` → set phase=Active
+- **on_update**: Detect suspension/reactivation → call control plane accordingly
+- **on_delete**: Call control plane delete (soft delete, no DB drop) → remove finalizer
+- **on_timer** (60s): Periodic drift detection — verify tenant exists in control plane
+
+Lifecycle phases: `Pending → Provisioning → Active ⇄ Suspended → Deleting → (removed)` or `→ Failed`
+
+---
+
+## 19. SaaS Billing & DNS
+
+### Billing Engine
+
+#### Plan Tiers
+
+| Plan | Monthly (USD) | Token Quota | Storage (GB) | API Calls | Active Users |
+|---|---|---|---|---|---|
+| Starter | $49 | 100,000 | 10 | 50,000 | 25 |
+| Growth | $199 | 500,000 | 50 | 200,000 | 100 |
+| Enterprise | $999 | 5,000,000 | 500 | 2,000,000 | Unlimited |
+
+Plans are stored in `cp_plans` table. Hardcoded defaults exist as fallback. Admins can create custom plans via API.
+
+#### Overage Pricing (per unit above quota)
+
+| Dimension | Starter | Growth | Enterprise |
+|---|---|---|---|
+| Tokens (per 1K) | $0.40 | $0.25 | $0.10 |
+| Storage (per GB) | $0.09 | $0.07 | $0.03 |
+| API Calls (per 1K) | $0.15 | $0.10 | $0.05 |
+| Active User | $1.75 | $1.50 | $1.00 |
+
+#### Invoice Lifecycle
+
+```
+DRAFT → ISSUED → PAID (or VOID)
+```
+
+- **DRAFT**: Auto-generated monthly. Can be recomputed (overwritten).
+- **ISSUED**: Locked. Sent to tenant. Cannot be recomputed.
+- **PAID**: Marked via payment webhook (Stripe/Razorpay) or manual admin action.
+- **VOID**: Cancelled invoice. Not deletable (audit trail).
+
+#### Usage Event Types
+
+| Event Type | Aggregation | Source |
+|---|---|---|
+| `ai_tokens` | SUM (monthly total) | AI Service reports token count per request |
+| `api_calls` | SUM (monthly total) | Data plane reports API call counts |
+| `storage_bytes` | MAX (peak usage) | Periodic measurement of tenant S3 bucket + DB size |
+| `active_users` | MAX (peak concurrent) | Data plane reports distinct active users |
+
+### DNS Management
+
+Multi-provider DNS for automatic tenant subdomain provisioning:
+
+| Provider | When Used | Key Feature |
+|---|---|---|
+| **Cloudflare** | Primary (default) | Proxied mode → CDN + DDoS + Universal SSL |
+| **Route53** | AWS-hosted regions | UPSERT semantics, no idempotency issues |
+| **Azure DNS** | Azure-hosted regions | Managed via `DnsManagementClient` |
+
+#### DNS Record Lifecycle
+
+```
+Tenant Provision → CloudflareDNS.create_record({subdomain}.alis.app CNAME → lb.alis.app)
+Tenant Delete    → TenantDNSManager.deprovision_dns() → get_record() → delete_record()
+```
+
+- Cloudflare records are **proxied** (orange cloud) — traffic routes through Cloudflare CDN
+- Proxied records use TTL=1 (auto) — Cloudflare manages caching
+- Non-Cloudflare records use TTL=300 (5 min)
+- SSL: Wildcard cert `*.alis.app` via Cloudflare Universal SSL or cert-manager in k8s
+
+### Per-Tenant Infrastructure Isolation
+
+| Resource | Isolation Strategy |
+|---|---|
+| **Database** | Dedicated PostgreSQL database per tenant (`alis_{subdomain}`) |
+| **S3 Bucket** | Dedicated bucket per tenant (`alis-tenant-{tenant_id}`) with versioning + encryption + lifecycle |
+| **Vault Secrets** | Path-based isolation: `alis/{region}/tenant/{tenant_id}/{secret_type}` |
+| **Celery Queues** | Per-tenant queues: `default:{tenant_id}`, `high:{tenant_id}` |
+| **DNS** | Per-tenant CNAME record |
+| **AI Budget** | Per-tenant token budget tracked in Redis |
+
+### Celery Queue Routing (SaaS)
+
+```
+TenantTaskRouter:
+  - System tasks (calendar, backup, reporting) → shared "default" queue
+  - Tenant tasks → "default:{tenant_id}" or "high:{tenant_id}"
+  - High priority: notifications, ai_tasks prefixed tasks → high queue
+```
+
+Workers consume from specific tenant queues. This prevents one tenant's heavy workload from starving another.
+
+### SaaS Test Suite
+
+| Test File | Tests | Coverage |
+|---|---|---|
+| `control_plane/tests/test_s2_control_plane.py` | 20 | Crypto, TenantRepository, Provisioner, Admin + Internal API |
+| `ai_service/tests/test_s3_ai_service.py` | 30 | PII masking, budget tracking, provider routing, endpoints |
+| `control_plane/tests/test_s4_billing.py` | 35 | Plans, usage store, billing engine, invoice lifecycle, API |
+| `control_plane/tests/test_s5_infra.py` | 32 | Task routing, queue naming, S3 bucket, Vault client, secrets mgr |
+| `infra/k8s/operator/tests/test_s8_operator.py` | 21 | CRD schema, reconciler create/suspend/delete, drift detection |
+| `control_plane/tests/test_s9_billing_api.py` | 15 | Plan CRUD, tenant portal, Stripe/Razorpay webhooks |
+| `control_plane/tests/test_s10_dns.py` | 19 | DNS records, Cloudflare/Route53 providers, TenantDNSManager |
+| **Total SaaS tests** | **172** | |
+
+---
+
+*QUAICU Solutions Private Limited | ALIS OS v2.0 | April 2026 | Confidential*
+*Document generated: 2026-04-02*

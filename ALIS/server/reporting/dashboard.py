@@ -53,7 +53,7 @@ class DashboardService:
                     100.0 * COUNT(*) FILTER (WHERE status = 'ENROLLED') /
                     NULLIF(COUNT(*), 0), 1
                 )                                                           AS conversion_rate
-            FROM applications
+            FROM applicants
             WHERE org_id = %s AND academic_year = %s
             """,
             (org_id, academic_year),

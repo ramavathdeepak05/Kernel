@@ -90,7 +90,7 @@ if not _PROMETHEUS_AVAILABLE:
     logger.warning("prometheus_client not installed — metrics endpoint will return 501")
 
 from server.core.error_handlers import register_exception_handlers
-from server.core.security import TenantMiddleware
+from server.core.security import SubdomainTenantMiddleware
 from server.api.auth_router import router as auth_router
 from server.api.users_router import router as users_router
 from server.api.roles_router import router as roles_router
@@ -118,6 +118,7 @@ from server.api.admin_router import router as admin_router                      
 from server.api.phd_router import router as phd_router                             # E15 PhD / Doctoral
 from server.api.convocation_router import router as convocation_router             # E18 Convocation
 from server.api.wifi_attendance_router import router as wifi_attendance_router     # P29 WiFi Attendance
+from server.api.learning_router import router as learning_router                   # P40 In-house LMS
 from server.consent.consent_middleware import ConsentMiddleware                    # E21 DPDP
 from server.core.shadow_mode_middleware import ShadowModeMiddleware                # P21 Shadow mode suppression
 from server.core.api_versioning import DeprecationMiddleware, get_api_v2_router    # §29 API versioning
@@ -294,8 +295,8 @@ def create_app() -> FastAPI:
     # --- Security Headers ---
     app.add_middleware(SecurityHeadersMiddleware)
 
-    # --- Tenant Isolation (Layer 4 Invariant) ---
-    app.add_middleware(TenantMiddleware)
+    # --- Tenant Isolation (Layer 4 Invariant) — S1: subdomain-aware ---
+    app.add_middleware(SubdomainTenantMiddleware)
 
     # --- Shadow Mode (P21) — must run after TenantMiddleware to read tenant_id ---
     app.add_middleware(ShadowModeMiddleware)
@@ -393,6 +394,7 @@ def create_app() -> FastAPI:
     app.include_router(phd_router)               # E15 PhD / Doctoral
     app.include_router(convocation_router)       # E18 Convocation
     app.include_router(wifi_attendance_router)   # P29 WiFi Attendance
+    app.include_router(learning_router)          # P40 In-house LMS
 
     # --- API v2 mount (§29 versioning) ---
     api_v2_router = get_api_v2_router()

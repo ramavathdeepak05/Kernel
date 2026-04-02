@@ -244,24 +244,23 @@ NEVER process a payment webhook without idempotency check first
 | Epic | Module | Status |
 |---|---|---|
 | E01–E13 | Core platform (Auth through Dynamic Process Engine) | ✅ All complete |
-| **E14** | **Regulatory & Accreditation** | ❌ Not built |
-| **E15** | **PhD / Doctoral Research** | ❌ Not built |
+| **E14** | **Regulatory & Accreditation** | ✅ Built |
+| **E15** | **PhD / Doctoral Research** | ✅ Built |
 | **E16** | **Parent / Guardian Portal** | ❌ Not built — go-live blocker |
-| **E17** | **Re-admission & Credit Transfer** | ❌ Not built |
-| **E18** | **Convocation Management** | ❌ Not built |
-| **E19** | **Quota Seat Matrix Engine** | ❌ Not built |
-| **E20** | **OBE / CO-PO Mapping** | ❌ Not built |
-| **E21** | **DPDP Consent Management** | ❌ Not built — go-live blocker |
-| **PAA** | **Policy Authoring Agent** | ❌ Not built |
+| **E17** | **Re-admission & Credit Transfer** | ✅ Built |
+| **E18** | **Convocation Management** | ✅ Built |
+| **E19** | **Quota Seat Matrix Engine** | ✅ Built |
+| **E20** | **OBE / CO-PO Mapping** | ✅ Built |
+| **E21** | **DPDP Consent Management** | ✅ Built |
+| **PAA** | **Policy Authoring Agent** | ✅ Built |
 | **FE** | **React Frontend** | In progress (P15) |
-| **Go-live blockers** | MFA, WhatsApp, Observability, Fee Versioning, Data Migration, Shadow Mode | ❌ Not built |
+| **Go-live blockers** | WhatsApp, E16 (Parent Portal) | ❌ Not built |
 
-**846 tests passing.** Do not break this. Run the full test suite before every commit.
+**1055 tests passing** (883 data-plane + 172 SaaS). Do not break this. Run the full test suite before every commit.
 
-**Build order for go-live readiness:**
+**Remaining build order for go-live readiness:**
 1. Fix P0 bugs (connection pool, Vault, LLM model tier) — see §14
-2. Go-live blockers in this order: E21 (DPDP) → MFA → Observability → Fee Versioning → WhatsApp → E16 (Parent Portal) → Data Migration tooling → Shadow Mode
-3. Then: E14 → E19 → E15 → E17 → E18 → E20 → PAA
+2. Go-live blockers in this order: WhatsApp → E16 (Parent Portal)
 
 ---
 

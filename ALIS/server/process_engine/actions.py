@@ -47,7 +47,7 @@ def _update_application_status(params: Dict[str, Any], org_id: str) -> Dict[str,
         raise ValueError("update_application_status requires application_id and status")
     from server.db_service import execute_transaction
     execute_transaction([(
-        "UPDATE applications SET status = %s WHERE id = %s AND org_id = %s",
+        "UPDATE applicants SET status = %s WHERE id = %s AND org_id = %s",
         (status, application_id, org_id),
     )])
     return {"application_id": application_id, "new_status": status}

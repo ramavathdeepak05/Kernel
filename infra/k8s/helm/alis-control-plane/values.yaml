@@ -1,0 +1,58 @@
+global:
+  image:
+    repository: ghcr.io/alis-antigravity/alis-control-plane
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+replicaCount: 2
+
+port: 8001
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+service:
+  type: ClusterIP
+  port: 8001
+
+# Control plane DB (alis_control)
+database:
+  host: postgres
+  port: 5432
+  name: alis_control
+  user: postgres
+
+# Postgres admin DSN (for CREATE DATABASE during provisioning)
+pgAdmin:
+  host: postgres
+  port: 5432
+  user: postgres
+
+# S3 / MinIO (for BucketProvisioner)
+s3:
+  endpoint: http://minio:9000
+  region: us-east-1
+
+# Vault
+vault:
+  addr: ""
+  mountPoint: secret
+
+# Auth tokens
+auth:
+  internalToken: ""   # sourced from secret
+  jwtSecret: ""       # sourced from secret
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+ingress:
+  enabled: false     # control plane is internal-only by default

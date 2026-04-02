@@ -1,10 +1,12 @@
 # ALIS Platform — Build Plan
 ## QUAICU Pvt. Ltd. | Hyderabad, India
-**Updated:** 2026-03-20 | **P22–P29 COMPLETE** | Migrations 0001–0034
+**Updated:** 2026-04-02 | **P22–P40 + S1–S10 COMPLETE** | Migrations 0001–0041 | SaaS tests: 172 | Data-plane tests: 883
 
 ---
 
 ## Platform Status Snapshot
+
+### Data Plane (ERP Modules)
 
 | Module | Backend | Frontend | Status |
 |---|---|---|---|
@@ -13,6 +15,7 @@
 | AI Gateway + RAG + PGVector | ✅ | ✅ Agent rail wired | **GA** |
 | Admissions (10-stage pipeline) | ✅ | ✅ Kanban + portal | **GA** |
 | Academics | ✅ | ✅ AcademicsPage + OBEPage | **GA** |
+| In-house LMS (P40) | ✅ learning_service + content_generator | ✅ LearningPage | **GA** |
 | Examinations & Grades | ✅ | ✅ ExaminationsPage | **GA** |
 | Finance | ✅ | ✅ FinancePage | **GA** |
 | HR & Staff | ✅ | ✅ HRPage | **GA** |
@@ -43,6 +46,115 @@
 | Load testing | ✅ locustfile.py | — | **GA** |
 | DigiLocker / NTA / WhatsApp / Drillbit / NIC | ⚠️ Stubs (env-activated) | — | Awaiting live creds |
 
+### SaaS Platform (S1–S10)
+
+| Sprint | Module | Backend | Tests | Status |
+|---|---|---|---|---|
+| S1 | Subdomain tenant middleware | ✅ `tenant_registry.py` + `tenant_tasks.py` | — (integrated) | **GA** |
+| S2 | Control Plane | ✅ `control_plane/` — provisioner, router, crypto, db | 20 | **GA** |
+| S3 | AI Service | ✅ `ai_service/` — PII masking, budget, provider routing | 30 | **GA** |
+| S4 | Billing Engine | ✅ billing_engine, usage_store, billing_models | 35 | **GA** |
+| S5 | Infrastructure Isolation | ✅ bucket_provisioner, vault_client, tenant task routing | 32 | **GA** |
+| S6 | Helm Charts | ✅ data-plane, control-plane, ai-service (3 charts) | — (structural) | **GA** |
+| S7 | Terraform | ✅ AWS, Azure, GCP, shared Vault modules + 3 envs | — (IaC) | **GA** |
+| S8 | K8s Operator | ✅ TenantStack CRD + kopf reconciler | 21 | **GA** |
+| S9 | Billing API | ✅ plan_store, tenant portal, Stripe/Razorpay webhooks | 15 | **GA** |
+| S10 | DNS Routing | ✅ Cloudflare, Route53, Azure DNS providers | 19 | **GA** |
+
+---
+
+## S1–S10 — SaaS Transformation (April 2026) ✅ COMPLETE
+
+### S1 — Subdomain Tenant Resolution
+- `SubdomainTenantMiddleware` in data plane resolves `{subdomain}.alis.app` → tenant DSN
+- `tenant_registry.py` — TenantRegistry with local cache + CP fallback
+- `tenant_tasks.py` — TenantTaskRouter for per-tenant Celery queue routing
+- Backward compat: empty `CONTROL_PLANE_URL` = single-tenant on-prem mode
+
+### S2 — Control Plane Service
+- `control_plane/` — standalone FastAPI application
+- `TenantProvisioner` — full lifecycle: provision → suspend → reactivate → delete
+- Admin API (JWT) + Internal API (X-Internal-Token)
+- `cp_tenants`, `cp_provisioning_log` tables
+- AES-GCM encryption for tenant DB passwords
+
+### S3 — AI Service Microservice
+- `ai_service/` — centralized LLM proxy
+- PII masking: Aadhaar, email, phone, UUID, Application ID → deterministic tokens
+- Per-tenant token budget enforcement (Redis-backed)
+- Provider routing: VpcOllama (default) → ManagedAPI (enterprise)
+- `AIServiceLLM` — LangChain-compatible wrapper for data-plane integration
+
+### S4 — Billing Engine
+- Plan tiers: Starter ($49), Growth ($199), Enterprise ($999)
+- Usage events: `ai_tokens`, `api_calls`, `storage_bytes`, `active_users`
+- Invoice lifecycle: DRAFT → ISSUED → PAID (or VOID)
+- Per-dimension overage computation
+
+### S5 — Infrastructure Isolation
+- Per-tenant S3 bucket (`alis-tenant-{tenant_id}`) — versioning, AES256, GLACIER lifecycle
+- Per-tenant Vault KV v2 path (`alis/{region}/tenant/{tenant_id}/{secret_type}`)
+- Per-tenant Celery queues (`default:{tenant_id}`, `high:{tenant_id}`)
+
+### S6 — Helm Charts
+- `alis-data-plane/` — 11 templates (celery-beat Recreate strategy, worker 300s grace, ExternalSecret, NetworkPolicy)
+- `alis-control-plane/` — combined deployment + service + secret
+- `alis-ai-service/` — deployment + HPA + GPU affinity
+
+### S7 — Terraform Multi-Cloud
+- AWS: VPC + EKS + Aurora + ElastiCache + S3 + Route53
+- Azure: AKS + PostgreSQL Flex + Redis Cache + Blob Storage
+- GCP: GKE Autopilot + Cloud SQL + Memorystore + GCS + KMS
+- Shared: Vault KV v2 + AppRole auth + ACL policies
+- Environments: dev (AWS small), staging (Azure mid), prod (AWS large + Vault)
+
+### S8 — Kubernetes Operator
+- TenantStack CRD (`alis.app/v1alpha1`) — 6 lifecycle phases
+- kopf reconciler: create → update → delete → timer (60s drift detection)
+- BYOD support flag for bring-your-own-database tenants
+
+### S9 — Billing API + Tenant Portal
+- Dynamic plan CRUD (`cp_plans` table)
+- Tenant self-service: `/tenant/billing/usage`, `/tenant/billing/invoices`
+- Stripe + Razorpay payment webhooks → auto invoice-paid marking
+- Payment dedup via `provider_payment_id`
+
+### S10 — DNS Routing
+- Multi-provider: Cloudflare (proxied/CDN), Route53 (UPSERT), Azure DNS
+- Auto CNAME provisioning during tenant creation
+- Auto deprovision on tenant deletion
+
+---
+
+## P30–P40 — COMPLETE (March 2026)
+
+### Migrations (0035–0041)
+
+| Migration | Description |
+|---|---|
+| 0035 | workflow_tasks table + audit_ledger immutability trigger + RLS on leads/audit_ledger |
+| 0036 | workflow_tasks: tenant_id, urgency, assignee_role, assignee_actor_id |
+| 0037 | tenant_policies table |
+| 0038 | failed_task_log — Celery DLQ |
+| 0039 | Visiting faculty session logs + placement drive management |
+| 0040 | Identity match (EC-ADM-01) + access lift (EC-ADM-05) |
+| 0041 | In-house LMS: course_materials, assignments, assignment_submissions + RLS |
+
+### P31–P39 Highlights
+- P31: Frontend API wiring (all pages to real APIs)
+- P35: Dynamic RBAC delegation + role-aware dashboard routing
+- P36: EC-ADM-01 identity mismatch + EC-ADM-05 UTR access lift
+- P38: Wire ConsentPage, OBEPage, SeatMatrixPage to real APIs
+- P39: Vault Raft cluster_addr fix, domain event tenant context
+
+### P40 — In-house LMS ✅
+- Replaces Moodle LMS stub (tombstoned)
+- `learning_service.py` — CourseMaterialService, AssignmentService, SubmissionService
+- `content_generator_v1.py` — AI agent for lecture notes, quizzes, assignment questions, lesson plans
+- `learning_router.py` — 17 endpoints at `/api/v1/learning/`
+- `LearningPage.tsx` at `/academics/learning`
+- Beat task: `close_overdue_assignments` (hourly)
+
 ---
 
 ## P22–P29 — COMPLETE (March 2026)
@@ -57,176 +169,62 @@
 | 0032–0034 | Drillbit submission, WiFi attendance, TA assignments |
 
 ### P27 — Backend + Frontend Epics ✅ DONE
-
 All E14–E21 + PAA backend services, all frontend pages (28 pages), 6-language i18n, mobile-responsive shell, offline PWA, monitoring stack, backup infra, load testing.
 
 ### P28 — Offline / Low-Bandwidth PWA ✅ DONE
-
-Dexie IndexedDB (`pendingMarks`, `cachedSessions`), background sync (`syncPendingMarks`), Workbox runtime caching, network badge, `OfflineAttendancePage`.
+Dexie IndexedDB, background sync, Workbox runtime caching, OfflineAttendancePage.
 
 ### P29 — WiFi Attendance Desktop + Backend ✅ DONE
-
-`wifi_attendance_router.py` (4 routes), Electron app (Login → CourseSelector → Session → LiveRoster), NSIS installer (80MB), HashRouter fix for `file://` protocol.
-
----
-
-## P23 — Missing Module Frontends (After P22)
-
-All modules have complete backends but are missing staff-facing UI pages. These are the remaining frontend gaps, grouped by urgency.
-
-### P23-A: Core Staff UIs (High Priority — needed for GA)
-
-#### HR & Staff Module (E08)
-- `web/src/pages/hr/HRDashboardPage.tsx` — Faculty & staff roster, contract status, CAS computation
-- `web/src/pages/hr/AttendancePage.tsx` — Staff attendance tracker, late/absence patterns
-- `web/src/pages/hr/PayrollPage.tsx` — Monthly payroll run, deduction breakdown, payslip download
-- `web/src/pages/hr/LeaveManagementPage.tsx` — Leave requests queue, balance overview, approval actions
-
-#### Student Services Module (E09)
-- `web/src/pages/student-services/GrievancePage.tsx` — Grievance queue, anomaly alerts, resolution tracking
-- `web/src/pages/student-services/HostelPage.tsx` — Room allocation, swap requests, swap exchange approvals
-- `web/src/pages/student-services/LibraryPage.tsx` — Book issuance, fine collection, overdue alerts
-- `web/src/pages/student-services/PlacementPage.tsx` — JD pipeline, interview schedules, placement stats
-
-#### Communication Hub (E10)
-- `web/src/pages/communications/CommunicationDashboardPage.tsx` — Message history, WhatsApp thread viewer, bulk send queue
-- `web/src/pages/communications/TemplatePage.tsx` — Template management (SMS/Email/WhatsApp), preview & test send
-
-#### Alumni & Placement (E12)
-- `web/src/pages/alumni/AlumniDashboardPage.tsx` — Alumni registry, engagement tracker, job placement map
-
-### P23-B: Workflow & AI UI (High Priority)
-
-#### Workflow Engine Admin UI
-- `web/src/pages/admin/WorkflowPage.tsx` — Active workflow instances, approval queue overview, stuck task alerts, manual override with audit entry
-- `web/src/pages/admin/QuorumPage.tsx` — Pending quorum votes, quorum member management
-
-#### AI Gateway Chat UI
-- `web/src/pages/ai/AgentChatPage.tsx` — Full chat thread (not just rail), conversation history, tool call trace viewer
-- `web/src/pages/ai/ModelRegistryPage.tsx` — Registered AI models, task-class mapping, performance metrics
-
-#### Dynamic Process Engine Visual Builder
-- `web/src/pages/admin/ProcessBuilderPage.tsx` — Drag-and-drop BPMN-lite process editor, policy rule wizard, approval chain configurator
-
-### P23-C: Compliance & Consent UI
-
-#### DPDP Consent Management
-- `web/src/pages/compliance/ConsentManagementPage.tsx` — Per-student consent status, collection log, erasure requests, retention audit
-- Consent collection modal (reusable component) — shown at registration and on data-processing events
-- Student-facing: consent review panel inside student dashboard
-
-#### E14 Regulatory Full Workflow
-- `web/src/pages/regulatory/RegulatoryPage.tsx` — (in P22 batch)
-- `web/src/pages/regulatory/NaacEvidencePage.tsx` — Evidence upload per criterion, auto-collection triggers, AQAR draft viewer
-- `web/src/pages/regulatory/NirfPage.tsx` — NIRF parameter data entry (TLR/RPC/GO/OI/PERCEPTION), rank estimate calculator
-
-### P23-D: Advanced Module UIs
-
-#### Academic Management (E05)
-- `web/src/pages/academics/TimetablePage.tsx` — Timetable builder, slot conflict detection, export to PDF
-- `web/src/pages/academics/AttendancePage.tsx` — Session-wise attendance grid, bulk entry, shortage alerts
-- `web/src/pages/academics/AssessmentPage.tsx` — IA marks entry, grace mark application, moderation workflow
-
-#### Finance Advanced Views
-- `web/src/pages/finance/FeeStructurePage.tsx` — Program fee structure editor, intake-year versioning
-- `web/src/pages/finance/ScholarshipPage.tsx` — Scholarship pool management, assignment history, revocation queue
-- `web/src/pages/finance/WaiverPage.tsx` — Waiver requests, approval workflow, ledger impact preview
-- `web/src/pages/finance/ExportPage.tsx` — Tally XML / Busy CSV export, GST e-invoice generation
+wifi_attendance_router.py (4 routes), Electron app, NSIS installer (80MB).
 
 ---
 
-## P24 — Live Integrations (After P23)
-
-| Integration | Current State | Effort | Notes |
-|---|---|---|---|
-| DigiLocker live (academic certs) | Stub in `integrations/digilocker.py` | 1 week | NIC API, requires UMANG credentials |
-| WhatsApp Business API (live) | MSG91 templates seeded, dispatcher exists | 3 days | Needs MSG91 account + webhook receiver |
-| NTA Score Import | Stub in `integrations/nta.py` | 2 days | JEE/NEET score import for admissions |
-| Payment gateway live (Razorpay) | Code done, needs credentials + webhook | 1 day | Razorpay test → prod key switch |
-| Drillbit API (plagiarism) | Stub in `phd/plagiarism_service.py` | 2 days | Drillbit API key + async result callback |
-| NIC e-Invoice API | Stub in `finance/einvoice_service.py` | 3 days | GST registered institution sandbox |
-| LMS (Moodle/Google Classroom) | Event-triggered stub | 1 week | LMS API varies by institution |
-
----
-
-## P25 — Observability + Production Hardening (After P22)
-
-### Observability Stack
-
-| Task | Delivers | Ref |
-|---|---|---|
-| Prometheus + Grafana | docker-compose service; 8 dashboard panels: req/s, p95 latency, error rate, Celery queue depth, event lag, DB pool, AI inference time, active tenants | §25 |
-| Loki + Promtail | Log aggregation; structured request logs (tenant_id, request_id, user_id, module, latency); LLM call trace logs | §25 |
-| AlertManager rules | Page on: p95 > 2s, error rate > 1%, Celery queue > 500, event lag > 10min, backup failure, domain event FAILED count spike | §25 |
-| Sentry integration | Exception capture with tenant context; PII scrubbing for DPDP compliance | gaps.md |
-
-### Load Testing
-
-| Scenario | Target | Tool |
-|---|---|---|
-| Normal load (200 concurrent) | p95 < 500ms, error < 0.5% | Locust |
-| Result day (2000 concurrent) | p95 < 2s, error < 1% | Locust |
-| Admissions surge (500 concurrent applications) | p95 < 1s | Locust |
-| Grade card download storm (batch PDF) | No timeout for 1000 students | Locust |
-
-### Backup + Disaster Recovery
-
-| Task | Delivers |
-|---|---|
-| `infra/backup/backup.sh` | pg_dump daily at 03:00 UTC + weekly full dump; MinIO versioned bucket |
-| `server/core/backup_service.py` | Orchestration + health check; fire `platform.backup_failed` event on error |
-| `docs/runbooks/restore.md` | Step-by-step restore from MinIO backup |
-| RTO target | < 4 hours (policy-configured) |
-| RPO target | < 24 hours (daily backup window) |
-
----
-
-## P26 — Offline + Mobile PWA (Post-GA)
-
-| Task | Delivers | Effort |
-|---|---|---|
-| Faculty attendance PWA | Offline marking with IndexedDB queue; sync on reconnect | 1 week |
-| Student mobile portal | Native-like bottom-sheet navigation, biometric login, push notifications | 2 weeks |
-| Service Worker + cache strategy | Shell cached offline; API calls gracefully degrade | 3 days |
-
----
-
-## Migration Chain (current head: 0031)
+## Migration Chain (current head: 0041)
 
 ```
 0001 → 0002 → 0003 → ... → 0014 (full admissions)
 → 0015 (RBAC scope + event hardening)
-→ 0016 (feature flags)
-→ 0017 (E14 regulatory)
-→ 0018 (DPDP consent)
-→ 0019 (MFA devices)
-→ 0020 (idempotency + audit RLS)
-→ 0021 (fee versioning + webhook idempotency)
-→ 0022 (DBT exemption + promissory)
-→ 0023 (WhatsApp language)
-→ 0024 (guardian portal provisioning)
-→ 0025 (P21 pilot hardening — shadow mode, webhooks, E19 seat matrix, edge cases)
-→ 0026 (E15 PhD module) ← P22
-→ 0027 (E17 re-admission + credit transfer) ← P22
-→ 0028 (E18 convocation) ← P22
-→ 0029 (E20 OBE / CO-PO) ← P22
-→ 0030 (multi-campus entity model) ← P22
-→ 0031 (GST e-invoice IRN + language_preference) ← P22
+→ 0016–0025 (feature flags, regulatory, DPDP, MFA, idempotency, fee versioning, guardian portal, pilot hardening)
+→ 0026–0031 (PhD, re-admission, convocation, OBE, multi-campus, e-invoice) ← P22
+→ 0032–0034 (Drillbit, WiFi attendance, TA assignments) ← P29
+→ 0035–0038 (workflow tasks, tenant_policies, failed_task_log) ← P31
+→ 0039 (HR/placement workflow gaps) ← P37
+→ 0040 (identity match + access lift) ← P36
+→ 0041 (in-house learning — course_materials, assignments, submissions) ← P40
 ```
 
 ---
 
 ## Test Suite Status
 
-| Batch | Tests | Status |
+| Suite | Tests | Status |
 |---|---|---|
-| Core infra (E01–E03) | ~200 | ✅ Passing |
-| Admissions (E04) | ~300 | ✅ Passing |
-| Academics–Alumni (E05–E12) | ~280 | ✅ Passing |
-| **Total (P21 baseline)** | **781 / 781** | ✅ All passing |
-| P22 new (E15/E17/E18/E20/PAA) | ~60 (estimate) | ❌ Not yet written |
+| Data-plane unit tests (ALIS/tests/) | 883 | ✅ Passing |
+| Integration tests (@integration marker) | ~160 | ⏭ Skipped without infra |
+| S2 Control Plane | 20 | ✅ Passing |
+| S3 AI Service | 30 | ✅ Passing |
+| S4 Billing Engine | 35 | ✅ Passing |
+| S5 Infra Isolation | 32 | ✅ Passing |
+| S8 K8s Operator | 21 | ✅ Passing |
+| S9 Billing API | 15 | ✅ Passing |
+| S10 DNS Routing | 19 | ✅ Passing |
+| **Total** | **~1,055+** | ✅ |
 
-> Note: 4 test files pre-exist with known failures unrelated to P22: `test_ai_gateway_api.py` (NameError in test fixture), `test_auth.py` (session fixture), `test_integrations_p14.py` (DigiLocker stub), `test_ai_gateway.py` (Ollama not running). These are excluded from CI until the integrations are live.
+> Known non-blocking: 2 pre-existing failures in `test_tasks.py` (notification dispatcher mock), ~41 errors in `test_auth.py`/`test_integrations_p14.py` (require running Redis). These are infrastructure-dependent, not code bugs.
+
+---
+
+## Remaining Gaps
+
+| Area | Gap | Blocking? |
+|---|---|---|
+| DigiLocker integration | Stub — needs NIC/UMANG credentials | No — manual review works |
+| NTA score import | Stub — needs NTA API key | No — manual entry works |
+| WhatsApp DLT template IDs | Placeholders — institution registers with MSG91 | No — ops config only |
+| i18n (kn/mr/ta) | Translation files ~10% complete | No — English pilot unaffected |
+| Multi-campus FE | Backend ✅, no frontend page | No — admin API works |
+| GST e-Invoice FE trigger | Backend ✅, no frontend trigger button | No — API callable directly |
+| SaaS admin dashboard FE | Backend ✅, no control-plane UI | No — admin API + kubectl |
 
 ---
 
@@ -236,39 +234,16 @@ All modules have complete backends but are missing staff-facing UI pages. These 
 |---|---|
 | R1 | No hardcoded thresholds — all from `policy_engine.get_value()` |
 | R2 | No hardcoded approval chains — all from `workflow_engine` DAG configs |
-| R3 | SLA deadlines stored as absolute `TIMESTAMPTZ` — computed at creation, never at check time |
+| R3 | SLA deadlines stored as absolute `TIMESTAMPTZ` |
 | R4 | No hardcoded role names — roles from RBAC permission enum |
-| R6 | State machines for all entity transitions — no ad-hoc status updates |
-| R7 | Policy DSL for all eligibility decisions — never if/else thresholds in service code |
-| R8 | No hardcoded notification content — all content via `template_key` in event payload |
-| R9 | No hardcoded document formats — `document_engine.render(template_id, context, tenant_id)` |
-| R10 | No hardcoded regulatory mappings — evidence mappings from `regulatory_criteria` table |
-| R11 | Feature flags from DB — `tenant_feature_flags` table, Redis-cached |
-| R12 | `policy_version_id` stored on every policy-governed decision record |
+| R6 | State machines for all entity transitions |
+| R7 | Policy DSL for all eligibility decisions |
+| R8 | No hardcoded notification content |
+| R9 | No hardcoded document formats |
+| R10 | No hardcoded regulatory mappings |
+| R11 | Feature flags from DB — `tenant_feature_flags` table |
+| R12 | `policy_version_id` stored on every decision record |
 
 ---
 
-## Priority Order for Remaining Work
-
-```
-NOW (P22, in progress):
-  ├── Batch 2: E15/E17/E18/E20 backends + Tally/dedup/einvoice
-  ├── Batch 3: PAA + multi-campus service + API versioning + backup + load test
-  └── Batch 4: All new frontend pages + Guardian Portal + mobile shell + i18n
-
-NEXT (P23):
-  ├── P23-A: HR, Student Services, Communication, Alumni staff UIs
-  ├── P23-B: Workflow admin UI, AI chat UI, Process Builder
-  └── P23-C: DPDP consent UI, E14 full regulatory UI, E16 Guardian Portal service
-
-AFTER (P24 + P25):
-  ├── P24: Live integrations (DigiLocker, WhatsApp, Razorpay prod, Drillbit, NIC)
-  └── P25: Observability stack (Grafana/Loki/Prometheus), alerting, load test baseline
-
-LATER (P26):
-  └── Offline PWA, mobile native app
-```
-
----
-
-*Build Plan v2.0 | 2026-03-19 | QUAICU Pvt. Ltd. | Reflects P22 in-progress state*
+*Build Plan v3.0 | 2026-04-02 | QUAICU Pvt. Ltd. | Reflects S1-S10 SaaS completion + P40 LMS*

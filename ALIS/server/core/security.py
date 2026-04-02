@@ -852,6 +852,198 @@ class TenantMiddleware:
 
 
 # ============================================================================
+# S1: SUBDOMAIN TENANT MIDDLEWARE (SaaS multi-tenant)
+# ============================================================================
+# Extends TenantMiddleware with subdomain-based tenant resolution.
+#
+# Resolution priority:
+# 1. STATIC_TENANT_ID env var   — Tier 2 (dedicated stack): bypasses all lookups.
+# 2. Host header subdomain      — iitb.alis.app → slug "iitb" → TenantRegistry lookup.
+# 3. Bearer JWT session          — existing TenantMiddleware path (session.tenant_id).
+# 4. X-Tenant-ID header          — internal service calls / tests.
+#
+# Cross-tenant protection: if subdomain resolves a tenant AND the JWT session
+# carries a different tenant_id, the request is rejected (403).
+# ============================================================================
+
+class SubdomainTenantMiddleware:
+    """
+    FastAPI/Starlette ASGI middleware — SaaS subdomain-aware tenant resolution.
+
+    Drop-in replacement for TenantMiddleware.  Add *this* to main.py instead;
+    TenantMiddleware is superseded (do not add both).
+
+    Usage:
+        app.add_middleware(SubdomainTenantMiddleware)
+    """
+
+    EXEMPT_PATHS = TenantMiddleware.EXEMPT_PATHS
+
+    def __init__(self, app):
+        self.app = app
+
+    @staticmethod
+    def _extract_subdomain(host: str) -> Optional[str]:
+        """
+        Extract subdomain slug from the Host header.
+
+        iitb.alis.app       → "iitb"
+        api.iitb.alis.app   → "iitb"  (second-to-last segment before domain suffix)
+        localhost            → None
+        127.0.0.1            → None
+        alis.app             → None   (apex domain — no tenant subdomain)
+        """
+        from server.core.settings import settings
+        suffix = settings.saas_domain_suffix  # e.g., "alis.app"
+        host = host.split(":")[0].lower()     # strip port
+
+        if host in ("localhost", "127.0.0.1", "0.0.0.0") or host.replace(".", "").isdigit():
+            return None  # loopback / IP — single-tenant dev mode
+
+        if not host.endswith(suffix):
+            # Custom domain (enterprise CNAME) — no subdomain extraction here;
+            # those tenants are resolved via X-Tenant-ID or JWT session.
+            return None
+
+        prefix = host[: -(len(suffix) + 1)]  # strip ".<suffix>"
+        if not prefix:
+            return None  # apex domain
+
+        # Take the rightmost segment of the prefix as the tenant slug.
+        # e.g., "api.iitb" → "iitb"
+        slug = prefix.split(".")[-1]
+        return slug if slug else None
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+
+        if path in self.EXEMPT_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        headers = dict(scope.get("headers", []))
+        tenant_id: Optional[str] = None
+
+        # ------------------------------------------------------------------
+        # Priority 1: STATIC_TENANT_ID (Tier 2 dedicated-stack mode)
+        # ------------------------------------------------------------------
+        from server.core.settings import settings
+        if settings.static_tenant_id:
+            tenant_id = settings.static_tenant_id
+
+        # ------------------------------------------------------------------
+        # Priority 2: Host header subdomain → TenantRegistry
+        # ------------------------------------------------------------------
+        subdomain_tenant_id: Optional[str] = None
+        if not tenant_id:
+            host = headers.get(b"host", b"").decode("utf-8", errors="ignore")
+            slug = self._extract_subdomain(host)
+            if slug:
+                try:
+                    from server.core.tenant_registry import TenantRegistry
+                    record = await TenantRegistry.get_by_subdomain(slug)
+                    if record and record.status == "active":
+                        subdomain_tenant_id = record.tenant_id
+                        tenant_id = subdomain_tenant_id
+                    elif record and record.status == "suspended":
+                        body = b'{"error": "Tenant suspended", "code": "ERR_TENANT_SUSPENDED"}'
+                        await _send_403(send, body)
+                        return
+                    # If record is None: unknown subdomain — fall through to JWT check.
+                except Exception as exc:
+                    logger.warning("SubdomainTenantMiddleware: TenantRegistry lookup failed: %s", exc)
+                    # Non-fatal — fall through to JWT resolution.
+
+        # ------------------------------------------------------------------
+        # Priority 3: Bearer JWT → session.tenant_id
+        # ------------------------------------------------------------------
+        session_tenant_id: Optional[str] = None
+        auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="ignore")
+        if auth_header.startswith("Bearer "):
+            raw_token = auth_header[7:].strip()
+            session = SessionManager.validate_token(raw_token)
+            if session and session.tenant_id:
+                session_tenant_id = session.tenant_id
+                if not tenant_id:
+                    tenant_id = session_tenant_id
+
+        # Cross-tenant guard: subdomain and JWT session must agree.
+        if subdomain_tenant_id and session_tenant_id and subdomain_tenant_id != session_tenant_id:
+            AuditLog.log(
+                action=AuditAction.ACCESS_DENIED,
+                actor_id=session_tenant_id,
+                actor_type="session",
+                entity_type="subdomain_tenant_middleware",
+                entity_id="",
+                success=False,
+                failure_reason="Cross-tenant mismatch: subdomain vs session tenant_id",
+                metadata={
+                    "path": path,
+                    "subdomain_tenant": subdomain_tenant_id,
+                    "session_tenant": session_tenant_id,
+                },
+            )
+            body = b'{"error": "Tenant mismatch", "code": "ERR_CROSS_TENANT"}'
+            await _send_403(send, body)
+            return
+
+        # ------------------------------------------------------------------
+        # Priority 4: X-Tenant-ID header (internal service calls / tests)
+        # ------------------------------------------------------------------
+        if not tenant_id:
+            tenant_header = headers.get(b"x-tenant-id", b"").decode("utf-8", errors="ignore")
+            if tenant_header:
+                tenant_id = tenant_header
+
+        # ------------------------------------------------------------------
+        # Layer 4 Invariant: reject if tenant_id is still unresolved
+        # ------------------------------------------------------------------
+        if not tenant_id:
+            AuditLog.log(
+                action=AuditAction.ACCESS_DENIED,
+                actor_id="unknown",
+                actor_type="unknown",
+                entity_type="subdomain_tenant_middleware",
+                entity_id="",
+                success=False,
+                failure_reason="Missing tenant_id — Layer 4 Invariant",
+                metadata={"path": path},
+            )
+            body = b'{"error": "Tenant context required", "code": "ERR_LAYER4_TENANT"}'
+            await _send_403(send, body)
+            return
+
+        # Set ContextVar for duration of this request.
+        ctx_token = _current_tenant_id.set(tenant_id)
+        if "state" not in scope:
+            scope["state"] = {}
+        if isinstance(scope["state"], dict):
+            scope["state"]["tenant_id"] = tenant_id
+
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            _current_tenant_id.reset(ctx_token)
+
+
+async def _send_403(send, body: bytes) -> None:
+    """Send a plain 403 JSON response (shared by both tenant middlewares)."""
+    await send({
+        "type": "http.response.start",
+        "status": 403,
+        "headers": [
+            [b"content-type", b"application/json"],
+            [b"content-length", str(len(body)).encode()],
+        ],
+    })
+    await send({"type": "http.response.body", "body": body})
+
+
+# ============================================================================
 # E00-S02: AUDIT MIDDLEWARE
 # ============================================================================
 # Epic Constraint: "All modules inherit audit middleware"

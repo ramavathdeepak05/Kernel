@@ -246,43 +246,127 @@ function Message({ msg, onChipClick }: MessageProps) {
 
   // Action card — chips present
   if (msg.chips && msg.chips.length > 0) {
+    const isModuleAction = msg.canvasAction?.type === 'EXECUTE_MODULE'
+    const moduleAction = isModuleAction ? msg.canvasAction as Extract<CanvasAction, { type: 'EXECUTE_MODULE' }> : null
+
     return (
       <div
         style={{
-          border: 'var(--border)',
+          border: isModuleAction
+            ? '1px solid rgba(29,158,117,0.25)'
+            : 'var(--border)',
           borderRadius: 'var(--radius-md)',
           padding: '7px 10px',
           marginBottom: 6,
           width: '100%',
+          background: isModuleAction
+            ? 'rgba(29,158,117,0.03)'
+            : 'transparent',
         }}
       >
         <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
           {msg.text}
         </p>
+
+        {/* EXECUTE_MODULE payload preview */}
+        {moduleAction && (
+          <div
+            style={{
+              borderRadius: 4,
+              background: 'rgba(0,0,0,0.03)',
+              padding: '6px 8px',
+              marginBottom: 6,
+              fontSize: 10,
+              fontFamily: 'monospace',
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              maxHeight: 120,
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
+              <span style={{ color: '#6B7280' }}>Module:</span>
+              <span style={{ color: '#1D9E75', fontWeight: 600 }}>{moduleAction.module}</span>
+              <span style={{ color: '#6B7280' }}>→</span>
+              <span style={{ color: '#3B82F6' }}>{moduleAction.actionEndpoint}</span>
+              {moduleAction.is_batch && (
+                <span
+                  style={{
+                    color: '#EF9F27',
+                    fontWeight: 700,
+                    fontSize: 9,
+                    textTransform: 'uppercase',
+                    padding: '0 4px',
+                    border: '1px solid rgba(239,159,39,0.3)',
+                    borderRadius: 3,
+                  }}
+                >
+                  BATCH
+                </span>
+              )}
+            </div>
+            {moduleAction.payload && Object.keys(moduleAction.payload).length > 0 && (
+              <div style={{ color: '#374151' }}>
+                {Object.entries(moduleAction.payload)
+                  .filter(([key]) => key !== 'status')
+                  .slice(0, 6)
+                  .map(([key, val]) => (
+                    <div key={key}>
+                      <span style={{ color: '#6B7280' }}>{key}:</span>{' '}
+                      <span>{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+                    </div>
+                  ))}
+                <div style={{ color: '#9CA3AF', marginTop: 2 }}>
+                  status: <span style={{ color: '#EF9F27', fontWeight: 600 }}>DRAFT</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {msg.chips.map((chip) => (
-            <button
-              key={chip}
-              onClick={() => onChipClick(chip, msg.canvasAction)}
-              style={{
-                padding: '3px 8px',
-                borderRadius: 'var(--radius-pill)',
-                fontSize: 11,
-                background: chip === 'Skip'
-                  ? 'rgba(0,0,0,0.04)'
-                  : 'rgba(29,158,117,0.08)',
-                color: chip === 'Skip'
-                  ? 'var(--color-text-secondary)'
-                  : '#1D9E75',
-                border: chip === 'Skip'
-                  ? '0.5px solid rgba(0,0,0,0.1)'
-                  : '0.5px solid rgba(29,158,117,0.2)',
-                cursor: 'pointer',
-              }}
-            >
-              {chip}
-            </button>
-          ))}
+          {msg.chips.map((chip) => {
+            const isConfirm = chip === 'Confirm' || chip === 'Confirm Batch' || chip.startsWith('Confirm ')
+            const isSkip = chip === 'Skip'
+            const isReview = chip === 'Review Items First'
+            return (
+              <button
+                key={chip}
+                onClick={() => onChipClick(chip, msg.canvasAction)}
+                style={{
+                  padding: '3px 8px',
+                  borderRadius: 'var(--radius-pill)',
+                  fontSize: 11,
+                  background: isSkip
+                    ? 'rgba(0,0,0,0.04)'
+                    : isConfirm
+                      ? 'rgba(29,158,117,0.12)'
+                      : isReview
+                        ? 'rgba(59,130,246,0.08)'
+                        : 'rgba(29,158,117,0.08)',
+                  color: isSkip
+                    ? 'var(--color-text-secondary)'
+                    : isConfirm
+                      ? '#1D9E75'
+                      : isReview
+                        ? '#3B82F6'
+                        : '#1D9E75',
+                  border: isSkip
+                    ? '0.5px solid rgba(0,0,0,0.1)'
+                    : isConfirm
+                      ? '0.5px solid rgba(29,158,117,0.3)'
+                      : isReview
+                        ? '0.5px solid rgba(59,130,246,0.2)'
+                        : '0.5px solid rgba(29,158,117,0.2)',
+                  cursor: 'pointer',
+                  fontWeight: isConfirm ? 600 : 400,
+                }}
+              >
+                {chip}
+              </button>
+            )
+          })}
         </div>
       </div>
     )

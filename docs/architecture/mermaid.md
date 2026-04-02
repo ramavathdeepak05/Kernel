@@ -22,7 +22,7 @@ graph TB
 
     %% ─── CI/CD ───
     subgraph CICD["CI/CD — .github/workflows/ci.yml"]
-        CILint["lint"] --> CIType["typecheck"] --> CITest["pytest (958 mocked)"] --> CITestInteg["pytest --real-db (16)"] --> CIBuild["build"]
+        CILint["lint"] --> CIType["typecheck"] --> CITest["pytest (883 data-plane + 172 SaaS)"] --> CITestInteg["pytest --real-db (16)"] --> CIBuild["build"]
     end
 
     %% ─── AGENT SKILLS (Claude Code) ───
@@ -204,7 +204,7 @@ graph TB
             TEvents["events (domain event processing)"]
             TCalendar["calendar sync"]
             TBackup["backup"]
-            TLMS["lms_sync — NOT IMPLEMENTED"]
+            TLMS["lms_sync — TOMBSTONED (P40 in-house LMS)"]
             TPlagiarism["plagiarism_poll"]
             TReporting["reporting"]
             TShadow["shadow_divergence"]
@@ -249,7 +249,7 @@ graph TB
     end
 
     subgraph Tests["ALIS/tests/ (45+ files)"]
-        TUnit["Unit tests (958 passing — mocked)"]
+        TUnit["Unit tests (883 data-plane + 172 SaaS)"]
         TInteg["@integration tests\n(16 real-DB: 14 core + 2 rail advisor)"]
         TConf["conftest.py\n(TestClient + JWT + fakeredis)"]
     end

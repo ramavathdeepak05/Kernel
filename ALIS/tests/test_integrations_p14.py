@@ -267,14 +267,11 @@ class TestNTAScoreClient:
 # =============================================================================
 
 class TestLMSSyncClient:
-    def _make_client(self, **kw):
-        from server.admissions.integrations.lms_sync import LMSSyncClient
-        client = LMSSyncClient.__new__(LMSSyncClient)
-        client._settings = _mock_settings(**kw)
-        return client
+    """P40: LMS tombstoned — Moodle replaced by in-house LMS."""
 
-    def test_stub_mode_returns_fake_id(self):
-        client = self._make_client(lms_enabled=False)
+    def test_stub_mode_returns_success(self):
+        from server.admissions.integrations.lms_sync import LMSSyncClient
+        client = LMSSyncClient()
         result = client.create_student(
             roll_number="CS-2025-0001",
             email="student@test.com",
@@ -283,38 +280,22 @@ class TestLMSSyncClient:
         )
         assert result.success is True
         assert result.is_stub is True
-        assert "STUB-CS-2025-0001" in result.user.lms_id
 
-    def test_create_student_live(self):
-        client = self._make_client()
-        mock_resp_create = Mock()
-        mock_resp_create.raise_for_status = Mock()
-        mock_resp_create.json.return_value = [{"id": 42}]
-        mock_resp_cohort = Mock()
-        mock_resp_cohort.raise_for_status = Mock()
-        mock_resp_cohort.json.return_value = {}
-
-        with patch("httpx.post", side_effect=[mock_resp_create, mock_resp_cohort]):
-            result = client.create_student(
-                roll_number="CS-2025-0001",
-                email="john@test.com",
-                full_name="John Doe",
-                program="CS",
-            )
-
-        assert result.success is True
-        assert result.user.lms_id == "42"
-        assert result.user.username == "cs20250001"
+    def test_tombstone_is_never_enabled(self):
+        from server.admissions.integrations.lms_sync import LMSSyncClient
+        client = LMSSyncClient()
+        assert client.is_enabled() is False
 
     def test_deactivate_student_stub_returns_true(self):
-        client = self._make_client(lms_enabled=False)
+        from server.admissions.integrations.lms_sync import LMSSyncClient
+        client = LMSSyncClient()
         assert client.deactivate_student("STUB-CS-2025-0001") is True
 
-    def test_username_derivation(self):
+    def test_create_student_returns_no_user_object(self):
         from server.admissions.integrations.lms_sync import LMSSyncClient
-        # _username strips dashes: CS-2025-0001 → cs20250001
-        assert LMSSyncClient._username("CS-2025-0001") == "cs20250001"
-        assert LMSSyncClient._username("MBA-2025-0099") == "mba20250099"
+        client = LMSSyncClient()
+        result = client.create_student("CS-2025-0001", "a@b.com", "Test", "CS")
+        assert result.user is None
 
 
 # =============================================================================

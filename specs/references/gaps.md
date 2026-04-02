@@ -2,7 +2,7 @@
 ## Implementation Reference for E15–E20
 ### QUAICU Pvt. Ltd. | Confidential
 
-**Last updated:** 2026-03-20
+**Last updated:** 2026-03-27
 
 This file contains full implementation specs for the product gaps identified
 as missing from ALIS v1. Items marked ✅ are fully built and deployed.

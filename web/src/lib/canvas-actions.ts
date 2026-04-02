@@ -55,11 +55,14 @@ export type CanvasAction =
   | { type: 'FILTER'; filters: Record<string, unknown> }
   | { type: 'OPEN_DETAIL'; itemId: string }
   | { type: 'EXECUTE'; action: 'approve' | 'reject' | 'escalate'; itemId: string }
+  | { type: 'EXECUTE_MODULE'; module: string; actionEndpoint: string;
+      payload: Record<string, unknown>; is_batch?: boolean; chips?: string[] }
   | { type: 'CLEAR_HIGHLIGHT' }
 
 export interface AgentResponse {
   message: string
   canvasAction: CanvasAction | null
   quickActions?: string[]
+  chips?: string[]
   agentContext?: string
 }

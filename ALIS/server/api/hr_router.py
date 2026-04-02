@@ -59,7 +59,7 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from server.core.rbac import Permission, require_permission
 
@@ -524,10 +524,10 @@ async def assign_employee_department(
     return JSONResponse(status_code=201, content=_jsonify(result))
 
 
-@router.delete("/employee-departments/{assignment_id}", status_code=204)
+@router.delete("/employee-departments/{assignment_id}", status_code=204, response_model=None)
 @require_permission(Permission.STAFF_UPDATE)
 async def remove_employee_department(
     request: Request, assignment_id: str
-) -> JSONResponse:
+) -> Response:
     EmployeeDepartmentService.remove(_org(request), assignment_id, _actor(request))
-    return JSONResponse(status_code=204, content=None)
+    return Response(status_code=204)

@@ -1,0 +1,57 @@
+{{- if .Values.celeryBeat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "alis.fullname" . }}-beat
+  namespace: {{ include "alis.namespace" . }}
+  labels:
+    {{- include "alis.labels" . | nindent 4 }}
+    app.kubernetes.io/component: beat
+spec:
+  # Beat MUST be a singleton — never scale beyond 1 replica.
+  # Duplicate beats = duplicate task execution.
+  replicas: {{ .Values.celeryBeat.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "alis.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: beat
+  strategy:
+    type: Recreate    # kill old pod before starting new (no overlap)
+  template:
+    metadata:
+      labels:
+        {{- include "alis.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: beat
+    spec:
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "alis.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: beat
+          image: {{ include "alis.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.celeryBeat.command | nindent 12 }}
+          env:
+            {{- include "alis.env" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.celeryBeat.resources | nindent 12 }}
+      {{- with .Values.celeryBeat.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.celeryBeat.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.celeryBeat.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
