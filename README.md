@@ -17,6 +17,8 @@ Developed by QUAICU Solutions Private Limited in partnership with Woxsen Univers
 | Secrets | HashiCorp Vault (Transit + KV v2) |
 | Frontend | React 19 + TypeScript, Vite 7, Tailwind v4, Radix UI |
 | Proxy | Nginx |
+| Control Plane | Standalone FastAPI microservice (tenant provisioning, billing, DNS) |
+| AI Service | Standalone FastAPI microservice (PII masking, provider routing, budget) |
 
 ---
 
@@ -43,6 +45,8 @@ Default URLs:
 - API: http://localhost:8000/api/v1/
 - API docs: http://localhost:8000/docs
 - Frontend: http://localhost:5173
+- Control Plane: http://localhost:8100
+- AI Service: http://localhost:8200
 - Grafana: http://localhost:3000 (admin / see `.env`)
 - Prometheus: http://localhost:9090
 - Vault: http://localhost:8200
@@ -56,23 +60,59 @@ ALIS Production/
 ├── ALIS/                        # Backend — Python / FastAPI (QUAICU)
 │   ├── server/
 │   │   ├── api/                 # FastAPI routers (one per module)
-│   │   ├── core/                # RBAC, events, policy, audit, security, Vault
-│   │   ├── admissions/          # 10-stage admissions workflow
-│   │   ├── academics/           # Courses, timetable, syllabus
+│   │   ├── core/                # RBAC, events, policy, audit, security, Vault,
+│   │   │                        #   AI gateway, guardrails, HITL, model registry,
+│   │   │                        #   prompt registry, shadow mode, lockdown,
+│   │   │                        #   feature flags, tenant crypto, diff tracker
+│   │   ├── admissions/          # 10-stage admissions workflow (87 routes)
+│   │   ├── academics/           # Courses, timetable, syllabus, OBE/CO-PO
 │   │   ├── examinations/        # Tests, grading, hall tickets
-│   │   ├── finance/             # Fees, payments, exemptions, ledger
-│   │   ├── hr/                  # Staff, payroll, leave
-│   │   ├── student_services/
-│   │   ├── communication/
-│   │   ├── regulatory/
-│   │   ├── consent/
-│   │   ├── alumni/
-│   │   ├── reporting/
-│   │   └── process_engine/
-│   ├── migrations/              # Alembic migrations (0001–0023)
-│   └── tests/                   # 904 tests
+│   │   ├── finance/             # Fees, payments, exemptions, e-invoice, ledger
+│   │   ├── hr/                  # Staff, payroll, leave, TA assignments
+│   │   ├── student_services/    # Grievances, hostel, library, in-house learning
+│   │   ├── communication/       # Email, WhatsApp, notifications
+│   │   ├── regulatory/          # Accreditation, NAAC, statutory compliance
+│   │   ├── consent/             # DPDP consent management
+│   │   ├── alumni/              # Alumni tracking and placement
+│   │   ├── reporting/           # Analytics and dashboards
+│   │   ├── process_engine/      # Dynamic workflow engine
+│   │   ├── phd/                 # PhD / Doctoral research module
+│   │   ├── convocation/         # Convocation management
+│   │   ├── agents/              # AI agent pipeline definitions
+│   │   ├── rules/               # Rules-as-data engine
+│   │   ├── integrations/        # DigiLocker, Drillbit, WiFi attendance, e-invoice
+│   │   ├── mcp/                 # Model Context Protocol server
+│   │   └── tools/               # Agent tool registry
+│   ├── migrations/              # Alembic migrations (0001–0041)
+│   └── tests/                   # Test suite (1 055+ tests)
 │
-├── web/                         # Frontend — React 19 / TypeScript (shared)
+├── web/                         # Frontend — React 19 / TypeScript
+│   └── src/
+│       ├── pages/               # Module screens (22 page areas)
+│       │   ├── admissions/      ├── academics/   ├── examinations/
+│       │   ├── finance/         ├── hr/          ├── student-services/
+│       │   ├── communications/  ├── regulatory/  ├── alumni/
+│       │   ├── reports/         ├── phd/         ├── convocation/
+│       │   ├── consent/         ├── dashboard/   ├── auth/
+│       │   ├── admin/           ├── attendance/  ├── settings/
+│       │   ├── security/        ├── workflows/   ├── process-engine/
+│       │   └── portal/
+│       ├── components/          # Shared UI component library
+│       ├── hooks/               # Module-specific TanStack Query hooks
+│       ├── services/            # apiFetch service layer
+│       ├── store/               # Zustand auth + global state
+│       └── shell/               # App shell, sidebar, layout
+│
+├── control_plane/               # SaaS control plane microservice
+│   ├── provisioner.py           # Tenant provisioning orchestration
+│   ├── billing_engine.py        # Usage billing and plan enforcement
+│   ├── dns_manager.py           # Subdomain / DNS provisioning
+│   └── bucket_provisioner.py    # MinIO bucket per-tenant setup
+│
+├── ai_service/                  # AI gateway microservice
+│   ├── providers.py             # Ollama / external LLM routing
+│   ├── pii_masker.py            # PII masking before LLM calls
+│   └── budget.py                # Per-tenant AI token budget
 │
 ├── infra/                       # Infrastructure configuration
 │   ├── nginx/                   # Reverse proxy config
@@ -84,7 +124,7 @@ ALIS Production/
 │       ├── architecture.md      # Full system design
 │       ├── frontend.md          # UI/UX spec and design system
 │       ├── edge-cases.md        # Failure mode resolvers
-│       └── gaps.md              # Unbuilt epics (E15–E20)
+│       └── gaps.md              # Unbuilt epics
 │
 ├── docs/                        # Documentation
 │   ├── architecture/            # System overview
@@ -98,7 +138,8 @@ ALIS Production/
 │       ├── onboarding/          # Dev environment setup for Woxsen team
 │       └── data/                # Anonymised datasets (not committed)
 │
-├── .agents/                     # Claude Code AI skill definitions
+├── scripts/                     # Seed, migration, and utility scripts
+├── .agents/                     # AI skill definitions and workflows
 ├── docker-compose.yml
 ├── .env.example
 ├── CONTRIBUTING.md
@@ -110,12 +151,13 @@ ALIS Production/
 ## Build Status
 
 ### Backend (FastAPI)
-All 21 core epics complete. 1055 tests passing (883 data-plane + 172 SaaS). S1-S10 SaaS transformation complete.
+All 21 core epics complete. **1 055+ tests passing.** 41 Alembic migrations shipped.
+SaaS transformation (S1–S10) complete. Control Plane and AI Service microservices operational.
 
 | Epic | Module | Backend | Frontend |
 |------|--------|---------|----------|
 | E01 | Auth + RBAC + MFA/TOTP | ✅ | ✅ login/session |
-| E02 | Workflow Engine + Approval Quorum | ✅ | — |
+| E02 | Workflow Engine + Approval Quorum | ✅ | ✅ |
 | E03 | AI Gateway + RAG + PGVector | ✅ | — |
 | E04 | Admissions (10-stage, 87 routes) | ✅ | ✅ |
 | E05 | Academics | ✅ | ✅ |
@@ -126,12 +168,12 @@ All 21 core epics complete. 1055 tests passing (883 data-plane + 172 SaaS). S1-S
 | E10 | Communication Hub | ✅ | ✅ |
 | E11 | Reporting & Analytics | ✅ | ✅ |
 | E12 | Alumni & Placement | ✅ | ✅ |
-| E13 | Dynamic Process Engine | ✅ | — |
-| E14 | Regulatory & Accreditation | ✅ | — |
-| E15 | PhD / Doctoral Research | ✅ | — |
-| E16 | Parent / Guardian Portal | 🔲 pending | — |
+| E13 | Dynamic Process Engine | ✅ | ✅ |
+| E14 | Regulatory & Accreditation | ✅ | ✅ |
+| E15 | PhD / Doctoral Research | ✅ | ✅ |
+| E16 | Parent / Guardian Portal | ✅ | ✅ portal/ |
 | E17 | Re-admission & Credit Transfer | ✅ | — |
-| E18 | Convocation Management | ✅ | — |
+| E18 | Convocation Management | ✅ | ✅ |
 | E19 | Quota Seat Matrix Engine | ✅ | — |
 | E20 | OBE / CO-PO Mapping | ✅ | — |
 | E21 | DPDP Consent Management | ✅ | ✅ |
@@ -147,10 +189,20 @@ All 21 core epics complete. 1055 tests passing (883 data-plane + 172 SaaS). S1-S
 | Fee structure versioning (intake_year lock) | ✅ |
 | Payment webhook idempotency + UTR disputes | ✅ |
 | EC-FIN-01/02 — DBT exemption + promissory ledger | ✅ |
-| E10 WhatsApp Business API (MSG91 + templates) | 🔲 pending |
-| E16 Parent/Guardian portal | 🔲 pending |
 | DigiLocker live integration | ✅ |
-| Data migration pipeline (validate → dry-run → commit) | ✅ |
+| Drillbit plagiarism integration | ✅ |
+| WiFi attendance integration | ✅ |
+| e-Invoice (GST) integration | ✅ |
+| In-house learning module | ✅ |
+| Identity match & access lift | ✅ |
+| HR + placement workflow gaps | ✅ |
+| Multi-campus support (migration 0030) | ✅ |
+| Shadow mode (advisory-only AI dry-run) | ✅ |
+| Model Context Protocol (MCP) server | ✅ |
+| Control Plane microservice (SaaS provisioning + billing) | ✅ |
+| AI Service microservice (PII masking + provider routing) | ✅ |
+| E10 WhatsApp Business API (MSG91 + templates) | 🔲 pending |
+| Guardian-initiated portal self-service flows | 🔲 pending |
 
 ---
 
@@ -162,15 +214,11 @@ All 21 core epics complete. 1055 tests passing (883 data-plane + 172 SaaS). S1-S
 - Timestamps: `TIMESTAMPTZ` (UTC) in DB, ISO 8601 in API
 - Tenant isolation: RLS via `SET LOCAL alis.current_tenant`
 - Soft delete: `status='ARCHIVED'` (lifecycle) or `status='ANNULLED'` (state machine)
+- AI outputs: advisory-only (`AIResponse` with `confidence` + `state_impact`), never auto-committed
+- Policy lifecycle: `DRAFT → SUBMITTED → ACTIVATED` via `PolicyService`
+- All DB writes: `execute_transaction()` only; reads: `execute_query()` only
 
 See `specs/SKILL.md` for full development reference and invariants.
-
----
-
-## Partnership
-
-ALIS is co-developed with Woxsen University under a Master Collaboration Agreement.
-See `partners/woxsen/` for SOW, legal documents, and onboarding guides.
 
 ---
 
