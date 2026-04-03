@@ -377,13 +377,24 @@ class AIOutputValidator:
         Handles common LLM output patterns:
         1. Pure JSON string
         2. JSON wrapped in markdown code fences (```json ... ```)
-        3. JSON embedded in explanatory text
+        3. JSON embedded in explanatory text (any nesting depth)
+
+        Uses json.JSONDecoder.raw_decode() for Case 3 so that deeply nested
+        objects (e.g. {"meta": {"sub": {"key": 1}}}) are matched correctly.
+        The old regex only handled one level of nesting and silently rejected
+        valid structured outputs from the LLM.
         """
+        import json as _json
+
         text = text.strip()
 
-        # Case 1: Direct JSON object
-        if text.startswith("{") and text.endswith("}"):
-            return text
+        # Case 1: Direct JSON object — try parsing the whole string first.
+        if text.startswith("{"):
+            try:
+                _json.JSONDecoder().raw_decode(text)
+                return text
+            except _json.JSONDecodeError:
+                pass
 
         # Case 2: Markdown code-fenced JSON
         fence_match = re.search(
@@ -392,12 +403,23 @@ class AIOutputValidator:
             re.DOTALL,
         )
         if fence_match:
-            return fence_match.group(1).strip()
+            candidate = fence_match.group(1).strip()
+            try:
+                _json.JSONDecoder().raw_decode(candidate)
+                return candidate
+            except _json.JSONDecodeError:
+                pass
 
-        # Case 3: Embedded JSON — find outermost { ... }
-        brace_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", text, re.DOTALL)
-        if brace_match:
-            return brace_match.group(0)
+        # Case 3: Embedded JSON — scan for the first '{' that begins a valid
+        # JSON object, regardless of nesting depth.
+        decoder = _json.JSONDecoder()
+        for i, char in enumerate(text):
+            if char == "{":
+                try:
+                    obj, _ = decoder.raw_decode(text, i)
+                    return _json.dumps(obj)
+                except _json.JSONDecodeError:
+                    continue
 
         return None
 

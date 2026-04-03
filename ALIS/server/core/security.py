@@ -44,6 +44,11 @@ import redis as _redis_lib
 
 from .audit import AuditLog, AuditAction
 
+# --- Global constants ---
+# Single source of truth for default session expiry.
+# Change here and every caller picks it up automatically.
+SESSION_EXPIRY_HOURS: int = 24
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +82,7 @@ class Session:
 
     # Timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(hours=24))
+    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(hours=SESSION_EXPIRY_HOURS))
     last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Status
@@ -163,20 +168,27 @@ class TokenGenerator:
 
 # --- Redis Helpers ---
 
-_SESS_PREFIX    = "alis:sess:"
-_TOK_PREFIX     = "alis:tok:"
-_USER_SESS_PFX  = "alis:user_sess:"
-_FAIL_PREFIX    = "alis:fail:"
-_LOCKOUT_PREFIX = "alis:lockout:"
-_RATE_PREFIX    = "alis:rate:"
-_PWRESET_PREFIX  = "alis:pwreset:"
+_SESS_PREFIX      = "alis:sess:"
+_TOK_PREFIX       = "alis:tok:"
+_USER_SESS_PFX    = "alis:user_sess:"
+_FAIL_PREFIX      = "alis:fail:"
+_LOCKOUT_PREFIX   = "alis:lockout:"
+_RATE_PREFIX      = "alis:rate:"
+_PWRESET_PREFIX   = "alis:pwreset:"
 _GUARDIAN_OTP_PFX = "alis:gotp:"
+
+# Cached Redis client — created once, reused across all security calls.
+# Avoids re-parsing the URL (and potential DNS lookups) on every request.
+_redis_client: Optional["_redis_lib.Redis"] = None
 
 
 def _get_redis() -> "_redis_lib.Redis":
-    """Return a Redis client from the configured URL. Lazy — never called at import time."""
-    from server.core.settings import settings
-    return _redis_lib.from_url(settings.redis_url, decode_responses=True)
+    """Return a cached Redis client. Initialised lazily on first call."""
+    global _redis_client
+    if _redis_client is None:
+        from server.core.settings import settings
+        _redis_client = _redis_lib.from_url(settings.redis_url, decode_responses=True)
+    return _redis_client
 
 
 def _session_to_dict(session: "Session") -> dict:
@@ -262,8 +274,14 @@ class FailedLoginTracker:
         try:
             return _get_redis().exists(_LOCKOUT_PREFIX + identifier) > 0
         except Exception:
-            logger.exception("FailedLoginTracker.is_locked_out Redis error")
-            return False  # fail open — don't block logins if Redis is down
+            # SECURITY: fail closed — during a Redis outage we cannot determine
+            # lockout state, so we treat the account as locked to prevent
+            # brute-force attacks that exploit the outage window.
+            logger.exception(
+                "FailedLoginTracker.is_locked_out Redis error — failing CLOSED "
+                "(account treated as locked until Redis recovers)"
+            )
+            return True  # fail closed — deny unknown lockout state
 
     @classmethod
     def get_lockout_remaining(cls, identifier: str) -> Optional[timedelta]:
@@ -328,7 +346,7 @@ class SessionManager:
             device_id=device_id,
             user_agent=user_agent,
             ip_address=ip_address,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry_hours or SESSION_EXPIRY_HOURS),
         )
         cls._save(_get_redis(), session)
         return session, token
@@ -366,15 +384,32 @@ class SessionManager:
             return None
 
     @classmethod
+    def _delete_session_keys(cls, r: "_redis_lib.Redis", session: "Session") -> None:
+        """
+        Immediately remove all Redis keys associated with a session.
+
+        Called on revocation so that a captured raw token is invalidated
+        instantly — not merely marked is_active=False in a key that still
+        has its original TTL.  Re-saving a revoked session would extend the
+        token-hash key TTL, which is the vulnerability we are fixing.
+        """
+        r.delete(_TOK_PREFIX + session.token_hash)
+        r.delete(_SESS_PREFIX + session.id)
+        r.srem(_USER_SESS_PFX + session.user_id, session.id)
+
+    @classmethod
     def revoke_session(cls, session_id: str, reason: str = "Manual revocation") -> bool:
-        """Revoke a session."""
+        """Revoke a session and immediately delete all its Redis keys."""
         try:
             r = _get_redis()
             session = cls._load(r, session_id)
             if not session:
                 return False
             session.revoke(reason)
-            cls._save(r, session)
+            # Delete keys immediately — do NOT re-save with an extended TTL.
+            # Saving a revoked session would allow a captured token to remain
+            # valid until the key's original TTL expires.
+            cls._delete_session_keys(r, session)
             return True
         except Exception:
             logger.exception("SessionManager.revoke_session Redis error")
@@ -382,7 +417,7 @@ class SessionManager:
 
     @classmethod
     def revoke_all_user_sessions(cls, user_id: str, reason: str = "User logout all") -> int:
-        """Revoke all active sessions for a user."""
+        """Revoke all active sessions for a user and delete all their Redis keys."""
         try:
             r = _get_redis()
             session_ids = r.smembers(_USER_SESS_PFX + user_id)
@@ -391,8 +426,10 @@ class SessionManager:
                 session = cls._load(r, sid)
                 if session and session.is_active:
                     session.revoke(reason)
-                    cls._save(r, session)
+                    cls._delete_session_keys(r, session)
                     count += 1
+            # Clean up the user-sessions set itself
+            r.delete(_USER_SESS_PFX + user_id)
             return count
         except Exception:
             logger.exception("SessionManager.revoke_all_user_sessions Redis error")
@@ -534,17 +571,38 @@ class PasswordResetManager:
         """
         Validate a reset token and atomically consume it (single-use).
 
+        Uses GETDEL (Redis ≥6.2) for an atomic get-and-delete, preventing
+        the race condition where two concurrent requests both read the token
+        before either deletes it (double-reset vulnerability).
+
         Returns {"user_id": ..., "tenant_id": ...} if valid, None if expired/invalid.
         """
         try:
             r = _get_redis()
             token_hash = TokenGenerator.hash_token(token)
             key = _PWRESET_PREFIX + token_hash
-            data = r.get(key)
+            # GETDEL is atomic: gets the value AND deletes the key in one operation.
+            # Falls back to GET+DEL if Redis <6.2 (best-effort, not fully atomic).
+            data = r.getdel(key)
             if not data:
                 return None
-            r.delete(key)  # single-use: consume immediately
             return json.loads(data)
+        except AttributeError:
+            # Redis client too old — fall back to GET + DELETE (non-atomic)
+            logger.warning(
+                "PasswordResetManager: redis-py does not support GETDEL; "
+                "upgrade to redis-py>=4.1.0. Falling back to non-atomic GET+DEL."
+            )
+            try:
+                r = _get_redis()
+                key = _PWRESET_PREFIX + TokenGenerator.hash_token(token)
+                data = r.get(key)
+                if data:
+                    r.delete(key)
+                return json.loads(data) if data else None
+            except Exception:
+                logger.exception("PasswordResetManager.validate_and_consume fallback error")
+                return None
         except Exception:
             logger.exception("PasswordResetManager.validate_and_consume Redis error")
             return None
@@ -591,19 +649,42 @@ class GuardianOTPManager:
         """
         Verify OTP and consume it (single-use).
 
+        Uses GETDEL for an atomic read-and-delete preventing double-use
+        under concurrent requests with the same OTP.
+
         Returns {"student_id": ..., "tenant_id": ...} on success, None if invalid/expired.
         """
         try:
             r = _get_redis()
             key = cls._key(phone)
-            data = r.get(key)
+            # Atomically fetch-and-delete to prevent double-use race condition.
+            data = r.getdel(key)
             if not data:
                 return None
             record = json.loads(data)
             if record.get("otp") != otp:
+                # OTP mismatch — already consumed; caller must regenerate.
                 return None
-            r.delete(key)
             return {"student_id": record["student_id"], "tenant_id": record["tenant_id"]}
+        except AttributeError:
+            # Redis client too old — fall back to GET-check-DELETE (non-atomic)
+            logger.warning(
+                "GuardianOTPManager: redis-py too old for GETDEL; using non-atomic fallback."
+            )
+            try:
+                r = _get_redis()
+                key = cls._key(phone)
+                data = r.get(key)
+                if not data:
+                    return None
+                record = json.loads(data)
+                if record.get("otp") != otp:
+                    return None
+                r.delete(key)
+                return {"student_id": record["student_id"], "tenant_id": record["tenant_id"]}
+            except Exception:
+                logger.exception("GuardianOTPManager.verify_and_consume fallback error")
+                return None
         except Exception:
             logger.exception("GuardianOTPManager.verify_and_consume Redis error")
             return None
@@ -797,10 +878,20 @@ class TenantMiddleware:
                 tenant_id = session.tenant_id
 
         # Fallback: X-Tenant-ID header (for internal service calls / tests)
+        # SECURITY: Only honour this header when the caller presents the correct
+        # shared secret in X-Internal-Secret.  Without this guard, a forged
+        # X-Tenant-ID header from an external client could tenant-spoof.
         if not tenant_id:
-            tenant_header = headers.get(b"x-tenant-id", b"").decode("utf-8", errors="ignore")
-            if tenant_header:
+            from server.core.settings import settings
+            internal_secret = headers.get(b"x-internal-secret", b"").decode("utf-8", errors="ignore")
+            tenant_header   = headers.get(b"x-tenant-id",      b"").decode("utf-8", errors="ignore")
+            if tenant_header and internal_secret and internal_secret == settings.internal_service_secret:
                 tenant_id = tenant_header
+            elif tenant_header and not internal_secret:
+                logger.warning(
+                    "TenantMiddleware: X-Tenant-ID header received without X-Internal-Secret — "
+                    "ignoring (possible tenant-spoof attempt, path=%s)", path
+                )
 
         if not tenant_id:
             # Layer 4 Invariant Violation: REJECT
@@ -993,11 +1084,20 @@ class SubdomainTenantMiddleware:
 
         # ------------------------------------------------------------------
         # Priority 4: X-Tenant-ID header (internal service calls / tests)
+        # SECURITY: Guarded by X-Internal-Secret to prevent tenant spoofing
+        # from external callers who could forge the header.
         # ------------------------------------------------------------------
         if not tenant_id:
-            tenant_header = headers.get(b"x-tenant-id", b"").decode("utf-8", errors="ignore")
-            if tenant_header:
+            from server.core.settings import settings
+            internal_secret = headers.get(b"x-internal-secret", b"").decode("utf-8", errors="ignore")
+            tenant_header   = headers.get(b"x-tenant-id",      b"").decode("utf-8", errors="ignore")
+            if tenant_header and internal_secret and internal_secret == settings.internal_service_secret:
                 tenant_id = tenant_header
+            elif tenant_header and not internal_secret:
+                logger.warning(
+                    "SubdomainTenantMiddleware: X-Tenant-ID header received without "
+                    "X-Internal-Secret — ignoring (possible tenant-spoof attempt, path=%s)", path
+                )
 
         # ------------------------------------------------------------------
         # Layer 4 Invariant: reject if tenant_id is still unresolved

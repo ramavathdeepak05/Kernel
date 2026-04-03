@@ -431,6 +431,13 @@ MODULE_PERMISSIONS: Dict[str, List[Permission]] = {
     "M8": [
         Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
     ],
+    # M9 — Alumni & Placement (E12)
+    # Previously missing from this map, which caused get_module_for_permission()
+    # to return None for alumni permissions and silently treat them as
+    # unowned platform permissions in cross-module approval flows.
+    "M9": [
+        Permission.ALUMNI_READ, Permission.ALUMNI_MANAGE, Permission.PLACEMENT_MANAGE,
+    ],
     "M10": [
         Permission.PROCESS_READ, Permission.PROCESS_MANAGE,  # E13 — Dynamic Process Engine
     ],
@@ -557,9 +564,17 @@ def verify_access(
                 pass  # Will be caught by the check below
 
         if not tenant_id:
-            violations.append(
-                "Tenant isolation: tenant_id is required for all non-system operations "
-                "(Layer 4 Invariant)"
+            # SECURITY: Early return — missing tenant is a hard Layer 4 invariant
+            # violation. Collecting it into the violations list and processing
+            # context rules after the fact risks future refactors accidentally
+            # allowing the request through.
+            return AccessResult(
+                allowed=False,
+                reason="Tenant isolation: tenant_id is required for all non-system operations (Layer 4 Invariant)",
+                context_violations=[
+                    "Tenant isolation: tenant_id is required for all non-system operations "
+                    "(Layer 4 Invariant)"
+                ],
             )
 
     # --- Step 3: Context-Awareness Checks ---
@@ -619,6 +634,10 @@ def require_permission(permission: Permission):
     Decorator factory for requiring a specific permission.
     Use with FastAPI route handlers.
 
+    SECURITY: If the role cannot be resolved from request.state, the request
+    is DENIED (default-deny posture).  The old behaviour of silently executing
+    the handler when role is absent was a default-allow bypass.
+
     Example:
         @app.get("/students")
         @require_permission(Permission.STUDENT_READ)
@@ -630,8 +649,6 @@ def require_permission(permission: Permission):
     def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            # In real implementation, extract role from request/session
-            # This is a placeholder for the middleware pattern
             request = kwargs.get("request")
             if request is None:
                 for arg in args:
@@ -643,13 +660,29 @@ def require_permission(permission: Permission):
                 role = getattr(request.state, "user_role", None)
                 context = getattr(request.state, "access_context", {})
 
-                if role:
-                    result = verify_access(role, permission, context)
-                    if not result.allowed:
-                        raise PermissionDeniedError(
-                            message=result.reason,
-                            details={"violations": result.context_violations}
-                        )
+                if role is None:
+                    # SECURITY: default deny — do not silently allow when role
+                    # is absent.  This prevents auth middleware bypass.
+                    raise PermissionDeniedError(
+                        message=(
+                            "RBAC check failed: user_role not found on request.state. "
+                            "Ensure authentication middleware ran before this route."
+                        ),
+                        details={"permission_required": permission.value},
+                    )
+
+                result = verify_access(role, permission, context)
+                if not result.allowed:
+                    raise PermissionDeniedError(
+                        message=result.reason,
+                        details={"violations": result.context_violations}
+                    )
+            else:
+                # No request object available — also deny by default.
+                raise PermissionDeniedError(
+                    message="RBAC check failed: no request object found in handler arguments.",
+                    details={"permission_required": permission.value},
+                )
 
             return await func(*args, **kwargs)
         wrapper.__signature__ = inspect.signature(func)

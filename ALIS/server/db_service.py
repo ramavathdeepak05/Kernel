@@ -434,7 +434,8 @@ def execute_query(
                     return cursor.fetchall()
                 return []
             except Exception as e:
-                logger.error(f"Query execution failed: {e}\nQuery: {query}")
+                # Log the query template (not params) to avoid leaking PII in logs
+                logger.error("Query execution failed: %s | query_template=%s", e, query[:200])
                 raise
 
 

@@ -421,6 +421,23 @@ class Settings(BaseSettings):
         description="Domain suffix used to extract subdomain tenant slug. "
                     "E.g., 'alis.app' → iitb.alis.app → slug='iitb'.",
     )
+    # -------------------------------------------------------------------------
+    # Internal Service Auth (E00-S03 — X-Tenant-ID header guard)
+    # -------------------------------------------------------------------------
+    # Used by TenantMiddleware / SubdomainTenantMiddleware to verify that an
+    # X-Tenant-ID header is coming from a trusted internal service call (Celery,
+    # control plane, background jobs) rather than an external attacker forging
+    # the header to spoof a tenant.
+    # Must be set in production via INTERNAL_SERVICE_SECRET env var.
+    internal_service_secret: str = Field(
+        default="",
+        description=(
+            "Shared secret for internal service-to-service calls that supply "
+            "X-Tenant-ID.  Must be set in production via INTERNAL_SERVICE_SECRET "
+            "env var.  Empty = X-Tenant-ID header is ignored (safe default)."
+        ),
+    )
+
     tenant_db_cache_ttl_seconds: int = Field(
         default=300,
         description="Redis TTL (seconds) for per-tenant DB config cache.",
@@ -479,6 +496,12 @@ class Settings(BaseSettings):
         if not self.alis_master_key:
             raise ValueError(
                 "[SECURITY] ALIS_MASTER_KEY must be set in production (required for tenant encryption)."
+            )
+
+        if not self.internal_service_secret:
+            raise ValueError(
+                "[SECURITY] INTERNAL_SERVICE_SECRET must be set in production. "
+                "This secret guards the X-Tenant-ID header against external tenant-spoof attacks."
             )
 
         if self.jwt_algorithm == "RS256":

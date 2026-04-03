@@ -312,7 +312,7 @@ class AuditLedger:
         ``actor_role`` falls back to ``actor_type`` if not provided
         (old callers used ``actor_type`` instead of ``actor_role``).
         """
-        from server.db_service import get_db_connection
+        from server.db_service import get_tenant_db_connection
         try:
             from psycopg2.extras import RealDictCursor
         except ImportError:
@@ -359,7 +359,7 @@ class AuditLedger:
         lock_key = _tenant_lock_key(resolved_tenant)
         action_str = action.value if isinstance(action, AuditAction) else str(action)
 
-        with get_db_connection() as conn:
+        with get_tenant_db_connection(resolved_tenant) as conn:
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     # 1. Acquire per-tenant advisory lock (released at
@@ -596,6 +596,9 @@ class AuditLedger:
         """
         Walk the entire hash chain for a tenant and verify every link.
 
+        Rows are processed in chunks of 10,000 to avoid loading millions of
+        audit entries into memory at once (OOM protection for mature tenants).
+
         Returns a dict:
             {
                 "valid": bool,
@@ -610,17 +613,81 @@ class AuditLedger:
         """
         from server.db_service import execute_system_query
 
-        rows = execute_system_query(
-            "SELECT id, tenant_id, actor_id, actor_role, action, "
-            "       entity_type, entity_id, metadata, timestamp, "
-            "       previous_hash, hash "
-            "FROM audit_ledger "
-            "WHERE tenant_id = %s "
-            "ORDER BY id ASC",
-            (tenant_id,),
-        )
+        _CHUNK_SIZE = 10_000
+        total_entries = 0
+        expected_previous_hash: Optional[str] = None
+        last_id = 0  # cursor-based pagination via id > last_id
 
-        if not rows:
+        while True:
+            rows = execute_system_query(
+                "SELECT id, tenant_id, actor_id, actor_role, action, "
+                "       entity_type, entity_id, metadata, timestamp, "
+                "       previous_hash, hash "
+                "FROM audit_ledger "
+                "WHERE tenant_id = %s AND id > %s "
+                "ORDER BY id ASC "
+                "LIMIT %s",
+                (tenant_id, last_id, _CHUNK_SIZE),
+            )
+
+            if not rows:
+                # No more rows (or empty for the first chunk)
+                break
+
+            for row in rows:
+                total_entries += 1
+
+                # Verify previous_hash linkage
+                if row["previous_hash"] != expected_previous_hash:
+                    return {
+                        "valid": False,
+                        "total_entries": total_entries,
+                        "first_invalid_id": row["id"],
+                        "message": (
+                            f"Chain break at entry {row['id']}: "
+                            f"expected previous_hash={expected_previous_hash!r}, "
+                            f"got {row['previous_hash']!r}."
+                        ),
+                    }
+
+                # Recompute hash and compare
+                ts = row["timestamp"]
+                meta = row["metadata"]
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+
+                recomputed = compute_entry_hash(
+                    previous_hash=row["previous_hash"],
+                    tenant_id=row["tenant_id"],
+                    actor_id=row["actor_id"],
+                    actor_role=row["actor_role"],
+                    action=row["action"],
+                    entity_type=row["entity_type"],
+                    entity_id=row["entity_id"],
+                    timestamp=ts,
+                    metadata=meta,
+                )
+
+                if recomputed != row["hash"]:
+                    return {
+                        "valid": False,
+                        "total_entries": total_entries,
+                        "first_invalid_id": row["id"],
+                        "message": (
+                            f"Hash mismatch at entry {row['id']}: "
+                            f"expected={recomputed!r}, stored={row['hash']!r}."
+                        ),
+                    }
+
+                expected_previous_hash = row["hash"]
+
+            last_id = rows[-1]["id"]
+
+            # If fewer rows than chunk size returned, we've reached the end.
+            if len(rows) < _CHUNK_SIZE:
+                break
+
+        if total_entries == 0:
             return {
                 "valid": True,
                 "total_entries": 0,
@@ -628,58 +695,11 @@ class AuditLedger:
                 "message": "Ledger is empty for this tenant.",
             }
 
-        expected_previous_hash: Optional[str] = None
-
-        for row in rows:
-            # Verify previous_hash linkage
-            if row["previous_hash"] != expected_previous_hash:
-                return {
-                    "valid": False,
-                    "total_entries": len(rows),
-                    "first_invalid_id": row["id"],
-                    "message": (
-                        f"Chain break at entry {row['id']}: "
-                        f"expected previous_hash={expected_previous_hash!r}, "
-                        f"got {row['previous_hash']!r}."
-                    ),
-                }
-
-            # Recompute hash and compare
-            ts = row["timestamp"]
-            meta = row["metadata"]
-            if isinstance(meta, str):
-                meta = json.loads(meta)
-
-            recomputed = compute_entry_hash(
-                previous_hash=row["previous_hash"],
-                tenant_id=row["tenant_id"],
-                actor_id=row["actor_id"],
-                actor_role=row["actor_role"],
-                action=row["action"],
-                entity_type=row["entity_type"],
-                entity_id=row["entity_id"],
-                timestamp=ts,
-                metadata=meta,
-            )
-
-            if recomputed != row["hash"]:
-                return {
-                    "valid": False,
-                    "total_entries": len(rows),
-                    "first_invalid_id": row["id"],
-                    "message": (
-                        f"Hash mismatch at entry {row['id']}: "
-                        f"expected={recomputed!r}, stored={row['hash']!r}."
-                    ),
-                }
-
-            expected_previous_hash = row["hash"]
-
         return {
             "valid": True,
-            "total_entries": len(rows),
+            "total_entries": total_entries,
             "first_invalid_id": None,
-            "message": f"All {len(rows)} entries verified successfully.",
+            "message": f"All {total_entries} entries verified successfully (chunked, {_CHUNK_SIZE}/batch).",
         }
 
     # ------------------------------------------------------------------

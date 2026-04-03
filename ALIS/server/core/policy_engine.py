@@ -228,10 +228,22 @@ class PolicyEngine:
         if isinstance(policy.get("rules"), str):
             policy["rules"] = json.loads(policy["rules"])
 
-        # Cache for TTL
+        # Cache for TTL — use explicit serialisation to avoid type loss.
+        # json.dumps(default=str) would silently convert datetimes to strings,
+        # causing type mismatches (str vs datetime) when rules compare dates.
+        def _json_serial(obj):
+            if hasattr(obj, "isoformat"):
+                return obj.isoformat()
+            if hasattr(obj, "hex"):  # UUID
+                return str(obj)
+            raise TypeError(f"Cannot serialise type: {type(obj)}")
         try:
             r = self._get_redis()
-            r.setex(self._cache_key(tenant_id, policy_id), _POLICY_CACHE_TTL, json.dumps(policy, default=str))
+            r.setex(
+                self._cache_key(tenant_id, policy_id),
+                _POLICY_CACHE_TTL,
+                json.dumps(policy, default=_json_serial),
+            )
         except Exception:
             pass
 
@@ -246,16 +258,19 @@ class PolicyEngine:
         policy_id: str,
         context: Dict[str, Any],
         tenant_id: str,
-        default_verdict: str = "ELIGIBLE",
+        default_verdict: str = "INELIGIBLE",
         actor_id: str = "system",
         entity_id: Optional[str] = None,
     ) -> PolicyResult:
         """Evaluate a policy against the provided context.
 
         Rules are evaluated in order. First match wins (short-circuit).
-        If no rule fires, default_verdict is returned (configurable per
-        call site — use "ELIGIBLE" for permissive defaults, "INELIGIBLE"
-        for strict defaults).
+        If no rule fires, default_verdict is returned.
+
+        SECURITY: default_verdict defaults to "INELIGIBLE" (deny-by-default)
+        to align with the ALIS Engineering Constitution's default-deny posture.
+        Call sites that require permissive defaults (e.g. informational lookups)
+        must explicitly pass default_verdict="ELIGIBLE".
 
         Every evaluation is automatically traced to the immutable audit
         ledger (action=POLICY_EVALUATED) with the full inputs snapshot,
