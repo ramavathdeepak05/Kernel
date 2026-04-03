@@ -1,40 +1,46 @@
 """
-ALIS LLM Task Router — tiered model dispatch
+ALIS LLM Task Router — tiered model dispatch + per-task timeout
 
 Problem: A single 1.5B model cannot reliably handle the full range of AI tasks
 in ALIS.  Structured slot-filling works fine at small scale, but document
 drafting, briefing generation, and eligibility reasoning need larger models or
 the output quality erodes institutional trust.
 
-Solution: Three task classes, each mapped to an appropriately sized model.
-All model names come from Settings (env-configurable), never hardcoded here.
+A secondary problem: the global ``ollama_timeout_seconds`` (120 s) applies to
+all tasks equally.  A slow 14B REASONING call consuming the full timeout is
+acceptable; a 1.5B EXTRACTION call doing so is a bug—it means the model is
+stuck and we should fail-fast and retry.
+
+Solution: Three task classes, each mapped to an appropriately sized model AND
+a hard per-class timeout.  All model names come from Settings
+(env-configurable), never hardcoded here.
 
 Task classes
 ────────────
-EXTRACTION  — structured data extraction, JSON schema output, slot-filling
+EXTRACTION  — structured data extraction, JSON schema output, slot-filling.
               Output is always machine-readable.  Small model (1.5B) is fine
               because the output space is constrained by the schema.
+              Hard timeout: 15 s — fail-fast, retry on timeout.
 
 GENERATION  — document drafting, email composition, briefing summaries,
-              lecture slide outlines.  Needs 7B+ for coherent long-form output
-              and consistent instruction-following.
+              lecture slide outlines.  Needs 7B+ for coherent long-form output.
+              Hard timeout: 60 s.
 
 REASONING   — multi-step decisions: eligibility evaluation, risk scoring,
               scholarship prioritisation, conflict detection in timetables.
               Needs 14B+ (or external API) for reliable chain-of-thought.
+              Hard timeout: 120 s (matches global Ollama default).
 
 EMBEDDING   — semantic search and RAG retrieval.  Always uses nomic-embed-text
               regardless of the tier settings above.
+              Hard timeout: 30 s.
 
 Usage
 ─────
-    from server.core.llm_router import LLMTaskClass, get_model_for_task
+    from server.core.llm_router import LLMTaskClass, get_model_for_task, get_timeout_for_task
 
-    model = get_model_for_task(LLMTaskClass.GENERATION)
-    # → "qwen2.5:7b-instruct"  (or whatever is set in env)
-
-    model = get_model_for_task(LLMTaskClass.EMBEDDING)
-    # → "nomic-embed-text"  (fixed, never overridden by task class)
+    model   = get_model_for_task(LLMTaskClass.GENERATION)    # "qwen2.5:7b-instruct"
+    timeout = get_timeout_for_task(LLMTaskClass.EXTRACTION)  # 15 (seconds)
 
 Agents should call get_model_for_task() rather than reading
 settings.ollama_extraction_model directly, so routing logic stays in one place.
@@ -105,3 +111,35 @@ def get_temperature_for_task(task_class: LLMTaskClass) -> float:
         LLMTaskClass.EMBEDDING:  0.0,
     }
     return _TEMP_MAP[task_class]
+
+
+def get_timeout_for_task(task_class: LLMTaskClass) -> int:
+    """
+    Return the hard timeout (seconds) for the given task class.
+
+    Rationale
+    ---------
+    EXTRACTION (15 s): 1.5B model with constrained JSON output — anything
+        longer means the model is stuck.  Fail-fast triggers a retry with
+        backoff, which is preferable to blocking the request for 2 minutes.
+
+    GENERATION (60 s): 7B model generating long-form text.  Longer outputs
+        legitimately take more time.
+
+    REASONING (120 s): 14B model or external API doing chain-of-thought.
+        Matches the global Ollama default — this is the maximum we tolerate.
+
+    EMBEDDING (30 s): Embedding calls are synchronous HTTP and should be fast.
+        30 s is generous; in practice nomic-embed-text finishes in < 5 s.
+
+    Override per-invocation if a specific agent has tighter SLA requirements.
+    These values are intentionally not in Settings because they should track the
+    model tier, not the deployment environment.
+    """
+    _TIMEOUT_MAP = {
+        LLMTaskClass.EXTRACTION: 15,
+        LLMTaskClass.GENERATION: 60,
+        LLMTaskClass.REASONING:  120,
+        LLMTaskClass.EMBEDDING:  30,
+    }
+    return _TIMEOUT_MAP[task_class]

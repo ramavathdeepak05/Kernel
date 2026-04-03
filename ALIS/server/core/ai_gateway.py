@@ -1062,10 +1062,21 @@ class AIGateway:
             )
         else:
             # Local Ollama (default — pre-S3 single-tenant path)
+            # Apply per-task-class timeout so slow models don't block fast tasks.
+            from server.core.llm_router import LLMTaskClass, get_timeout_for_task
+            _task_cls: LLMTaskClass = LLMTaskClass.EXTRACTION  # conservative default
+            if capability:
+                _cap_lower = capability.lower()
+                if any(k in _cap_lower for k in ("draft", "generat", "summar", "compos")):
+                    _task_cls = LLMTaskClass.GENERATION
+                elif any(k in _cap_lower for k in ("reason", "score", "eligib", "risk", "plan")):
+                    _task_cls = LLMTaskClass.REASONING
+            _task_timeout = resource_kwargs.pop("timeout", get_timeout_for_task(_task_cls))
             llm = OllamaLLM(
                 base_url=base_url,
                 model=model,
                 temperature=temperature,
+                timeout=_task_timeout,
                 **resource_kwargs,
             )
 
