@@ -412,12 +412,27 @@ def execute_query(
     tenant_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Synchronous execute_query (psycopg2) — backward-compatible default.
+    Synchronous execute_query (psycopg2) — for Celery workers only.
 
-    Used by all service-layer methods (sync).
-    Celery workers and service files should import this function.
-    For high-concurrency FastAPI handlers, use execute_query_async instead.
+    ** DO NOT CALL FROM FastAPI ASYNC HANDLERS. **
+    Use execute_query_async() instead. Calling this from an async context
+    blocks the event loop and degrades throughput under concurrency.
+    This function raises RuntimeError if an event loop is running.
     """
+    try:
+        import asyncio
+        asyncio.get_running_loop()
+        # If we reach here, a loop IS running — this is a misuse from async context.
+        raise RuntimeError(
+            "execute_query (psycopg2 sync) called inside a running asyncio event loop. "
+            "Use execute_query_async() in FastAPI route handlers to avoid event loop blocking. "
+            "Only Celery workers should use the sync variant."
+        )
+    except RuntimeError as re:
+        if "execute_query" in str(re):
+            raise
+        # No event loop running — safe to proceed (Celery context)
+        pass
     if not psycopg2:
         logger.warning("Mocking execute_query due to missing driver.")
         return []
@@ -476,10 +491,25 @@ def execute_transaction(
     tenant_id: Optional[str] = None
 ) -> None:
     """
-    Synchronous execute_transaction (psycopg2) — backward-compatible default.
-    Used by all service-layer methods and Celery workers.
-    For high-concurrency FastAPI handlers, use execute_transaction_async.
+    Synchronous execute_transaction (psycopg2) — for Celery workers only.
+
+    ** DO NOT CALL FROM FastAPI ASYNC HANDLERS. **
+    Use execute_transaction_async() instead. Calling this from an async context
+    blocks the event loop and degrades concurrency.
+    This function raises RuntimeError if an event loop is running.
     """
+    try:
+        import asyncio
+        asyncio.get_running_loop()
+        raise RuntimeError(
+            "execute_transaction (psycopg2 sync) called inside a running asyncio event loop. "
+            "Use execute_transaction_async() in FastAPI route handlers. "
+            "Only Celery workers should use the sync variant."
+        )
+    except RuntimeError as re:
+        if "execute_transaction" in str(re):
+            raise
+        pass
     if not psycopg2:
         logger.warning("Mocking execute_transaction.")
         return

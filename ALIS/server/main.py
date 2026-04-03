@@ -475,6 +475,22 @@ def create_app() -> FastAPI:
             checks["minio"] = f"error: {e}"
             healthy = False
 
+        # --- Vault ---
+        try:
+            from server.core.vault_client import get_vault_client
+            vault = get_vault_client()
+            if not vault._is_available():
+                raise RuntimeError("Vault health check failed — service is unreachable.")
+            checks["vault"] = "ok"
+        except Exception as e:
+            # Vault unavailable is warn-only in non-production (no exam PDFs)
+            from server.core.settings import settings as _settings
+            if _settings.is_production:
+                checks["vault"] = f"error: {e}"
+                healthy = False
+            else:
+                checks["vault"] = f"warn: {e}"
+
         status_code = 200 if healthy else 503
         return JSONResponse(
             status_code=status_code,
