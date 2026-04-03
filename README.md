@@ -10,11 +10,11 @@ Developed by QUAICU Solutions Private Limited in partnership with Woxsen Univers
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | FastAPI + Python 3.11, PostgreSQL 16 + pgvector, asyncpg + psycopg2 |
+| Backend | FastAPI + Python 3.11, PostgreSQL 16 + pgvector, asyncpg (FastAPI) + psycopg2 (Celery workers) |
 | Task queue | Celery + Redis |
 | AI | Ollama (`qwen2.5:1.5b-instruct-q8_0` + `nomic-embed-text`) |
 | Object storage | MinIO |
-| Secrets | HashiCorp Vault (Transit + KV v2) |
+| Secrets | HashiCorp Vault (Transit + KV v2) — TTL-cached, fail-closed tiers |
 | Frontend | React 19 + TypeScript, Vite 7, Tailwind v4, Radix UI |
 | Proxy | Nginx |
 | Control Plane | Standalone FastAPI microservice (tenant provisioning, billing, DNS) |
@@ -206,6 +206,21 @@ SaaS transformation (S1–S10) complete. Control Plane and AI Service microservi
 
 ---
 
+### Phase 2 Architectural Hardening (April 2026)
+
+| Item | Status |
+|------|--------|
+| Security fixes (20): tenant spoofing, RBAC bypass, session revocation, OTP atomicity | ✅ |
+| `execute_query` / `execute_transaction` async-loop guard — psycopg2 enforced to Celery only | ✅ |
+| `VaultClient` — TTL-based LRU cache (5 min), fail-closed critical tiers, `VaultUnavailableError` | ✅ |
+| `/ready` health probe — Vault connectivity check added | ✅ |
+| `AIGateway._extract_json` — upgraded to `JSONDecoder.raw_decode` (nested JSON) | ✅ |
+| `PolicyEngine` — default verdict `INELIGIBLE`, cache serialization fixes | ✅ |
+| `AuditLedger` — per-tenant async pool writes, chunked chain integrity (10 k rows) | ✅ |
+| `INTERNAL_SERVICE_SECRET` guard on `X-Tenant-ID` header (tenant spoofing prevention) | ✅ |
+
+---
+
 ## Key Conventions
 
 - API prefix: `/api/v1/`
@@ -216,7 +231,8 @@ SaaS transformation (S1–S10) complete. Control Plane and AI Service microservi
 - Soft delete: `status='ARCHIVED'` (lifecycle) or `status='ANNULLED'` (state machine)
 - AI outputs: advisory-only (`AIResponse` with `confidence` + `state_impact`), never auto-committed
 - Policy lifecycle: `DRAFT → SUBMITTED → ACTIVATED` via `PolicyService`
-- All DB writes: `execute_transaction()` only; reads: `execute_query()` only
+- All DB writes: `execute_transaction_async()` in FastAPI; `execute_transaction()` (psycopg2) in Celery workers only
+- All DB reads: `execute_query_async()` in FastAPI; `execute_query()` in Celery workers only
 
 See `specs/SKILL.md` for full development reference and invariants.
 
