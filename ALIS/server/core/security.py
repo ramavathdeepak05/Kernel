@@ -501,9 +501,15 @@ class SessionManager:
 
 class RateLimiter:
     """
-    Fixed-window rate limiter.
+    Simple Redis-based rate limiter using a fixed-window counter.
 
-    Redis-backed — safe for multi-worker deployments.
+    SECURITY NOTE: This uses a fixed-window approach. While sufficient for
+    standard API protection, it allows for a burst of 2x the limit at window
+    boundaries (e.g. limit-1 requests at the end of window N and limit-1
+    requests at the start of window N+1). For critical endpoints requiring
+    strict peak-load management, consider a sliding-window or token-bucket
+    implementation.
+
     Key: alis:rate:{identifier}  — INCR counter, TTL = window_seconds
     """
 
