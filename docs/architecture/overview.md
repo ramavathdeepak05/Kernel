@@ -55,16 +55,18 @@ Users don’t navigate complex menus. They simply express their **intent**.
 ---
 
 ### The Result: The 10x Administrator
-Because ALIS manages the complete end-to-end lifecycle across the entire institution, it acts like a highly competent, tireless Chief of Staff for every employee in the university. It covers 10 core operational pillars:
+Because ALIS manages the complete end-to-end lifecycle across the entire institution, it acts like a highly competent, tireless Chief of Staff for every employee in the university. ALIS is deployable as an **on-premises single-tenant installation** (Docker Compose, full data residency) or as a **managed SaaS service** (Kubernetes, multi-tenant with dedicated DB isolation per institution). It covers 12 core operational pillars:
 1. **Admissions & Intake:** Autonomous lead capturing, document verification, and fee collection.
-2. **Academics:** Automated timetables, attendance tracking, lecture generation, and mentorship.
+2. **Academics & LMS:** Automated timetables, attendance tracking, AI-generated course content, and in-house learning management.
 3. **Examinations:** Instant hall tickets, anonymous answer script distribution, auto-grading objective exams, and one-click grade card generation.
 4. **Student Services:** Placement drive tracking, library automation, and grievance routing.
 5. **Human Resources (HR):** Faculty workload mapping, automated leave approvals, and performance tracking.
-6. **Finance & Accounting:** Intelligent fee ledger management, automated scholarship disbursements, and dynamic invoicing.
-7. **Organizations & Roles:** Centralized tenant management and dynamic role assignments.
+6. **Finance & Accounting:** Intelligent fee ledger management, automated scholarship disbursements, GST e-invoicing, and dynamic invoicing.
+7. **Organizations & Roles:** Centralized multi-campus tenant management and dynamic role assignments.
 8. **Alumni Relations:** Post-graduation engagement, placement surveys, and mentorship matching.
-9. **Policy & Compliance:** A strict Governance Rule Engine that translates university regulations into unbending code.
-10. **Auditing & Reporting:** Immutable audit ledgers tracking every single system change and AI decision.
+9. **Policy & Compliance (DPDP/NAAC/NIRF):** A strict Governance Rule Engine that translates university regulations into unbending code, with full DPDP consent enforcement.
+10. **PhD & Doctoral Research:** Milestone tracking, DC meeting management, plagiarism checks, and thesis submission workflows.
+11. **Convocation Management:** Automated degree audits, gold medal computation, seating arrangement generation, and certificate issuance.
+12. **Auditing & Reporting:** Immutable audit ledgers tracking every single system change and AI decision.
 
 The human's job is no longer to "gather data" or jump between isolated software tools. Their job is strictly to exercise judgment, make compassionate decisions, and guide students. ALIS handles the rest.

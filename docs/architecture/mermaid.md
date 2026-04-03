@@ -209,6 +209,7 @@ graph TB
             TReporting["reporting"]
             TShadow["shadow_divergence"]
             TWebhook["webhook_retry (DLQ)"]
+            TLearning["learning_tasks (close_overdue_assignments — hourly, P40)"]
         end
     end
 
@@ -244,8 +245,8 @@ graph TB
         Locust["infra/loadtest/locustfile.py"]
     end
 
-    subgraph Migrations["ALIS/migrations/ — Alembic (40 versions)"]
-        Mig["0001 initial schema\n...\n0040 identity match & access lift"]
+    subgraph Migrations["ALIS/migrations/ — Alembic (41 versions)"]
+        Mig["0001 initial schema\n...\n0040 identity match & access lift\n0041 in-house LMS (course_materials, assignments, submissions)"]
     end
 
     subgraph Tests["ALIS/tests/ (45+ files)"]
