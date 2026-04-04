@@ -235,7 +235,7 @@ def compute_entry_hash(
         "metadata": metadata,
     }
     canonical = _canonical_payload(payload)
-    preimage = (previous_hash or "") + canonical
+    preimage = str(previous_hash or "") + str(canonical)
     return hashlib.sha256(preimage.encode("utf-8")).hexdigest()
 
 
@@ -446,6 +446,87 @@ class AuditLedger:
                 logger.exception("Failed to write to audit ledger")
                 raise
 
+
+    # ------------------------------------------------------------------
+    # Async audit (off critical path — drains via Celery worker)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def log_deferred(
+        action: AuditAction,
+        actor_id: str,
+        actor_role: Optional[str] = None,
+        entity_type: str = "",
+        entity_id: str = "",
+        tenant_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **extra_kwargs: Any,
+    ) -> bool:
+        """
+        Attempt to enqueue a NON-CRITICAL audit entry for async persistence.
+
+        Synchronous call (<1ms when Redis is available).
+        The perf_tasks.drain_audit_queue beat task (every 2s) persists
+        entries to DB with full hash-chain integrity.
+
+        CRITICAL actions (state_transition, login, override_*, lockdown_*,
+        password_*, etc.) are ALWAYS written synchronously via log() —
+        this method detects them and falls through to the sync path.
+
+        Also falls back to synchronous log() if Redis is unavailable.
+
+        Use for: AI_INVOCATION, READ, EVENT_PUBLISHED, GUARDRAIL_WARNING,
+                 POLICY_EVALUATED, CONFIG_CHANGE, etc.
+        Do NOT use for: STATE_TRANSITION, LOGIN, OVERRIDE_*, LOCKDOWN_*, etc.
+        (Those will be caught and written synchronously anyway.)
+        """
+        resolved_tenant = tenant_id
+        if not resolved_tenant:
+            try:
+                from server.core.security import get_current_tenant_id
+                resolved_tenant = get_current_tenant_id()
+            except Exception:
+                resolved_tenant = "SYSTEM"
+
+        resolved_role = actor_role or "unknown"
+        action_str = action.value if isinstance(action, AuditAction) else str(action)
+
+        merged_meta: Dict[str, Any] = dict(metadata or {})
+        if extra_kwargs:
+            merged_meta.update(extra_kwargs)
+
+        # Try async path for non-critical actions
+        try:
+            from server.core.perf import AsyncAuditWriter
+            # is_critical() returns True for state_transition, login, overrides, etc.
+            # Those skip Redis and go directly to synchronous DB write below.
+            if not AsyncAuditWriter.is_critical(action_str):
+                enqueued = AsyncAuditWriter.enqueue_sync(
+                    action=action_str,
+                    actor_id=actor_id,
+                    actor_role=resolved_role,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    tenant_id=resolved_tenant,
+                    metadata=merged_meta or None,
+                )
+                if enqueued:
+                    return True
+                # Redis unavailable — fall through to sync
+        except Exception:
+            pass
+
+        # Fallback: synchronous DB write (always durable, always correct)
+        AuditLedger.log(
+            action=action,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            tenant_id=resolved_tenant,
+            metadata=merged_meta if merged_meta else metadata,
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Convenience helpers (delegate to log())

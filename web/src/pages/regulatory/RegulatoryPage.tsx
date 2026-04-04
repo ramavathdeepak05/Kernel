@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '@/components/ui/alis-tabs';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -32,7 +33,7 @@ interface NirfParam {
 
 async function apiFetch<T>(path: string): Promise<T | null> {
   try {
-    const token = localStorage.getItem('token') ?? '';
+    const token = sessionStorage.getItem('token') ?? '';
     const res = await fetch(`/api/v1${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -157,7 +158,6 @@ function parseNirfParams(data: Record<string, unknown>): NirfParam[] {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export function RegulatoryPage() {
-  const [activeTab, setActiveTab] = useState<'naac' | 'nirf' | 'compliance'>('naac');
   const [showModal, setShowModal] = useState(false);
 
   const [naacCriteria, setNaacCriteria] = useState<NaacCriterion[]>([]);
@@ -220,32 +220,16 @@ export function RegulatoryPage() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: COLORS.surface, borderRadius: 8, padding: 4, width: 'fit-content' }}>
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setActiveTab(t.key)}
-            style={{
-              padding: '7px 18px',
-              borderRadius: 6,
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 500,
-              background: activeTab === t.key ? COLORS.purple : 'transparent',
-              color: activeTab === t.key ? '#fff' : COLORS.muted,
-              transition: 'all 0.15s',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <ALISTabs defaultValue="naac">
+        <ALISTabsList>
+          {tabs.map((t) => (
+            <ALISTabsTrigger key={t.key} value={t.key}>{t.label}</ALISTabsTrigger>
+          ))}
+        </ALISTabsList>
 
       {/* Tab 1: NAAC Criteria */}
-      {activeTab === 'naac' && (
-        loading ? (
+      <ALISTabsContent value="naac">
+      {loading ? (
           <p style={{ color: COLORS.muted, fontSize: 13 }}>Loading NAAC data…</p>
         ) : naacCriteria.length === 0 ? (
           <p style={{ color: COLORS.muted, fontSize: 13 }}>No NAAC metrics available. Ensure the regulatory feature flag is enabled and metrics have been recorded.</p>
@@ -289,10 +273,11 @@ export function RegulatoryPage() {
             })}
           </div>
         )
-      )}
+      }
+      </ALISTabsContent>
 
-      {/* Tab 2: NIRF Parameters */}
-      {activeTab === 'nirf' && (
+      <ALISTabsContent value="nirf">
+      {
         loading ? (
           <p style={{ color: COLORS.muted, fontSize: 13 }}>Loading NIRF data…</p>
         ) : nirfParams.length === 0 ? (
@@ -335,10 +320,11 @@ export function RegulatoryPage() {
             ))}
           </div>
         )
-      )}
+      }
+      </ALISTabsContent>
 
-      {/* Tab 3: Compliance Tracker */}
-      {activeTab === 'compliance' && (
+      <ALISTabsContent value="compliance">
+      {(
         <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, overflow: 'hidden' }}>
           <div style={{ padding: '14px 20px', borderBottom: `1px solid ${COLORS.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontWeight: 600, fontSize: 14, color: COLORS.text }}>Compliance Items ({COMPLIANCE_ITEMS.length})</span>
@@ -372,6 +358,8 @@ export function RegulatoryPage() {
           </div>
         </div>
       )}
+      </ALISTabsContent>
+      </ALISTabs>
 
       {/* Floating Upload Button */}
       <button

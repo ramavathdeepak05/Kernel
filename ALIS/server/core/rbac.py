@@ -634,9 +634,16 @@ def require_permission(permission: Permission):
     Decorator factory for requiring a specific permission.
     Use with FastAPI route handlers.
 
+    Enforcement pipeline (per request):
+      1. Lockdown check (in-memory, ~0ms) — fast rejection before any logic
+      2. RBAC check (in-memory dict lookup, ~0ms) — role → permission validation
+      3. Request context setup — sets RequestContext for read/write routing
+
     SECURITY: If the role cannot be resolved from request.state, the request
-    is DENIED (default-deny posture).  The old behaviour of silently executing
-    the handler when role is absent was a default-allow bypass.
+    is DENIED (default-deny posture).
+
+    Lockdown is enforced BOTH here (pre-check, fast rejection) AND in
+    execute_transaction (DB-level, prevents bypass). Dual enforcement.
 
     Example:
         @app.get("/students")
@@ -661,8 +668,6 @@ def require_permission(permission: Permission):
                 context = getattr(request.state, "access_context", {})
 
                 if role is None:
-                    # SECURITY: default deny — do not silently allow when role
-                    # is absent.  This prevents auth middleware bypass.
                     raise PermissionDeniedError(
                         message=(
                             "RBAC check failed: user_role not found on request.state. "
@@ -671,14 +676,53 @@ def require_permission(permission: Permission):
                         details={"permission_required": permission.value},
                     )
 
+                # --- Pre-check 1: Lockdown (in-memory, <1ms) ---
+                # Fast rejection before RBAC. Prevents unnecessary DB/Redis load
+                # during incident response. DB-level check in execute_transaction
+                # remains as defense-in-depth.
+                try:
+                    from server.core.lockdown import LockdownManager
+                    if LockdownManager.is_active():
+                        # For write permissions, block immediately.
+                        # Read permissions are allowed during lockdown.
+                        _write_perms = {
+                            Permission.USER_CREATE, Permission.USER_UPDATE, Permission.USER_DELETE,
+                            Permission.STUDENT_CREATE, Permission.STUDENT_UPDATE,
+                            Permission.FEE_CREATE, Permission.PAYMENT_PROCESS,
+                            Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
+                            Permission.MARKS_ENTRY, Permission.MARKS_FINALIZE,
+                            Permission.RESULT_PUBLISH, Permission.ANNOUNCEMENT_CREATE,
+                            Permission.BULK_MESSAGE, Permission.AI_INVOKE,
+                        }
+                        if permission in _write_perms:
+                            from server.core.exceptions import ALISError
+                            raise ALISError(
+                                message="System is in lockdown mode — write operations blocked.",
+                                details={"permission": permission.value},
+                            )
+                except ImportError:
+                    pass  # lockdown module not available — skip check
+
+                # --- Pre-check 2: RBAC (in-memory dict lookup, <1ms) ---
                 result = verify_access(role, permission, context)
                 if not result.allowed:
                     raise PermissionDeniedError(
                         message=result.reason,
                         details={"violations": result.context_violations}
                     )
+
+                # --- Setup: Request context for read/write routing ---
+                try:
+                    from server.core.request_context import RequestContext, set_request_context
+                    tenant_id = getattr(request.state, "tenant_id", "")
+                    ctx = RequestContext(
+                        tenant_id=tenant_id,
+                        consistency_mode="strong",
+                    )
+                    set_request_context(ctx)
+                except Exception:
+                    pass  # request_context module not available — no-op
             else:
-                # No request object available — also deny by default.
                 raise PermissionDeniedError(
                     message="RBAC check failed: no request object found in handler arguments.",
                     details={"permission_required": permission.value},

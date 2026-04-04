@@ -7,7 +7,7 @@ import uuid
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import ProgramCreate
 
@@ -66,7 +66,7 @@ class ProgramService:
         if not fields:
             raise BusinessRuleViolation(message="No updatable fields provided")
 
-        set_clause = ", ".join(f"{k} = %s" for k in fields)
+        set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in fields)
         values = list(fields.values()) + [program_id, org_id]
         execute_transaction([(
             f"UPDATE programs SET {set_clause}, updated_at = NOW() WHERE id = %s AND org_id = %s",

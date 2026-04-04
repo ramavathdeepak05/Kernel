@@ -30,6 +30,7 @@ import { useALISRole } from '../hooks/useALISRole'
 import { useAgentContext } from '../hooks/useAgentContext'
 import { useAgentCanvasSync } from '../hooks/useAgentCanvasSync'
 import { MODULE_ICONS, MODULE_LABELS, MODULE_ROUTES } from '../lib/role-config'
+import type { ALISModule } from '../lib/canvas-actions'
 import { CampusSwitcher } from '../components/CampusSwitcher'
 
 function useMobile() {
@@ -177,7 +178,7 @@ function MobileNavDrawer({
         </div>
 
         {/* Module list */}
-        {visibleModules.map((mod) => {
+        {visibleModules.map((mod: ALISModule) => {
           const active = location.pathname.startsWith(MODULE_ROUTES[mod])
           return (
             <button
@@ -269,7 +270,7 @@ export function ALISShell() {
         className="alis-shell"
         style={{
           display: 'grid',
-          gridTemplateColumns: '52px 1fr 320px',
+          gridTemplateColumns: 'auto 1fr 320px',
           height: '100vh',
           overflow: 'hidden',
           background: 'var(--color-background-primary)',

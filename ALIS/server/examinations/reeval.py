@@ -245,3 +245,140 @@ class ReEvalService:
             (org_id,),
         )
         return [dict(r) for r in rows]
+
+
+# ======================================================================
+# EC-EXM-03 — Revaluation + Supplementary Overlap Escrow
+# ======================================================================
+
+class RevalSupplementaryEscrowService:
+    """
+    Handles the overlap when a student has both a pending revaluation
+    AND needs to register for a supplementary exam for the same course.
+
+    Workflow:
+    1. Student registers for supplementary → system checks for pending reeval
+    2. If reeval pending: supplementary registration is CONDITIONAL
+    3. Fee goes to escrow (not final collection)
+    4. If reeval resolves to REVISED (pass) → supplementary cancelled, escrow refunded
+    5. If reeval resolves to REJECTED → supplementary confirmed, escrow released to fees
+    6. If reeval still pending at T-7 days before supplementary → auto-confirm
+
+    States:
+        CONDITIONAL → CONFIRMED | CANCELLED_REEVAL_PASS | AUTO_CONFIRMED
+    """
+
+    @classmethod
+    def register_conditional(
+        cls,
+        org_id: str,
+        student_id: str,
+        course_id: str,
+        supplementary_exam_id: str,
+        reeval_request_id: str,
+        escrow_amount: float,
+        actor_id: str,
+    ) -> dict:
+        """Register for supplementary with escrow (revaluation pending)."""
+        escrow_id = str(uuid.uuid4())
+        execute_transaction([
+            (
+                """
+                INSERT INTO reval_supplementary_escrows
+                    (id, org_id, student_id, course_id, supplementary_exam_id,
+                     reeval_request_id, escrow_amount, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'CONDITIONAL', NOW())
+                """,
+                (escrow_id, org_id, student_id, course_id, supplementary_exam_id,
+                 reeval_request_id, escrow_amount),
+            )
+        ], tenant_id=org_id)
+
+        AuditLog.log(
+            action=AuditAction.CREATE, actor_id=actor_id, actor_role="student",
+            entity_type="reval_supplementary_escrow", entity_id=escrow_id,
+            tenant_id=org_id,
+            metadata={
+                "reeval_request_id": reeval_request_id,
+                "supplementary_exam_id": supplementary_exam_id,
+                "escrow_amount": escrow_amount,
+                "event": "conditional_supplementary_registered",
+            },
+        )
+        return {"escrow_id": escrow_id, "status": "CONDITIONAL"}
+
+    @classmethod
+    def resolve_on_reeval_decision(cls, org_id: str, reeval_request_id: str, decision: str) -> None:
+        """Called by ReEvalService event handler when a reeval is decided."""
+        escrows = execute_query(
+            "SELECT id, student_id, escrow_amount FROM reval_supplementary_escrows "
+            "WHERE reeval_request_id = %s AND org_id = %s AND status = 'CONDITIONAL'",
+            (reeval_request_id, org_id),
+            tenant_id=org_id,
+        )
+        for esc in escrows:
+            if decision == "REVISED":
+                # Reeval passed → cancel supplementary, refund escrow
+                execute_transaction([
+                    (
+                        "UPDATE reval_supplementary_escrows SET status = 'CANCELLED_REEVAL_PASS', "
+                        "resolved_at = NOW() WHERE id = %s",
+                        (esc["id"],),
+                    )
+                ], tenant_id=org_id)
+                # Trigger refund
+                DomainEventBus.publish(DomainEvent(
+                    event_type="finance.escrow_refund_requested",
+                    org_id=org_id,
+                    payload={
+                        "escrow_id": esc["id"],
+                        "student_id": str(esc["student_id"]),
+                        "amount": float(esc["escrow_amount"]),
+                        "reason": "revaluation_passed",
+                    },
+                ))
+            elif decision == "REJECTED":
+                # Reeval rejected → confirm supplementary, release escrow to fees
+                execute_transaction([
+                    (
+                        "UPDATE reval_supplementary_escrows SET status = 'CONFIRMED', "
+                        "resolved_at = NOW() WHERE id = %s",
+                        (esc["id"],),
+                    )
+                ], tenant_id=org_id)
+                DomainEventBus.publish(DomainEvent(
+                    event_type="finance.escrow_released_to_fees",
+                    org_id=org_id,
+                    payload={
+                        "escrow_id": esc["id"],
+                        "student_id": str(esc["student_id"]),
+                        "amount": float(esc["escrow_amount"]),
+                    },
+                ))
+
+    @classmethod
+    def auto_confirm_overdue(cls, org_id: str, days_before_exam: int = 7) -> int:
+        """Beat task: auto-confirm escrows when supplementary is within N days."""
+        escrows = execute_query(
+            """
+            SELECT e.id FROM reval_supplementary_escrows e
+            JOIN exam_schedules es ON es.id = e.supplementary_exam_id
+            WHERE e.org_id = %s AND e.status = 'CONDITIONAL'
+            AND es.exam_date <= NOW() + INTERVAL '%s days'
+            """,
+            (org_id, days_before_exam),
+            tenant_id=org_id,
+        )
+        count = 0
+        for esc in escrows:
+            execute_transaction([
+                (
+                    "UPDATE reval_supplementary_escrows SET status = 'AUTO_CONFIRMED', "
+                    "resolved_at = NOW() WHERE id = %s AND status = 'CONDITIONAL'",
+                    (esc["id"],),
+                )
+            ], tenant_id=org_id)
+            count += 1
+        if count:
+            logger.info("EC-EXM-03: Auto-confirmed %d conditional supplementary registrations", count)
+        return count

@@ -117,6 +117,11 @@ def seed(conn: psycopg2.extensions.connection) -> None:
     # 1. Organisation
     # ----------------------------------------------------------------
     print(f"  -> Organisation: {ORG_NAME} ({ORG_SLUG})")
+    # Use the slug as the canonical tenant_id — this is what the login form sends.
+    # The organizations table stores the UUID as id, but users.tenant_id = slug
+    # so that login(tenant_id="demo") finds users WHERE tenant_id = "demo".
+    tenant_id = ORG_SLUG
+
     cur.execute("SELECT id FROM organizations WHERE slug = %s", (ORG_SLUG,))
     existing_org = cur.fetchone()
     if existing_org:
@@ -126,12 +131,12 @@ def seed(conn: psycopg2.extensions.connection) -> None:
         org_id = str(uuid.uuid4())
         cur.execute(
             """
-            INSERT INTO organizations (id, name, slug, status, metadata)
-            VALUES (%s, %s, %s, 'ACTIVE', %s)
+            INSERT INTO organizations (id, tenant_id, name, code, slug, status, is_deleted, entity_type, created_by, created_at)
+            VALUES (%s, %s, %s, %s, %s, 'ACTIVE', FALSE, 'STANDALONE', 'SYSTEM_SEED', NOW())
             """,
-            (org_id, ORG_NAME, ORG_SLUG, json.dumps({"programs": PROGRAMS})),
+            (org_id, tenant_id, ORG_NAME, ORG_SLUG.upper(), ORG_SLUG),
         )
-        print(f"    Created: {org_id}")
+        print(f"    Created: {org_id} (tenant_id={tenant_id})")
 
     # ----------------------------------------------------------------
     # 2. SUPER_ADMIN user
@@ -139,7 +144,7 @@ def seed(conn: psycopg2.extensions.connection) -> None:
     print(f"  -> SUPER_ADMIN: {ADMIN_EMAIL}")
     cur.execute(
         "SELECT id FROM users WHERE tenant_id = %s AND email = %s",
-        (org_id, ADMIN_EMAIL),
+        (tenant_id, ADMIN_EMAIL),
     )
     if cur.fetchone():
         print("    Already exists -- skipping")
@@ -148,12 +153,105 @@ def seed(conn: psycopg2.extensions.connection) -> None:
         pw_hash = _pwd.hash(ADMIN_PASSWORD)
         cur.execute(
             """
-            INSERT INTO users (id, tenant_id, username, email, display_name, role, status, password_hash, actor_type)
-            VALUES (%s, %s, %s, %s, 'System Administrator', 'SUPER_ADMIN', 'ACTIVE', %s, 'human')
+            INSERT INTO users (id, tenant_id, username, email, display_name, role, status,
+                               password_hash, actor_type, is_deleted)
+            VALUES (%s, %s, %s, %s, 'System Administrator', 'SUPER_ADMIN', 'ACTIVE', %s, 'human', FALSE)
             """,
-            (admin_id, org_id, ADMIN_EMAIL, ADMIN_EMAIL, pw_hash),
+            (admin_id, tenant_id, ADMIN_EMAIL, ADMIN_EMAIL, pw_hash),
         )
         print(f"    Created: {admin_id}")
+
+    # ----------------------------------------------------------------
+    # 2b. All role-based users (demo credentials)
+    # ----------------------------------------------------------------
+    ROLE_USERS = [
+        {
+            "email": "registrar@demo.edu",
+            "username": "registrar@demo.edu",
+            "display_name": "Dr. Rajesh Kumar (Registrar)",
+            "role": "REGISTRAR",
+            "password": "Registrar@1234",
+        },
+        {
+            "email": "dean@demo.edu",
+            "username": "dean@demo.edu",
+            "display_name": "Dr. Sunita Reddy (Dean — Academics)",
+            "role": "DEAN",
+            "password": "Dean@1234",
+        },
+        {
+            "email": "hod.cs@demo.edu",
+            "username": "hod.cs@demo.edu",
+            "display_name": "Dr. Anand Rao (HOD — Computer Science)",
+            "role": "HOD",
+            "password": "HOD@1234",
+        },
+        {
+            "email": "faculty@demo.edu",
+            "username": "faculty@demo.edu",
+            "display_name": "Dr. Kavitha Sharma (Faculty — CSE)",
+            "role": "FACULTY",
+            "password": "Faculty@1234",
+        },
+        {
+            "email": "student@demo.edu",
+            "username": "student@demo.edu",
+            "display_name": "Arjun Mehta (Student — B.Tech CSE)",
+            "role": "STUDENT",
+            "password": "Student@1234",
+        },
+        {
+            "email": "finance@demo.edu",
+            "username": "finance@demo.edu",
+            "display_name": "Meera Iyer (Finance Officer)",
+            "role": "FINANCE_OFFICER",
+            "password": "Finance@1234",
+        },
+        {
+            "email": "coe@demo.edu",
+            "username": "coe@demo.edu",
+            "display_name": "Dr. Vikram Nair (Controller of Examinations)",
+            "role": "COE",
+            "password": "CoE@1234",
+        },
+        {
+            "email": "hr@demo.edu",
+            "username": "hr@demo.edu",
+            "display_name": "Priya Desai (HR Manager)",
+            "role": "HR_MANAGER",
+            "password": "HR@1234",
+        },
+        {
+            "email": "admin@demo.edu",
+            "username": "admin@demo.edu",
+            "display_name": "System Administrator",
+            "role": "ADMIN",
+            "password": "Admin@1234",
+        },
+    ]
+
+    print("  -> Seeding all role-based users")
+    for u in ROLE_USERS:
+        cur.execute(
+            "SELECT id FROM users WHERE tenant_id = %s AND email = %s",
+            (tenant_id, u["email"]),
+        )
+        if cur.fetchone():
+            print(f"    {u['role']:20s} {u['email']:30s} -- already exists")
+        else:
+            user_id = str(uuid.uuid4())
+            pw_hash = _pwd.hash(u["password"])
+            cur.execute(
+                """
+                INSERT INTO users
+                    (id, tenant_id, username, email, display_name, role, status,
+                     password_hash, actor_type, is_deleted)
+                VALUES (%s, %s, %s, %s, %s, %s, 'ACTIVE', %s, 'human', FALSE)
+                """,
+                (user_id, tenant_id, u["username"], u["email"],
+                 u["display_name"], u["role"], pw_hash),
+            )
+            print(f"    {u['role']:20s} {u['email']:30s} / {u['password']}")
 
     # ----------------------------------------------------------------
     # 3. Institution policies

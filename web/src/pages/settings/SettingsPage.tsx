@@ -10,6 +10,7 @@
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import { alisApi } from '../../lib/alis-api'
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '@/components/ui/alis-tabs'
 
 // ─────────────────────────────────────────────
 // Types
@@ -287,14 +288,6 @@ function WhatsAppTab() {
 // ─────────────────────────────────────────────
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<'roles' | 'whatsapp' | 'flags'>('roles')
-
-  const tabs: { key: typeof tab; label: string }[] = [
-    { key: 'roles',    label: 'Roles & Permissions' },
-    { key: 'whatsapp', label: 'WhatsApp DLT Templates' },
-    { key: 'flags',    label: 'Feature Flags' },
-  ]
-
   return (
     <div style={styles.page}>
       <div style={styles.pageHeader}>
@@ -302,23 +295,18 @@ export function SettingsPage() {
         <p style={styles.pageSubtitle}>System configuration — Super Admin only</p>
       </div>
 
-      <div style={styles.tabBar}>
-        {tabs.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{ ...styles.tabBtn, ...(tab === t.key ? styles.tabActive : {}) }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      <div style={styles.tabContent}>
-        {tab === 'roles'    && <RolesTab />}
-        {tab === 'whatsapp' && <WhatsAppTab />}
-        {tab === 'flags'    && <FeatureFlagsTab />}
-      </div>
+      <ALISTabs defaultValue="roles">
+        <ALISTabsList>
+          <ALISTabsTrigger value="roles">Roles & Permissions</ALISTabsTrigger>
+          <ALISTabsTrigger value="whatsapp">WhatsApp DLT Templates</ALISTabsTrigger>
+          <ALISTabsTrigger value="flags">Feature Flags</ALISTabsTrigger>
+        </ALISTabsList>
+        <div style={styles.tabContent}>
+          <ALISTabsContent value="roles"><RolesTab /></ALISTabsContent>
+          <ALISTabsContent value="whatsapp"><WhatsAppTab /></ALISTabsContent>
+          <ALISTabsContent value="flags"><FeatureFlagsTab /></ALISTabsContent>
+        </div>
+      </ALISTabs>
     </div>
   )
 }

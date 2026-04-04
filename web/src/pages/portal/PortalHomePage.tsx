@@ -1,6 +1,7 @@
 import { useState, FormEvent } from "react";
 import { ArrowRight, BookOpen, Clock, Users } from "lucide-react";
 import { leadsApi } from "@/services/admissions";
+import { MorphingTextReveal } from "@/components/ui/morphing-text-reveal";
 
 const PROGRAMS = [
   { name: "B.Tech", specializations: ["Computer Engineering", "Electronics", "Mechanical", "Civil"], seats: 120 },
@@ -44,9 +45,19 @@ export default function PortalHomePage() {
           Shape Your Future.
           <br />Apply Today.
         </h1>
-        <p className="text-[15px] text-slate-500 max-w-xl mx-auto">
-          A fully automated, AI-assisted admissions process. Apply online, track in real time, get decisions faster.
-        </p>
+        <div className="h-6 mb-2 flex justify-center">
+          <MorphingTextReveal
+            texts={[
+              "AI-assisted admissions process.",
+              "Apply online, track in real time.",
+              "Get decisions faster.",
+              "Fully automated. Fully transparent.",
+            ]}
+            className="text-[15px] text-slate-500"
+            interval={3500}
+            glitchOnHover={false}
+          />
+        </div>
 
         {/* CTA */}
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
@@ -71,16 +82,17 @@ export default function PortalHomePage() {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4 mb-12">
         {[
-          { icon: Users, label: "Applications received", value: "2,847" },
-          { icon: BookOpen, label: "Programs available", value: "6" },
-          { icon: Clock, label: "Avg. processing time", value: "48h" },
+          { icon: Users, label: "Applications received", end: 2847, suffix: "" },
+          { icon: BookOpen, label: "Programs available", end: 6, suffix: "" },
+          { icon: Clock, label: "Avg. processing time", end: 48, suffix: "h" },
         ].map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.label} className="portal-card p-5 text-center">
-              <Icon className="w-5 h-5 text-blue-500 mx-auto mb-2" />
-              <div className="text-2xl font-bold text-slate-900 mb-1" style={{ fontFamily: "var(--font-family-sans)" }}>
-                {stat.value}
+            <div key={stat.label} className="portal-card p-5 text-center group hover:shadow-lg transition-all">
+              <Icon className="w-5 h-5 text-blue-500 mx-auto mb-2 group-hover:scale-110 transition-transform" />
+              <div className="flex items-baseline justify-center gap-0.5 mb-1">
+                <span className="text-2xl font-bold text-slate-900">{stat.end}</span>
+                {stat.suffix && <span className="text-2xl font-bold text-slate-900">{stat.suffix}</span>}
               </div>
               <div className="text-[11px] text-slate-500">{stat.label}</div>
             </div>

@@ -4,6 +4,7 @@ import {
   Users, BookOpen, Bus, Home, AlertCircle,
   CheckCircle2, Clock, ChevronRight, TrendingUp,
 } from "lucide-react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 
 // ── Design tokens (ALIS OS spec) ──────────────────────────────
 const TEAL = "#1D9E75";
@@ -45,7 +46,7 @@ function Badge({ variant, children }: { variant: keyof typeof BADGE; children: R
 const API = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 
 async function apiFetch<T>(endpoint: string): Promise<T> {
-  const token = localStorage.getItem("token");
+  const token = sessionStorage.getItem("token");
   const res = await fetch(`${API}${endpoint}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -489,7 +490,7 @@ function GrievancesTab() {
     setSaving(true);
     setErr("");
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const r = await fetch(`${API}/student-services/grievances`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
@@ -639,8 +640,6 @@ const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
 ];
 
 export default function StudentServicesPage() {
-  const [tab, setTab] = useState<TabId>("overview");
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
@@ -661,35 +660,25 @@ export default function StudentServicesPage() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div style={{ display: "flex", gap: 4, marginTop: 16 }}>
-          {tabs.map((t) => (
-            <button key={t.id}
-              onClick={() => setTab(t.id)}
-              style={{
-                display: "flex", alignItems: "center", gap: 6,
-                padding: "6px 12px", borderRadius: 8,
-                fontSize: 11, fontWeight: 500, cursor: "pointer",
-                background: tab === t.id ? TEAL_BG : "transparent",
-                color: tab === t.id ? TEAL : "#64748b",
-                border: `0.5px solid ${tab === t.id ? TEAL_BORDER : "transparent"}`,
-                transition: "all 0.12s",
-              }}>
-              {t.icon}
-              {t.label}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* Content */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
-        {tab === "overview"   && <OverviewTab />}
-        {tab === "hostel"     && <HostelTab />}
-        {tab === "library"    && <LibraryTab />}
-        {tab === "transport"  && <TransportTab />}
-        {tab === "grievances" && <GrievancesTab />}
-      </div>
+      <ALISTabs defaultValue="overview">
+        <div style={{ flexShrink: 0, padding: "0 24px" }}>
+          <ALISTabsList>
+            {tabs.map((t) => (
+              <ALISTabsTrigger key={t.id} value={t.id}>{t.icon} {t.label}</ALISTabsTrigger>
+            ))}
+          </ALISTabsList>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
+          <ALISTabsContent value="overview"><OverviewTab /></ALISTabsContent>
+          <ALISTabsContent value="hostel"><HostelTab /></ALISTabsContent>
+          <ALISTabsContent value="library"><LibraryTab /></ALISTabsContent>
+          <ALISTabsContent value="transport"><TransportTab /></ALISTabsContent>
+          <ALISTabsContent value="grievances"><GrievancesTab /></ALISTabsContent>
+        </div>
+      </ALISTabs>
     </div>
   );
 }

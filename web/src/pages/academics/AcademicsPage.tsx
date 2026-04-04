@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import {
   BookOpen,
   Users,
@@ -693,7 +694,6 @@ function MentorshipTab() {
 // ── Main Page ─────────────────────────────────────────────────
 
 export default function AcademicsPage() {
-  const [activeTab, setActiveTab] = useState<TabId>("overview");
   const insights = useAcademicsInsights();
   const atRisk = useAtRiskStudents();
 
@@ -739,12 +739,20 @@ export default function AcademicsPage() {
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto pr-1">
-        <TabNav active={activeTab} onChange={setActiveTab} />
-        {activeTab === "overview"   && <OverviewTab />}
-        {activeTab === "courses"    && <CoursesTab />}
-        {activeTab === "timetable"  && <TimetableTab />}
-        {activeTab === "attendance" && <AttendanceTab />}
-        {activeTab === "mentorship" && <MentorshipTab />}
+        <ALISTabs defaultValue="overview">
+          <ALISTabsList className="mb-5">
+            <ALISTabsTrigger value="overview"><BarChart3 className="w-3 h-3" /> Overview</ALISTabsTrigger>
+            <ALISTabsTrigger value="courses"><BookOpen className="w-3 h-3" /> Courses</ALISTabsTrigger>
+            <ALISTabsTrigger value="timetable"><Calendar className="w-3 h-3" /> Timetable</ALISTabsTrigger>
+            <ALISTabsTrigger value="attendance"><Activity className="w-3 h-3" /> Attendance</ALISTabsTrigger>
+            <ALISTabsTrigger value="mentorship"><Brain className="w-3 h-3" /> Mentorship</ALISTabsTrigger>
+          </ALISTabsList>
+          <ALISTabsContent value="overview"><OverviewTab /></ALISTabsContent>
+          <ALISTabsContent value="courses"><CoursesTab /></ALISTabsContent>
+          <ALISTabsContent value="timetable"><TimetableTab /></ALISTabsContent>
+          <ALISTabsContent value="attendance"><AttendanceTab /></ALISTabsContent>
+          <ALISTabsContent value="mentorship"><MentorshipTab /></ALISTabsContent>
+        </ALISTabs>
       </div>
     </div>
   );

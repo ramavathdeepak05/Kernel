@@ -6,7 +6,7 @@ import uuid
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import AlumniProfileCreate, AlumniProfileUpdate
 

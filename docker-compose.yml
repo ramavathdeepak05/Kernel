@@ -13,14 +13,16 @@ services:
       POSTGRES_DB: ${DB_NAME:-alis_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./ALIS/migrations/init:/docker-entrypoint-initdb.d   # runs on first boot
+      - ./ALIS/migrations/init:/docker-entrypoint-initdb.d # runs on first boot
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-alis_db}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-alis_db}" ]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - data
 
   # ---------------------------------------------------------------------------
   # Redis 7 (Celery broker + result backend)
@@ -30,18 +32,20 @@ services:
     container_name: alis_redis
     restart: unless-stopped
     command: >
-      redis-server
-      --maxmemory 512mb
-      --maxmemory-policy allkeys-lru
+      redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+      --requirepass ${REDIS_PASSWORD:-change-me-redis-password}
     volumes:
       - redis_data:/data
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - data
+      - ai
 
   # ---------------------------------------------------------------------------
   # Ollama (local LLM + embeddings)
@@ -63,10 +67,12 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "ollama", "list"]
+      test: [ "CMD", "ollama", "list" ]
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - ai
 
   # ---------------------------------------------------------------------------
   # MinIO (S3-compatible local file storage)
@@ -82,13 +88,15 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # MinIO Console (web UI)
+      - "9000:9000" # S3 API
+      - "9001:9001" # MinIO Console (web UI)
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
+    networks:
+      - data
 
   # ---------------------------------------------------------------------------
   # ALIS FastAPI Application
@@ -101,10 +109,13 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      DB_HOST: pgbouncer        # route through PgBouncer, not directly to postgres
+      DB_HOST: postgres
       DB_PORT: 5432
-      PGBOUNCER_ENABLED: "true"
+      PGBOUNCER_ENABLED: "false"
+      PGBOUNCER_HOST: postgres
+      PGBOUNCER_PORT: "5432"
       REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change-me-redis-password}
       OLLAMA_BASE_URL: http://ollama:11434
       MINIO_ENDPOINT: minio:9000
       VAULT_ADDR: http://vault:8200
@@ -121,18 +132,85 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
-    volumes:
-      - ./ALIS:/app                   # live-reload in dev
     command: >
-      uvicorn server.main:app
-      --host 0.0.0.0
-      --port 8000
-      --reload
+      uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers 4
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1" ]
       interval: 15s
       timeout: 5s
       retries: 5
+    networks:
+      - data
+      - ai
+      - public
+
+  # ---------------------------------------------------------------------------
+  # ALIS Control Plane (SaaS tenant lifecycle — S2)
+  # ---------------------------------------------------------------------------
+  control_plane:
+    build:
+      context: ./control_plane
+      dockerfile: Dockerfile
+    container_name: alis_control_plane
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      CP_DB_HOST: pgbouncer
+      CP_DB_PORT: 5432
+      CP_PG_ADMIN_HOST: postgres
+      CP_PG_ADMIN_PORT: 5432
+      S3_ENDPOINT_URL: http://minio:9000
+      VAULT_ADDR: http://vault:8200
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      vault:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./ALIS/migrations:/app/ALIS/migrations:ro # Provisioner runs Alembic on tenant DBs
+    command: >
+      uvicorn control_plane.main:app --host 0.0.0.0 --port 8001 --workers 2
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8001/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - data
+
+  # ---------------------------------------------------------------------------
+  # ALIS AI Service (centralised AI inference — S3)
+  # ---------------------------------------------------------------------------
+  ai_service:
+    build:
+      context: ./ai_service
+      dockerfile: Dockerfile
+    container_name: alis_ai_service
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      REDIS_URL: redis://redis:6379/1
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8002:8002"
+    command: >
+      uvicorn ai_service.main:app --host 0.0.0.0 --port 8002 --workers 2
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:8002/health || exit 1" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai
 
   # ---------------------------------------------------------------------------
   # Celery Worker
@@ -149,6 +227,7 @@ services:
       DB_PORT: 5432
       PGBOUNCER_ENABLED: "true"
       REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change-me-redis-password}
       OLLAMA_BASE_URL: http://ollama:11434
       MINIO_ENDPOINT: minio:9000
     depends_on:
@@ -159,10 +238,10 @@ services:
     volumes:
       - ./ALIS:/app
     command: >
-      celery -A server.worker worker
-      --loglevel=info
-      --concurrency=4
-      --queues=default,ai_tasks,notifications
+      celery -A server.worker worker --loglevel=info --concurrency=4 --queues=default,ai_tasks,notifications
+    networks:
+      - data
+      - ai
 
   # ---------------------------------------------------------------------------
   # Celery Beat (periodic tasks — academic calendar, fee checks, reminders)
@@ -178,6 +257,7 @@ services:
       DB_HOST: pgbouncer
       DB_PORT: "5432"
       REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-change-me-redis-password}
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -186,9 +266,9 @@ services:
     volumes:
       - ./ALIS:/app
     command: >
-      celery -A server.worker beat
-      --loglevel=info
-      --schedule=/tmp/celerybeat-schedule
+      celery -A server.worker beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    networks:
+      - data
 
   # ---------------------------------------------------------------------------
   # PgBouncer (connection pooler — session mode, max 1000 clients → 80 backend)
@@ -199,24 +279,24 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgres://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@postgres:5432/${DB_NAME:-alis_db}
-      POOL_MODE: session
+      POOL_MODE: transaction
       MAX_CLIENT_CONN: 1000
       DEFAULT_POOL_SIZE: 80
-      SERVER_IDLE_TIMEOUT: 30    # free idle backend after 30s
-      CLIENT_IDLE_TIMEOUT: 600   # close idle client after 10m
-      SERVER_RESET_QUERY: DISCARD ALL
+      SERVER_IDLE_TIMEOUT: 30 # free idle backend after 30s
+      CLIENT_IDLE_TIMEOUT: 600 # close idle client after 10m
+      # SERVER_RESET_QUERY not needed in transaction mode (PgBouncer handles it)
     ports:
-      - "6432:5432"              # 6432 externally, 5432 inside alis_network
+      - "6432:5432" # 6432 externally, 5432 inside alis_network
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 5432 || exit 1"]
+      test: [ "CMD-SHELL", "pg_isready -h localhost -p 5432 || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 5
     networks:
-      - default
+      - data
 
   # ---------------------------------------------------------------------------
   # HashiCorp Vault (P0-2: exam paper encryption + CoE-only decrypt + audit)
@@ -250,13 +330,15 @@ services:
       - vault_data:/vault/data
       - vault_logs:/vault/logs
       - ./infra/vault:/vault/config:ro
-    entrypoint: ["sh", "/vault/config/vault-autostart.sh"]
+    entrypoint: [ "sh", "/vault/config/vault-autostart.sh" ]
     healthcheck:
-      test: ["CMD-SHELL", "vault status -address=http://localhost:8200 | grep -E 'Sealed.*false|Active' || exit 1"]
+      test: [ "CMD-SHELL", "vault status -address=http://localhost:8200 | grep -E 'Sealed.*false|Active' || exit 1" ]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
+    networks:
+      - data
 
   # ---------------------------------------------------------------------------
   # Prometheus (metrics scraping)
@@ -276,10 +358,13 @@ services:
       - --storage.tsdb.retention.time=30d
       - --web.enable-lifecycle
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1" ]
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - data
+      - observability
 
   # ---------------------------------------------------------------------------
   # Grafana (dashboards)
@@ -300,6 +385,8 @@ services:
     depends_on:
       - prometheus
       - loki
+    networks:
+      - observability
 
   # ---------------------------------------------------------------------------
   # Loki (log aggregation)
@@ -314,6 +401,8 @@ services:
       - ./infra/monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
       - loki_data:/loki
     command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - observability
 
   # ---------------------------------------------------------------------------
   # Promtail (log shipper — reads Docker container logs)
@@ -329,6 +418,8 @@ services:
     command: -config.file=/etc/promtail/config.yml
     depends_on:
       - loki
+    networks:
+      - observability
 
   # ---------------------------------------------------------------------------
   # Alertmanager (routes Prometheus alerts → email / webhook)
@@ -346,10 +437,12 @@ services:
       - --config.file=/etc/alertmanager/config.yml
       - --storage.path=/alertmanager
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:9093/-/healthy || exit 1"]
+      test: [ "CMD-SHELL", "wget -q --spider http://localhost:9093/-/healthy || exit 1" ]
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - observability
 
   # ---------------------------------------------------------------------------
   # Nginx (reverse proxy + SSL termination)
@@ -363,14 +456,17 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro    # SSL certificates
+      - ./nginx/certs:/etc/nginx/certs:ro # SSL certificates
     depends_on:
       - app
     healthcheck:
-      test: ["CMD-SHELL", "nginx -t || exit 1"]
+      test: [ "CMD-SHELL", "nginx -t || exit 1" ]
       interval: 30s
       timeout: 5s
       retries: 3
+    networks:
+      - public
+      - data
 
 volumes:
   postgres_data:
@@ -384,6 +480,17 @@ volumes:
   loki_data:
   alertmanager_data:
 
+
 networks:
-  default:
-    name: alis_network
+  # data-plane: app, workers, control plane, pgbouncer, postgres, redis, minio, vault
+  data:
+    name: alis_data
+  # ai: app and ai_service talk to ollama; isolated from billing/control-plane internals
+  ai:
+    name: alis_ai
+  # observability: prometheus, grafana, loki, alertmanager — no access to data-plane secrets
+  observability:
+    name: alis_observability
+  # public: nginx ingress only
+  public:
+    name: alis_public

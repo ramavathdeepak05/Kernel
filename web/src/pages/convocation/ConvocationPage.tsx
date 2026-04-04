@@ -8,6 +8,7 @@
  * Tab 4: Gold Medals
  */
 import { useState, useEffect } from 'react';
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '@/components/ui/alis-tabs';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ interface SeatRecord {
 
 async function apiFetch<T>(path: string): Promise<T | null> {
   try {
-    const token = localStorage.getItem('token') ?? '';
+    const token = sessionStorage.getItem('token') ?? '';
     const res = await fetch(`/api/v1${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -157,8 +158,6 @@ function groupSeats(records: SeatRecord[]): SeatingSection[] {
 // ── Main Component ─────────────────────────────────────────────────────────
 
 export function ConvocationPage() {
-  const [activeTab, setActiveTab] = useState<'planner' | 'audit' | 'seating' | 'medals'>('planner');
-
   const [convocations, setConvocations] = useState<ConvocationEvent[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [auditRecords, setAuditRecords] = useState<AuditRecord[]>([]);
@@ -166,13 +165,6 @@ export function ConvocationPage() {
   const [seatingSections, setSeatingSections] = useState<SeatingSection[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-
-  const tabs = [
-    { key: 'planner', label: 'Ceremony Planner' },
-    { key: 'audit',   label: 'Degree Audit' },
-    { key: 'seating', label: 'Seating Chart' },
-    { key: 'medals',  label: 'Gold Medals' },
-  ] as const;
 
   // Load convocations list
   useEffect(() => {
@@ -214,28 +206,20 @@ export function ConvocationPage() {
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 28 }}>
-          {tabs.map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
-              background: activeTab === t.key ? COLORS.surface : 'transparent',
-              color: activeTab === t.key ? COLORS.text : COLORS.muted,
-              border: 'none',
-              borderBottom: activeTab === t.key ? `2px solid ${COLORS.teal}` : '2px solid transparent',
-              padding: '10px 20px',
-              fontSize: 14,
-              fontWeight: activeTab === t.key ? 600 : 400,
-              cursor: 'pointer',
-              borderRadius: '6px 6px 0 0',
-            }}>{t.label}</button>
-          ))}
-        </div>
+        <ALISTabs defaultValue="planner">
+          <ALISTabsList>
+            <ALISTabsTrigger value="planner">Ceremony Planner</ALISTabsTrigger>
+            <ALISTabsTrigger value="audit">Degree Audit</ALISTabsTrigger>
+            <ALISTabsTrigger value="seating">Seating Chart</ALISTabsTrigger>
+            <ALISTabsTrigger value="medals">Gold Medals</ALISTabsTrigger>
+          </ALISTabsList>
 
         {loading ? <Spinner /> : convocations.length === 0 ? (
           <p style={{ color: COLORS.muted, fontSize: 14 }}>No convocation events created yet.</p>
         ) : (
           <>
             {/* Tab 1 — Ceremony Planner */}
-            {activeTab === 'planner' && (
+            <ALISTabsContent value="planner">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                 {convocations.map(c => (
                   <div key={c.id}
@@ -291,11 +275,11 @@ export function ConvocationPage() {
                   </div>
                 ))}
               </div>
-            )}
+            </ALISTabsContent>
 
             {/* Tab 2 — Degree Audit */}
-            {activeTab === 'audit' && (
-              detailLoading ? <Spinner /> : auditRecords.length === 0 ? (
+            <ALISTabsContent value="audit">
+              {detailLoading ? <Spinner /> : auditRecords.length === 0 ? (
                 <p style={{ color: COLORS.muted, fontSize: 14 }}>
                   No degree audit records. Select a convocation and click "Run Degree Audit" to generate records.
                 </p>
@@ -352,12 +336,12 @@ export function ConvocationPage() {
                     </tbody>
                   </table>
                 </div>
-              )
-            )}
+              )}
+            </ALISTabsContent>
 
             {/* Tab 3 — Seating Chart */}
-            {activeTab === 'seating' && (
-              detailLoading ? <Spinner /> : seatingSections.length === 0 ? (
+            <ALISTabsContent value="seating">
+              {detailLoading ? <Spinner /> : seatingSections.length === 0 ? (
                 <p style={{ color: COLORS.muted, fontSize: 14 }}>
                   No seating plan generated. Click "Generate Seating" on the Ceremony Planner tab.
                 </p>
@@ -418,12 +402,12 @@ export function ConvocationPage() {
                     </div>
                   </div>
                 </div>
-              )
-            )}
+              )}
+            </ALISTabsContent>
 
             {/* Tab 4 — Gold Medals */}
-            {activeTab === 'medals' && (
-              detailLoading ? <Spinner /> : (
+            <ALISTabsContent value="medals">
+              {detailLoading ? <Spinner /> : (
                 <div>
                   <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 28, marginBottom: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -473,10 +457,11 @@ export function ConvocationPage() {
                     <strong style={{ color: COLORS.text }}>Eligibility Criteria:</strong> Highest CGPA (excluding grace marks) in the program, zero backlogs, no pending dues. Only one gold medal per program per batch.
                   </div>
                 </div>
-              )
-            )}
+              )}
+            </ALISTabsContent>
           </>
         )}
+        </ALISTabs>
       </div>
     </div>
   );

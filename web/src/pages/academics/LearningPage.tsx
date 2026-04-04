@@ -8,6 +8,7 @@
  * Tab 4: Generate (AI) — AI content generation panel (faculty only)
  */
 import { useState, useEffect } from "react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import { learningApi } from "@/services/learning";
 import type {
   CourseMaterial,
@@ -33,7 +34,7 @@ const C = {
 };
 
 function authHeader() {
-  return { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` };
+  return { Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}` };
 }
 
 // ── helpers ──────────────────────────────────────────────────
@@ -663,7 +664,7 @@ export function LearningPage() {
   const [role, setRole] = useState("FACULTY");
   useEffect(() => {
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       if (!token) return;
       const payload = JSON.parse(atob(token.split(".")[1]));
       setRole(payload.role ?? "FACULTY");
@@ -728,48 +729,40 @@ export function LearningPage() {
         )}
       </div>
 
-      {/* Tab bar */}
-      <div className="flex gap-1 rounded-xl p-1" style={{ background: C.surface }}>
-        {visibleTabs.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t as Tab)}
-            className="flex-1 text-xs font-semibold py-2 rounded-lg transition-all"
-            style={{
-              background: tab === t ? C.purple : "transparent",
-              color: tab === t ? "#fff" : C.muted,
-            }}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <ALISTabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <ALISTabsList>
+          {visibleTabs.map((t) => (
+            <ALISTabsTrigger key={t} value={t}>{t}</ALISTabsTrigger>
+          ))}
+        </ALISTabsList>
 
-      {/* Tab content */}
-      <div
-        className="rounded-2xl p-5"
-        style={{ background: C.card, border: `1px solid ${C.border}` }}
-      >
-        {tab === "Materials" && (
-          <MaterialsTab courseId={courseId} role={role} />
-        )}
-        {tab === "Assignments" && (
-          <AssignmentsTab
-            courseId={courseId}
-            role={role}
-            onSelectAssignment={(a) => {
-              setSelectedAssignment(a);
-              setTab("My Work");
-            }}
-          />
-        )}
-        {tab === "My Work" && (
-          <MyWorkTab assignmentId={selectedAssignment?.id ?? null} />
-        )}
-        {tab === "Generate (AI)" && isFaculty && (
-          <GenerateTab courseId={courseId} />
-        )}
-      </div>
+        <div
+          className="rounded-2xl p-5"
+          style={{ background: C.card, border: `1px solid ${C.border}` }}
+        >
+          <ALISTabsContent value="Materials">
+            <MaterialsTab courseId={courseId} role={role} />
+          </ALISTabsContent>
+          <ALISTabsContent value="Assignments">
+            <AssignmentsTab
+              courseId={courseId}
+              role={role}
+              onSelectAssignment={(a) => {
+                setSelectedAssignment(a);
+                setTab("My Work");
+              }}
+            />
+          </ALISTabsContent>
+          <ALISTabsContent value="My Work">
+            <MyWorkTab assignmentId={selectedAssignment?.id ?? null} />
+          </ALISTabsContent>
+          {isFaculty && (
+            <ALISTabsContent value="Generate (AI)">
+              <GenerateTab courseId={courseId} />
+            </ALISTabsContent>
+          )}
+        </div>
+      </ALISTabs>
     </div>
   );
 }

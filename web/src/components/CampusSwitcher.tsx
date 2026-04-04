@@ -22,7 +22,7 @@ interface CampusSwitcherProps {
 export function CampusSwitcher({ compact = false }: CampusSwitcherProps) {
   const [campuses, setCampuses] = useState<Campus[]>([]);
   const [current, setCurrent] = useState<string>(
-    localStorage.getItem("tenant_id") ?? "demo"
+    sessionStorage.getItem("tenant_id") ?? "demo"
   );
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -47,7 +47,7 @@ export function CampusSwitcher({ compact = false }: CampusSwitcherProps) {
 
   const handleSelect = (tenantId: string) => {
     if (tenantId === current) { setOpen(false); return; }
-    localStorage.setItem("tenant_id", tenantId);
+    sessionStorage.setItem("tenant_id", tenantId);
     setCurrent(tenantId);
     setOpen(false);
     // Full reload so all API calls pick up new tenant

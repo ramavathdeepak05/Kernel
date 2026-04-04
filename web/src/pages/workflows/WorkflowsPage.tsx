@@ -66,7 +66,7 @@ interface ApprovalRequest {
 const BASE = "/api/approvals";
 
 async function getApprovals(path = "", params?: Record<string, string>) {
-  const token = localStorage.getItem("token") ?? "";
+  const token = sessionStorage.getItem("token") ?? "";
   const qs = params ? "?" + new URLSearchParams(params) : "";
   const res = await fetch(`${BASE}${path}${qs}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -76,7 +76,7 @@ async function getApprovals(path = "", params?: Record<string, string>) {
 }
 
 async function postApproval(path: string, body: unknown) {
-  const token = localStorage.getItem("token") ?? "";
+  const token = sessionStorage.getItem("token") ?? "";
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -613,7 +613,7 @@ export function WorkflowsPage() {
 
   const currentUserId: string | undefined = (() => {
     try {
-      const u = localStorage.getItem("user");
+      const u = sessionStorage.getItem("user");
       return u ? JSON.parse(u).id : undefined;
     } catch { return undefined; }
   })();

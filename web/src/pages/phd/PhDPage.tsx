@@ -8,6 +8,7 @@
  * Tab 4: Plagiarism Reports (Drillbit check status)
  */
 import { useState, useEffect, useCallback } from 'react';
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '@/components/ui/alis-tabs';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ interface PlagiarismRow extends PlagiarismReport {
 
 async function apiFetch<T>(path: string): Promise<T | null> {
   try {
-    const token = localStorage.getItem('token') ?? '';
+    const token = sessionStorage.getItem('token') ?? '';
     const res = await fetch(`/api/v1${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -305,26 +306,15 @@ export function PhDPage() {
           <p style={{ color: COLORS.muted, marginTop: 6, fontSize: 14 }}>E15 — Scholar Registry, Milestones, DC Meetings & Plagiarism</p>
         </div>
 
-        {/* Tabs */}
-        <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 28 }}>
-          {tabs.map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
-              background: activeTab === t.key ? COLORS.surface : 'transparent',
-              color: activeTab === t.key ? COLORS.text : COLORS.muted,
-              border: 'none',
-              borderBottom: activeTab === t.key ? `2px solid ${COLORS.teal}` : '2px solid transparent',
-              padding: '10px 20px',
-              fontSize: 14,
-              fontWeight: activeTab === t.key ? 600 : 400,
-              cursor: 'pointer',
-              borderRadius: '6px 6px 0 0',
-            }}>{t.label}</button>
-          ))}
-        </div>
+        <ALISTabs defaultValue="registry" onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+          <ALISTabsList>
+            {tabs.map(t => (
+              <ALISTabsTrigger key={t.key} value={t.key}>{t.label}</ALISTabsTrigger>
+            ))}
+          </ALISTabsList>
 
-        {/* Tab 1 — Scholar Registry */}
-        {activeTab === 'registry' && (
-          scholarsLoading ? <Spinner /> : scholars.length === 0 ? (
+        <ALISTabsContent value="registry">
+        {scholarsLoading ? <Spinner /> : scholars.length === 0 ? (
             <p style={{ color: COLORS.muted, fontSize: 14 }}>No PhD scholars registered.</p>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -354,10 +344,11 @@ export function PhDPage() {
               ))}
             </div>
           )
-        )}
+        }
+        </ALISTabsContent>
 
-        {/* Tab 2 — Milestone Tracker */}
-        {activeTab === 'milestones' && (
+        <ALISTabsContent value="milestones">
+        {
           scholarsLoading ? <Spinner /> : (
             <div>
               <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: 20, marginBottom: 24 }}>
@@ -429,10 +420,11 @@ export function PhDPage() {
               )}
             </div>
           )
-        )}
+        }
+        </ALISTabsContent>
 
-        {/* Tab 3 — DC Meetings */}
-        {activeTab === 'meetings' && (
+        <ALISTabsContent value="meetings">
+        {
           enrichLoading ? <Spinner /> : dcRows.length === 0 ? (
             <p style={{ color: COLORS.muted, fontSize: 14 }}>No DC meetings scheduled yet.</p>
           ) : (
@@ -496,10 +488,11 @@ export function PhDPage() {
               </table>
             </div>
           )
-        )}
+        }
+        </ALISTabsContent>
 
-        {/* Tab 4 — Plagiarism Reports */}
-        {activeTab === 'plagiarism' && (
+        <ALISTabsContent value="plagiarism">
+        {
           enrichLoading ? <Spinner /> : plagRows.length === 0 ? (
             <p style={{ color: COLORS.muted, fontSize: 14 }}>No plagiarism reports submitted yet.</p>
           ) : (
@@ -583,7 +576,9 @@ export function PhDPage() {
               })}
             </div>
           )
-        )}
+        }
+        </ALISTabsContent>
+        </ALISTabs>
       </div>
     </div>
   );

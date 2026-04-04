@@ -28,6 +28,16 @@ export type ALISModule =
   | 'settings'
   | 'onboarding'
   | 'team'
+  | 'clubs'
+  | 'training'
+  | 'recruitment'
+  | 'budget'
+  | 'vendors'
+  | 'my_fees'
+  | 'my_courses'
+  | 'my_exams'
+  | 'my_library'
+  | 'learning'
 
 export type CanvasView =
   | 'approval_queue'

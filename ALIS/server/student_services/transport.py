@@ -7,7 +7,7 @@ import uuid
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import TransportAssignCreate, TransportRouteCreate
 
@@ -58,7 +58,7 @@ class TransportService:
                     fields.append("stops = %s::jsonb")
                     values.append(json.dumps(v))
                 else:
-                    fields.append(f"{k} = %s")
+                    fields.append(f"{safe_identifier(k)} = %s")
                     values.append(v)
         if not fields:
             return cls.get_route(org_id, route_id)

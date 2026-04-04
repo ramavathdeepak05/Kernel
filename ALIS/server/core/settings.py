@@ -52,6 +52,40 @@ class Settings(BaseSettings):
     pgbouncer_host: str = Field(default="localhost", description="PgBouncer host (set to 'pgbouncer' in docker-compose)")
     pgbouncer_port: int = Field(default=6432, description="PgBouncer port (5432 inside docker network)")
 
+    # ---- Read Replica (empty = disabled, all reads go to primary) ----
+    db_replica_host: str = Field(default="", description="Read replica host. Empty = no replica.")
+    db_replica_port: int = Field(default=5432)
+    db_replica_pool_min: int = Field(default=2)
+    db_replica_pool_max: int = Field(default=20)
+    # Read-your-writes stickiness: after a write in a request, all subsequent
+    # reads in the same request are routed to primary for this many seconds.
+    db_read_after_write_stickiness_seconds: float = Field(
+        default=2.0,
+        description="Seconds to stick reads to primary after a write in the same request.",
+    )
+
+    # ---- Backpressure (queue depth thresholds) ----
+    backpressure_ai_warn: int = Field(default=50, description="ai_tasks queue: warn threshold")
+    backpressure_ai_reject: int = Field(default=100, description="ai_tasks queue: reject threshold")
+    backpressure_events_warn: int = Field(default=500, description="event_dispatch queue: warn threshold")
+    backpressure_events_reject: int = Field(default=2000, description="event_dispatch queue: reject threshold")
+
+    @property
+    def replica_enabled(self) -> bool:
+        return bool(self.db_replica_host)
+
+    @property
+    def db_replica_url(self) -> str:
+        host = self.db_replica_host or self.db_host
+        port = self.db_replica_port
+        return f"postgresql://{self.db_user}:{self.db_password}@{host}:{port}/{self.db_name}"
+
+    @property
+    def db_replica_url_async(self) -> str:
+        host = self.db_replica_host or self.db_host
+        port = self.db_replica_port
+        return f"postgresql://{self.db_user}:{self.db_password}@{host}:{port}/{self.db_name}"
+
     @property
     def db_url(self) -> str:
         return f"postgresql://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
@@ -498,6 +532,19 @@ class Settings(BaseSettings):
                 "[SECURITY] ALIS_MASTER_KEY must be set in production (required for tenant encryption)."
             )
 
+        if not self.redis_password:
+            raise ValueError(
+                "[SECURITY] REDIS_PASSWORD must be set in production. "
+                "An unauthenticated Redis exposes session tokens and Celery task payloads."
+            )
+
+        _MINIO_DEFAULTS = {"minioadmin"}
+        if self.minio_access_key in _MINIO_DEFAULTS or self.minio_secret_key in _MINIO_DEFAULTS:
+            raise ValueError(
+                "[SECURITY] MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be changed from defaults in production. "
+                "Default 'minioadmin' credentials expose all uploaded documents."
+            )
+
         if not self.internal_service_secret:
             raise ValueError(
                 "[SECURITY] INTERNAL_SERVICE_SECRET must be set in production. "
@@ -526,6 +573,21 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return cached Settings instance. Use this everywhere."""
     return Settings()
+
+
+def _clear_settings_cache() -> None:
+    """
+    Invalidate the cached Settings instance.
+
+    Use ONLY in tests that need to patch environment variables before
+    importing or using settings:
+
+        monkeypatch.setenv("APP_ENV", "production")
+        _clear_settings_cache()
+        from server.core.settings import get_settings
+        s = get_settings()   # picks up the patched env
+    """
+    get_settings.cache_clear()
 
 
 # Module-level singleton — import this directly

@@ -127,7 +127,7 @@ def test_app(patch_cp_db):
 
 def _admin_headers() -> dict:
     """Generate a valid admin JWT for test requests."""
-    from jose import jwt
+    import jwt as _pyjwt
     import time
     payload = {
         "sub": "test-admin",
@@ -135,7 +135,7 @@ def _admin_headers() -> dict:
         "exp": int(time.time()) + 3600,
     }
     from control_plane.settings import settings
-    token = jwt.encode(payload, settings.admin_jwt_secret, algorithm=settings.admin_jwt_algorithm)
+    token = _pyjwt.encode(payload, settings.admin_jwt_secret, algorithm=settings.admin_jwt_algorithm)
     return {"Authorization": f"Bearer {token}"}
 
 

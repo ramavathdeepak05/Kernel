@@ -13,6 +13,7 @@ import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { DataTable, type Column } from '../components/DataTable'
 import { Badge } from '../components/Badge'
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '../components/ui/alis-tabs'
 
 // ---------------------------------------------------------------------------
 // Types + static fallback data
@@ -134,10 +135,9 @@ const AI_COLS: Column<AIScoreItem>[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` })
+const authHeader = () => ({ Authorization: `Bearer ${sessionStorage.getItem('token')}` })
 
 export function ExamControllerDashboard() {
-  const [tab, setTab] = useState<'dispatch' | 'ai_queue' | 'reval'>('dispatch')
   const [stats, setStats] = useState(STATS_DEFAULT)
   const [schedules, setSchedules] = useState<PaperDispatch[]>(DISPATCH_FALLBACK)
   const [aiQueue, setAiQueue] = useState<AIScoreItem[]>(AI_QUEUE_FALLBACK)
@@ -233,82 +233,69 @@ export function ExamControllerDashboard() {
       <StatsRow stats={stats} />
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        {[
-          { key: 'dispatch', label: 'Paper Dispatch' },
-          { key: 'ai_queue', label: `AI Score Review (${aiQueue.length})` },
-          { key: 'reval', label: `Reval Alerts (${revalAlerts.length})` },
-        ].map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key as typeof tab)}
-            style={{
-              padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              fontSize: 13, fontWeight: 600,
-              background: tab === t.key ? '#5D5FEF' : '#1A1D2E',
-              color: tab === t.key ? '#fff' : '#7B82A8',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <ALISTabs defaultValue="dispatch">
+        <ALISTabsList>
+          <ALISTabsTrigger value="dispatch" badge={schedules.length}>Paper Dispatch</ALISTabsTrigger>
+          <ALISTabsTrigger value="ai_queue" badge={aiQueue.length}>AI Score Review</ALISTabsTrigger>
+          <ALISTabsTrigger value="reval" badge={revalAlerts.length}>Reval Alerts</ALISTabsTrigger>
+        </ALISTabsList>
 
-      {tab === 'dispatch' && (
-        <DataTable
-          title="Paper Dispatch Status"
-          columns={DISPATCH_COLS}
-          rows={schedules}
-          onRowClick={() => {}}
-        />
-      )}
+        <ALISTabsContent value="dispatch">
+          <DataTable
+            title="Paper Dispatch Status"
+            columns={DISPATCH_COLS}
+            rows={schedules}
+            onRowClick={() => {}}
+          />
+        </ALISTabsContent>
 
-      {tab === 'ai_queue' && (
-        <DataTable
-          title="AI Score Confirmation Queue — Faculty Review Required"
-          columns={AI_COLS}
-          rows={aiQueue}
-          onRowClick={() => {}}
-        />
-      )}
+        <ALISTabsContent value="ai_queue">
+          <DataTable
+            title="AI Score Confirmation Queue — Faculty Review Required"
+            columns={AI_COLS}
+            rows={aiQueue}
+            onRowClick={() => {}}
+          />
+        </ALISTabsContent>
 
-      {tab === 'reval' && (
-        <div style={{
-          background: '#11131F', border: '1px solid #1E2235', borderRadius: 12, padding: 20,
-        }}>
-          <p style={{ color: '#7B82A8', fontSize: 12, margin: '0 0 16px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Revaluation / Supplementary Overlap Alerts
-          </p>
-          {revalAlerts.length === 0 ? (
-            <p style={{ color: '#7B82A8', fontSize: 13, margin: 0 }}>No pending alerts.</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {revalAlerts.map(alert => (
-                <div key={alert.id} style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 12,
-                  padding: '12px 16px', borderRadius: 8,
-                  background: alert.severity === 'HIGH' ? '#E24B4A11' : '#EF9F2711',
-                  border: `1px solid ${alert.severity === 'HIGH' ? '#E24B4A33' : '#EF9F2733'}`,
-                }}>
-                  <span style={{
-                    fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700, flexShrink: 0, marginTop: 2,
-                    background: alert.severity === 'HIGH' ? '#E24B4A22' : '#EF9F2722',
-                    color: alert.severity === 'HIGH' ? '#E24B4A' : '#EF9F27',
+        <ALISTabsContent value="reval">
+          <div style={{
+            background: '#11131F', border: '1px solid #1E2235', borderRadius: 12, padding: 20,
+          }}>
+            <p style={{ color: '#7B82A8', fontSize: 12, margin: '0 0 16px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Revaluation / Supplementary Overlap Alerts
+            </p>
+            {revalAlerts.length === 0 ? (
+              <p style={{ color: '#7B82A8', fontSize: 13, margin: 0 }}>No pending alerts.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {revalAlerts.map(alert => (
+                  <div key={alert.id} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 12,
+                    padding: '12px 16px', borderRadius: 8,
+                    background: alert.severity === 'HIGH' ? '#E24B4A11' : '#EF9F2711',
+                    border: `1px solid ${alert.severity === 'HIGH' ? '#E24B4A33' : '#EF9F2733'}`,
                   }}>
-                    {alert.severity}
-                  </span>
-                  <div>
-                    <p style={{ margin: 0, color: '#C9D1E9', fontSize: 13, fontWeight: 600 }}>{alert.student}</p>
-                    <p style={{ margin: '2px 0 0', color: '#7B82A8', fontSize: 12 }}>
-                      {alert.course} — {alert.issue}
-                    </p>
+                    <span style={{
+                      fontSize: 11, padding: '2px 8px', borderRadius: 4, fontWeight: 700, flexShrink: 0, marginTop: 2,
+                      background: alert.severity === 'HIGH' ? '#E24B4A22' : '#EF9F2722',
+                      color: alert.severity === 'HIGH' ? '#E24B4A' : '#EF9F27',
+                    }}>
+                      {alert.severity}
+                    </span>
+                    <div>
+                      <p style={{ margin: 0, color: '#C9D1E9', fontSize: 13, fontWeight: 600 }}>{alert.student}</p>
+                      <p style={{ margin: '2px 0 0', color: '#7B82A8', fontSize: 12 }}>
+                        {alert.course} — {alert.issue}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+          </div>
+        </ALISTabsContent>
+      </ALISTabs>
     </div>
   )
 }

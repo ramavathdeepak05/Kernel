@@ -16,6 +16,18 @@ TEST_ORG_ID = "00000000-0000-0000-0000-000000000001"
 TEST_USER_ID = "00000000-0000-0000-0000-000000000002"
 TEST_TENANT = "TEST-TENANT-AUTOUSE"
 
+@pytest.fixture(autouse=True)
+def reset_settings_cache():
+    """
+    Clear the lru_cache on get_settings() after every test.
+    Prevents stale cached Settings from leaking between tests that
+    patch environment variables via monkeypatch.setenv().
+    """
+    yield
+    from server.core.settings import _clear_settings_cache
+    _clear_settings_cache()
+
+
 @pytest.fixture(autouse=True, scope="module")
 def isolate_sys_modules():
     """
@@ -165,7 +177,7 @@ def _make_jwt(
     expires_minutes: int = 60,
 ) -> str:
     """Generate a real signed JWT for test requests."""
-    from jose import jwt as jose_jwt
+    import jwt as _pyjwt
     from server.core.settings import settings
 
     now = datetime.now(timezone.utc)
@@ -177,7 +189,7 @@ def _make_jwt(
         "iat": now,
         "exp": now + timedelta(minutes=expires_minutes),
     }
-    return jose_jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return _pyjwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
 @pytest.fixture(scope="session")

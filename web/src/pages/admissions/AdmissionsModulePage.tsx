@@ -26,51 +26,17 @@ const COLORS = {
 // ── TAB 1: KANBAN ────────────────────────────────────────────────
 
 const STAGES = [
-  { key: 'lead', label: 'Lead', count: 342, color: '#7B82A8' },
-  { key: 'submitted', label: 'Submitted', count: 218, color: '#5D5FEF' },
-  { key: 'docs', label: 'Docs Review', count: 87, color: '#EF9F27' },
-  { key: 'eligible', label: 'Eligible', count: 64, color: '#1D9E75' },
-  { key: 'merit', label: 'Merit Listed', count: 48, color: '#4CAF9F' },
-  { key: 'offer', label: 'Offer Sent', count: 31, color: '#9B59B6' },
-  { key: 'enrolled', label: 'Enrolled', count: 22, color: '#1D9E75' },
+  { key: 'lead', label: 'Lead', count: 0, color: '#7B82A8' },
+  { key: 'submitted', label: 'Submitted', count: 0, color: '#5D5FEF' },
+  { key: 'docs', label: 'Docs Review', count: 0, color: '#EF9F27' },
+  { key: 'eligible', label: 'Eligible', count: 0, color: '#1D9E75' },
+  { key: 'merit', label: 'Merit Listed', count: 0, color: '#4CAF9F' },
+  { key: 'offer', label: 'Offer Sent', count: 0, color: '#9B59B6' },
+  { key: 'enrolled', label: 'Enrolled', count: 0, color: '#1D9E75' },
 ];
 
 const KANBAN_CARDS: Record<string, { name: string; program: string; branch: string }[]> = {
-  lead: [
-    { name: 'Ravi Kumar', program: 'B.Tech', branch: 'CSE' },
-    { name: 'Priya Nair', program: 'B.Tech', branch: 'ECE' },
-    { name: 'Amir Khan', program: 'MBA', branch: '—' },
-  ],
-  submitted: [
-    { name: 'Suresh Pillai', program: 'B.Tech', branch: 'ME' },
-    { name: 'Anita Sharma', program: 'MBA', branch: '—' },
-    { name: 'Deepak Raj', program: 'B.Sc', branch: 'CS' },
-  ],
-  docs: [
-    { name: 'Arjun Mehta', program: 'B.Tech', branch: 'CSE' },
-    { name: 'Kavitha R.', program: 'B.Tech', branch: 'Civil' },
-    { name: 'Rohit Bose', program: 'B.Tech', branch: 'ME' },
-  ],
-  eligible: [
-    { name: 'Nisha Patel', program: 'B.Tech', branch: 'ECE' },
-    { name: 'Vijay Rajan', program: 'B.Sc', branch: 'CS' },
-    { name: 'Lakshmi S.', program: 'B.Tech', branch: 'CSE' },
-  ],
-  merit: [
-    { name: 'Karthik V.', program: 'B.Tech', branch: 'CSE' },
-    { name: 'Meena D.', program: 'MBA', branch: '—' },
-    { name: 'Ramesh P.', program: 'B.Tech', branch: 'EEE' },
-  ],
-  offer: [
-    { name: 'Pooja Singh', program: 'MBA', branch: '—' },
-    { name: 'Arun Nair', program: 'B.Tech', branch: 'CSE' },
-    { name: 'Divya K.', program: 'B.Tech', branch: 'ECE' },
-  ],
-  enrolled: [
-    { name: 'Sanjay M.', program: 'B.Tech', branch: 'ME' },
-    { name: 'Rekha T.', program: 'MBA', branch: '—' },
-    { name: 'Harish B.', program: 'B.Tech', branch: 'Civil' },
-  ],
+  lead: [], submitted: [], docs: [], eligible: [], merit: [], offer: [], enrolled: [],
 };
 
 // ── TAB 2: DOCUMENT QUEUE ────────────────────────────────────────
@@ -85,12 +51,7 @@ type DocItem = {
   submitted: string;
 };
 
-const INITIAL_DOC_QUEUE: DocItem[] = [
-  { id: 'd1', applicant: 'Arjun Mehta', doc: 'Class XII Marksheet', status: 'PENDING', method: 'DigiLocker', flag: null, submitted: '2026-03-17' },
-  { id: 'd2', applicant: 'Priya Nair', doc: 'Transfer Certificate', status: 'PENDING', method: 'Manual', flag: null, submitted: '2026-03-16' },
-  { id: 'd3', applicant: 'Rohit Bose', doc: 'Caste Certificate', status: 'FLAGGED', method: 'OCR', flag: 'OCR confidence 42% — manual forensic review required', submitted: '2026-03-15' },
-  { id: 'd4', applicant: 'Kavitha R.', doc: 'Degree Certificate', status: 'APPROVED', method: 'Board API', flag: null, submitted: '2026-03-14' },
-];
+const INITIAL_DOC_QUEUE: DocItem[] = [];
 
 // ── TAB 3: REPORTING GATE ────────────────────────────────────────
 
@@ -152,7 +113,7 @@ function methodBadge(method: string | null): string {
 // ── API helpers ──────────────────────────────────────────────────
 
 function authHeader() {
-  return { Authorization: `Bearer ${localStorage.getItem('token') ?? ''}`, 'Content-Type': 'application/json' };
+  return { Authorization: `Bearer ${sessionStorage.getItem('token') ?? ''}`, 'Content-Type': 'application/json' };
 }
 
 // ── Main Component ───────────────────────────────────────────────

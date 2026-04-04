@@ -1,8 +1,8 @@
-import { useState } from "react";
 import {
   BarChart2, TrendingUp, BookOpen, DollarSign,
   Download, FileText, Cpu, RefreshCw,
 } from "lucide-react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import {
   useDashboardKPIs, useAdmissionsFunnel, useAdmissionsPrograms,
   useAcademicsAttendance, useFacultyWorkload,
@@ -447,8 +447,6 @@ function SavedTab() {
 // ── Page root ──────────────────────────────────────────────────
 
 export default function ReportsPage() {
-  const [tab, setTab] = useState<TabId>("overview");
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {/* Header */}
@@ -464,31 +462,18 @@ export default function ReportsPage() {
         </span>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 2, borderBottom: "0.5px solid var(--color-border-tertiary, rgba(255,255,255,0.06))" }}>
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              display: "flex", alignItems: "center", gap: 5, padding: "6px 12px",
-              borderRadius: "6px 6px 0 0", border: "0.5px solid transparent",
-              background: tab === t.id ? "var(--color-background-secondary, #0f1c2e)" : "transparent",
-              color: tab === t.id ? TEAL : "var(--color-text-secondary, #64748b)",
-              fontSize: 12, fontWeight: tab === t.id ? 500 : 400, cursor: "pointer",
-              marginBottom: tab === t.id ? -1 : 0, outline: "none",
-            }}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "overview"   && <OverviewTab />}
-      {tab === "admissions" && <AdmissionsTab />}
-      {tab === "academics"  && <AcademicsTab />}
-      {tab === "finance"    && <FinanceTab />}
-      {tab === "saved"      && <SavedTab />}
+      <ALISTabs defaultValue="overview">
+        <ALISTabsList>
+          {TABS.map(t => (
+            <ALISTabsTrigger key={t.id} value={t.id}>{t.icon} {t.label}</ALISTabsTrigger>
+          ))}
+        </ALISTabsList>
+        <ALISTabsContent value="overview"><OverviewTab /></ALISTabsContent>
+        <ALISTabsContent value="admissions"><AdmissionsTab /></ALISTabsContent>
+        <ALISTabsContent value="academics"><AcademicsTab /></ALISTabsContent>
+        <ALISTabsContent value="finance"><FinanceTab /></ALISTabsContent>
+        <ALISTabsContent value="saved"><SavedTab /></ALISTabsContent>
+      </ALISTabs>
     </div>
   );
 }

@@ -6,11 +6,12 @@
  * Default view: fee_dashboard
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { DataTable, type Column } from '../components/DataTable'
 import { Badge } from '../components/Badge'
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '../components/ui/alis-tabs'
 
 // ---------------------------------------------------------------------------
 // Mock data
@@ -27,16 +28,7 @@ interface Defaulter {
   status: 'overdue' | 'partial' | 'notice_sent'
 }
 
-const DEFAULTERS: Defaulter[] = [
-  { id: 'd01', name: 'Rahul Gupta', rollNo: '22CS012', programme: 'B.Tech CSE', dueAmount: 45000, dueSince: '15 Jan 2026', installment: 'Sem 5 Fee', status: 'overdue' },
-  { id: 'd02', name: 'Anjali Verma', rollNo: '22EC034', programme: 'B.Tech ECE', dueAmount: 32000, dueSince: '15 Jan 2026', installment: 'Sem 5 Fee', status: 'notice_sent' },
-  { id: 'd03', name: 'Suresh Kumar', rollNo: '21ME009', programme: 'B.Tech ME', dueAmount: 60000, dueSince: '30 Nov 2025', installment: 'Sem 4 + Sem 5', status: 'overdue' },
-  { id: 'd04', name: 'Meena Iyer', rollNo: '22CS067', programme: 'B.Tech CSE', dueAmount: 22500, dueSince: '15 Jan 2026', installment: 'Hostel fee', status: 'partial' },
-  { id: 'd05', name: 'Akash Singh', rollNo: '23EC001', programme: 'B.Tech ECE', dueAmount: 90000, dueSince: '15 Sep 2025', installment: 'Sem 3 + Sem 4 + Sem 5', status: 'overdue' },
-  { id: 'd06', name: 'Lakshmi Prasad', rollNo: '22CS041', programme: 'B.Tech CSE', dueAmount: 18000, dueSince: '01 Feb 2026', installment: 'Transport fee', status: 'partial' },
-  { id: 'd07', name: 'Vikram Nair', rollNo: '21ME022', programme: 'B.Tech ME', dueAmount: 45000, dueSince: '30 Nov 2025', installment: 'Sem 4 Fee', status: 'notice_sent' },
-  { id: 'd08', name: 'Priya Shankar', rollNo: '22EC018', programme: 'B.Tech ECE', dueAmount: 27000, dueSince: '15 Jan 2026', installment: 'Library + Lab fee', status: 'partial' },
-]
+const API_BASE = import.meta.env.VITE_API_URL || "/api/v1";
 
 const STATUS_BADGE: Record<Defaulter['status'], 'red' | 'amber' | 'blue'> = {
   overdue: 'red',
@@ -50,24 +42,12 @@ const STATUS_LABEL: Record<Defaulter['status'], string> = {
   notice_sent: 'Notice sent',
 }
 
-const STATS = [
-  { label: 'Total dues', value: '₹3,39,500', delta: '8 defaulters', deltaColor: '#E24B4A' },
-  { label: 'Collected this month', value: '₹12.4L', delta: '↑ 8% vs last month', deltaColor: '#1D9E75' },
-  { label: 'Invoices overdue', value: '23', delta: '4 > 90 days', deltaColor: '#EF9F27' },
-  { label: 'Scholarships pending', value: '₹2.1L', delta: '14 students', deltaColor: '#94a3b8' },
+const EMPTY_STATS = [
+  { label: 'Total dues', value: '—', delta: '', deltaColor: '#94a3b8' },
+  { label: 'Collected this month', value: '—', delta: '', deltaColor: '#94a3b8' },
+  { label: 'Invoices overdue', value: '—', delta: '', deltaColor: '#94a3b8' },
+  { label: 'Scholarships pending', value: '—', delta: '', deltaColor: '#94a3b8' },
 ]
-
-// ---------------------------------------------------------------------------
-
-const COLLECTION_MONTHS = [
-  { month: 'Oct', amount: 8.4 },
-  { month: 'Nov', amount: 9.1 },
-  { month: 'Dec', amount: 7.2 },
-  { month: 'Jan', amount: 11.5 },
-  { month: 'Feb', amount: 12.4 },
-]
-
-const MAX_AMOUNT = Math.max(...COLLECTION_MONTHS.map((m) => m.amount))
 
 const DEFAULTER_COLUMNS: Column<Defaulter>[] = [
   { key: 'name', label: 'Student', width: '2fr' },
@@ -99,10 +79,48 @@ const DEFAULTER_COLUMNS: Column<Defaulter>[] = [
 
 export function FinanceDashboard() {
   const { canvas, highlightItem } = useALISStore()
-  const [activeTab, setActiveTab] = useState<'defaulters' | 'collection'>('defaulters')
+  const [defaulters, setDefaulters] = useState<Defaulter[]>([])
+  const [stats, setStats] = useState(EMPTY_STATS)
+  const [collectionMonths, setCollectionMonths] = useState<{ month: string; amount: number }[]>([])
 
-  const totalDue = DEFAULTERS.reduce((sum, d) => sum + d.dueAmount, 0)
-  const overdueCount = DEFAULTERS.filter((d) => d.status === 'overdue').length
+  useEffect(() => {
+    const token = sessionStorage.getItem("token");
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.allSettled([
+      fetch(`${API_BASE}/finance/fee-defaulters?limit=20`, { headers }),
+      fetch(`${API_BASE}/reports/dashboard/kpis`, { headers }),
+      fetch(`${API_BASE}/finance/collection-trend`, { headers }),
+    ]).then(async ([defRes, kpiRes, trendRes]) => {
+      if (defRes.status === "fulfilled" && defRes.value.ok) {
+        const data = await defRes.value.json();
+        setDefaulters((data.items ?? data ?? []).map((d: Record<string, unknown>) => ({
+          id: String(d.id ?? ""), name: String(d.name ?? d.student_name ?? ""),
+          rollNo: String(d.roll_no ?? d.rollNo ?? ""), programme: String(d.programme ?? d.program ?? ""),
+          dueAmount: Number(d.due_amount ?? d.dueAmount ?? 0), dueSince: String(d.due_since ?? d.dueSince ?? ""),
+          installment: String(d.installment ?? d.description ?? ""), status: String(d.status ?? "overdue") as Defaulter["status"],
+        })));
+      }
+      if (kpiRes.status === "fulfilled" && kpiRes.value.ok) {
+        const kpis = await kpiRes.value.json();
+        setStats([
+          { label: 'Total dues', value: kpis.total_dues ?? '—', delta: kpis.defaulter_count ? `${kpis.defaulter_count} defaulters` : '', deltaColor: '#E24B4A' },
+          { label: 'Collected this month', value: kpis.collected_this_month ?? '—', delta: kpis.collection_delta ?? '', deltaColor: '#1D9E75' },
+          { label: 'Invoices overdue', value: String(kpis.invoices_overdue ?? '—'), delta: kpis.overdue_delta ?? '', deltaColor: '#EF9F27' },
+          { label: 'Scholarships pending', value: kpis.scholarships_pending ?? '—', delta: kpis.scholarship_delta ?? '', deltaColor: '#94a3b8' },
+        ]);
+      }
+      if (trendRes.status === "fulfilled" && trendRes.value.ok) {
+        const trend = await trendRes.value.json();
+        setCollectionMonths((trend.items ?? trend ?? []).map((m: Record<string, unknown>) => ({
+          month: String(m.month ?? ""), amount: Number(m.amount ?? 0),
+        })));
+      }
+    });
+  }, [])
+
+  const totalDue = defaulters.reduce((sum, d) => sum + d.dueAmount, 0)
+  const overdueCount = defaulters.filter((d) => d.status === 'overdue').length
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -123,49 +141,29 @@ export function FinanceDashboard() {
       </div>
 
       {/* Stats */}
-      <StatsRow stats={STATS} />
+      <StatsRow stats={stats} />
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 2, borderBottom: 'var(--border)' }}>
-        {(['defaulters', 'collection'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 500,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === tab ? '2px solid var(--alis-teal)' : '2px solid transparent',
-              color: activeTab === tab ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              textTransform: 'capitalize',
-              transition: 'color 0.12s',
-            }}
-          >
-            {tab === 'defaulters'
-              ? `Defaulters (${overdueCount} overdue)`
-              : 'Collection trend'}
-          </button>
-        ))}
-      </div>
+      <ALISTabs defaultValue="defaulters">
+        <ALISTabsList>
+          <ALISTabsTrigger value="defaulters" badge={overdueCount}>Defaulters</ALISTabsTrigger>
+          <ALISTabsTrigger value="collection">Collection trend</ALISTabsTrigger>
+        </ALISTabsList>
 
-      {/* Defaulter table */}
-      {activeTab === 'defaulters' && (
-        <>
+        <ALISTabsContent value="defaulters">
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              marginBottom: -4,
+              marginBottom: 8,
             }}
           >
             <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
               Total outstanding: <strong style={{ color: '#E24B4A' }}>₹{totalDue.toLocaleString('en-IN')}</strong>
             </span>
             <button
+              className="transition-colors duration-150"
               style={{
                 padding: '4px 10px',
                 fontSize: 11,
@@ -182,64 +180,68 @@ export function FinanceDashboard() {
           </div>
           <DataTable
             columns={DEFAULTER_COLUMNS}
-            rows={DEFAULTERS}
+            rows={defaulters}
             highlightedId={canvas.highlightedItemId}
             onRowClick={(row) => highlightItem(row.id)}
             gridTemplateColumns="2fr 90px 1.5fr 100px 1fr 2fr 100px"
           />
-        </>
-      )}
+        </ALISTabsContent>
 
-      {/* Collection trend mini chart */}
-      {activeTab === 'collection' && (
-        <div
-          style={{
-            background: 'var(--color-background-secondary)',
-            border: 'var(--border)',
-            borderRadius: 'var(--radius-md)',
-            padding: '16px',
-          }}
-        >
-          <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
-            Fee collection (₹ Lakhs) — last 5 months
-          </p>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, height: 100 }}>
-            {COLLECTION_MONTHS.map((m) => {
-              const h = (m.amount / MAX_AMOUNT) * 100
-              const isLatest = m.month === 'Feb'
-              return (
-                <div
-                  key={m.month}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}
-                >
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: isLatest ? 'var(--alis-teal)' : 'var(--color-text-secondary)',
-                      fontWeight: isLatest ? 600 : 400,
-                      marginBottom: 4,
-                    }}
-                  >
-                    {m.amount}L
-                  </span>
+        <ALISTabsContent value="collection">
+          <div
+            style={{
+              background: 'var(--color-background-secondary)',
+              border: 'var(--border)',
+              borderRadius: 'var(--radius-md)',
+              padding: '16px',
+            }}
+          >
+            <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
+              Fee collection (₹ Lakhs) — last 5 months
+            </p>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, height: 120 }}>
+              {collectionMonths.map((m, idx) => {
+                const maxAmt = Math.max(...collectionMonths.map(x => x.amount), 1)
+                const h = (m.amount / maxAmt) * 100
+                const isLatest = m.month === 'Feb'
+                return (
                   <div
-                    style={{
-                      width: '100%',
-                      height: `${h}%`,
-                      background: isLatest ? 'var(--alis-teal)' : 'rgba(29,158,117,0.3)',
-                      borderRadius: '3px 3px 0 0',
-                      minHeight: 4,
-                    }}
-                  />
-                  <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-                    {m.month}
-                  </span>
-                </div>
-              )
-            })}
+                    key={m.month}
+                    className="group/bar"
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}
+                  >
+                    <span
+                      className="transition-all duration-200 group-hover/bar:text-[#e2e8f0]"
+                      style={{
+                        fontSize: 10,
+                        color: isLatest ? 'var(--alis-teal)' : 'var(--color-text-secondary)',
+                        fontWeight: isLatest ? 600 : 400,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {m.amount}L
+                    </span>
+                    <div
+                      className="transition-all duration-300 ease-out group-hover/bar:scale-x-110"
+                      style={{
+                        width: '100%',
+                        height: `${h}%`,
+                        background: isLatest ? 'var(--alis-teal)' : 'rgba(29,158,117,0.3)',
+                        borderRadius: '4px 4px 0 0',
+                        minHeight: 4,
+                        animationDelay: `${idx * 100}ms`,
+                      }}
+                    />
+                    <span style={{ fontSize: 10, color: 'var(--color-text-secondary)', marginTop: 4 }}>
+                      {m.month}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        </ALISTabsContent>
+      </ALISTabs>
     </div>
   )
 }

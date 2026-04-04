@@ -33,7 +33,7 @@ from uuid import uuid4
 
 from server.core.audit import AuditLog, AuditAction
 from server.core.exceptions import BusinessRuleViolation, PermissionDeniedError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import (
     ConsultantCreate,
@@ -294,7 +294,7 @@ class LeadService:
             updates["disqualify_reason"] = request.disqualify_reason
 
         if updates:
-            set_clause = ", ".join(f"{k} = %s" for k in updates)
+            set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in updates)
             execute_transaction([
                 (
                     f"UPDATE leads SET {set_clause} WHERE id = %s AND org_id = %s",

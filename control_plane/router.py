@@ -51,15 +51,15 @@ def _require_admin_jwt(authorization: str = Header(...)) -> dict:
     """Validate admin Bearer JWT. Returns the decoded payload."""
     from control_plane.settings import settings
     try:
-        from jose import jwt, JWTError
+        import jwt as _pyjwt
         if not authorization.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="Bearer token required")
         token = authorization[7:].strip()
-        payload = jwt.decode(token, settings.admin_jwt_secret, algorithms=[settings.admin_jwt_algorithm])
+        payload = _pyjwt.decode(token, settings.admin_jwt_secret, algorithms=[settings.admin_jwt_algorithm])
         if payload.get("role") not in ("SUPER_ADMIN", "PLATFORM_ADMIN"):
             raise HTTPException(status_code=403, detail="Admin role required")
         return payload
-    except Exception as exc:
+    except (_pyjwt.PyJWTError, Exception) as exc:
         raise HTTPException(status_code=401, detail=str(exc))
 
 

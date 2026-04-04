@@ -15,12 +15,13 @@ export interface Column<T> {
   width?: string
 }
 
-interface DataTableProps<T extends { id: string }> {
+export interface DataTableProps<T extends { id: string }> {
   columns: Column<T>[]
   rows: T[]
   onRowClick?: (row: T) => void
   highlightedId?: string | null
   gridTemplateColumns?: string
+  title?: string
 }
 
 export function DataTable<T extends { id: string }>({

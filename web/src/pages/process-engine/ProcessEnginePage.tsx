@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import {
   GitBranch, Shield, ClipboardList, ChevronDown, ChevronUp, Plus, X,
   ArrowRight, CheckCircle2, Clock, AlertTriangle, FileText, Users,
@@ -182,7 +183,7 @@ const AUDIT_TYPE_COLORS: Record<string, { color: string; bg: string }> = {
 // ── API helper ─────────────────────────────────────────────────────────────
 async function apiFetch<T>(path: string): Promise<T | null> {
   try {
-    const token = localStorage.getItem("token") ?? "";
+    const token = sessionStorage.getItem("token") ?? "";
     const res = await fetch(`/api/v1${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -462,7 +463,7 @@ function AuditTab() {
   const visible = filter === "All" ? events : events.filter(e => e.type === filter);
 
   useEffect(() => {
-    const token = localStorage.getItem("token") ?? "";
+    const token = sessionStorage.getItem("token") ?? "";
     fetch("/api/v1/audit/logs?limit=30", {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -541,14 +542,6 @@ function AuditTab() {
 type Tab = "workflows" | "policy" | "audit";
 
 export function ProcessEnginePage() {
-  const [tab, setTab] = useState<Tab>("workflows");
-
-  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: "workflows", label: "Workflows",    icon: <GitBranch size={14} /> },
-    { id: "policy",    label: "Policy Rules", icon: <ClipboardList size={14} /> },
-    { id: "audit",     label: "Audit",        icon: <History size={14} /> },
-  ];
-
   return (
     <div style={{ minHeight: "100vh", background: C.bg, padding: "32px 40px", fontFamily: "Inter, system-ui, sans-serif" }}>
       {/* header */}
@@ -560,22 +553,16 @@ export function ProcessEnginePage() {
         <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Configure workflows, manage policy rules, and audit all process changes.</p>
       </div>
 
-      {/* tab bar */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 28, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: "fit-content" }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            display: "flex", alignItems: "center", gap: 7, padding: "8px 18px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, transition: "all 0.15s",
-            background: tab === t.id ? C.teal : "transparent",
-            color: tab === t.id ? "#fff" : C.muted,
-          }}>
-            {t.icon}{t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "workflows" && <WorkflowsTab />}
-      {tab === "policy"    && <PolicyRulesTab />}
-      {tab === "audit"     && <AuditTab />}
+      <ALISTabs defaultValue="workflows">
+        <ALISTabsList>
+          <ALISTabsTrigger value="workflows"><GitBranch size={14} /> Workflows</ALISTabsTrigger>
+          <ALISTabsTrigger value="policy"><ClipboardList size={14} /> Policy Rules</ALISTabsTrigger>
+          <ALISTabsTrigger value="audit"><History size={14} /> Audit</ALISTabsTrigger>
+        </ALISTabsList>
+        <ALISTabsContent value="workflows"><WorkflowsTab /></ALISTabsContent>
+        <ALISTabsContent value="policy"><PolicyRulesTab /></ALISTabsContent>
+        <ALISTabsContent value="audit"><AuditTab /></ALISTabsContent>
+      </ALISTabs>
     </div>
   );
 }

@@ -52,7 +52,7 @@ from server.core.security import (
 )
 from server.core.rbac import Role, is_manager_role
 from server.core.audit import AuditLedger, AuditAction
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 logger = logging.getLogger(__name__)
 

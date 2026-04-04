@@ -17,8 +17,8 @@ export function OfflineAttendancePage() {
       courseCode={params.get('courseCode') ?? ''}
       courseName={params.get('courseName') ?? 'Attendance'}
       date={params.get('date') ?? new Date().toISOString().slice(0, 10)}
-      tenantId={localStorage.getItem('tenantId') ?? ''}
-      authToken={localStorage.getItem('token') ?? ''}
+      tenantId={sessionStorage.getItem('tenantId') ?? ''}
+      authToken={sessionStorage.getItem('token') ?? ''}
     />
   )
 }

@@ -112,12 +112,22 @@ class StudentState(str, Enum):
     # Stage 8 — Payment
     SEAT_CONFIRMED = "SEAT_CONFIRMED"
 
+    # Stage 8.5 — Reporting gate (EC-ADM-03 Ghost Withdrawal)
+    REPORTING_PENDING = "REPORTING_PENDING"
+    FORFEITED = "FORFEITED"               # seat forfeited after SLA breach
+
     # Stage 9 — Final verification
     VERIFICATION_PENDING = "VERIFICATION_PENDING"
     READY_FOR_ENROLLMENT = "READY_FOR_ENROLLMENT"
 
     # Stage 10 — Enrolled
     ENROLLED = "ENROLLED"
+
+    # Identity verification (EC-ADM-01)
+    KYC_RECONCILIATION = "KYC_RECONCILIATION"
+
+    # Document fraud (EC-ADM-04)
+    POTENTIAL_FORGERY = "POTENTIAL_FORGERY"
 
     # Terminal — withdrawn at any stage
     CANCELLED = "CANCELLED"
@@ -259,8 +269,17 @@ STUDENT_TRANSITIONS: Dict[StudentState, Set[StudentState]] = {
     StudentState.OFFER_DECLINED: {StudentState.CANCELLED},
     # Stage 8
     StudentState.SEAT_CONFIRMED: {
-        StudentState.VERIFICATION_PENDING, StudentState.CANCELLED
+        StudentState.REPORTING_PENDING,     # EC-ADM-03 reporting gate
+        StudentState.VERIFICATION_PENDING,  # direct path (no reporting gate)
+        StudentState.CANCELLED,
     },
+    # Stage 8.5 — Reporting gate (EC-ADM-03)
+    StudentState.REPORTING_PENDING: {
+        StudentState.VERIFICATION_PENDING,  # student reported within SLA
+        StudentState.FORFEITED,             # SLA breached → seat forfeited
+        StudentState.CANCELLED,
+    },
+    StudentState.FORFEITED: {StudentState.CANCELLED},  # terminal-like (waitlist activated)
     # Stage 9
     StudentState.VERIFICATION_PENDING: {
         StudentState.READY_FOR_ENROLLMENT, StudentState.CANCELLED
@@ -270,6 +289,17 @@ STUDENT_TRANSITIONS: Dict[StudentState, Set[StudentState]] = {
     },
     # Stage 10
     StudentState.ENROLLED: {StudentState.CANCELLED},
+    # Identity verification (EC-ADM-01) — can enter from document review
+    StudentState.KYC_RECONCILIATION: {
+        StudentState.DOCUMENTS_VERIFIED,    # identity confirmed → proceed
+        StudentState.POTENTIAL_FORGERY,     # escalated to forgery
+        StudentState.CANCELLED,
+    },
+    # Document fraud (EC-ADM-04) — escalation from KYC or document review
+    StudentState.POTENTIAL_FORGERY: {
+        StudentState.DOCUMENTS_VERIFIED,    # cleared after investigation
+        StudentState.CANCELLED,             # confirmed fraud → cancel
+    },
     # Terminal
     StudentState.CANCELLED: set(),
 }

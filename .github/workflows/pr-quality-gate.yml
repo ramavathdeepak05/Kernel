@@ -1,0 +1,71 @@
+name: PR Quality Gate
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  size-check:
+    name: "PR Size Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          CHANGED=$(git diff --stat origin/${{ github.base_ref }}...HEAD | tail -1)
+          echo "Changed: $CHANGED"
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | wc -l)
+          echo "Files changed: $FILES"
+          if [ "$FILES" -gt 50 ]; then
+            echo "::warning::Large PR ($FILES files changed). Consider splitting."
+          fi
+
+  no-secrets:
+    name: "Secret Detection"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Scan for common secret patterns in changed files
+          PATTERNS="password.*=.*['\"](?!.*\{)|api_key.*=.*['\"](?!.*\{)|secret.*=.*['\"](?!.*\{)"
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- '*.py' '*.ts' '*.tsx' '*.yml' '*.yaml')
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No relevant files changed."
+            exit 0
+          fi
+          echo "$CHANGED_FILES" | xargs grep -inE "$PATTERNS" || true
+          echo "Manual review required for any flagged lines above."
+
+  migration-check:
+    name: "Migration Safety"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for migration conflicts
+        run: |
+          # Ensure no two migrations have the same revision number
+          MIGRATIONS=$(find ALIS/migrations/versions -name '*.py' 2>/dev/null | sort)
+          if [ -z "$MIGRATIONS" ]; then
+            echo "No migrations found."
+            exit 0
+          fi
+          REVISIONS=$(grep -h "^revision = " $MIGRATIONS 2>/dev/null | sort | uniq -d)
+          if [ -n "$REVISIONS" ]; then
+            echo "::error::Duplicate migration revisions found: $REVISIONS"
+            exit 1
+          fi
+          echo "No migration conflicts detected."

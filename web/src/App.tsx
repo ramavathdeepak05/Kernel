@@ -3,10 +3,11 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom
 import { queryClient } from "./lib/queryClient";
 import { useAuthStore } from "./store/authStore";
 import { useEffect } from "react";
-import { useALISRole } from "./hooks/useALISRole";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
-// New three-column ALIS shell (FE-1)
-import { ALISShell } from "./shell/ALISShell";
+// Rebuilt shell + dashboard per ALIS_FRONTEND_SPEC.md
+import { NewALISShell } from "./components/shell/NewALISShell";
+import { RoleDashboard } from "./components/dashboard/RoleDashboard";
 
 // Public layouts (unchanged)
 import PortalLayout from "./layouts/PortalLayout";
@@ -20,13 +21,6 @@ import ApplicationWizardPage from "./pages/portal/ApplicationWizardPage";
 import ApplicationStatusPage from "./pages/portal/ApplicationStatusPage";
 import OfferLetterPage from "./pages/portal/OfferLetterPage";
 
-// Role dashboards (new views layer)
-import { RegistrarDashboard } from "./views/RegistrarDashboard";
-import { FacultyDashboard } from "./views/FacultyDashboard";
-import { StudentDashboard } from "./views/StudentDashboard";
-import { FinanceDashboard } from "./views/FinanceDashboard";
-import { HODDashboard } from "./views/HODDashboard";
-import { ExamControllerDashboard } from "./views/ExamControllerDashboard";
 import { SeatMatrixPage } from "./pages/admissions/SeatMatrixPage";
 
 // Module pages (existing)
@@ -64,17 +58,15 @@ import { SettingsPage } from './pages/settings/SettingsPage';
 // P28 — Offline PWA attendance (standalone, no shell — loads as installable page)
 import { OfflineAttendancePage } from './pages/attendance/OfflineAttendancePage';
 
-function RoleDashboard() {
-  const { role } = useALISRole();
-  const map: Record<string, JSX.Element> = {
-    faculty:         <FacultyDashboard />,
-    student:         <StudentDashboard />,
-    finance:         <FinanceDashboard />,
-    hod:             <HODDashboard />,
-    exam_controller: <ExamControllerDashboard />,
-  };
-  return map[role] ?? <RegistrarDashboard />;
-}
+import { MyCoursesPage } from './pages/student/MyCoursesPage';
+import { MyExamsPage } from './pages/student/MyExamsPage';
+import { MyFeesPage } from './pages/student/MyFeesPage';
+import { MyLibraryPage } from './pages/student/MyLibraryPage';
+import { ClubsEventsPage } from './pages/clubs/ClubsEventsPage';
+import { TrainingPage } from './pages/hr/TrainingPage';
+import { RecruitmentPage } from './pages/hr/RecruitmentPage';
+import { BudgetPage } from './pages/finance/BudgetPage';
+import { VendorsPage } from './pages/finance/VendorsPage';
 
 function ProtectedRoute() {
   const { isAuthenticated, hydrate } = useAuthStore();
@@ -97,6 +89,7 @@ export default function App() {
   }, [hydrate]);
 
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
@@ -113,16 +106,11 @@ export default function App() {
 
           {/* Protected app — three-column ALIS shell */}
           <Route element={<ProtectedRoute />}>
-            <Route element={<ALISShell />}>
+            <Route element={<NewALISShell />}>
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
-              {/* Role dashboards — RoleDashboard selects the right view by role */}
+              {/* Role dashboard — auto-selects by role per ALIS_FRONTEND_SPEC.md §6 */}
               <Route path="/dashboard" element={<RoleDashboard />} />
-              <Route path="/dashboard/faculty" element={<FacultyDashboard />} />
-              <Route path="/dashboard/student" element={<StudentDashboard />} />
-              <Route path="/dashboard/finance" element={<FinanceDashboard />} />
-              <Route path="/dashboard/hod" element={<HODDashboard />} />
-              <Route path="/dashboard/exam-controller" element={<ExamControllerDashboard />} />
 
               {/* Module pages */}
               <Route path="/admissions" element={<AdmissionsPage />} />
@@ -153,6 +141,19 @@ export default function App() {
               {/* Team management */}
               <Route path="/admin/team" element={<TeamManagementPage />} />
 
+              {/* Student self-service routes */}
+              <Route path="/my/courses" element={<MyCoursesPage />} />
+              <Route path="/my/exams" element={<MyExamsPage />} />
+              <Route path="/my/fees" element={<MyFeesPage />} />
+              <Route path="/my/library" element={<MyLibraryPage />} />
+
+              {/* New module routes */}
+              <Route path="/clubs" element={<ClubsEventsPage />} />
+              <Route path="/training" element={<TrainingPage />} />
+              <Route path="/recruitment" element={<RecruitmentPage />} />
+              <Route path="/budget" element={<BudgetPage />} />
+              <Route path="/vendors" element={<VendorsPage />} />
+
               {/* Settings — SUPER_ADMIN / Admin */}
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
@@ -169,5 +170,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
+    </ErrorBoundary>
   );
 }

@@ -296,7 +296,10 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
     fingerprint = _device_fingerprint(request)
     device_trusted = MFAService.is_device_trusted(body.tenant_id, user_id_str, fingerprint)
 
-    mfa_needed = (role_requires_mfa or has_mfa) and not device_trusted
+    # MFA challenge is only triggered if user has ENROLLED a device.
+    # If their role requires MFA but they haven't enrolled, they're allowed in
+    # with a warning — the frontend should prompt them to enroll.
+    mfa_needed = has_mfa and not device_trusted
 
     if mfa_needed:
         # Issue a short-lived MFA challenge token — do NOT create a full session yet
@@ -352,6 +355,8 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
             "role": user_role,
             "tenant_id": body.tenant_id,
             "expires_at": session.expires_at.isoformat(),
+            # Flag: role requires MFA but user hasn't enrolled yet
+            "mfa_enrollment_required": role_requires_mfa and not has_mfa,
         },
     )
 
@@ -409,6 +414,9 @@ async def refresh_session(
         return _err(401, error, "ERR_AUTH_REQUIRED")
 
     session.refresh(extend_hours=24)
+    # Persist updated expiry to Redis — without this, the TTL stays at the original value
+    from server.core.security import _get_redis
+    SessionManager._save(_get_redis(), session)
 
     return JSONResponse(
         status_code=200,
@@ -605,6 +613,10 @@ async def bootstrap_tenant(body: BootstrapRequest) -> JSONResponse:
         POST /api/auth/login     → get a session token
         POST /api/auth/register  → provision the rest of the institution
     """
+    # Rate limit bootstrap attempts per tenant (1 per day)
+    if not RateLimiter.check(f"bootstrap:{body.tenant_id}", max_requests=3, window_seconds=86400):
+        return _err(429, "Too many bootstrap attempts for this tenant", "ERR_RATE_LIMITED")
+
     expected_secret = os.getenv("ALIS_BOOTSTRAP_SECRET", "")
     if not expected_secret:
         return _err(

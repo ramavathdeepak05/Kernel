@@ -11,7 +11,7 @@ import uuid
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import NotFoundError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import CounsellingReferralCreate, CounsellingSessionCreate
 
@@ -55,7 +55,7 @@ class CounsellingService:
         values: list = []
         for k, v in updates.items():
             if k in allowed and v is not None:
-                fields.append(f"{k} = %s")
+                fields.append(f"{safe_identifier(k)} = %s")
                 values.append(v)
         if not fields:
             return cls.get_session(org_id, session_id, include_notes=True)

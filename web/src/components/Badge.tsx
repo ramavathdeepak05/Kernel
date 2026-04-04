@@ -5,25 +5,31 @@
  * Never use color decoratively — only for semantic status.
  */
 
-export type BadgeVariant = 'red' | 'amber' | 'green' | 'blue' | 'gray' | 'teal'
+export type BadgeVariant = 'red' | 'amber' | 'green' | 'blue' | 'gray' | 'teal' | 'yellow' | 'purple'
 
 const BADGE_STYLES: Record<BadgeVariant, { bg: string; color: string }> = {
-  red:   { bg: '#FCEBEB', color: '#A32D2D' },
-  amber: { bg: '#FAEEDA', color: '#854F0B' },
-  green: { bg: '#EAF3DE', color: '#3B6D11' },
-  blue:  { bg: '#E6F1FB', color: '#185FA5' },
-  gray:  { bg: 'rgba(255,255,255,0.06)', color: '#94a3b8' },
-  teal:  { bg: '#E1F5EE', color: '#0F6E56' },
+  red:    { bg: '#FCEBEB', color: '#A32D2D' },
+  amber:  { bg: '#FAEEDA', color: '#854F0B' },
+  yellow: { bg: '#FEF9C3', color: '#854D0E' },
+  green:  { bg: '#EAF3DE', color: '#3B6D11' },
+  blue:   { bg: '#E6F1FB', color: '#185FA5' },
+  purple: { bg: '#F3E8FF', color: '#6B21A8' },
+  gray:   { bg: 'rgba(255,255,255,0.06)', color: '#94a3b8' },
+  teal:   { bg: '#E1F5EE', color: '#0F6E56' },
 }
 
-interface BadgeProps {
-  variant: BadgeVariant
-  children: React.ReactNode
+export interface BadgeProps {
+  variant?: BadgeVariant
+  /** Shorthand: pass label + color instead of variant + children */
+  label?: string
+  color?: string
+  children?: React.ReactNode
   className?: string
 }
 
-export function Badge({ variant, children, className }: BadgeProps) {
-  const s = BADGE_STYLES[variant]
+export function Badge({ variant, label, color, children, className }: BadgeProps) {
+  const resolvedVariant: BadgeVariant = variant || (color as BadgeVariant) || 'gray'
+  const s = BADGE_STYLES[resolvedVariant] || BADGE_STYLES.gray
   return (
     <span
       className={className}
@@ -38,7 +44,7 @@ export function Badge({ variant, children, className }: BadgeProps) {
         whiteSpace: 'nowrap',
       }}
     >
-      {children}
+      {children || label}
     </span>
   )
 }

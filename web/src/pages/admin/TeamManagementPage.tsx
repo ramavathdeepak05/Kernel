@@ -28,7 +28,7 @@ interface UserEntry {
   role: string
 }
 
-const TOKEN = () => localStorage.getItem('token') ?? ''
+const TOKEN = () => sessionStorage.getItem('token') ?? ''
 const H = () => ({ 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN()}` })
 
 async function apiFetch(path: string, method = 'GET', body?: object) {

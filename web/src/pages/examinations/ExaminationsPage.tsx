@@ -5,6 +5,9 @@ import {
   BookOpen, Layers, ChevronRight, Star, Ticket, CreditCard, Brain,
 } from "lucide-react";
 import {
+  ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent,
+} from "@/components/ui/alis-tabs";
+import {
   useExamSchedules,
   useSemesterAnalytics,
   useExamAiInsights,
@@ -845,8 +848,6 @@ function AIScoreReviewTab() {
 // ── Main Page ──────────────────────────────────────────────────
 
 export default function ExaminationsPage() {
-  const [tab, setTab] = useState<TabId>("overview");
-
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: "transparent" }}>
       {/* Header */}
@@ -874,33 +875,27 @@ export default function ExaminationsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 mt-4">
-          {tabs.map((t) => (
-            <button key={t.id}
-              onClick={() => setTab(t.id)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
-              style={{
-                background: tab === t.id ? "rgba(52,211,153,0.12)" : "transparent",
-                color: tab === t.id ? "#34d399" : "#64748b",
-                border: `1px solid ${tab === t.id ? "rgba(52,211,153,0.25)" : "transparent"}`,
-              }}>
-              {t.icon}
-              {t.label}
-            </button>
-          ))}
-        </div>
-      </div>
+        <ALISTabs defaultValue="overview" className="mt-4">
+          <ALISTabsList>
+            {tabs.map((t) => (
+              <ALISTabsTrigger key={t.id} value={t.id}>
+                <span className="flex items-center gap-1.5">{t.icon}{t.label}</span>
+              </ALISTabsTrigger>
+            ))}
+          </ALISTabsList>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-6 pb-6">
-        {tab === "overview"    && <OverviewTab />}
-        {tab === "schedules"   && <SchedulesTab />}
-        {tab === "grades"      && <GradesTab />}
-        {tab === "results"     && <ResultsTab />}
-        {tab === "reeval"      && <ReEvalTab />}
-        {tab === "halltickets" && <HallTicketsTab />}
-        {tab === "gradecards"  && <GradeCardsTab />}
-        {tab === "aiscore"     && <AIScoreReviewTab />}
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto pb-6">
+            <ALISTabsContent value="overview"><OverviewTab /></ALISTabsContent>
+            <ALISTabsContent value="schedules"><SchedulesTab /></ALISTabsContent>
+            <ALISTabsContent value="grades"><GradesTab /></ALISTabsContent>
+            <ALISTabsContent value="results"><ResultsTab /></ALISTabsContent>
+            <ALISTabsContent value="reeval"><ReEvalTab /></ALISTabsContent>
+            <ALISTabsContent value="halltickets"><HallTicketsTab /></ALISTabsContent>
+            <ALISTabsContent value="gradecards"><GradeCardsTab /></ALISTabsContent>
+            <ALISTabsContent value="aiscore"><AIScoreReviewTab /></ALISTabsContent>
+          </div>
+        </ALISTabs>
       </div>
     </div>
   );

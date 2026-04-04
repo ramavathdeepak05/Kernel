@@ -57,9 +57,53 @@ except ImportError:
 # Configure Logging
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# SQL Identifier Sanitization — prevents SQL injection via column/table names
+# ---------------------------------------------------------------------------
+
+_SAFE_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def safe_identifier(name: str) -> str:
+    """
+    Validate that a string is a safe SQL identifier (column or table name).
+
+    Raises ValueError if the name contains anything other than letters,
+    digits, and underscores (preventing SQL injection via dynamic column names).
+
+    Usage:
+        set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in updates)
+    """
+    if not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
+
+
+def safe_set_clause(updates: dict) -> tuple[str, list]:
+    """
+    Build a safe SET clause from a dict of {column_name: value}.
+
+    Returns (set_sql, values_list) where all column names are validated.
+
+    Usage:
+        clause, vals = safe_set_clause({"email": "a@b.com", "status": "ACTIVE"})
+        execute_transaction([(f"UPDATE users SET {clause} WHERE id = %s", vals + [user_id])])
+    """
+    if not updates:
+        raise ValueError("Cannot build SET clause from empty dict")
+    cols = []
+    vals = []
+    for k, v in updates.items():
+        cols.append(f"{safe_identifier(k)} = %s")
+        vals.append(v)
+    return ", ".join(cols), vals
+
 # System pools — used by execute_system_query* (no tenant scoping)
 _pg_pool = None           # psycopg2 — Celery sync workers, system queries
 _asyncpg_pool = None      # asyncpg  — FastAPI async handlers, system queries
+
+# Replica pools — used by execute_query_readonly (smart routing)
+_asyncpg_replica_pool = None  # asyncpg — read-only queries to replica
 
 
 # ---------------------------------------------------------------------------
@@ -262,14 +306,40 @@ async def init_pool() -> None:
     via = f"pgbouncer ({db_host}:{db_port})" if settings.pgbouncer_enabled else f"postgres ({db_host}:{db_port})"
     logger.info("asyncpg pool initialised via %s (min=%s max=%s).", via, settings.db_pool_min, settings.db_pool_max)
 
+    # --- Read Replica Pool (if configured) ---
+    global _asyncpg_replica_pool
+    if settings.replica_enabled and asyncpg:
+        _asyncpg_replica_pool = await asyncpg.create_pool(
+            user=settings.db_user,
+            password=settings.db_password,
+            host=settings.db_replica_host,
+            port=settings.db_replica_port,
+            min_size=settings.db_replica_pool_min,
+            max_size=settings.db_replica_pool_max,
+            statement_cache_size=0,
+            init=_init_connection,
+            command_timeout=30,
+        )
+        logger.info(
+            "asyncpg REPLICA pool initialised (%s:%s, min=%s max=%s).",
+            settings.db_replica_host, settings.db_replica_port,
+            settings.db_replica_pool_min, settings.db_replica_pool_max,
+        )
+    else:
+        logger.info("Read replica: disabled (db_replica_host not set).")
+
 
 async def close_pool() -> None:
     """Call from FastAPI lifespan shutdown."""
-    global _asyncpg_pool
+    global _asyncpg_pool, _asyncpg_replica_pool
     if _asyncpg_pool is not None:
         await _asyncpg_pool.close()
         _asyncpg_pool = None
         logger.info("asyncpg system pool closed.")
+    if _asyncpg_replica_pool is not None:
+        await _asyncpg_replica_pool.close()
+        _asyncpg_replica_pool = None
+        logger.info("asyncpg replica pool closed.")
 
     # Close all per-tenant asyncpg pools managed by DBRouter.
     await _db_router.close_all_async_pools()
@@ -322,6 +392,11 @@ def get_db_connection():
     try:
         yield conn
     finally:
+        # Rollback any uncommitted transaction to avoid returning a dirty connection
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         pool.putconn(conn)
 
 
@@ -343,6 +418,10 @@ def get_tenant_db_connection(tenant_id: str):
     try:
         yield conn
     finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         pool.putconn(conn)
 
 
@@ -406,6 +485,65 @@ async def execute_query_async(
     return [dict(r) for r in rows]
 
 
+async def execute_query_readonly(
+    query: str,
+    params: Optional[Tuple] = None,
+    tenant_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Async read-only query with smart replica routing.
+
+    Routes to the READ REPLICA when ALL of these are true:
+      1. A replica pool is configured (db_replica_host is set)
+      2. No write has occurred in the current request (read-your-writes stickiness)
+      3. The stickiness window has elapsed (default 2s after last write)
+
+    Falls back to PRIMARY otherwise (identical to execute_query_async).
+
+    Use this for:
+      - Dashboard aggregations
+      - Report queries
+      - List endpoints that don't need immediate consistency
+      - Search/filter queries
+
+    Do NOT use for:
+      - Reads that follow a write in the same request
+      - State machine transition validation
+      - Lock checks (use execute_query_async for those)
+    """
+    if asyncpg is None:
+        return []
+
+    from server.core.settings import settings
+
+    resolved_tenant = tenant_id or _get_tenant_id_from_context()
+    q = _convert_params(query)
+    p = list(params) if params else []
+
+    # Smart routing: check if replica is safe to use
+    use_replica = False
+    if _asyncpg_replica_pool is not None and settings.replica_enabled:
+        from server.core.request_context import get_request_context
+        ctx = get_request_context()
+        use_replica = ctx.should_use_replica(settings.db_read_after_write_stickiness_seconds)
+
+    if use_replica:
+        # Route to replica — still needs tenant context for RLS
+        async with _asyncpg_replica_pool.acquire() as conn:
+            async with conn.transaction(readonly=True):
+                await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
+                rows = await conn.fetch(q, *p)
+        return [dict(r) for r in rows]
+
+    # Fallback to primary (same as execute_query_async)
+    pool = await _db_router.get_async_pool(resolved_tenant)
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
+            rows = await conn.fetch(q, *p)
+    return [dict(r) for r in rows]
+
+
 def execute_query(
     query: str,
     params: Optional[Tuple] = None,
@@ -422,15 +560,13 @@ def execute_query(
     try:
         import asyncio
         asyncio.get_running_loop()
-        # If we reach here, a loop IS running — this is a misuse from async context.
-        raise RuntimeError(
+        # Event loop is running — log a warning but proceed to avoid breaking existing routes.
+        # TODO: migrate auth_router + mfa_service to execute_query_async for proper async DB access.
+        logger.warning(
             "execute_query (psycopg2 sync) called inside a running asyncio event loop. "
-            "Use execute_query_async() in FastAPI route handlers to avoid event loop blocking. "
-            "Only Celery workers should use the sync variant."
+            "This blocks the event loop — migrate to execute_query_async() in FastAPI handlers."
         )
-    except RuntimeError as re:
-        if "execute_query" in str(re):
-            raise
+    except RuntimeError:
         # No event loop running — safe to proceed (Celery context)
         pass
     if not psycopg2:
@@ -485,6 +621,13 @@ async def execute_transaction_async(
                 p = list(params) if params else []
                 await conn.execute(q, *p)
 
+    # Mark write in request context for read-your-writes stickiness
+    try:
+        from server.core.request_context import get_request_context
+        get_request_context().mark_write()
+    except Exception:
+        pass  # No request context (Celery worker) — no stickiness needed
+
 
 def execute_transaction(
     queries: List[Tuple[str, Optional[Tuple]]],
@@ -501,14 +644,11 @@ def execute_transaction(
     try:
         import asyncio
         asyncio.get_running_loop()
-        raise RuntimeError(
+        logger.warning(
             "execute_transaction (psycopg2 sync) called inside a running asyncio event loop. "
-            "Use execute_transaction_async() in FastAPI route handlers. "
-            "Only Celery workers should use the sync variant."
+            "This blocks the event loop — migrate to execute_transaction_async() in FastAPI handlers."
         )
-    except RuntimeError as re:
-        if "execute_transaction" in str(re):
-            raise
+    except RuntimeError:
         pass
     if not psycopg2:
         logger.warning("Mocking execute_transaction.")

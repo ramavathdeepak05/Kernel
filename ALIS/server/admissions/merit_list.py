@@ -33,7 +33,7 @@ from pydantic import BaseModel, Field
 
 from server.core.audit import AuditLog, AuditAction
 from server.core.exceptions import BusinessRuleViolation
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -643,7 +643,7 @@ class MeritListService:
             updates["approved_by"] = actor_id
             updates["approved_at"] = datetime.now(timezone.utc)
 
-        set_clause = ", ".join(f"{k} = %s" for k in updates)
+        set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in updates)
         execute_transaction([
             (
                 f"UPDATE merit_lists SET {set_clause} WHERE id = %s AND org_id = %s",

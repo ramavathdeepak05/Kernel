@@ -7,7 +7,7 @@ from statistics import mean
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import PerformanceReviewCreate, PerformanceReviewUpdate
 
@@ -71,7 +71,7 @@ class PerformanceReviewService:
         for field in ("strengths", "improvements", "goals_next", "staff_comments"):
             val = getattr(req, field)
             if val is not None:
-                fields.append(f"{field} = %s")
+                fields.append(f"{safe_identifier(field)} = %s")
                 values.append(val)
 
         if req.status:

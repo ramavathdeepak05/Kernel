@@ -8,21 +8,12 @@ import {
   useCollectionReport, useDefaultRisk, useFeeStructures,
   useScholarships, usePendingWaivers, useMonthlyCollection,
 } from "@/hooks/use-finance";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import type { FeeStructure, DefaultRisk } from "@/services/finance";
 
 // ── constants ──────────────────────────────────────────────────
 
 const CURRENT_YEAR = "2024-25";
-
-type TabId = "overview" | "fees" | "scholarships" | "waivers" | "risk";
-
-const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",     label: "Overview",     icon: <BarChart3 className="w-3.5 h-3.5" /> },
-  { id: "fees",         label: "Fee Structures", icon: <Landmark className="w-3.5 h-3.5" /> },
-  { id: "scholarships", label: "Scholarships",  icon: <Gift className="w-3.5 h-3.5" /> },
-  { id: "waivers",      label: "Waivers",       icon: <Shield className="w-3.5 h-3.5" /> },
-  { id: "risk",         label: "Default Risk",  icon: <AlertTriangle className="w-3.5 h-3.5" /> },
-];
 
 const fmt = (n?: number) =>
   n == null ? "—" : new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n);
@@ -394,7 +385,7 @@ function WaiverModal({ onClose, onDone }: { onClose: () => void; onDone: () => v
     setSaving(true);
     setErr("");
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const r = await fetch(`${API_BASE}/finance/waivers`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },

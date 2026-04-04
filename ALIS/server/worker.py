@@ -54,6 +54,8 @@ celery_app = Celery(
         "server.tasks.backup",           # P22 daily database backup
         "server.tasks.plagiarism_poll",  # E15 Drillbit plagiarism result polling
         "server.tasks.learning_tasks",   # P40 In-house LMS — close overdue assignments
+        "server.tasks.perf_tasks",       # Performance: async audit drain, event dispatch
+        "server.tasks.partition_mgmt",   # Partition management: create/drop/detach
     ],
 )
 
@@ -80,7 +82,11 @@ celery_app.conf.update(
 celery_app.conf.task_queues = (
     Queue("default"),
     Queue("high_priority"),
-    Queue("dead_letter"),   # Receives tasks that exhausted all retries
+    Queue("dead_letter"),         # Receives tasks that exhausted all retries
+    Queue("audit_queue"),         # Async audit drain (high-frequency, low-latency)
+    Queue("event_dispatch_queue"),  # Domain event dispatch (decoupled from request)
+    Queue("ai_tasks"),            # AI inference tasks (may be slow)
+    Queue("notifications"),       # Email/SMS/WhatsApp delivery
 )
 celery_app.conf.task_default_queue = "default"
 
@@ -99,61 +105,39 @@ celery_app.conf.task_routes = (TenantTaskRouter(),)
 
 @worker_ready.connect
 def _register_all_domain_event_handlers(**kwargs: object) -> None:
-    """Import all event handler modules so their subscriptions are active."""
-    try:
-        from server.finance.event_handlers import register_all as _fin
-        _fin()
-        logger.info("worker: finance event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register finance event handlers: %s", e)
-    try:
-        from server.admissions.event_handlers import register_all as _adm
-        _adm()
-        logger.info("worker: admissions event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register admissions event handlers: %s", e)
-    try:
-        from server.academics.event_handlers import register_all as _acm
-        _acm()
-        logger.info("worker: academics event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register academics event handlers: %s", e)
-    try:
-        from server.hr.event_handlers import register_all as _hr
-        _hr()
-        logger.info("worker: hr event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register hr event handlers: %s", e)
-    try:
-        from server.examinations.event_handlers import register_all as _exm
-        _exm()
-        logger.info("worker: examinations event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register examinations event handlers: %s", e)
-    try:
-        from server.communication.event_handlers import register_all as _com
-        _com()
-        logger.info("worker: communication event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register communication event handlers: %s", e)
-    try:
-        from server.student_services.event_handlers import register_all as _stu
-        _stu()
-        logger.info("worker: student_services event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register student_services event handlers: %s", e)
-    try:
-        from server.alumni.event_handlers import register_all as _alu
-        _alu()
-        logger.info("worker: alumni event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register alumni event handlers: %s", e)
-    try:
-        from server.regulatory.event_handlers import register_all as _reg
-        _reg()
-        logger.info("worker: regulatory event handlers registered")
-    except Exception as e:
-        logger.error("worker: failed to register regulatory event handlers: %s", e)
+    """Import all event handler modules so their subscriptions are active.
+
+    Failures are logged AND tracked. If any module fails to register, the worker
+    emits a CRITICAL log so monitoring catches it immediately.
+    """
+    _modules = [
+        ("finance", "server.finance.event_handlers"),
+        ("admissions", "server.admissions.event_handlers"),
+        ("academics", "server.academics.event_handlers"),
+        ("hr", "server.hr.event_handlers"),
+        ("examinations", "server.examinations.event_handlers"),
+        ("communication", "server.communication.event_handlers"),
+        ("student_services", "server.student_services.event_handlers"),
+        ("alumni", "server.alumni.event_handlers"),
+        ("regulatory", "server.regulatory.event_handlers"),
+    ]
+    failed = []
+    for name, module_path in _modules:
+        try:
+            import importlib
+            mod = importlib.import_module(module_path)
+            mod.register_all()
+            logger.info("worker: %s event handlers registered", name)
+        except Exception as e:
+            failed.append(name)
+            logger.error("worker: FAILED to register %s event handlers: %s", name, e, exc_info=True)
+
+    if failed:
+        logger.critical(
+            "worker: %d event handler module(s) failed to register: %s — "
+            "events for these modules will NOT be processed!",
+            len(failed), ", ".join(failed),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -285,5 +269,40 @@ celery_app.conf.beat_schedule = {
     "learning-close-overdue": {
         "task": "server.tasks.learning_tasks.close_overdue_assignments",
         "schedule": crontab(minute=0),  # every hour on the hour
+    },
+
+    # --- Performance Optimization Tasks ---
+
+    # Drain async audit queue: every 2 seconds
+    "perf-drain-audit": {
+        "task": "server.tasks.perf_tasks.drain_audit_queue",
+        "schedule": 2.0,
+        "kwargs": {"batch_size": 200},
+    },
+    # Dispatch pending domain events: every 3 seconds
+    "perf-dispatch-events": {
+        "task": "server.tasks.perf_tasks.dispatch_pending_events",
+        "schedule": 3.0,
+        "kwargs": {"batch_size": 50},
+    },
+
+    # --- Partition Management Tasks ---
+
+    # Create future partitions: weekly on Sunday at 03:30 UTC
+    "partition-create-future": {
+        "task": "server.tasks.partition_mgmt.create_future_partitions",
+        "schedule": crontab(hour=3, minute=30, day_of_week=0),
+    },
+    # Drop expired domain_events partitions: weekly on Sunday at 04:00 UTC
+    "partition-drop-expired-events": {
+        "task": "server.tasks.partition_mgmt.drop_expired_event_partitions",
+        "schedule": crontab(hour=4, minute=0, day_of_week=0),
+        "kwargs": {"retention_days": 30},
+    },
+    # Detach old audit_ledger partitions: monthly on 1st at 04:30 UTC
+    "partition-detach-old-audit": {
+        "task": "server.tasks.partition_mgmt.detach_old_audit_partitions",
+        "schedule": crontab(hour=4, minute=30, day_of_month=1),
+        "kwargs": {"retention_years": 2},
     },
 }

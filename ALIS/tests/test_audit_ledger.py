@@ -178,6 +178,7 @@ class TestBackwardCompatibility:
         mock_db_ctx.__enter__ = MagicMock(return_value=mock_conn)
         mock_db_ctx.__exit__ = MagicMock(return_value=False)
         mock_db_service.get_db_connection.return_value = mock_db_ctx
+        mock_db_service.get_tenant_db_connection.return_value = mock_db_ctx
 
         # Mock tenant context resolution to avoid importing security
         mock_security = MagicMock()

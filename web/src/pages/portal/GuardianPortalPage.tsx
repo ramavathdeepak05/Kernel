@@ -505,13 +505,13 @@ export function GuardianPortalPage() {
 
   // Restore session from localStorage if still valid
   useEffect(() => {
-    const stored = localStorage.getItem('alis_guardian_session');
+    const stored = sessionStorage.getItem('alis_guardian_session');
     if (stored) {
       try {
         setGuardianSession(JSON.parse(stored));
         setStep('dashboard');
       } catch {
-        localStorage.removeItem('alis_guardian_session');
+        sessionStorage.removeItem('alis_guardian_session');
       }
     }
   }, []);
@@ -520,7 +520,7 @@ export function GuardianPortalPage() {
     setLoading(true);
     setOtpError(null);
     try {
-      const tenantId = localStorage.getItem('tenant_id') ?? 'demo';
+      const tenantId = sessionStorage.getItem('tenant_id') ?? 'demo';
       await alisApi.post('/auth/guardian/request-otp', { phone, tenant_id: tenantId });
       setStep('otp');
     } catch (err: unknown) {
@@ -534,7 +534,7 @@ export function GuardianPortalPage() {
     setLoading(true);
     setOtpError(null);
     try {
-      const tenantId = localStorage.getItem('tenant_id') ?? 'demo';
+      const tenantId = sessionStorage.getItem('tenant_id') ?? 'demo';
       const result = await alisApi.post<GuardianSession & { token: string; student: StudentInfo }>(
         '/auth/guardian/verify-otp',
         { phone, otp, tenant_id: tenantId }
@@ -545,7 +545,7 @@ export function GuardianPortalPage() {
         tenant_id: result.tenant_id ?? tenantId,
       };
       setGuardianSession(session);
-      localStorage.setItem('alis_guardian_session', JSON.stringify(session));
+      sessionStorage.setItem('alis_guardian_session', JSON.stringify(session));
       setStep('dashboard');
     } catch (err: unknown) {
       setOtpError(err instanceof Error ? err.message : 'Invalid OTP. Please try again.');
@@ -561,7 +561,7 @@ export function GuardianPortalPage() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('alis_guardian_session');
+    sessionStorage.removeItem('alis_guardian_session');
     setGuardianSession(null);
     setStep('phone');
     setPhone('');

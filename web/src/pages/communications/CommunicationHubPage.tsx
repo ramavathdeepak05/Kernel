@@ -3,6 +3,7 @@ import {
   MessageSquare, Mail, Send, AlertCircle,
   Megaphone, BarChart2, RefreshCw, Layers,
 } from "lucide-react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import {
   useCommsStats, useTemplates, useFailedLogs,
   useAnnouncements, useBulkCampaigns,
@@ -426,33 +427,20 @@ export default function CommunicationHubPage() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 2, borderBottom: "0.5px solid var(--color-border-tertiary, rgba(255,255,255,0.06))", paddingBottom: 0 }}>
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              display: "flex", alignItems: "center", gap: 5, padding: "6px 12px",
-              borderRadius: "6px 6px 0 0", border: "0.5px solid transparent",
-              borderBottom: tab === t.id ? "0.5px solid transparent" : "none",
-              background: tab === t.id ? "var(--color-background-secondary, #0f1c2e)" : "transparent",
-              color: tab === t.id ? TEAL : "var(--color-text-secondary, #64748b)",
-              fontSize: 12, fontWeight: tab === t.id ? 500 : 400, cursor: "pointer",
-              marginBottom: tab === t.id ? -1 : 0,
-              outline: "none",
-            }}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      {tab === "overview"      && <OverviewTab />}
-      {tab === "templates"     && <TemplatesTab />}
-      {tab === "announcements" && <AnnouncementsTab />}
-      {tab === "campaigns"     && <CampaignsTab />}
-      {tab === "logs"          && <FailedLogsTab />}
+      <ALISTabs defaultValue="overview">
+        <ALISTabsList>
+          {TABS.map(t => (
+            <ALISTabsTrigger key={t.id} value={t.id}>
+              <span className="flex items-center gap-1.5">{t.icon} {t.label}</span>
+            </ALISTabsTrigger>
+          ))}
+        </ALISTabsList>
+        <ALISTabsContent value="overview"><OverviewTab /></ALISTabsContent>
+        <ALISTabsContent value="templates"><TemplatesTab /></ALISTabsContent>
+        <ALISTabsContent value="announcements"><AnnouncementsTab /></ALISTabsContent>
+        <ALISTabsContent value="campaigns"><CampaignsTab /></ALISTabsContent>
+        <ALISTabsContent value="logs"><FailedLogsTab /></ALISTabsContent>
+      </ALISTabs>
     </div>
   );
 }

@@ -164,8 +164,8 @@ export function PolicyStudioPage() {
     setAiLoading(true);
     setAiDraftResult(null);
     try {
-      const userId = localStorage.getItem('user_id') ?? 'system';
-      const tenantId = localStorage.getItem('tenant_id') ?? 'demo';
+      const userId = sessionStorage.getItem('user_id') ?? 'system';
+      const tenantId = sessionStorage.getItem('tenant_id') ?? 'demo';
       const res = await alisApi.post<{ content?: string; error?: string }>('/ai/invoke', {
         actor_id: userId,
         actor_role: 'admin',

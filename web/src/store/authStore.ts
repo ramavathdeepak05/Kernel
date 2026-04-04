@@ -17,25 +17,25 @@ export const useAuthStore = create<AuthState>((set) => ({
   token: null,
   isLoading: true,
   setAuth: (user, token) => {
-    localStorage.setItem("token", token);
-    localStorage.setItem("user", JSON.stringify(user));
+    sessionStorage.setItem("token", token);
+    sessionStorage.setItem("user", JSON.stringify(user));
     set({ user, token, isAuthenticated: true, isLoading: false });
   },
   logout: () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    sessionStorage.removeItem("token");
+    sessionStorage.removeItem("user");
     set({ user: null, token: null, isAuthenticated: false, isLoading: false });
   },
   hydrate: async () => {
-    const token = localStorage.getItem("token");
-    const userStr = localStorage.getItem("user");
+    const token = sessionStorage.getItem("token");
+    const userStr = sessionStorage.getItem("user");
     if (!token || !userStr) { set({ isLoading: false }); return; }
     try {
       const user: UserProfile = JSON.parse(userStr);
       set({ user, token, isAuthenticated: true, isLoading: false });
     } catch {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
       set({ isLoading: false });
     }
   },

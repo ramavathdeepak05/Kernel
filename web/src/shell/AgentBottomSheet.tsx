@@ -160,7 +160,7 @@ export function AgentBottomSheet({ open, onClose }: Props) {
 
         {/* Chat content */}
         <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <ChatThread />
+          <ChatThread onChipAction={handleChipAction} />
         </div>
 
         {/* Quick actions */}

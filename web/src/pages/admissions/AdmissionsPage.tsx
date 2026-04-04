@@ -22,6 +22,7 @@ import { useReviewQueue, usePipelineSummary, useDocumentReviewQueue, useEntrance
 import { STATUS_LABELS, STATUS_COLORS } from "@/types/admissions";
 import { cn, formatDate } from "@/lib/utils";
 import { policiesApi, type InstitutionPolicy } from "@/services/admissions";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 
 // ── Sparkline component ──────────────────────────────────────
 
@@ -206,7 +207,7 @@ function FutureItemsSection() {
   const [items, setItems] = useState<{ id: string; label: string; detail: string; status: string }[]>([]);
 
   useEffect(() => {
-    const token = localStorage.getItem("token") ?? "";
+    const token = sessionStorage.getItem("token") ?? "";
     fetch("/api/v1/workflows?current_state=RUNNING&limit=8", {
       headers: { Authorization: `Bearer ${token}` },
     })

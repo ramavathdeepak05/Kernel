@@ -3,6 +3,7 @@ import {
   Shield, FileText, Clock, CheckCircle2, XCircle, AlertTriangle,
   Search, Download, ChevronDown, ChevronUp, BarChart3,
 } from "lucide-react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 
 // ── theme ──────────────────────────────────────────────────────────────────
 const C = {
@@ -57,7 +58,7 @@ const DSR_TYPE_COLORS: Record<string, { color: string; bg: string }> = {
 };
 
 function authHeader() {
-  return { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` };
+  return { Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}` };
 }
 
 // ── Consents Tab ───────────────────────────────────────────────────────────
@@ -422,7 +423,7 @@ function AuditLogTab() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem("token") ?? "";
+    const token = sessionStorage.getItem("token") ?? "";
     fetch("/api/v1/audit/logs?entity_type=consent&limit=50", {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -512,8 +513,6 @@ function AuditLogTab() {
 type Tab = "consents" | "dsr" | "audit";
 
 export function ConsentPage() {
-  const [tab, setTab] = useState<Tab>("consents");
-
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
     { id: "consents", label: "Consents",     icon: <Shield size={14} /> },
     { id: "dsr",      label: "DSR Requests", icon: <FileText size={14} /> },
@@ -531,21 +530,16 @@ export function ConsentPage() {
         <p style={{ margin: 0, fontSize: 13, color: C.muted }}>Manage student consents, data subject requests (DSR), and maintain a full consent audit trail.</p>
       </div>
 
-      <div style={{ display: "flex", gap: 4, marginBottom: 28, background: C.surface, border: `1px solid ${C.border}`, borderRadius: 10, padding: 4, width: "fit-content" }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{
-            display: "flex", alignItems: "center", gap: 7, padding: "8px 18px", borderRadius: 7, border: "none", cursor: "pointer", fontSize: 13, fontWeight: 600, transition: "all 0.15s",
-            background: tab === t.id ? C.teal : "transparent",
-            color: tab === t.id ? "#fff" : C.muted,
-          }}>
-            {t.icon}{t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "consents" && <ConsentsTab />}
-      {tab === "dsr"      && <DSRTab />}
-      {tab === "audit"    && <AuditLogTab />}
+      <ALISTabs defaultValue="consents">
+        <ALISTabsList>
+          {tabs.map(t => (
+            <ALISTabsTrigger key={t.id} value={t.id}>{t.icon} {t.label}</ALISTabsTrigger>
+          ))}
+        </ALISTabsList>
+        <ALISTabsContent value="consents"><ConsentsTab /></ALISTabsContent>
+        <ALISTabsContent value="dsr"><DSRTab /></ALISTabsContent>
+        <ALISTabsContent value="audit"><AuditLogTab /></ALISTabsContent>
+      </ALISTabs>
     </div>
   );
 }

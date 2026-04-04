@@ -160,13 +160,19 @@ class DomainEventBus:
             )
         ])
 
-        # 2. Async dispatch via Celery
+        # 2. Async dispatch via Celery (with deferred fallback)
+        #
+        # Optimization: If Celery is unavailable OR if the caller wants
+        # minimum latency, the event stays PENDING in DB and the
+        # perf_tasks.dispatch_pending_events beat task picks it up
+        # within 3 seconds. This decouples Celery availability from
+        # the publish() call path.
         try:
             from server.tasks.events import dispatch_domain_event
             dispatch_domain_event.delay(event.id)
         except Exception as e:
-            # Celery unavailable — beat retry task will pick it up
-            logger.warning("DomainEventBus: Celery unavailable, event %s queued in DB: %s", event.id, e)
+            # Celery unavailable — beat task will pick it up within 3s
+            logger.warning("DomainEventBus: Celery unavailable, event %s deferred to dispatcher: %s", event.id, e)
 
         if _METRICS_AVAILABLE and _DOMAIN_EVENTS_PUBLISHED is not None:
             try:
@@ -176,6 +182,30 @@ class DomainEventBus:
         logger.info("DomainEventBus: published %s [entity=%s/%s, org=%s]",
                     event.event_type, event.entity_type, event.entity_id, event.org_id)
         return event.id
+
+    @classmethod
+    def publish_fast(cls, event: DomainEvent) -> str:
+        """
+        Minimum-latency publish: DB INSERT only, no Celery dispatch.
+
+        The perf_tasks.dispatch_pending_events beat task (every 3s) picks up
+        PENDING events and dispatches them to Celery. Use this when the
+        event doesn't need sub-second processing and you want to minimize
+        the request latency path.
+
+        Same durability guarantee as publish() — event is persisted to DB.
+        """
+        from server.core.perf import DeferredEventPublisher
+        event_id = DeferredEventPublisher.publish_deferred(event)
+
+        if _METRICS_AVAILABLE and _DOMAIN_EVENTS_PUBLISHED is not None:
+            try:
+                _DOMAIN_EVENTS_PUBLISHED.labels(event_type=event.event_type).inc()
+            except Exception:
+                pass
+        logger.info("DomainEventBus: published_fast %s [entity=%s/%s, org=%s]",
+                    event.event_type, event.entity_type, event.entity_id, event.org_id)
+        return event_id
 
     @classmethod
     def publish_sync(cls, event: DomainEvent) -> None:

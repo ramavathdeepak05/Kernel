@@ -119,6 +119,7 @@ from server.api.phd_router import router as phd_router                          
 from server.api.convocation_router import router as convocation_router             # E18 Convocation
 from server.api.wifi_attendance_router import router as wifi_attendance_router     # P29 WiFi Attendance
 from server.api.learning_router import router as learning_router                   # P40 In-house LMS
+from server.api.ai_providers_router import router as ai_providers_router          # AI Provider extensibility
 from server.consent.consent_middleware import ConsentMiddleware                    # E21 DPDP
 from server.core.shadow_mode_middleware import ShadowModeMiddleware                # P21 Shadow mode suppression
 from server.core.api_versioning import DeprecationMiddleware, get_api_v2_router    # §29 API versioning
@@ -191,12 +192,7 @@ class RequestLoggingMiddleware:
     """
     Raw ASGI middleware: structured JSON request logging.
 
-    Emits one log line per request:
-    {
-      "ts": "...", "level": "info", "event": "http_request",
-      "method": "POST", "path": "/api/v1/...", "status_code": 201,
-      "duration_ms": 45.2, "tenant_id": "...", "request_id": "...", "user_id": "..."
-    }
+    Optimization: Skip detailed logging for lightweight probes (/health, /ready, /metrics).
     """
 
     def __init__(self, app):
@@ -204,6 +200,14 @@ class RequestLoggingMiddleware:
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Short-circuit: skip logging for health/readiness probes
+        from server.core.perf import is_lightweight_request
+        path = scope.get("path", "")
+        method = scope.get("method", "")
+        if is_lightweight_request(method, path):
             await self.app(scope, receive, send)
             return
 
@@ -256,10 +260,18 @@ class RequestLoggingMiddleware:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """P0-1: Init asyncpg pool on startup, close on shutdown."""
+    """P0-1: Init asyncpg pool on startup, close on shutdown. Warm caches."""
     from server.db_service import init_pool, close_pool
     await init_pool()
     logger.info("ALIS startup: asyncpg pool ready.")
+
+    # Warm Vault cache for non-critical secrets (non-blocking)
+    try:
+        from server.core.perf import warm_vault_cache
+        await warm_vault_cache()
+    except Exception as e:
+        logger.warning("Vault warm-up skipped: %s", e)
+
     yield
     await close_pool()
     logger.info("ALIS shutdown: asyncpg pool closed.")
@@ -288,21 +300,29 @@ def create_app() -> FastAPI:
         openapi_url=None if settings.is_production else "/openapi.json",
     )
 
-    # --- Observability (outermost — captures all requests including errors) ---
-    app.add_middleware(MetricsMiddleware)
-    app.add_middleware(RequestLoggingMiddleware)
+    # --- Middleware Stack ---
+    #
+    # IMPORTANT: Starlette executes middleware in REVERSE add order.
+    # The LAST add_middleware call is the OUTERMOST layer (first to execute).
+    #
+    # Desired execution order (outermost → innermost):
+    #   1. Metrics (outermost — captures all requests including errors)
+    #   2. RequestLogging (needs request_id, can log without tenant)
+    #   3. SecurityHeaders (cheap — just appends headers on response)
+    #   4. SubdomainTenant (Layer 4 Invariant — sets ContextVar for tenant)
+    #   5. ShadowMode (needs tenant_id from step 4 — P21)
+    #   6. Consent (needs tenant_id from step 4 — E21 DPDP, innermost)
+    #
+    # So we add in reverse: Consent first, Metrics last.
 
-    # --- Security Headers ---
-    app.add_middleware(SecurityHeadersMiddleware)
-
-    # --- Tenant Isolation (Layer 4 Invariant) — S1: subdomain-aware ---
-    app.add_middleware(SubdomainTenantMiddleware)
-
-    # --- Shadow Mode (P21) — must run after TenantMiddleware to read tenant_id ---
-    app.add_middleware(ShadowModeMiddleware)
-
-    # --- DPDP Consent Enforcement (E21) — must run after TenantMiddleware ---
+    # Innermost (closest to route handler)
     app.add_middleware(ConsentMiddleware)
+    app.add_middleware(ShadowModeMiddleware)
+    app.add_middleware(SubdomainTenantMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestLoggingMiddleware)
+    # Outermost (first to execute on request, last on response)
+    app.add_middleware(MetricsMiddleware)
 
     # --- CORS ---
     # In production restrict to explicit methods/headers; dev keeps wildcard for convenience.
@@ -395,6 +415,7 @@ def create_app() -> FastAPI:
     app.include_router(convocation_router)       # E18 Convocation
     app.include_router(wifi_attendance_router)   # P29 WiFi Attendance
     app.include_router(learning_router)          # P40 In-house LMS
+    app.include_router(ai_providers_router)      # AI Provider extensibility
 
     # --- API v2 mount (§29 versioning) ---
     api_v2_router = get_api_v2_router()

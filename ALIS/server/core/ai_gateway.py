@@ -740,18 +740,15 @@ class InstrumentedLLM:
             audit_metadata["state_impact"] = validated_output.state_impact
             audit_metadata["output_json"] = validated_output.model_dump()
 
-        AuditLog.log(
+        # AI_INVOCATION is non-critical audit — use deferred path for lower latency.
+        # Falls back to synchronous write if Redis is unavailable.
+        AuditLog.log_deferred(
             action=AuditAction.AI_INVOCATION,
             actor_id=self._context.actor_id,
-            actor_type=self._context.actor_type,
             actor_role=self._context.actor_role.value if self._context.actor_role else None,
             entity_type="ai_gateway",
             entity_id=request_id,
-            success=success,
-            failure_reason=error,
-            org_id=self._context.org_id,
-            module=self._context.module,
-            wizard=self._context.wizard,
+            tenant_id=self._context.org_id,
             metadata=audit_metadata,
         )
 
@@ -1016,9 +1013,26 @@ class AIGateway:
 
         # --- LLM Backend Selection ---
         # Priority order:
+        # 0. Per-tenant AI provider (client's own API key — SaaS extensibility)
         # 1. AI Service microservice (S3) — when AI_SERVICE_URL is configured
         # 2. External OpenAI-compatible API (NVIDIA NIM, OpenAI, etc.)
         # 3. Local Ollama (default, pre-S3 single-tenant path)
+
+        # Priority 0: Per-tenant AI provider (client brought their own key)
+        if context.org_id:
+            from .ai_providers import resolve_llm_for_tenant
+            tenant_llm = resolve_llm_for_tenant(
+                tenant_id=context.org_id,
+                capability=capability,
+                temperature=temperature,
+            )
+            if tenant_llm is not None:
+                return InstrumentedLLM(
+                    llm=tenant_llm,
+                    context=context,
+                    model_name=f"tenant:{context.org_id}",
+                )
+
         from .settings import get_settings
         _settings = get_settings()
 

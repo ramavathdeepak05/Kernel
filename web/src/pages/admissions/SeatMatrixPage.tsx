@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect } from 'react'
+import { Progress } from '@/components/ui/interfaces-progress'
 
 // ---------------------------------------------------------------------------
 // Types + mock data
@@ -286,7 +287,7 @@ export function SeatMatrixPage() {
   const [matrixData, setMatrixData] = useState<ProgramMatrix[]>([])
 
   useEffect(() => {
-    const token = localStorage.getItem('token') ?? ''
+    const token = sessionStorage.getItem('token') ?? ''
     fetch(`/api/v1/seats?intake_batch=${year}`, {
       headers: { Authorization: `Bearer ${token}` },
     })

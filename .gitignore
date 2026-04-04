@@ -34,11 +34,16 @@ ENV/
 .vscode/
 *.code-workspace
 
-# Environment variables
+# JetBrains
+.idea/
+
+# Environment variables — NEVER commit secrets
 .env
-.env.production
-.env.staging
+.env.*
+!.env.example
 nginx/certs/*.pem
+nginx/certs/*.key
+nginx/certs/*.crt
 
 # Database
 *.db
@@ -49,3 +54,33 @@ nginx/certs/*.pem
 
 # Claude Code
 .claude/settings.local.json
+
+# Node / Frontend
+node_modules/
+web/dist/
+web/tsconfig.app.tsbuildinfo
+desktop/node_modules/
+desktop/dist/
+desktop/dist-electron/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage/
+*.lcov
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Docker
+docker-compose.override.yml
+
+# Temp / one-off scripts (should never be committed)
+*.tmp
+*.bak
+*.swp
+celerybeat-schedule
+celerybeat-schedule.db

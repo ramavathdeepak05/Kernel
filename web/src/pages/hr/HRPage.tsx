@@ -8,19 +8,10 @@ import {
   useStaff, usePendingLeave, usePayrollSummary,
   usePendingReviews, useDeptAttendance, useHRInsights, useWorkloadAnalytics,
 } from "@/hooks/use-hr";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '@/components/ui/alis-tabs';
 import type { StaffMember, LeaveRequest } from "@/services/hr";
 
 // ── constants ──────────────────────────────────────────────────
-
-type TabId = "overview" | "staff" | "leave" | "payroll" | "performance";
-
-const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "overview",    label: "Overview",    icon: <BarChart3 className="w-3.5 h-3.5" /> },
-  { id: "staff",       label: "Staff",       icon: <Users className="w-3.5 h-3.5" /> },
-  { id: "leave",       label: "Leave",       icon: <Calendar className="w-3.5 h-3.5" /> },
-  { id: "payroll",     label: "Payroll",     icon: <TrendingUp className="w-3.5 h-3.5" /> },
-  { id: "performance", label: "Performance", icon: <Star className="w-3.5 h-3.5" /> },
-];
 
 const TEAL = "#1D9E75";
 const TEAL_BG = "rgba(29,158,117,0.08)";
@@ -256,7 +247,7 @@ function LeaveModal({ onClose, onDone }: { onClose: () => void; onDone: () => vo
     setSaving(true);
     setErr("");
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const r = await fetch(`${API_BASE}/hr/leave`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },

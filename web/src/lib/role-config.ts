@@ -1,6 +1,14 @@
 /**
- * Role-based density and permission configuration.
- * Reference: ALIS-skills/references/frontend.md §3, §13
+ * Role-based configuration — controls what each user sees.
+ *
+ * Every role gets:
+ * - A density (high/medium/low) controlling UI information density
+ * - A default view (what they see first on /dashboard)
+ * - A default module (where sidebar starts)
+ * - A list of visible modules (sidebar navigation items)
+ *
+ * The backend role string (user.role) maps to ALISRole.
+ * Unknown roles fall back to 'registrar' (safe default — RBAC still enforces).
  */
 
 import type { ALISModule, CanvasView } from './canvas-actions'
@@ -12,6 +20,8 @@ export type ALISRole =
   | 'finance'
   | 'hod'
   | 'exam_controller'
+  | 'hr_manager'
+  | 'dean'
   | 'admin'
   | 'super_admin'
 
@@ -24,6 +34,8 @@ export const ROLE_DENSITY: Record<ALISRole, Density> = {
   finance:         'high',
   hod:             'medium',
   exam_controller: 'high',
+  hr_manager:      'high',
+  dean:            'medium',
   admin:           'high',
   super_admin:     'high',
 }
@@ -35,31 +47,90 @@ export const ROLE_DEFAULT_VIEW: Record<ALISRole, CanvasView> = {
   finance:         'fee_dashboard',
   hod:             'student_risk',
   exam_controller: 'exam_management',
+  hr_manager:      'approval_queue',
+  dean:            'approval_queue',
   admin:           'approval_queue',
   super_admin:     'approval_queue',
 }
 
 export const ROLE_DEFAULT_MODULE: Record<ALISRole, ALISModule> = {
   registrar:       'admissions',
-  faculty:         'academics',
-  student:         'academics',
+  faculty:         'my_courses',
+  student:         'my_courses',
   finance:         'finance',
   hod:             'academics',
   exam_controller: 'examinations',
+  hr_manager:      'hr',
+  dean:            'academics',
   admin:           'dashboard',
   super_admin:     'dashboard',
 }
 
 /** Modules visible to each role in the sidebar */
 export const ROLE_MODULES: Record<ALISRole, ALISModule[]> = {
-  registrar:       ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'workflows', 'regulatory', 'reports'],
-  faculty:         ['dashboard', 'academics', 'examinations', 'student_services', 'phd'],
-  student:         ['dashboard', 'academics', 'examinations', 'student_services'],
-  finance:         ['dashboard', 'finance', 'reports'],
-  hod:             ['dashboard', 'academics', 'hr', 'student_services', 'phd', 'obe', 'reports'],
-  exam_controller: ['dashboard', 'examinations', 'academics', 'convocation'],
-  admin:           ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'obe', 'workflows', 'process_engine', 'consent', 'regulatory', 'reports', 'settings', 'team'],
-  super_admin:     ['dashboard', 'admissions', 'academics', 'examinations', 'finance', 'hr', 'student_services', 'communications', 'alumni', 'phd', 'convocation', 'obe', 'workflows', 'process_engine', 'consent', 'regulatory', 'reports', 'settings', 'onboarding', 'team'],
+  // STUDENT — self-service only
+  student: [
+    'dashboard', 'my_courses', 'my_exams', 'my_fees', 'my_library',
+    'learning', 'student_services', 'clubs',
+  ],
+
+  // FACULTY — teaching + research
+  faculty: [
+    'dashboard', 'my_courses', 'academics', 'examinations', 'learning',
+    'student_services', 'phd', 'training',
+  ],
+
+  // HOD — department oversight + faculty's view
+  hod: [
+    'dashboard', 'academics', 'my_courses', 'examinations', 'hr',
+    'student_services', 'phd', 'obe', 'reports', 'learning', 'training',
+  ],
+
+  // DEAN — academic oversight + approvals
+  dean: [
+    'dashboard', 'academics', 'examinations', 'student_services',
+    'clubs', 'phd', 'obe', 'regulatory', 'reports',
+  ],
+
+  // EXAM CONTROLLER (CoE) — exam lifecycle
+  exam_controller: [
+    'dashboard', 'examinations', 'academics', 'convocation', 'reports',
+  ],
+
+  // FINANCE OFFICER — money
+  finance: [
+    'dashboard', 'finance', 'budget', 'vendors', 'reports',
+  ],
+
+  // HR MANAGER — people
+  hr_manager: [
+    'dashboard', 'hr', 'recruitment', 'training', 'reports',
+  ],
+
+  // REGISTRAR — institution-wide
+  registrar: [
+    'dashboard', 'admissions', 'academics', 'examinations', 'finance',
+    'hr', 'student_services', 'communications', 'alumni', 'phd',
+    'convocation', 'workflows', 'regulatory', 'reports',
+  ],
+
+  // ADMIN — everything operational
+  admin: [
+    'dashboard', 'admissions', 'academics', 'examinations', 'finance',
+    'budget', 'vendors', 'hr', 'recruitment', 'training',
+    'student_services', 'clubs', 'communications', 'alumni', 'phd',
+    'convocation', 'obe', 'learning', 'workflows', 'process_engine',
+    'consent', 'regulatory', 'reports', 'settings', 'team',
+  ],
+
+  // SUPER_ADMIN — everything + platform
+  super_admin: [
+    'dashboard', 'admissions', 'academics', 'examinations', 'finance',
+    'budget', 'vendors', 'hr', 'recruitment', 'training',
+    'student_services', 'clubs', 'communications', 'alumni', 'phd',
+    'convocation', 'obe', 'learning', 'workflows', 'process_engine',
+    'consent', 'regulatory', 'reports', 'settings', 'onboarding', 'team',
+  ],
 }
 
 export const MODULE_ICONS: Record<ALISModule, string> = {
@@ -85,6 +156,16 @@ export const MODULE_ICONS: Record<ALISModule, string> = {
   settings:         '⚙',
   onboarding:       '⬡',
   team:             '◎',
+  clubs:            '♣',
+  training:         '⎔',
+  recruitment:      '⊕',
+  budget:           '⊞',
+  vendors:          '⊡',
+  my_fees:          '₹',
+  my_courses:       '▤',
+  my_exams:         '≡',
+  my_library:       '⊟',
+  learning:         '⊞',
 }
 
 export const MODULE_LABELS: Record<ALISModule, string> = {
@@ -110,6 +191,16 @@ export const MODULE_LABELS: Record<ALISModule, string> = {
   settings:         'Settings',
   onboarding:       'Onboarding',
   team:             'My Team',
+  clubs:            'Clubs & Events',
+  training:         'Training',
+  recruitment:      'Recruitment',
+  budget:           'Budget',
+  vendors:          'Vendors & Purchase',
+  my_fees:          'My Fees',
+  my_courses:       'My Courses',
+  my_exams:         'My Exams',
+  my_library:       'Library',
+  learning:         'Learning (LMS)',
 }
 
 export const MODULE_ROUTES: Record<ALISModule, string> = {
@@ -135,4 +226,14 @@ export const MODULE_ROUTES: Record<ALISModule, string> = {
   settings:         '/settings',
   onboarding:       '/admin/onboarding',
   team:             '/admin/team',
+  clubs:            '/clubs',
+  training:         '/training',
+  recruitment:      '/recruitment',
+  budget:           '/budget',
+  vendors:          '/vendors',
+  my_fees:          '/my/fees',
+  my_courses:       '/my/courses',
+  my_exams:         '/my/exams',
+  my_library:       '/my/library',
+  learning:         '/academics/learning',
 }

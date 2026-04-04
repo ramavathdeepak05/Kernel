@@ -49,7 +49,7 @@ from pydantic import BaseModel, Field
 from server.core.security import SessionManager
 from server.core.rbac import Role
 from server.core.audit import AuditLedger, AuditAction
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 logger = logging.getLogger(__name__)
 

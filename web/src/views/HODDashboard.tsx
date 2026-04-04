@@ -12,6 +12,7 @@ import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { RiskBar } from '../components/RiskBar'
 import { DataTable, type Column } from '../components/DataTable'
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '../components/ui/alis-tabs'
 
 // ---------------------------------------------------------------------------
 // Types + static fallback data
@@ -124,10 +125,9 @@ const FACULTY_COLUMNS: Column<FacultyWorkload>[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` })
+const authHeader = () => ({ Authorization: `Bearer ${sessionStorage.getItem('token')}` })
 
 export function HODDashboard() {
-  const [activeTab, setActiveTab] = useState<'workload' | 'heatmap'>('workload')
   const [stats, setStats] = useState(DEPT_STATS_DEFAULT)
   const [faculty, setFaculty] = useState<FacultyWorkload[]>([])
   const [heatMap, setHeatMap] = useState<CourseHeatCell[]>(HEAT_MAP_FALLBACK)
@@ -199,84 +199,68 @@ export function HODDashboard() {
       {/* Stats */}
       <StatsRow stats={stats} />
 
-      {/* Tab switcher */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        {(['workload', 'heatmap'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: '6px 16px',
-              borderRadius: 6,
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 600,
-              background: activeTab === tab ? '#5D5FEF' : '#1A1D2E',
-              color: activeTab === tab ? '#fff' : '#7B82A8',
-            }}
-          >
-            {tab === 'workload' ? 'Faculty Workload' : 'Attendance Heat Map'}
-          </button>
-        ))}
-      </div>
+      {/* Tabs */}
+      <ALISTabs defaultValue="workload">
+        <ALISTabsList>
+          <ALISTabsTrigger value="workload" badge={faculty.length}>Faculty Workload</ALISTabsTrigger>
+          <ALISTabsTrigger value="heatmap">Attendance Heat Map</ALISTabsTrigger>
+        </ALISTabsList>
 
-      {/* Faculty workload table */}
-      {activeTab === 'workload' && (
-        <DataTable
-          title="Faculty Workload"
-          columns={FACULTY_COLUMNS}
-          rows={faculty}
-          onRowClick={() => {}}
-        />
-      )}
+        <ALISTabsContent value="workload">
+          <DataTable
+            title="Faculty Workload"
+            columns={FACULTY_COLUMNS}
+            rows={faculty}
+            onRowClick={() => {}}
+          />
+        </ALISTabsContent>
 
-      {/* Attendance heat map */}
-      {activeTab === 'heatmap' && (
-        <div style={{
-          background: '#11131F',
-          border: '1px solid #1E2235',
-          borderRadius: 12,
-          padding: 20,
-        }}>
-          <p style={{ color: '#7B82A8', fontSize: 12, margin: '0 0 16px', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-            Attendance Heat Map — Course × Week
-          </p>
-          {heatMap.length === 0 ? (
-            <p style={{ color: '#7B82A8', fontSize: 13, margin: 0 }}>No attendance data available.</p>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr>
-                    {['Course', 'Week 1', 'Week 2', 'Week 3', 'Week 4', 'Avg'].map(h => (
-                      <th key={h} style={{
-                        padding: '8px 12px', textAlign: h === 'Course' ? 'left' : 'center',
-                        color: '#7B82A8', fontWeight: 600, fontSize: 11, letterSpacing: '0.04em',
-                        borderBottom: '1px solid #1E2235',
-                      }}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {heatMap.map(row => (
-                    <tr key={row.course} style={{ borderBottom: '1px solid #1E2235' }}>
-                      <td style={{ padding: '8px 12px', color: '#C9D1E9', fontSize: 13 }}>{row.course}</td>
-                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week1} /></td>
-                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week2} /></td>
-                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week3} /></td>
-                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.week4} /></td>
-                      <td style={{ padding: '8px 12px' }}><HeatCell value={row.avg} /></td>
+        <ALISTabsContent value="heatmap">
+          <div style={{
+            background: '#11131F',
+            border: '1px solid #1E2235',
+            borderRadius: 12,
+            padding: 20,
+          }}>
+            <p style={{ color: '#7B82A8', fontSize: 12, margin: '0 0 16px', fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+              Attendance Heat Map — Course × Week
+            </p>
+            {heatMap.length === 0 ? (
+              <p style={{ color: '#7B82A8', fontSize: 13, margin: 0 }}>No attendance data available.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr>
+                      {['Course', 'Week 1', 'Week 2', 'Week 3', 'Week 4', 'Avg'].map(h => (
+                        <th key={h} style={{
+                          padding: '8px 12px', textAlign: h === 'Course' ? 'left' : 'center',
+                          color: '#7B82A8', fontWeight: 600, fontSize: 11, letterSpacing: '0.04em',
+                          borderBottom: '1px solid #1E2235',
+                        }}>
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                  </thead>
+                  <tbody>
+                    {heatMap.map(row => (
+                      <tr key={row.course} style={{ borderBottom: '1px solid #1E2235' }}>
+                        <td style={{ padding: '8px 12px', color: '#C9D1E9', fontSize: 13 }}>{row.course}</td>
+                        <td style={{ padding: '8px 12px' }}><HeatCell value={row.week1} /></td>
+                        <td style={{ padding: '8px 12px' }}><HeatCell value={row.week2} /></td>
+                        <td style={{ padding: '8px 12px' }}><HeatCell value={row.week3} /></td>
+                        <td style={{ padding: '8px 12px' }}><HeatCell value={row.week4} /></td>
+                        <td style={{ padding: '8px 12px' }}><HeatCell value={row.avg} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </ALISTabsContent>
+      </ALISTabs>
     </div>
   )
 }

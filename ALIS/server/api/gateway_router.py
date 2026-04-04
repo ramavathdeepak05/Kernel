@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -58,7 +58,13 @@ from server.agents.research.registry import ResearchAgentRegistry
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/ai", tags=["ai-gateway"])
+from server.core.backpressure import require_ai_capacity
+
+router = APIRouter(
+    prefix="/api/v1/ai",
+    tags=["ai-gateway"],
+    dependencies=[],  # require_ai_capacity applied per-endpoint, not globally
+)
 
 
 # =============================================================================
@@ -163,7 +169,7 @@ class AgentListResponse(BaseModel):
 # POST /api/v1/ai/invoke — Central AI Invocation Endpoint
 # =============================================================================
 
-@router.post("/invoke", response_model=AIInvokeResponse)
+@router.post("/invoke", response_model=AIInvokeResponse, dependencies=[Depends(require_ai_capacity)])
 @require_permission(Permission.AI_INVOKE)
 async def invoke_ai_agent(request: Request, body: AIInvokeRequest) -> JSONResponse:
     """

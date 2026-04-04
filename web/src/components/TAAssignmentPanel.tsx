@@ -58,7 +58,7 @@ export function TAAssignmentPanel({ courseId, courseCode, courseName, sessionRef
   const [revoking, setRevoking] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(true)
 
-  const token = localStorage.getItem('token') ?? ''
+  const token = sessionStorage.getItem('token') ?? ''
   const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
 
   const fetchTAs = async () => {

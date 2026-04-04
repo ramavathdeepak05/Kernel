@@ -37,7 +37,7 @@ interface AuditEntry {
 
 async function apiFetch<T>(path: string): Promise<T | null> {
   try {
-    const token = localStorage.getItem("token") ?? "";
+    const token = sessionStorage.getItem("token") ?? "";
     const res = await fetch(`/api/v1${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -128,6 +128,7 @@ export default function DashboardPage() {
     {
       icon: Users,
       label: "Total Students",
+      raw: totalStudents,
       value: totalStudents > 0 ? totalStudents.toLocaleString("en-IN") : "—",
       color: "#818cf8",
       delta: "enrolled this year",
@@ -135,6 +136,7 @@ export default function DashboardPage() {
     {
       icon: FileText,
       label: "Active Applications",
+      raw: activeApps,
       value: activeApps > 0 ? activeApps.toLocaleString("en-IN") : "—",
       color: "#60a5fa",
       delta: `intake ${academicYear}`,
@@ -142,6 +144,7 @@ export default function DashboardPage() {
     {
       icon: AlertTriangle,
       label: "Pending Reviews",
+      raw: pendingReview,
       value: pendingReview > 0 ? pendingReview.toLocaleString("en-IN") : "—",
       color: "#fbbf24",
       delta: "Action required",
@@ -150,6 +153,7 @@ export default function DashboardPage() {
     {
       icon: TrendingUp,
       label: "Revenue MTD",
+      raw: revenueMtd,
       value: revenueMtd > 0 ? `₹${(revenueMtd / 100000).toFixed(1)}L` : "—",
       color: "#34d399",
       delta: "month to date",

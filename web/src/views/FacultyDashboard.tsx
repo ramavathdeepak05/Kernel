@@ -6,15 +6,18 @@
  * Default view: my_courses
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { RiskBar } from '../components/RiskBar'
 import { DataTable, type Column } from '../components/DataTable'
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '../components/ui/alis-tabs'
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Data types + API fetching
 // ---------------------------------------------------------------------------
+
+const API_BASE = import.meta.env.VITE_API_URL || "/api/v1";
 
 interface AtRiskStudent {
   id: string
@@ -26,27 +29,42 @@ interface AtRiskStudent {
   flag: string
 }
 
-const AT_RISK: AtRiskStudent[] = [
-  { id: 's01', name: 'Arjun Mehta', rollNo: '22CS041', course: 'Data Structures', attendance: 52, riskScore: 84, flag: 'Below 60% attendance' },
-  { id: 's02', name: 'Divya Nair', rollNo: '22CS017', course: 'OS & Networks', attendance: 61, riskScore: 72, flag: 'Missed 2 assessments' },
-  { id: 's03', name: 'Rohit Bose', rollNo: '22EC008', course: 'Digital Electronics', attendance: 58, riskScore: 78, flag: 'Below 60% attendance' },
-  { id: 's04', name: 'Sneha Pillai', rollNo: '22CS053', course: 'DBMS', attendance: 65, riskScore: 55, flag: 'Inconsistent submissions' },
-  { id: 's05', name: 'Karan Sharma', rollNo: '22ME021', course: 'Thermodynamics', attendance: 70, riskScore: 48, flag: 'Low internal marks' },
-  { id: 's06', name: 'Pooja Reddy', rollNo: '22CS031', course: 'Data Structures', attendance: 55, riskScore: 81, flag: 'Below 60% attendance' },
-]
+async function fetchFacultyData(token: string) {
+  const headers = { Authorization: `Bearer ${token}` };
+  const [riskRes, courseRes, kpiRes] = await Promise.allSettled([
+    fetch(`${API_BASE}/academics/at-risk-students`, { headers }),
+    fetch(`${API_BASE}/academics/my-courses`, { headers }),
+    fetch(`${API_BASE}/reports/dashboard/kpis`, { headers }),
+  ]);
+  const risk = riskRes.status === "fulfilled" && riskRes.value.ok ? await riskRes.value.json() : [];
+  const courses = courseRes.status === "fulfilled" && courseRes.value.ok ? await courseRes.value.json() : [];
+  const kpis = kpiRes.status === "fulfilled" && kpiRes.value.ok ? await kpiRes.value.json() : {};
+  return {
+    atRisk: (risk.items ?? risk ?? []).map((s: Record<string, unknown>) => ({
+      id: String(s.id ?? ""), name: String(s.name ?? s.student_name ?? ""),
+      rollNo: String(s.roll_no ?? s.rollNo ?? ""), course: String(s.course ?? ""),
+      attendance: Number(s.attendance ?? 0), riskScore: Number(s.risk_score ?? s.riskScore ?? 0),
+      flag: String(s.flag ?? s.reason ?? ""),
+    })) as AtRiskStudent[],
+    courses: (courses.items ?? courses ?? []).map((c: Record<string, unknown>) => ({
+      id: String(c.id ?? ""), code: String(c.code ?? c.course_code ?? ""),
+      name: String(c.name ?? c.course_name ?? ""), students: Number(c.students ?? c.student_count ?? 0),
+      pending: Number(c.pending ?? c.pending_marks ?? 0), avgAttendance: Number(c.avg_attendance ?? c.avgAttendance ?? 0),
+    })),
+    stats: [
+      { label: 'My courses', value: String(kpis.my_courses ?? courses.length ?? '0'), delta: kpis.semester ?? '' },
+      { label: 'At-risk students', value: String(kpis.at_risk_count ?? risk.length ?? '0'), delta: kpis.risk_delta ?? '', deltaColor: '#EF9F27' },
+      { label: 'Avg attendance', value: kpis.avg_attendance ? `${kpis.avg_attendance}%` : '—', delta: kpis.attendance_delta ?? '', deltaColor: '#1D9E75' },
+      { label: 'Pending marks', value: String(kpis.pending_marks ?? '0'), delta: kpis.marks_delta ?? '', deltaColor: '#E24B4A' },
+    ],
+  };
+}
 
-const COURSES = [
-  { id: 'c1', code: 'CS301', name: 'Data Structures & Algorithms', students: 58, pending: 4, avgAttendance: 74 },
-  { id: 'c2', code: 'CS302', name: 'Database Management Systems', students: 61, pending: 1, avgAttendance: 81 },
-  { id: 'c3', code: 'CS303', name: 'Operating Systems', students: 55, pending: 2, avgAttendance: 69 },
-  { id: 'c4', code: 'CS304', name: 'Computer Networks', students: 60, pending: 0, avgAttendance: 86 },
-]
-
-const STATS = [
-  { label: 'My courses', value: '4', delta: 'Semester 5' },
-  { label: 'At-risk students', value: '6', delta: '↑ 2 this week', deltaColor: '#EF9F27' },
-  { label: 'Avg attendance', value: '77%', delta: 'Target: 75%', deltaColor: '#1D9E75' },
-  { label: 'Pending marks', value: '7', delta: '2 overdue', deltaColor: '#E24B4A' },
+const EMPTY_STATS = [
+  { label: 'My courses', value: '—', delta: '' },
+  { label: 'At-risk students', value: '—', delta: '' },
+  { label: 'Avg attendance', value: '—', delta: '' },
+  { label: 'Pending marks', value: '—', delta: '' },
 ]
 
 const AT_RISK_COLUMNS: Column<AtRiskStudent>[] = [
@@ -89,7 +107,19 @@ const AT_RISK_COLUMNS: Column<AtRiskStudent>[] = [
 
 export function FacultyDashboard() {
   const { canvas, highlightItem } = useALISStore()
-  const [activeTab, setActiveTab] = useState<'risk' | 'courses'>('risk')
+  const [atRisk, setAtRisk] = useState<AtRiskStudent[]>([])
+  const [courses, setCourses] = useState<{ id: string; code: string; name: string; students: number; pending: number; avgAttendance: number }[]>([])
+  const [stats, setStats] = useState(EMPTY_STATS)
+
+  useEffect(() => {
+    const token = sessionStorage.getItem("token");
+    if (!token) return;
+    fetchFacultyData(token).then((data) => {
+      setAtRisk(data.atRisk);
+      setCourses(data.courses);
+      if (data.stats.length > 0) setStats(data.stats);
+    });
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -110,104 +140,88 @@ export function FacultyDashboard() {
       </div>
 
       {/* Stats */}
-      <StatsRow stats={STATS} />
+      <StatsRow stats={stats} />
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 2, borderBottom: 'var(--border)', paddingBottom: 0 }}>
-        {(['risk', 'courses'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            style={{
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 500,
-              background: 'none',
-              border: 'none',
-              borderBottom: activeTab === tab ? '2px solid var(--alis-teal)' : '2px solid transparent',
-              color: activeTab === tab ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              textTransform: 'capitalize',
-              transition: 'color 0.12s',
-            }}
-          >
-            {tab === 'risk' ? 'At-risk students' : 'My courses'}
-          </button>
-        ))}
-      </div>
+      <ALISTabs defaultValue="risk">
+        <ALISTabsList>
+          <ALISTabsTrigger value="risk" badge={atRisk.length}>At-risk students</ALISTabsTrigger>
+          <ALISTabsTrigger value="courses">My courses</ALISTabsTrigger>
+        </ALISTabsList>
 
-      {/* At-risk students table */}
-      {activeTab === 'risk' && (
-        <DataTable
-          columns={AT_RISK_COLUMNS}
-          rows={AT_RISK}
-          highlightedId={canvas.highlightedItemId}
-          onRowClick={(row) => highlightItem(row.id)}
-          gridTemplateColumns="2fr 1fr 2fr 80px 100px 2fr"
-        />
-      )}
+        <ALISTabsContent value="risk">
+          <DataTable
+            columns={AT_RISK_COLUMNS}
+            rows={atRisk}
+            highlightedId={canvas.highlightedItemId}
+            onRowClick={(row) => highlightItem(row.id)}
+            gridTemplateColumns="2fr 1fr 2fr 80px 100px 2fr"
+          />
+        </ALISTabsContent>
 
-      {/* Course tiles */}
-      {activeTab === 'courses' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-          {COURSES.map((course) => (
-            <div
-              key={course.id}
-              style={{
-                background: 'var(--color-background-secondary)',
-                border: 'var(--border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '12px 14px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
-                <div>
-                  <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', color: 'var(--alis-teal)', textTransform: 'uppercase' }}>
-                    {course.code}
-                  </p>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 2 }}>
-                    {course.name}
-                  </p>
+        <ALISTabsContent value="courses">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+            {courses.map((course) => (
+              <div
+                key={course.id}
+                className="group"
+                style={{
+                  background: 'var(--color-background-secondary)',
+                  border: 'var(--border)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '12px 14px',
+                  transition: 'border-color 0.15s',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div>
+                    <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', color: 'var(--alis-teal)', textTransform: 'uppercase' }}>
+                      {course.code}
+                    </p>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--color-text-primary)', marginTop: 2 }}>
+                      {course.name}
+                    </p>
+                  </div>
+                  {course.pending > 0 && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: '2px 7px',
+                        borderRadius: 'var(--radius-pill)',
+                        background: 'rgba(239,159,39,0.12)',
+                        color: '#EF9F27',
+                        border: '0.5px solid rgba(239,159,39,0.25)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {course.pending} pending
+                    </span>
+                  )}
                 </div>
-                {course.pending > 0 && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      padding: '2px 7px',
-                      borderRadius: 'var(--radius-pill)',
-                      background: 'rgba(239,159,39,0.12)',
-                      color: '#EF9F27',
-                      border: '0.5px solid rgba(239,159,39,0.25)',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {course.pending} pending
-                  </span>
-                )}
-              </div>
-              <div style={{ display: 'flex', gap: 16 }}>
-                <div>
-                  <p style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>Students</p>
-                  <p style={{ fontSize: 15, fontWeight: 500, color: 'var(--color-text-primary)' }}>{course.students}</p>
-                </div>
-                <div>
-                  <p style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>Avg attendance</p>
-                  <p
-                    style={{
-                      fontSize: 15,
-                      fontWeight: 500,
-                      color: course.avgAttendance >= 75 ? '#1D9E75' : '#EF9F27',
-                    }}
-                  >
-                    {course.avgAttendance}%
-                  </p>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <div>
+                    <p style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>Students</p>
+                    <p style={{ fontSize: 15, fontWeight: 500, color: 'var(--color-text-primary)' }}>{course.students}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, color: 'var(--color-text-secondary)' }}>Avg attendance</p>
+                    <p
+                      style={{
+                        fontSize: 15,
+                        fontWeight: 500,
+                        color: course.avgAttendance >= 75 ? '#1D9E75' : '#EF9F27',
+                      }}
+                    >
+                      {course.avgAttendance}%
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        </ALISTabsContent>
+      </ALISTabs>
     </div>
   )
 }

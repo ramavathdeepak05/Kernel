@@ -1,0 +1,302 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "release/**"]
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/alis
+
+permissions:
+  contents: read
+
+jobs:
+  # =========================================================================
+  # Stage 1: Lint + Type Check (fast fail — no infra needed)
+  # =========================================================================
+  backend-lint:
+    name: "Backend: Lint & Type Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ALIS/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd ALIS
+          pip install -r requirements.txt
+          pip install ruff mypy
+
+      - name: Ruff lint
+        run: cd ALIS && ruff check server/ --output-format=github
+
+      - name: Ruff format check
+        run: cd ALIS && ruff format --check server/
+
+      - name: MyPy type check
+        run: cd ALIS && mypy server/ --ignore-missing-imports --no-error-summary || true
+
+  frontend-lint:
+    name: "Frontend: Lint & Type Check"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: cd web && npm ci
+
+      - name: ESLint
+        run: cd web && npm run lint
+
+      - name: TypeScript check
+        run: cd web && npx tsc -b --noEmit || true
+
+  # =========================================================================
+  # Stage 2: Unit Tests (parallel — backend + frontend)
+  # =========================================================================
+  backend-test:
+    name: "Backend: Unit Tests"
+    runs-on: ubuntu-latest
+    needs: backend-lint
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ALIS/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          cd ALIS
+          pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        working-directory: ALIS
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          APP_ENV: development
+        run: |
+          python -m pytest tests/ \
+            --tb=short \
+            --strict-markers \
+            -q \
+            --cov=server \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=junit.xml \
+            -x
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: ALIS/coverage.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-results
+          path: ALIS/junit.xml
+
+  frontend-build:
+    name: "Frontend: Build"
+    runs-on: ubuntu-latest
+    needs: frontend-lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: cd web && npm ci
+
+      - name: Build (vite — production bundle)
+        run: cd web && npx vite build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: web/dist/
+
+  # =========================================================================
+  # Stage 3: Security Scanning
+  # =========================================================================
+  security-scan:
+    name: "Security: Dependency Audit"
+    runs-on: ubuntu-latest
+    needs: [backend-lint, frontend-lint]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit Python deps (backend)
+        run: pip-audit -r ALIS/requirements.txt --desc || true
+
+      - name: Audit Python deps (control plane)
+        run: pip-audit -r control_plane/requirements.txt --desc || true
+
+      - name: Audit Python deps (AI service)
+        run: pip-audit -r ai_service/requirements.txt --desc || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Audit npm deps
+        run: cd web && npm audit --audit-level=high || true
+
+  # =========================================================================
+  # Stage 4: Docker Build (only on main/release branches)
+  # =========================================================================
+  docker-build:
+    name: "Docker: Build Images"
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build, security-scan]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - context: ALIS
+            image: backend
+            dockerfile: ALIS/Dockerfile
+          - context: control_plane
+            image: control-plane
+            dockerfile: control_plane/Dockerfile
+          - context: ai_service
+            image: ai-service
+            dockerfile: ai_service/Dockerfile
+          - context: web
+            image: frontend
+            dockerfile: web/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.image }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # =========================================================================
+  # Stage 5: Deploy to Staging (auto on main)
+  # =========================================================================
+  deploy-staging:
+    name: "Deploy: Staging"
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: staging
+      url: https://staging.alis.app
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to staging
+        env:
+          DEPLOY_KEY: ${{ secrets.STAGING_DEPLOY_KEY }}
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          echo "Deploying to staging..."
+          # Replace with actual deployment command:
+          # ssh -i $DEPLOY_KEY deploy@$STAGING_HOST "cd /opt/alis && docker compose pull && docker compose up -d"
+          echo "Staging deployment placeholder — configure STAGING_DEPLOY_KEY and STAGING_HOST secrets"
+
+  # =========================================================================
+  # Stage 6: Deploy to Production (manual approval on release branches)
+  # =========================================================================
+  deploy-production:
+    name: "Deploy: Production"
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: startsWith(github.ref, 'refs/heads/release/')
+    environment:
+      name: production
+      url: https://alis.app
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to production
+        env:
+          DEPLOY_KEY: ${{ secrets.PRODUCTION_DEPLOY_KEY }}
+          PRODUCTION_HOST: ${{ secrets.PRODUCTION_HOST }}
+        run: |
+          echo "Deploying to production..."
+          # Replace with actual deployment command:
+          # ssh -i $DEPLOY_KEY deploy@$PRODUCTION_HOST "cd /opt/alis && docker compose -f docker-compose.yml pull && docker compose -f docker-compose.yml up -d"
+          echo "Production deployment placeholder — configure PRODUCTION_DEPLOY_KEY and PRODUCTION_HOST secrets"

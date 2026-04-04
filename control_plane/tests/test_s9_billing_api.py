@@ -176,9 +176,9 @@ def test_client(patch_cp_db):
 
 
 def _admin_headers():
-    from jose import jwt
+    import jwt as _pyjwt
     from control_plane.settings import settings
-    token = jwt.encode(
+    token = _pyjwt.encode(
         {"sub": "admin", "role": "SUPER_ADMIN", "exp": int(time.time()) + 3600},
         settings.admin_jwt_secret,
         algorithm=settings.admin_jwt_algorithm,

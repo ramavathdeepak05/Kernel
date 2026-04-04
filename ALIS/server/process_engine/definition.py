@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 
 class ProcessDefinitionService:

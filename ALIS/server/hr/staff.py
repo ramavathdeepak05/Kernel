@@ -7,7 +7,7 @@ import uuid
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
-from server.db_service import execute_query, execute_transaction
+from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import StaffProfileCreate, StaffProfileUpdate
 
@@ -88,7 +88,7 @@ class StaffService:
             if val is not None:
                 if field == "employment_type":
                     val = val.value
-                fields.append(f"{col} = %s")
+                fields.append(f"{safe_identifier(col)} = %s")
                 values.append(val)
 
         if req.qualifications is not None:

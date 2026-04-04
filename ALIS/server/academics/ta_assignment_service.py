@@ -50,8 +50,9 @@ def _revoke_ta(table: str, where_col: str, where_val: str, actor_id: str) -> Non
     if not result.allowed:
         raise ValueError(result.reason)
     new_status = _TAStatus.REVOKED.value
+    from server.db_service import safe_identifier
     execute_transaction([(
-        f"UPDATE {table} SET status=%s, revoked_at=NOW(), revoked_by=%s WHERE {where_col}=%s AND status=%s",
+        f"UPDATE {safe_identifier(table)} SET status=%s, revoked_at=NOW(), revoked_by=%s WHERE {safe_identifier(where_col)}=%s AND status=%s",
         (new_status, actor_id, where_val, _TAStatus.ACTIVE.value),
     )])
 

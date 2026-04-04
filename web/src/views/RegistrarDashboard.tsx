@@ -17,89 +17,59 @@ import { ApprovalRow, type ApprovalItem } from '../components/ApprovalRow'
 import { UndoToast } from '../components/UndoToast'
 
 // ---------------------------------------------------------------------------
-// Mock data (replace with API hook when MSW layer is wired)
+// API data fetching — real endpoints
 // ---------------------------------------------------------------------------
 
-const INITIAL_QUEUE: ApprovalItem[] = [
-  {
-    id: 'apr-001',
-    title: 'Hall ticket batch — B.Tech CSE 2025',
-    subtitle: '142 students · Examination · Expires 3h 12m',
-    priority: 'urgent',
-    slaPercent: 8,
-    module: 'examinations',
-    canAutoApprove: false,
-  },
-  {
-    id: 'apr-002',
-    title: 'Fee waiver — Priya Sharma (ROLL-2024-0047)',
-    subtitle: 'SC category · ₹18,400 waiver request · Finance',
-    priority: 'urgent',
-    slaPercent: 14,
-    module: 'finance',
-    canAutoApprove: false,
-  },
-  {
-    id: 'apr-003',
-    title: 'Transcript release — 6 alumni',
-    subtitle: 'Post-graduation verification · Alumni module',
-    priority: 'urgent',
-    slaPercent: 22,
-    module: 'alumni',
-    canAutoApprove: true,
-  },
-  {
-    id: 'apr-004',
-    title: 'Leave application — Dr. Anand Rao',
-    subtitle: 'HOD · Computer Science · 4 days medical',
-    priority: 'review',
-    slaPercent: 38,
-    module: 'hr',
-    canAutoApprove: false,
-  },
-  {
-    id: 'apr-005',
-    title: 'Bonafide certificate — 12 students',
-    subtitle: 'Visa processing · Bulk request · Student Services',
-    priority: 'review',
-    slaPercent: 51,
-    module: 'student_services',
-    canAutoApprove: true,
-  },
-  {
-    id: 'apr-006',
-    title: 'New course proposal — Data Engineering',
-    subtitle: 'Faculty: Dr. Kavitha · Academics board review',
-    priority: 'review',
-    slaPercent: 58,
-    module: 'academics',
-    canAutoApprove: false,
-  },
-  {
-    id: 'apr-007',
-    title: 'Hostel room reallocation — 3 students',
-    subtitle: 'Block C, Room 204 → 312 · Maintenance conflict',
-    priority: 'routine',
-    slaPercent: 74,
-    module: 'student_services',
-    canAutoApprove: true,
-  },
-  {
-    id: 'apr-008',
-    title: 'Vendor invoice — Lab consumables',
-    subtitle: '₹2,34,000 · PO-2025-0821 · Finance Controller',
-    priority: 'routine',
-    slaPercent: 91,
-    module: 'finance',
-    canAutoApprove: false,
-  },
-]
+const API_BASE = import.meta.env.VITE_API_URL || "/api/v1";
 
-const STATS = [
-  { label: 'Pending approvals', value: '8', delta: '3 urgent', deltaColor: '#E24B4A' },
-  { label: 'Enrolled this year', value: '1,847', delta: '+12 this week', deltaColor: '#1D9E75' },
-  { label: 'Exams this week', value: '14', delta: '2 halls unassigned', deltaColor: '#EF9F27' },
-  { label: 'Docs issued today', value: '63', delta: '↑ 18% vs yesterday', deltaColor: '#1D9E75' },
+async function fetchApprovals(): Promise<ApprovalItem[]> {
+  const token = sessionStorage.getItem("token");
+  if (!token) return [];
+  try {
+    const res = await fetch(`${API_BASE}/approvals/pending?limit=20`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.items ?? data ?? []).map((item: Record<string, unknown>) => ({
+      id: String(item.id ?? ""),
+      title: String(item.title ?? item.description ?? ""),
+      subtitle: String(item.subtitle ?? item.module ?? ""),
+      priority: item.priority === "urgent" ? "urgent" : item.priority === "review" ? "review" : "routine",
+      slaPercent: Number(item.sla_percent ?? item.slaPercent ?? 50),
+      module: String(item.module ?? ""),
+      canAutoApprove: Boolean(item.can_auto_approve ?? item.canAutoApprove ?? false),
+    })) as ApprovalItem[];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchStats(): Promise<{ label: string; value: string; delta: string; deltaColor: string }[]> {
+  const token = sessionStorage.getItem("token");
+  if (!token) return [];
+  try {
+    const res = await fetch(`${API_BASE}/reports/dashboard/kpis`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const kpis = await res.json();
+    return [
+      { label: "Pending approvals", value: String(kpis.pending_approvals ?? "0"), delta: `${kpis.urgent_count ?? 0} urgent`, deltaColor: "#E24B4A" },
+      { label: "Enrolled this year", value: String(kpis.enrolled_count ?? "0"), delta: kpis.enrolled_delta ?? "", deltaColor: "#1D9E75" },
+      { label: "Exams this week", value: String(kpis.exams_this_week ?? "0"), delta: kpis.exams_delta ?? "", deltaColor: "#EF9F27" },
+      { label: "Docs issued today", value: String(kpis.docs_issued_today ?? "0"), delta: kpis.docs_delta ?? "", deltaColor: "#1D9E75" },
+    ];
+  } catch {
+    return [];
+  }
+}
+
+const EMPTY_STATS = [
+  { label: "Pending approvals", value: "—", delta: "", deltaColor: "#94a3b8" },
+  { label: "Enrolled this year", value: "—", delta: "", deltaColor: "#94a3b8" },
+  { label: "Exams this week", value: "—", delta: "", deltaColor: "#94a3b8" },
+  { label: "Docs issued today", value: "—", delta: "", deltaColor: "#94a3b8" },
 ]
 
 // ---------------------------------------------------------------------------
@@ -114,9 +84,22 @@ const CLOSED_TOAST: ToastState = { open: false, message: '', undoFn: () => {} }
 
 export function RegistrarDashboard() {
   const { canvas, highlightItem } = useALISStore()
-  const [queue, setQueue] = useState<ApprovalItem[]>(INITIAL_QUEUE)
+  const [queue, setQueue] = useState<ApprovalItem[]>([])
+  const [stats, setStats] = useState(EMPTY_STATS)
+  const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState<ToastState>(CLOSED_TOAST)
   const prevHighlightRef = useRef<string | null>(null)
+
+  // Fetch real data on mount
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([fetchApprovals(), fetchStats()])
+      .then(([approvals, kpis]) => {
+        setQueue(approvals)
+        if (kpis.length > 0) setStats(kpis)
+      })
+      .finally(() => setLoading(false))
+  }, [])
 
   // Agent highlight-on-command: scroll to highlighted row
   useEffect(() => {
@@ -194,7 +177,7 @@ export function RegistrarDashboard() {
         </div>
 
         {/* 4-up stats */}
-        <StatsRow stats={STATS} />
+        <StatsRow stats={stats} />
 
         {/* Section label */}
         <div

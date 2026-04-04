@@ -6,6 +6,7 @@
  * Tab 2: Credit Transfer Requests (AI draft + review)
  */
 import { useState, useEffect } from 'react';
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from '@/components/ui/alis-tabs';
 
 const APPS = [
   { id: 'ra1', name: 'Deepak Kumar', program: 'B.Tech ME', gapFrom: '2022-07', gapTo: '2025-01', semesters: 4, status: 'UNDER_REVIEW', rollNo: null },
@@ -100,7 +101,7 @@ function apiRecordToApp(r: ReadmissionApiRecord): ReadmissionApp {
 
 async function apiPost(path: string, body: Record<string, unknown> = {}): Promise<boolean> {
   try {
-    const token = localStorage.getItem('token') ?? '';
+    const token = sessionStorage.getItem('token') ?? '';
     const res = await fetch(`/api/v1${path}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -423,12 +424,11 @@ function CreditTransferCard({ ct, decision, onDecide }: {
 }
 
 export function ReadmissionPage() {
-  const [activeTab, setActiveTab] = useState<'applications' | 'credits'>('applications');
   const [decisions, setDecisions] = useState<CTDecision>({});
   const [apps, setApps] = useState<ReadmissionApp[]>(APPS.map(a => a as ReadmissionApp));
 
   function loadApps() {
-    const token = localStorage.getItem('token') ?? '';
+    const token = sessionStorage.getItem('token') ?? '';
     fetch('/api/v1/readmission', {
       headers: { Authorization: `Bearer ${token}` },
     })
@@ -460,25 +460,14 @@ export function ReadmissionPage() {
           <p style={{ color: COLORS.muted, marginTop: 6, fontSize: 14 }}>E17 — Gap-year re-entries and AI-assisted course equivalency decisions</p>
         </div>
 
-        {/* Tabs */}
-        <div style={{ display: 'flex', gap: 4, borderBottom: `1px solid ${COLORS.border}`, marginBottom: 28 }}>
-          {tabs.map(t => (
-            <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
-              background: activeTab === t.key ? COLORS.surface : 'transparent',
-              color: activeTab === t.key ? COLORS.text : COLORS.muted,
-              border: 'none',
-              borderBottom: activeTab === t.key ? `2px solid ${COLORS.teal}` : '2px solid transparent',
-              padding: '10px 20px',
-              fontSize: 14,
-              fontWeight: activeTab === t.key ? 600 : 400,
-              cursor: 'pointer',
-              borderRadius: '6px 6px 0 0',
-            }}>{t.label}</button>
-          ))}
-        </div>
+        <ALISTabs defaultValue="applications">
+          <ALISTabsList>
+            {tabs.map(t => (
+              <ALISTabsTrigger key={t.key} value={t.key}>{t.label}</ALISTabsTrigger>
+            ))}
+          </ALISTabsList>
 
-        {/* Tab 1 — Re-admission Applications */}
-        {activeTab === 'applications' && (
+        <ALISTabsContent value="applications">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             {/* Summary chips */}
             <div style={{ display: 'flex', gap: 12 }}>
@@ -500,10 +489,9 @@ export function ReadmissionPage() {
             <AppTable apps={apps} onRefresh={loadApps} />
             <NewApplicationForm />
           </div>
-        )}
+        </ALISTabsContent>
 
-        {/* Tab 2 — Credit Transfer */}
-        {activeTab === 'credits' && (
+        <ALISTabsContent value="credits">
           <div>
             <div style={{
               background: COLORS.purple + '12',
@@ -528,7 +516,8 @@ export function ReadmissionPage() {
               ))}
             </div>
           </div>
-        )}
+        </ALISTabsContent>
+        </ALISTabs>
       </div>
     </div>
   );

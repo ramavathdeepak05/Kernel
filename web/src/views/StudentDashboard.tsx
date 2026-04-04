@@ -6,13 +6,16 @@
  * Default view: my_courses
  */
 
+import { useState, useEffect } from 'react'
 import { useALISStore } from '../store/alis.store'
 import { StatsRow } from '../components/StatCard'
 import { Badge } from '../components/Badge'
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Data types + API fetching
 // ---------------------------------------------------------------------------
+
+const API_BASE = import.meta.env.VITE_API_URL || "/api/v1";
 
 interface ExamEntry {
   id: string
@@ -25,19 +28,11 @@ interface ExamEntry {
   status: 'upcoming' | 'today' | 'done'
 }
 
-const EXAMS: ExamEntry[] = [
-  { id: 'e1', subject: 'Data Structures & Algorithms', code: 'CS301', date: 'Mon, 17 Mar 2026', time: '09:00 AM', venue: 'Hall A – Room 101', daysAway: 2, status: 'upcoming' },
-  { id: 'e2', subject: 'Database Management Systems', code: 'CS302', date: 'Wed, 19 Mar 2026', time: '02:00 PM', venue: 'Hall B – Room 205', daysAway: 4, status: 'upcoming' },
-  { id: 'e3', subject: 'Operating Systems', code: 'CS303', date: 'Fri, 21 Mar 2026', time: '09:00 AM', venue: 'Hall A – Room 102', daysAway: 6, status: 'upcoming' },
-  { id: 'e4', subject: 'Computer Networks', code: 'CS304', date: 'Mon, 24 Mar 2026', time: '02:00 PM', venue: 'Hall C – Room 301', daysAway: 9, status: 'upcoming' },
-  { id: 'e5', subject: 'Engineering Mathematics IV', code: 'MA301', date: 'Wed, 26 Mar 2026', time: '09:00 AM', venue: 'Hall B – Room 202', daysAway: 11, status: 'upcoming' },
-]
-
-const STATS = [
-  { label: 'Exams remaining', value: '5', delta: 'Next in 2 days', deltaColor: '#EF9F27' },
-  { label: 'Attendance', value: '78%', delta: 'Min required: 75%', deltaColor: '#1D9E75' },
-  { label: 'Internal marks', value: '71/100', delta: 'Avg across subjects' },
-  { label: 'Dues', value: '₹0', delta: 'All clear', deltaColor: '#1D9E75' },
+const EMPTY_STATS = [
+  { label: 'Exams remaining', value: '—', delta: '' },
+  { label: 'Attendance', value: '—', delta: '' },
+  { label: 'Internal marks', value: '—', delta: '' },
+  { label: 'Dues', value: '—', delta: '' },
 ]
 
 // ---------------------------------------------------------------------------
@@ -50,6 +45,38 @@ function urgencyColor(days: number): string {
 
 export function StudentDashboard() {
   useALISStore() // keep store wired for future agent actions
+  const [exams, setExams] = useState<ExamEntry[]>([])
+  const [stats, setStats] = useState(EMPTY_STATS)
+
+  useEffect(() => {
+    const token = sessionStorage.getItem("token");
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.allSettled([
+      fetch(`${API_BASE}/examinations/my-schedule`, { headers }),
+      fetch(`${API_BASE}/reports/dashboard/kpis`, { headers }),
+    ]).then(async ([examRes, kpiRes]) => {
+      if (examRes.status === "fulfilled" && examRes.value.ok) {
+        const data = await examRes.value.json();
+        setExams((data.items ?? data ?? []).map((e: Record<string, unknown>) => ({
+          id: String(e.id ?? ""), subject: String(e.subject ?? e.course_name ?? ""),
+          code: String(e.code ?? e.course_code ?? ""), date: String(e.date ?? e.exam_date ?? ""),
+          time: String(e.time ?? e.start_time ?? ""), venue: String(e.venue ?? "TBA"),
+          daysAway: Number(e.days_away ?? e.daysAway ?? 0),
+          status: (e.status as ExamEntry["status"]) ?? "upcoming",
+        })));
+      }
+      if (kpiRes.status === "fulfilled" && kpiRes.value.ok) {
+        const kpis = await kpiRes.value.json();
+        setStats([
+          { label: 'Exams remaining', value: String(kpis.exams_remaining ?? '0'), delta: kpis.next_exam_delta ?? '', deltaColor: '#EF9F27' },
+          { label: 'Attendance', value: kpis.attendance ? `${kpis.attendance}%` : '—', delta: kpis.attendance_delta ?? '', deltaColor: '#1D9E75' },
+          { label: 'Internal marks', value: String(kpis.internal_marks ?? '—'), delta: kpis.marks_delta ?? '' },
+          { label: 'Dues', value: kpis.dues ?? '₹0', delta: kpis.dues_delta ?? '', deltaColor: '#1D9E75' },
+        ]);
+      }
+    });
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -65,7 +92,7 @@ export function StudentDashboard() {
       </div>
 
       {/* Stats */}
-      <StatsRow stats={STATS} />
+      <StatsRow stats={stats} />
 
       {/* Exam schedule */}
       <div>
@@ -85,7 +112,7 @@ export function StudentDashboard() {
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {EXAMS.map((exam) => (
+          {exams.map((exam) => (
             <div
               key={exam.id}
               style={{

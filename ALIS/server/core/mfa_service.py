@@ -165,8 +165,13 @@ class MFAService:
         )
         for device in devices:
             codes = device.get("backup_codes") or []
-            if code_hash in codes:
-                new_codes = [c for c in codes if c != code_hash]
+            # Constant-time comparison to prevent timing attacks on backup codes
+            matched_hash = None
+            for stored_hash in codes:
+                if secrets.compare_digest(code_hash, stored_hash):
+                    matched_hash = stored_hash
+            if matched_hash is not None:
+                new_codes = [c for c in codes if c != matched_hash]
                 execute_transaction(
                     [(
                         "UPDATE mfa_devices SET backup_codes = %s WHERE id = %s",
@@ -278,9 +283,14 @@ class MFAService:
 
         On success, stamps last_used_at on the matching device.
         Falls back to backup code verification if no active TOTP device matches.
+        Rate-limited to 5 attempts per 5 minutes per user.
 
         Returns True if the challenge is satisfied, False otherwise.
         """
+        from server.core.security import RateLimiter
+        if not RateLimiter.check(f"mfa_challenge:{org_id}:{user_id}", max_requests=5, window_seconds=300):
+            return False
+
         from server.db_service import execute_query, execute_transaction
 
         devices = execute_query(

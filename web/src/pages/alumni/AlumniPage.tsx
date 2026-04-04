@@ -3,6 +3,7 @@ import {
   GraduationCap, Briefcase, Users, TrendingUp,
   CheckCircle2, Building2, Star, Calendar,
 } from "lucide-react";
+import { ALISTabs, ALISTabsList, ALISTabsTrigger, ALISTabsContent } from "@/components/ui/alis-tabs";
 import {
   useAlumniStats, useAlumniProfiles, usePlacementStats,
   usePlacements, useJobBoard, useRecruitmentDrives, useMentors,
@@ -432,30 +433,20 @@ export default function AlumniPage() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 2, borderBottom: "0.5px solid var(--color-border-tertiary, rgba(255,255,255,0.06))" }}>
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              display: "flex", alignItems: "center", gap: 5, padding: "6px 12px",
-              borderRadius: "6px 6px 0 0", border: "0.5px solid transparent",
-              background: tab === t.id ? "var(--color-background-secondary, #0f1c2e)" : "transparent",
-              color: tab === t.id ? TEAL : "var(--color-text-secondary, #64748b)",
-              fontSize: 12, fontWeight: tab === t.id ? 500 : 400, cursor: "pointer",
-              marginBottom: tab === t.id ? -1 : 0, outline: "none",
-            }}
-          >
-            {t.icon} {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "overview"   && <OverviewTab />}
-      {tab === "placements" && <PlacementsTab />}
-      {tab === "jobs"       && <JobBoardTab />}
-      {tab === "drives"     && <DrivesTab />}
-      {tab === "alumni"     && <AlumniDBTab />}
+      <ALISTabs defaultValue="overview">
+        <ALISTabsList>
+          {TABS.map(t => (
+            <ALISTabsTrigger key={t.id} value={t.id}>
+              <span className="flex items-center gap-1.5">{t.icon} {t.label}</span>
+            </ALISTabsTrigger>
+          ))}
+        </ALISTabsList>
+        <ALISTabsContent value="overview"><OverviewTab /></ALISTabsContent>
+        <ALISTabsContent value="placements"><PlacementsTab /></ALISTabsContent>
+        <ALISTabsContent value="jobs"><JobBoardTab /></ALISTabsContent>
+        <ALISTabsContent value="drives"><DrivesTab /></ALISTabsContent>
+        <ALISTabsContent value="alumni"><AlumniDBTab /></ALISTabsContent>
+      </ALISTabs>
     </div>
   );
 }

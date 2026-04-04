@@ -572,14 +572,17 @@ class PasswordResetManager:
             raise
         return token
 
+    # Lua script: atomic GET + DELETE — works on all redis-py versions
+    _GETDEL_LUA = "local v = redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]) end; return v"
+
     @classmethod
     def validate_and_consume(cls, token: str) -> Optional[dict]:
         """
         Validate a reset token and atomically consume it (single-use).
 
-        Uses GETDEL (Redis ≥6.2) for an atomic get-and-delete, preventing
-        the race condition where two concurrent requests both read the token
-        before either deletes it (double-reset vulnerability).
+        Uses a Lua script for atomic get-and-delete, preventing the race
+        condition where two concurrent requests both read the token before
+        either deletes it (double-reset vulnerability).
 
         Returns {"user_id": ..., "tenant_id": ...} if valid, None if expired/invalid.
         """
@@ -587,28 +590,10 @@ class PasswordResetManager:
             r = _get_redis()
             token_hash = TokenGenerator.hash_token(token)
             key = _PWRESET_PREFIX + token_hash
-            # GETDEL is atomic: gets the value AND deletes the key in one operation.
-            # Falls back to GET+DEL if Redis <6.2 (best-effort, not fully atomic).
-            data = r.getdel(key)
+            data = r.eval(cls._GETDEL_LUA, 1, key)
             if not data:
                 return None
             return json.loads(data)
-        except AttributeError:
-            # Redis client too old — fall back to GET + DELETE (non-atomic)
-            logger.warning(
-                "PasswordResetManager: redis-py does not support GETDEL; "
-                "upgrade to redis-py>=4.1.0. Falling back to non-atomic GET+DEL."
-            )
-            try:
-                r = _get_redis()
-                key = _PWRESET_PREFIX + TokenGenerator.hash_token(token)
-                data = r.get(key)
-                if data:
-                    r.delete(key)
-                return json.loads(data) if data else None
-            except Exception:
-                logger.exception("PasswordResetManager.validate_and_consume fallback error")
-                return None
         except Exception:
             logger.exception("PasswordResetManager.validate_and_consume Redis error")
             return None
@@ -636,8 +621,7 @@ class GuardianOTPManager:
     @classmethod
     def generate(cls, phone: str, student_id: str, tenant_id: str) -> str:
         """Generate a 6-digit OTP, store in Redis, return the OTP."""
-        import random
-        otp = f"{random.SystemRandom().randint(0, 999999):06d}"
+        otp = f"{secrets.randbelow(1000000):06d}"
         try:
             r = _get_redis()
             r.setex(
@@ -650,12 +634,15 @@ class GuardianOTPManager:
             raise
         return otp
 
+    # Lua script: atomic GET + DELETE — works on all redis-py versions
+    _GETDEL_LUA = "local v = redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]) end; return v"
+
     @classmethod
     def verify_and_consume(cls, phone: str, otp: str) -> Optional[dict]:
         """
         Verify OTP and consume it (single-use).
 
-        Uses GETDEL for an atomic read-and-delete preventing double-use
+        Uses a Lua script for atomic read-and-delete, preventing double-use
         under concurrent requests with the same OTP.
 
         Returns {"student_id": ..., "tenant_id": ...} on success, None if invalid/expired.
@@ -663,34 +650,14 @@ class GuardianOTPManager:
         try:
             r = _get_redis()
             key = cls._key(phone)
-            # Atomically fetch-and-delete to prevent double-use race condition.
-            data = r.getdel(key)
+            # Atomic fetch-and-delete via Lua — safe on all redis-py versions
+            data = r.eval(cls._GETDEL_LUA, 1, key)
             if not data:
                 return None
             record = json.loads(data)
             if record.get("otp") != otp:
-                # OTP mismatch — already consumed; caller must regenerate.
                 return None
             return {"student_id": record["student_id"], "tenant_id": record["tenant_id"]}
-        except AttributeError:
-            # Redis client too old — fall back to GET-check-DELETE (non-atomic)
-            logger.warning(
-                "GuardianOTPManager: redis-py too old for GETDEL; using non-atomic fallback."
-            )
-            try:
-                r = _get_redis()
-                key = cls._key(phone)
-                data = r.get(key)
-                if not data:
-                    return None
-                record = json.loads(data)
-                if record.get("otp") != otp:
-                    return None
-                r.delete(key)
-                return {"student_id": record["student_id"], "tenant_id": record["tenant_id"]}
-            except Exception:
-                logger.exception("GuardianOTPManager.verify_and_consume fallback error")
-                return None
         except Exception:
             logger.exception("GuardianOTPManager.verify_and_consume Redis error")
             return None

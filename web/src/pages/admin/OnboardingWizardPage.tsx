@@ -78,7 +78,7 @@ const autoCode = (n: string) => n.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(
 const tempPwd  = () => `ALIS@${Math.floor(1000 + Math.random() * 9000)}!`
 
 function apiFetch(path: string, body?: object) {
-  const token = localStorage.getItem('token') ?? ''
+  const token = sessionStorage.getItem('token') ?? ''
   return fetch(path, {
     method: body ? 'POST' : 'GET',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -275,7 +275,7 @@ export function OnboardingWizardPage() {
 
   async function provision() {
     let idx = 0
-    const token = localStorage.getItem('token') ?? ''
+    const token = sessionStorage.getItem('token') ?? ''
 
     async function run(label: string, fn: () => Promise<Response | null>) {
       const i = idx++

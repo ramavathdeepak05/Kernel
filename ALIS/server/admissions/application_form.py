@@ -848,11 +848,12 @@ class ApplicationFormService:
         if not updates:
             return
         updates["updated_at"] = datetime.now(timezone.utc)
-        set_clause = ", ".join(f"{k} = %s" for k in updates)
+        from server.db_service import safe_set_clause
+        clause, vals = safe_set_clause(updates)
         execute_transaction([
             (
-                f"UPDATE applicants SET {set_clause} WHERE id = %s AND org_id = %s",
-                (*updates.values(), applicant_id, org_id),
+                f"UPDATE applicants SET {clause} WHERE id = %s AND org_id = %s",
+                (*vals, applicant_id, org_id),
             )
         ])
 
