@@ -148,7 +148,7 @@ export function PermissionPicker({ selected, onChange, available, compact }: Pro
 
   const toggle = (val: string) => {
     const next = new Set(selected)
-    next.has(val) ? next.delete(val) : next.add(val)
+    if (next.has(val)) next.delete(val); else next.add(val)
     onChange(next)
   }
 
@@ -161,7 +161,7 @@ export function PermissionPicker({ selected, onChange, available, compact }: Pro
   }
 
   const toggleCollapse = (key: string) =>
-    setCollapsed(p => { const n = new Set(p); n.has(key) ? n.delete(key) : n.add(key); return n })
+    setCollapsed(p => { const n = new Set(p); if (n.has(key)) n.delete(key); else n.add(key); return n })
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()

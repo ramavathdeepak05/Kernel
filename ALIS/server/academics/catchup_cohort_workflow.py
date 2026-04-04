@@ -9,8 +9,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
@@ -52,7 +51,6 @@ class CatchUpCohortWorkflow:
         ops = []
 
         if session_ids:
-            placeholders = ", ".join(["%s"] * len(session_ids))
             # Insert or update attendance_records for these sessions
             for sid in session_ids:
                 ops.append(("""
@@ -73,7 +71,6 @@ class CatchUpCohortWorkflow:
             LIMIT 1
         """, (student_id, org_id))
 
-        semester_start = None
         elapsed_weeks = 0
         if enroll_rows and enroll_rows[0].get("start_date"):
             sem_start = enroll_rows[0]["start_date"]

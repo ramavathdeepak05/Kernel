@@ -5,7 +5,7 @@ import logging
 import uuid
 
 from server.core.audit import AuditAction, AuditLog
-from server.core.exceptions import BusinessRuleViolation, NotFoundError
+from server.core.exceptions import NotFoundError
 from server.db_service import execute_query, execute_transaction
 
 from .models import StudentEnrollRequest

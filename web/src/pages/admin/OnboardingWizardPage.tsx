@@ -246,14 +246,14 @@ export function OnboardingWizardPage() {
   const toggleScope = (modKey: string, schoolId: string) =>
     setModuleScope(p => {
       const next = new Set(p[modKey])
-      next.has(schoolId) ? next.delete(schoolId) : next.add(schoolId)
+      if (next.has(schoolId)) next.delete(schoolId); else next.add(schoolId)
       return { ...p, [modKey]: next }
     })
 
   const toggleCross = (modKey: string, targetKey: string) =>
     setCrossGrants(p => {
       const next = new Set(p[modKey])
-      next.has(targetKey) ? next.delete(targetKey) : next.add(targetKey)
+      if (next.has(targetKey)) next.delete(targetKey); else next.add(targetKey)
       return { ...p, [modKey]: next }
     })
 
@@ -433,7 +433,7 @@ export function OnboardingWizardPage() {
             return (
               <div key={school.id} style={{ ...CARD, padding: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'rgba(129,140,248,0.04)', borderBottom: open ? '1px solid rgba(255,255,255,0.06)' : 'none' }}>
-                  <button onClick={() => setExpandedSchools(p => { const n = new Set(p); open ? n.delete(school.id) : n.add(school.id); return n })}
+                  <button onClick={() => setExpandedSchools(p => { const n = new Set(p); if (open) n.delete(school.id); else n.add(school.id); return n })}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#818cf8', padding: 2 }}>
                     <ChevronDown size={15} style={{ transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform 0.15s' }} />
                   </button>
@@ -487,7 +487,7 @@ export function OnboardingWizardPage() {
                 {/* Card header */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: 'rgba(129,140,248,0.04)', borderBottom: isCollapsed ? 'none' : '1px solid rgba(255,255,255,0.06)' }}>
                   <button
-                    onClick={() => setCollapsedManagers(p => { const n = new Set(p); n.has(mgr.id) ? n.delete(mgr.id) : n.add(mgr.id); return n })}
+                    onClick={() => setCollapsedManagers(p => { const n = new Set(p); if (n.has(mgr.id)) n.delete(mgr.id); else n.add(mgr.id); return n })}
                     style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#818cf8', padding: 2 }}
                   >
                     <ChevronDown size={15} style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'none', transition: 'transform 0.15s' }} />

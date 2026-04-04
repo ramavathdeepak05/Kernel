@@ -6,7 +6,6 @@ Publishes:  AttendanceFinalized (via AttendanceService)
 from __future__ import annotations
 
 import logging
-from datetime import date
 
 from server.core.domain_events import DomainEvent, register_handler
 

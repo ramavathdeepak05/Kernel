@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus

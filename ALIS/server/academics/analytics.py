@@ -12,8 +12,6 @@ from server.core.ai_gateway import AIGateway, AIGatewayContext
 from server.core.rbac import Role
 from server.db_service import execute_query
 
-from .attendance import AttendanceService
-
 logger = logging.getLogger(__name__)
 
 
