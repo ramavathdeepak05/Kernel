@@ -142,7 +142,11 @@ ALIS Production/
 │   ├── PRODUCTION_ROADMAP.md    # Phased release plan and gap analysis
 │   ├── ALIS_SYSTEM_DOCUMENTATION.md # Core architecture docs
 │   ├── ALIS_FRONTEND_SPEC.md    # Frontend rebuild spec
+│   ├── api-versioning.md        # API v1/v2 versioning strategy
+│   ├── vault-degradation-runbook.md # Vault failure recovery procedures
 │   ├── architecture/            # System overview block diagrams
+│   ├── build/                   # Build plan and engineering timelines
+│   ├── runbooks/                # Operational runbooks (restore, SSL, etc)
 │   └── archive/                 # Historical references
 │
 ├── partners/                    # Cross-institutional collaboration
@@ -251,7 +255,3 @@ SaaS transformation (S1–S10) complete. Control Plane and AI Service microservi
 See `specs/SKILL.md` for full development reference and invariants.
 
 ---
-
-## License
-
-Proprietary — QUAICU Solutions Private Limited. See `partners/woxsen/legal/` for terms.
