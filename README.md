@@ -6,6 +6,16 @@ Developed by QUAICU Solutions Private Limited.
 
 ---
 
+## 📚 Documentation & Onboarding
+
+If you are a new team member, start here:
+1. [**CONTRIBUTING.md**](./CONTRIBUTING.md) — Git workflow, PR rules, and coding standards.
+2. [**ONBOARDING.md**](./docs/ONBOARDING.md) — Environment setup and role-specific guides.
+3. [**CODEBASE_MAP.md**](./docs/CODEBASE_MAP.md) — Master map of every folder and critical file dependencies.
+4. [**PRODUCTION_ROADMAP.md**](./docs/PRODUCTION_ROADMAP.md) — The path to v1 (Currently at **~75% completion**).
+
+---
+
 ## Stack
 
 | Layer | Technology |
@@ -127,8 +137,12 @@ ALIS Production/
 │       └── gaps.md              # Unbuilt epics
 │
 ├── docs/                        # Documentation
-│   ├── architecture/            # System overview
-│   ├── build/                   # Build plan and timelines
+│   ├── CODEBASE_MAP.md          # Full codebase directory map
+│   ├── ONBOARDING.md            # Developer setup guide
+│   ├── PRODUCTION_ROADMAP.md    # Phased release plan and gap analysis
+│   ├── ALIS_SYSTEM_DOCUMENTATION.md # Core architecture docs
+│   ├── ALIS_FRONTEND_SPEC.md    # Frontend rebuild spec
+│   ├── architecture/            # System overview block diagrams
 │   └── archive/                 # Historical references
 │
 ├── partners/                    # Cross-institutional collaboration

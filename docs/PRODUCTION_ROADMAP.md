@@ -10,21 +10,21 @@
 
 | Area | Status | Completion |
 |------|--------|:----------:|
-| Backend Core Infrastructure | 🟢 Strong | ~85% |
-| Backend Domain Modules | 🟡 Code exists, needs hardening | ~70% |
-| Frontend Web App | 🟠 Shell done, pages partially built | ~40% |
-| AI Agents & Gateway | 🟡 Foundation solid, agents partial | ~60% |
-| Desktop App | 🔴 Non-functional, minimal code | ~10% |
-| Integrations (3rd party) | 🔴 Mostly stubs | ~20% |
-| Testing | 🟡 Core covered, modules sparse | ~45% |
-| DevOps & Deployment | 🟢 Docker + CI exists | ~75% |
-| Documentation | 🟢 Comprehensive | ~90% |
+| Backend Core Infrastructure | 🟢 Strong |
+| Backend Domain Modules | 🟡 Code exists, needs hardening | 
+| Frontend Web App | 🟠 Shell done, pages partially built | 
+| AI Agents & Gateway | 🟡 Foundation solid, agents partial | 
+| Desktop App | 🔴 Non-functional, minimal code | 
+| Integrations (3rd party) | 🔴 Mostly stubs | 
+| Testing | 🟡 Core covered, modules sparse | 
+| DevOps & Deployment | 🟢 Docker + CI exists | 
+| Documentation | 🟢 Comprehensive | 
 
-**Overall estimate: ~55% to production**
+**Overall estimate: ~75% to production**
 
 ---
 
-## 1. Backend Core Infrastructure — 🟢 ~85%
+## 1. Backend Core Infrastructure — 🟢 
 
 ### What's Done ✅
 - 6-layer enforcement model fully implemented
@@ -54,7 +54,7 @@
 
 ---
 
-## 2. Backend Domain Modules — 🟡 ~70%
+## 2. Backend Domain Modules — 🟡 
 
 ### Module-by-Module Status
 
@@ -85,7 +85,7 @@
 
 ---
 
-## 3. Frontend Web App — 🟠 ~40%
+## 3. Frontend Web App — 🟠 
 
 ### What's Done ✅
 - Shell architecture: ALISShell, IconNav, PrimaryCanvas, AgentRail
@@ -130,7 +130,7 @@
 
 ---
 
-## 4. AI Agents & Gateway — 🟡 ~60%
+## 4. AI Agents & Gateway — 🟡 
 
 ### What's Done ✅
 - `AIGateway` — single entry point with guardrails, PII masking, confidence scoring
@@ -156,7 +156,7 @@
 
 ---
 
-## 5. Desktop App — 🔴 ~10%
+## 5. Desktop App — 🔴 
 
 ### Current State
 - Electron shell with Vite (1 main file: `index.ts`, 1 renderer: `App.tsx`)
@@ -173,7 +173,7 @@
 
 ---
 
-## 6. Integrations — 🔴 ~20%
+## 6. Integrations — 🔴 
 
 | Integration | Status | Priority |
 |------------|--------|----------|
@@ -193,7 +193,7 @@
 
 ---
 
-## 7. Testing — 🟡 ~45%
+## 7. Testing — 🟡 
 
 ### Current Coverage (49 test files)
 
@@ -224,7 +224,7 @@
 
 ---
 
-## 8. DevOps & Deployment — 🟢 ~75%
+## 8. DevOps & Deployment — 🟢 
 
 ### What's Done ✅
 - `docker-compose.yml` — 17 services fully defined
