@@ -23,15 +23,15 @@ Seat Allocation:
 
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction, safe_identifier
 
@@ -59,13 +59,14 @@ _ENTRY_STATUS_OFFER_TRANSITIONS = {
 # Pydantic Models
 # =============================================================================
 
+
 class SeatMatrixCreate(BaseModel):
     program_name: str = Field(..., min_length=2, max_length=200)
-    specialization: Optional[str] = None
+    specialization: str | None = None
     intake_batch: str = Field(..., min_length=2, max_length=50)
     category: str = Field(
         default="GENERAL",
-        description="GENERAL | SC | ST | OBC_NCL | EWS | PWD | NRI | MANAGEMENT_QUOTA"
+        description="GENERAL | SC | ST | OBC_NCL | EWS | PWD | NRI | MANAGEMENT_QUOTA",
     )
     total_seats: int = Field(..., ge=1, le=10000)
 
@@ -74,7 +75,7 @@ class SeatMatrixRead(BaseModel):
     id: str
     org_id: str
     program_name: str
-    specialization: Optional[str] = None
+    specialization: str | None = None
     intake_batch: str
     category: str
     total_seats: int
@@ -83,25 +84,26 @@ class SeatMatrixRead(BaseModel):
     available_seats: int = 0  # computed
     created_by: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, _context: Any) -> None:
         object.__setattr__(
-            self, "available_seats",
-            max(0, self.total_seats - self.filled_seats - self.blocked_seats)
+            self,
+            "available_seats",
+            max(0, self.total_seats - self.filled_seats - self.blocked_seats),
         )
 
 
 class MeritListPolicyCreate(BaseModel):
     program_name: str = Field(..., min_length=2, max_length=200)
     intake_batch: str = Field(..., min_length=2, max_length=50)
-    formula: Dict[str, float] = Field(
+    formula: dict[str, float] = Field(
         ...,
-        description='{"academic_pct": 0.35, "entrance_score": 0.45, "interview_score": 0.15, "diversity_bonus": 0.05}'
+        description='{"academic_pct": 0.35, "entrance_score": 0.45, "interview_score": 0.15, "diversity_bonus": 0.05}',
     )
-    tiebreaker_order: List[str] = Field(
+    tiebreaker_order: list[str] = Field(
         default_factory=lambda: ["academic_pct", "entrance_score"],
-        description='["academic_pct", "entrance_score", "age"]'
+        description='["academic_pct", "entrance_score", "age"]',
     )
     waitlist_depth_factor: float = Field(default=1.5, ge=1.0, le=5.0)
 
@@ -111,11 +113,11 @@ class MeritListPolicyRead(BaseModel):
     org_id: str
     program_name: str
     intake_batch: str
-    formula: Dict[str, Any]
-    tiebreaker_order: List[str]
+    formula: dict[str, Any]
+    tiebreaker_order: list[str]
     waitlist_depth_factor: float
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
     created_by: str
     created_at: datetime
 
@@ -125,27 +127,26 @@ class MeritListGenerateRequest(BaseModel):
     intake_batch: str
     category: str = "GENERAL"
     list_type: str = Field(
-        default="MERIT",
-        description="MERIT | WAITLIST | MANAGEMENT_QUOTA | NRI"
+        default="MERIT", description="MERIT | WAITLIST | MANAGEMENT_QUOTA | NRI"
     )
-    specialization: Optional[str] = None
+    specialization: str | None = None
 
 
 class MeritListRead(BaseModel):
     id: str
     org_id: str
     program_name: str
-    specialization: Optional[str] = None
+    specialization: str | None = None
     intake_batch: str
     category: str
     list_type: str
     version: int
     status: str
-    cutoff_score: Optional[float] = None
+    cutoff_score: float | None = None
     total_entries: int
-    published_at: Optional[datetime] = None
-    approved_by: Optional[str] = None
-    approved_at: Optional[datetime] = None
+    published_at: datetime | None = None
+    approved_by: str | None = None
+    approved_at: datetime | None = None
     generated_by: str
     created_at: datetime
 
@@ -157,10 +158,10 @@ class MeritListEntryRead(BaseModel):
     applicant_id: str
     rank: int
     composite_score: float
-    score_breakdown: Optional[Dict[str, Any]] = None
+    score_breakdown: dict[str, Any] | None = None
     status: str
-    offer_sent_at: Optional[datetime] = None
-    response_deadline: Optional[datetime] = None
+    offer_sent_at: datetime | None = None
+    response_deadline: datetime | None = None
 
 
 class WaitlistEntryRead(BaseModel):
@@ -171,17 +172,17 @@ class WaitlistEntryRead(BaseModel):
     waitlist_rank: int
     composite_score: float
     status: str
-    activated_at: Optional[datetime] = None
-    notification_sent_at: Optional[datetime] = None
-    response_deadline: Optional[datetime] = None
+    activated_at: datetime | None = None
+    notification_sent_at: datetime | None = None
+    response_deadline: datetime | None = None
 
 
 # =============================================================================
 # SEAT MATRIX SERVICE
 # =============================================================================
 
-class SeatMatrixService:
 
+class SeatMatrixService:
     @classmethod
     def create(
         cls,
@@ -193,9 +194,10 @@ class SeatMatrixService:
         matrix_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO seat_matrix (
                     id, org_id, program_name, specialization, intake_batch,
                     category, total_seats, filled_seats, blocked_seats,
@@ -204,15 +206,23 @@ class SeatMatrixService:
                 ON CONFLICT (org_id, program_name, intake_batch, category)
                 DO UPDATE SET total_seats = EXCLUDED.total_seats, updated_at = NOW()
                 """,
-                (
-                    matrix_id, org_id,
-                    request.program_name, request.specialization,
-                    request.intake_batch, request.category,
-                    request.total_seats, 0, 0,
-                    actor_id, now, now,
-                ),
-            )
-        ])
+                    (
+                        matrix_id,
+                        org_id,
+                        request.program_name,
+                        request.specialization,
+                        request.intake_batch,
+                        request.category,
+                        request.total_seats,
+                        0,
+                        0,
+                        actor_id,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -229,7 +239,9 @@ class SeatMatrixService:
                 "total_seats": request.total_seats,
             },
         )
-        return cls.get(org_id, request.program_name, request.intake_batch, request.category)
+        return cls.get(
+            org_id, request.program_name, request.intake_batch, request.category
+        )
 
     @classmethod
     def get(
@@ -254,9 +266,9 @@ class SeatMatrixService:
     def list(
         cls,
         org_id: str,
-        program_name: Optional[str] = None,
-        intake_batch: Optional[str] = None,
-    ) -> List[SeatMatrixRead]:
+        program_name: str | None = None,
+        intake_batch: str | None = None,
+    ) -> builtins.list[SeatMatrixRead]:
         conditions = ["org_id = %s"]
         params: list = [org_id]
         if program_name:
@@ -266,7 +278,7 @@ class SeatMatrixService:
             conditions.append("intake_batch = %s")
             params.append(intake_batch)
         rows = execute_query(
-            f"SELECT * FROM seat_matrix WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM seat_matrix WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY program_name, category",
             tuple(params),
         )
@@ -285,8 +297,10 @@ class SeatMatrixService:
 
         Returns True if allocation succeeded, False if no seats available.
         """
-        result = execute_query(
-            """
+        result = execute_transaction(
+            [
+                (
+                    """
             UPDATE seat_matrix
             SET filled_seats = filled_seats + 1, updated_at = NOW()
             WHERE org_id = %s AND program_name = %s AND intake_batch = %s
@@ -294,7 +308,19 @@ class SeatMatrixService:
               AND filled_seats + blocked_seats < total_seats
             RETURNING id
             """,
-            (org_id, program_name, intake_batch, category),
+                    (org_id, program_name, intake_batch, category),
+                )
+            ],
+            tenant_id=org_id,
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="allocate_seat",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "allocate_seat"},
         )
         return bool(result)
 
@@ -303,8 +329,8 @@ class SeatMatrixService:
 # MERIT LIST POLICY SERVICE
 # =============================================================================
 
-class MeritListPolicyService:
 
+class MeritListPolicyService:
     @classmethod
     def create(
         cls,
@@ -317,16 +343,17 @@ class MeritListPolicyService:
         if not (0.99 <= total_weight <= 1.01):
             raise BusinessRuleViolation(
                 message=f"Merit formula weights must sum to 1.0. "
-                        f"Current sum: {total_weight:.4f}",
+                f"Current sum: {total_weight:.4f}",
                 details={"formula": request.formula, "sum": total_weight},
             )
 
         policy_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO merit_list_policies (
                     id, org_id, program_name, intake_batch,
                     formula, tiebreaker_order, waitlist_depth_factor,
@@ -338,16 +365,20 @@ class MeritListPolicyService:
                     tiebreaker_order = EXCLUDED.tiebreaker_order,
                     waitlist_depth_factor = EXCLUDED.waitlist_depth_factor
                 """,
-                (
-                    policy_id, org_id,
-                    request.program_name, request.intake_batch,
-                    json.dumps(request.formula),
-                    json.dumps(request.tiebreaker_order),
-                    request.waitlist_depth_factor,
-                    actor_id, now,
-                ),
-            )
-        ])
+                    (
+                        policy_id,
+                        org_id,
+                        request.program_name,
+                        request.intake_batch,
+                        json.dumps(request.formula),
+                        json.dumps(request.tiebreaker_order),
+                        request.waitlist_depth_factor,
+                        actor_id,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -391,15 +422,15 @@ class MeritListPolicyService:
 # MERIT LIST SERVICE
 # =============================================================================
 
-class MeritListService:
 
+class MeritListService:
     @classmethod
     def generate(
         cls,
         request: MeritListGenerateRequest,
         org_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate a merit list for a program/batch/category.
 
@@ -415,7 +446,9 @@ class MeritListService:
             {merit_list_id, total_ranked, total_merit, total_waitlist}
         """
         # Fetch policy
-        policy = MeritListPolicyService.get(org_id, request.program_name, request.intake_batch)
+        policy = MeritListPolicyService.get(
+            org_id, request.program_name, request.intake_batch
+        )
 
         # Fetch seat count for waitlist depth
         try:
@@ -457,53 +490,72 @@ class MeritListService:
         w_int = formula.get("interview_score", 0.2)
         w_div = formula.get("diversity_bonus", 0.0)
 
-        scored: List[Dict[str, Any]] = []
+        scored: list[dict[str, Any]] = []
         for row in eligible_rows:
             acad = float(row.get("academic_pct") or 0) / 10.0  # normalize 100→10
             entrance = float(row.get("entrance_score") or 0) / 10.0
             composite = (acad * w_acad) + (entrance * w_ent) + (0 * w_int) + (0 * w_div)
-            scored.append({
-                "applicant_id": str(row["id"]),
-                "composite_score": round(composite, 4),
-                "score_breakdown": {
-                    "academic_pct": acad,
-                    "entrance_score": entrance,
-                    "interview_score": 0,
-                },
-            })
+            scored.append(
+                {
+                    "applicant_id": str(row["id"]),
+                    "composite_score": round(composite, 4),
+                    "score_breakdown": {
+                        "academic_pct": acad,
+                        "entrance_score": entrance,
+                        "interview_score": 0,
+                    },
+                }
+            )
 
         # Sort by composite descending
         scored.sort(key=lambda x: x["composite_score"], reverse=True)
 
         # Create merit list header (supersede existing published if any)
-        cls._supersede_existing(org_id, request.program_name, request.intake_batch, request.category)
-
-        version = cls._next_version(org_id, request.program_name, request.intake_batch, request.category)
-        merit_list_id = str(uuid4())
-        now = datetime.now(timezone.utc)
-        cutoff = scored[total_seats - 1]["composite_score"] if len(scored) >= total_seats else (
-            scored[-1]["composite_score"] if scored else 0
+        supersede_query = cls._get_supersede_existing_queries(
+            org_id, request.program_name, request.intake_batch, request.category
         )
 
-        execute_transaction([
+        version = cls._next_version(
+            org_id, request.program_name, request.intake_batch, request.category
+        )
+        merit_list_id = str(uuid4())
+        now = datetime.now(timezone.utc)
+        cutoff = (
+            scored[total_seats - 1]["composite_score"]
+            if len(scored) >= total_seats
+            else (scored[-1]["composite_score"] if scored else 0)
+        )
+
+        queries_to_run = []
+        if supersede_query:
+            queries_to_run.append(supersede_query)
+
+        queries_to_run.append(
             (
                 """
-                INSERT INTO merit_lists (
-                    id, org_id, program_name, specialization, intake_batch,
-                    category, list_type, version, status, cutoff_score,
-                    total_entries, generated_by, created_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
+            INSERT INTO merit_lists (
+                id, org_id, program_name, specialization, intake_batch,
+                category, list_type, version, status, cutoff_score,
+                total_entries, generated_by, created_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
                 (
-                    merit_list_id, org_id,
-                    request.program_name, request.specialization,
-                    request.intake_batch, request.category,
-                    request.list_type, version, "DRAFT",
-                    cutoff, len(scored),
-                    actor_id, now,
+                    merit_list_id,
+                    org_id,
+                    request.program_name,
+                    request.specialization,
+                    request.intake_batch,
+                    request.category,
+                    request.list_type,
+                    version,
+                    "DRAFT",
+                    cutoff,
+                    len(scored),
+                    actor_id,
+                    now,
                 ),
             )
-        ])
+        )
 
         # Insert merit list entries and waitlist entries
         merit_depth = total_seats
@@ -515,41 +567,55 @@ class MeritListService:
         for i, s in enumerate(scored):
             rank = i + 1
             if rank <= merit_depth:
-                merit_inserts.append((
-                    """
+                merit_inserts.append(
+                    (
+                        """
                     INSERT INTO merit_list_entries
                         (id, org_id, merit_list_id, applicant_id, rank,
                          composite_score, score_breakdown, status)
                     VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s)
                     ON CONFLICT (merit_list_id, applicant_id) DO NOTHING
                     """,
-                    (
-                        str(uuid4()), org_id, merit_list_id,
-                        s["applicant_id"], rank,
-                        s["composite_score"],
-                        json.dumps(s["score_breakdown"]),
-                        "PENDING",
-                    ),
-                ))
+                        (
+                            str(uuid4()),
+                            org_id,
+                            merit_list_id,
+                            s["applicant_id"],
+                            rank,
+                            s["composite_score"],
+                            json.dumps(s["score_breakdown"]),
+                            "PENDING",
+                        ),
+                    )
+                )
             elif rank <= merit_depth + waitlist_depth:
                 waitlist_rank = rank - merit_depth
-                waitlist_inserts.append((
-                    """
+                waitlist_inserts.append(
+                    (
+                        """
                     INSERT INTO waitlist_entries
                         (id, org_id, merit_list_id, applicant_id, waitlist_rank,
                          composite_score, status)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (merit_list_id, applicant_id) DO NOTHING
                     """,
-                    (
-                        str(uuid4()), org_id, merit_list_id,
-                        s["applicant_id"], waitlist_rank,
-                        s["composite_score"], "WAITING",
-                    ),
-                ))
+                        (
+                            str(uuid4()),
+                            org_id,
+                            merit_list_id,
+                            s["applicant_id"],
+                            waitlist_rank,
+                            s["composite_score"],
+                            "WAITING",
+                        ),
+                    )
+                )
 
         if merit_inserts or waitlist_inserts:
-            execute_transaction(merit_inserts + waitlist_inserts)
+            queries_to_run.extend(merit_inserts + waitlist_inserts)
+
+        if queries_to_run:
+            execute_transaction(queries_to_run)
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -564,14 +630,18 @@ class MeritListService:
                 "program": request.program_name,
                 "intake_batch": request.intake_batch,
                 "total_merit": min(len(scored), merit_depth),
-                "total_waitlist": max(0, min(len(scored) - merit_depth, waitlist_depth)),
+                "total_waitlist": max(
+                    0, min(len(scored) - merit_depth, waitlist_depth)
+                ),
                 "cutoff": cutoff,
             },
         )
 
         logger.info(
             "Merit list generated: %s [program=%s batch=%s merit=%d waitlist=%d]",
-            merit_list_id, request.program_name, request.intake_batch,
+            merit_list_id,
+            request.program_name,
+            request.intake_batch,
             min(len(scored), merit_depth),
             max(0, min(len(scored) - merit_depth, waitlist_depth)),
         )
@@ -592,11 +662,13 @@ class MeritListService:
             (merit_list_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Merit list '{merit_list_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Merit list '{merit_list_id}' not found."
+            )
         return MeritListRead(**rows[0])
 
     @classmethod
-    def list_entries(cls, merit_list_id: str, org_id: str) -> List[MeritListEntryRead]:
+    def list_entries(cls, merit_list_id: str, org_id: str) -> list[MeritListEntryRead]:
         rows = execute_query(
             "SELECT * FROM merit_list_entries WHERE merit_list_id = %s AND org_id = %s "
             "ORDER BY rank ASC",
@@ -605,7 +677,7 @@ class MeritListService:
         return [MeritListEntryRead(**r) for r in rows]
 
     @classmethod
-    def list_waitlist(cls, merit_list_id: str, org_id: str) -> List[WaitlistEntryRead]:
+    def list_waitlist(cls, merit_list_id: str, org_id: str) -> list[WaitlistEntryRead]:
         rows = execute_query(
             "SELECT * FROM waitlist_entries WHERE merit_list_id = %s AND org_id = %s "
             "ORDER BY waitlist_rank ASC",
@@ -626,7 +698,9 @@ class MeritListService:
             (merit_list_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Merit list '{merit_list_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Merit list '{merit_list_id}' not found."
+            )
 
         current = rows[0]["status"]
         allowed = _MERIT_LIST_TRANSITIONS.get(current, set())
@@ -636,7 +710,7 @@ class MeritListService:
                 details={"allowed": list(allowed)},
             )
 
-        updates: Dict[str, Any] = {"status": new_status}
+        updates: dict[str, Any] = {"status": new_status}
         if new_status == "PUBLISHED":
             updates["published_at"] = datetime.now(timezone.utc)
         if new_status == "APPROVED":
@@ -644,12 +718,14 @@ class MeritListService:
             updates["approved_at"] = datetime.now(timezone.utc)
 
         set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in updates)
-        execute_transaction([
-            (
-                f"UPDATE merit_lists SET {set_clause} WHERE id = %s AND org_id = %s",
-                (*updates.values(), merit_list_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE merit_lists SET {set_clause} WHERE id = %s AND org_id = %s",  # noqa: S608
+                    (*updates.values(), merit_list_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -691,13 +767,15 @@ class MeritListService:
         now = datetime.now(timezone.utc)
         entry_id = rows[0]["id"]
 
-        execute_transaction([
-            (
-                "UPDATE waitlist_entries SET status = 'ACTIVATED', activated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, entry_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE waitlist_entries SET status = 'ACTIVATED', activated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (now, entry_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -722,20 +800,18 @@ class MeritListService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _supersede_existing(
+    def _get_supersede_existing_queries(
         cls, org_id: str, program_name: str, intake_batch: str, category: str
-    ) -> None:
-        execute_transaction([
-            (
-                """
-                UPDATE merit_lists SET status = 'SUPERSEDED'
-                WHERE org_id = %s AND program_name = %s
-                  AND intake_batch = %s AND category = %s
-                  AND status = 'PUBLISHED'
-                """,
-                (org_id, program_name, intake_batch, category),
-            )
-        ])
+    ) -> tuple:
+        return (
+            """
+            UPDATE merit_lists SET status = 'SUPERSEDED'
+            WHERE org_id = %s AND program_name = %s
+              AND intake_batch = %s AND category = %s
+              AND status = 'PUBLISHED'
+            """,
+            (org_id, program_name, intake_batch, category),
+        )
 
     @classmethod
     def _next_version(

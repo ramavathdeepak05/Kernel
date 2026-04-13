@@ -38,17 +38,17 @@ Acceptance Criteria (E00-S08)
   • [x] Viewable in admin console (via get_decrypted_field_diffs)
   • [x] Tamper detection enabled (hash-chain from AuditLedger)
 """
+
 from __future__ import annotations
 
 import base64
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
-from .audit import AuditAction, AuditLedger, AuditEntry
-from .tenant_crypto import TenantKeyManager
+from .audit import AuditAction, AuditEntry, AuditLedger
 from .exceptions import DiffTrackingError
+from .tenant_crypto import TenantKeyManager
 
 logger = logging.getLogger(__name__)
 
@@ -60,22 +60,42 @@ logger = logging.getLogger(__name__)
 # Maps entity_type -> set of tracked field names.
 # If the set is empty, ALL fields are tracked.
 
-TRACKED_ENTITIES: Dict[str, Set[str]] = {
+TRACKED_ENTITIES: dict[str, set[str]] = {
     "marks": {
-        "score", "grade", "internal_marks", "external_marks",
-        "total_marks", "result_status", "moderation_applied",
+        "score",
+        "grade",
+        "internal_marks",
+        "external_marks",
+        "total_marks",
+        "result_status",
+        "moderation_applied",
     },
     "payroll": {
-        "basic_salary", "gross_salary", "net_salary", "deductions",
-        "allowances", "lop_days", "payable_days",
+        "basic_salary",
+        "gross_salary",
+        "net_salary",
+        "deductions",
+        "allowances",
+        "lop_days",
+        "payable_days",
     },
     "fee": {
-        "fee_amount", "discount", "waiver_pct", "penalty",
-        "due_date", "payment_status", "balance",
+        "fee_amount",
+        "discount",
+        "waiver_pct",
+        "penalty",
+        "due_date",
+        "payment_status",
+        "balance",
     },
     "transcript": {
-        "sgpa", "cgpa", "credits_earned", "credits_required",
-        "result_status", "honours", "remarks",
+        "sgpa",
+        "cgpa",
+        "credits_earned",
+        "credits_required",
+        "result_status",
+        "honours",
+        "remarks",
     },
 }
 
@@ -85,7 +105,7 @@ def is_tracked_entity(entity_type: str) -> bool:
     return entity_type.lower() in TRACKED_ENTITIES
 
 
-def get_tracked_fields(entity_type: str) -> Set[str]:
+def get_tracked_fields(entity_type: str) -> set[str]:
     """
     Return the set of tracked fields for an entity type.
     Returns an empty set if the entity is not tracked.
@@ -97,11 +117,12 @@ def get_tracked_fields(entity_type: str) -> Set[str]:
 # FIELD DIFF COMPUTATION
 # ============================================================================
 
+
 def _compute_field_diffs(
-    old_data: Dict[str, Any],
-    new_data: Dict[str, Any],
-    tracked_fields: Optional[Set[str]] = None,
-) -> Dict[str, Dict[str, Any]]:
+    old_data: dict[str, Any],
+    new_data: dict[str, Any],
+    tracked_fields: set[str] | None = None,
+) -> dict[str, dict[str, Any]]:
     """
     Compare old_data vs new_data and return a dict of changed fields.
 
@@ -124,7 +145,7 @@ def _compute_field_diffs(
     else:
         fields_to_check = set(old_data.keys()) | set(new_data.keys())
 
-    diffs: Dict[str, Dict[str, Any]] = {}
+    diffs: dict[str, dict[str, Any]] = {}
     for field in fields_to_check:
         old_val = old_data.get(field)
         new_val = new_data.get(field)
@@ -137,6 +158,7 @@ def _compute_field_diffs(
 # ============================================================================
 # ENCRYPTION OF PREVIOUS VALUES
 # ============================================================================
+
 
 def _encrypt_old_value(tenant_id: str, value: Any) -> str:
     """
@@ -182,17 +204,18 @@ def _decrypt_old_value(tenant_id: str, encrypted_str: str) -> Any:
 # PRIMARY API: COMPUTE AND LOG FIELD DIFFS
 # ============================================================================
 
+
 def compute_and_log_field_diffs(
     tenant_id: str,
     actor_id: str,
     actor_role: str,
     entity_type: str,
     entity_id: str,
-    old_data: Dict[str, Any],
-    new_data: Dict[str, Any],
-    module: Optional[str] = None,
-    wizard: Optional[str] = None,
-) -> Optional[AuditEntry]:
+    old_data: dict[str, Any],
+    new_data: dict[str, Any],
+    module: str | None = None,
+    wizard: str | None = None,
+) -> AuditEntry | None:
     """
     Compute per-field diffs between old_data and new_data, encrypt the
     previous values, and log the result to the immutable audit ledger.
@@ -221,11 +244,11 @@ def compute_and_log_field_diffs(
     if not is_tracked_entity(entity_lower):
         raise DiffTrackingError(
             message=f"Entity type '{entity_type}' is not registered for "
-                    f"field-level change tracking.",
+            f"field-level change tracking.",
             details={
                 "entity_type": entity_type,
                 "registered_types": list(TRACKED_ENTITIES.keys()),
-            }
+            },
         )
 
     tracked_fields = get_tracked_fields(entity_lower)
@@ -236,12 +259,13 @@ def compute_and_log_field_diffs(
     if not diffs:
         logger.debug(
             "No field changes detected for %s:%s — skipping diff log.",
-            entity_type, entity_id,
+            entity_type,
+            entity_id,
         )
         return None
 
     # Encrypt previous values
-    encrypted_diffs: Dict[str, Dict[str, Any]] = {}
+    encrypted_diffs: dict[str, dict[str, Any]] = {}
     for field_name, change in diffs.items():
         encrypted_diffs[field_name] = {
             "old_encrypted": _encrypt_old_value(tenant_id, change["old"]),
@@ -249,7 +273,7 @@ def compute_and_log_field_diffs(
         }
 
     # Build metadata payload
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "diff_type": "field_level",
         "field_diffs": encrypted_diffs,
         "fields_changed": list(encrypted_diffs.keys()),
@@ -274,8 +298,11 @@ def compute_and_log_field_diffs(
     logger.info(
         "E00-S08: Field-level diff logged for %s:%s — %d field(s) changed "
         "[actor=%s, tenant=%s]",
-        entity_type, entity_id, len(encrypted_diffs),
-        actor_id, tenant_id,
+        entity_type,
+        entity_id,
+        len(encrypted_diffs),
+        actor_id,
+        tenant_id,
     )
 
     return entry
@@ -285,12 +312,13 @@ def compute_and_log_field_diffs(
 # ADMIN CONSOLE: RETRIEVE DECRYPTED FIELD DIFFS
 # ============================================================================
 
+
 def get_decrypted_field_diffs(
     tenant_id: str,
     entity_type: str,
     entity_id: str,
     limit: int = 50,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Retrieve field-level diff history for an entity, with previous
     values decrypted on-the-fly for the admin console.
@@ -320,7 +348,7 @@ def get_decrypted_field_diffs(
         limit=limit,
     )
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     for row in raw_history:
         meta = row.get("metadata")
@@ -339,24 +367,24 @@ def get_decrypted_field_diffs(
         encrypted_diffs = meta.get("field_diffs", {})
 
         # Decrypt each field's old value
-        decrypted_diffs: Dict[str, Dict[str, Any]] = {}
+        decrypted_diffs: dict[str, dict[str, Any]] = {}
         for field_name, change in encrypted_diffs.items():
             decrypted_diffs[field_name] = {
-                "old": _decrypt_old_value(
-                    tenant_id, change.get("old_encrypted", "")
-                ),
+                "old": _decrypt_old_value(tenant_id, change.get("old_encrypted", "")),
                 "new": change.get("new"),
             }
 
-        results.append({
-            "audit_id": row.get("id"),
-            "actor_id": row.get("actor_id"),
-            "actor_role": row.get("actor_role"),
-            "timestamp": row.get("timestamp"),
-            "hash": row.get("hash"),
-            "fields_changed": meta.get("fields_changed", []),
-            "change_count": meta.get("change_count", 0),
-            "field_diffs": decrypted_diffs,
-        })
+        results.append(
+            {
+                "audit_id": row.get("id"),
+                "actor_id": row.get("actor_id"),
+                "actor_role": row.get("actor_role"),
+                "timestamp": row.get("timestamp"),
+                "hash": row.get("hash"),
+                "fields_changed": meta.get("fields_changed", []),
+                "change_count": meta.get("change_count", 0),
+                "field_diffs": decrypted_diffs,
+            }
+        )
 
     return results

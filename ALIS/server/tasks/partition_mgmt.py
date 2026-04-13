@@ -6,6 +6,7 @@ Celery Beat tasks for maintaining partitioned tables:
   2. Drop expired domain_events partitions (> 30 days)
   3. Detach old audit_ledger partitions (> 2 years) for archival
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,7 +17,9 @@ from server.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="server.tasks.partition_mgmt.create_future_partitions", queue="default")
+@celery_app.task(
+    name="server.tasks.partition_mgmt.create_future_partitions", queue="default"
+)
 def create_future_partitions() -> dict:
     """
     Create future partitions for audit_ledger (monthly) and domain_events (weekly).
@@ -54,12 +57,16 @@ def create_future_partitions() -> dict:
         )
         if not existing:
             try:
-                execute_system_transaction([(
-                    f"CREATE TABLE IF NOT EXISTS {part_name} "
-                    f"PARTITION OF audit_ledger "
-                    f"FOR VALUES FROM ('{from_date}') TO ('{to_date}')",
-                    None,
-                )])
+                execute_system_transaction(
+                    [
+                        (
+                            f"CREATE TABLE IF NOT EXISTS {part_name} "
+                            f"PARTITION OF audit_ledger "
+                            f"FOR VALUES FROM ('{from_date}') TO ('{to_date}')",
+                            None,
+                        )
+                    ]
+                )
                 created.append(part_name)
                 logger.info("Created partition: %s", part_name)
             except Exception as e:
@@ -85,12 +92,16 @@ def create_future_partitions() -> dict:
         )
         if not existing:
             try:
-                execute_system_transaction([(
-                    f"CREATE TABLE IF NOT EXISTS {part_name} "
-                    f"PARTITION OF domain_events "
-                    f"FOR VALUES FROM ('{week_start.isoformat()}') TO ('{week_end.isoformat()}')",
-                    None,
-                )])
+                execute_system_transaction(
+                    [
+                        (
+                            f"CREATE TABLE IF NOT EXISTS {part_name} "
+                            f"PARTITION OF domain_events "
+                            f"FOR VALUES FROM ('{week_start.isoformat()}') TO ('{week_end.isoformat()}')",
+                            None,
+                        )
+                    ]
+                )
                 created.append(part_name)
                 logger.info("Created partition: %s", part_name)
             except Exception as e:
@@ -99,7 +110,9 @@ def create_future_partitions() -> dict:
     return {"created": created}
 
 
-@celery_app.task(name="server.tasks.partition_mgmt.drop_expired_event_partitions", queue="default")
+@celery_app.task(
+    name="server.tasks.partition_mgmt.drop_expired_event_partitions", queue="default"
+)
 def drop_expired_event_partitions(retention_days: int = 30) -> dict:
     """
     Drop domain_events partitions older than retention_days.
@@ -141,19 +154,29 @@ def drop_expired_event_partitions(retention_days: int = 30) -> dict:
             to_date = datetime.fromisoformat(to_date_str)
 
             if to_date < cutoff:
-                execute_system_transaction([(
-                    f"DROP TABLE IF EXISTS {part_name}",
-                    None,
-                )])
+                execute_system_transaction(
+                    [
+                        (
+                            f"DROP TABLE IF EXISTS {part_name}",
+                            None,
+                        )
+                    ]
+                )
                 dropped.append(part_name)
-                logger.info("Dropped expired partition: %s (upper bound: %s)", part_name, to_date_str)
+                logger.info(
+                    "Dropped expired partition: %s (upper bound: %s)",
+                    part_name,
+                    to_date_str,
+                )
         except (ValueError, IndexError) as e:
             logger.debug("Could not parse bounds for %s: %s", part_name, e)
 
     return {"dropped": dropped}
 
 
-@celery_app.task(name="server.tasks.partition_mgmt.detach_old_audit_partitions", queue="default")
+@celery_app.task(
+    name="server.tasks.partition_mgmt.detach_old_audit_partitions", queue="default"
+)
 def detach_old_audit_partitions(retention_years: int = 2) -> dict:
     """
     Detach audit_ledger partitions older than retention_years.
@@ -196,15 +219,20 @@ def detach_old_audit_partitions(retention_years: int = 2) -> dict:
             to_date = datetime.fromisoformat(to_date_str)
 
             if to_date < cutoff:
-                execute_system_transaction([(
-                    f"ALTER TABLE audit_ledger DETACH PARTITION {part_name}",
-                    None,
-                )])
+                execute_system_transaction(
+                    [
+                        (
+                            f"ALTER TABLE audit_ledger DETACH PARTITION {part_name}",
+                            None,
+                        )
+                    ]
+                )
                 detached.append(part_name)
                 logger.info(
                     "Detached audit partition: %s (upper bound: %s). "
                     "Export to cold storage then DROP manually.",
-                    part_name, to_date_str,
+                    part_name,
+                    to_date_str,
                 )
         except (ValueError, IndexError) as e:
             logger.debug("Could not parse bounds for %s: %s", part_name, e)

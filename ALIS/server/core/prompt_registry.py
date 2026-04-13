@@ -56,17 +56,18 @@ Usage:
         prompt["content"], {"marksheet_text": "..."}
     )
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any
 from uuid import uuid4
 
 import jinja2
 from jinja2.sandbox import SandboxedEnvironment
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .exceptions import PromptNotFoundError, PromptResolutionError
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ _jinja_env = SandboxedEnvironment(
 # PROMPT REGISTRY SERVICE
 # =============================================================================
 
+
 class PromptRegistry:
     """
     Centralized, versioned prompt registry for all ALIS AI operations.
@@ -125,7 +127,7 @@ class PromptRegistry:
         tenant_id: str,
         description: str = "",
         fmt: str = "jinja2",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create a new prompt version in DRAFT status.
 
@@ -171,10 +173,17 @@ class PromptRegistry:
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
-                        prompt_id, tenant_id, name, next_version,
-                        content, fmt, description,
-                        PROMPT_STATUS_DRAFT, content_hash,
-                        actor_id, actor_role,
+                        prompt_id,
+                        tenant_id,
+                        name,
+                        next_version,
+                        content,
+                        fmt,
+                        description,
+                        PROMPT_STATUS_DRAFT,
+                        content_hash,
+                        actor_id,
+                        actor_role,
                     ),
                 )
             ],
@@ -199,7 +208,10 @@ class PromptRegistry:
 
         logger.info(
             "E03-S03: Prompt '%s' v%d created [tenant=%s, actor=%s]",
-            name, next_version, tenant_id, actor_id,
+            name,
+            next_version,
+            tenant_id,
+            actor_id,
         )
 
         return {
@@ -261,8 +273,7 @@ class PromptRegistry:
         if not target:
             raise PromptNotFoundError(
                 message=(
-                    f"Prompt '{name}' version {version} not found "
-                    f"[tenant={tenant_id}]"
+                    f"Prompt '{name}' version {version} not found [tenant={tenant_id}]"
                 ),
                 details={"name": name, "version": version},
             )
@@ -297,11 +308,13 @@ class PromptRegistry:
         if current_active:
             old_id = current_active[0]["id"]
             old_version = current_active[0]["version"]
-            queries.append((
-                "UPDATE prompt_registry SET status = %s, "
-                "updated_at = NOW() WHERE id = %s AND tenant_id = %s",
-                (PROMPT_STATUS_SUPERSEDED, old_id, tenant_id),
-            ))
+            queries.append(
+                (
+                    "UPDATE prompt_registry SET status = %s, "
+                    "updated_at = NOW() WHERE id = %s AND tenant_id = %s",
+                    (PROMPT_STATUS_SUPERSEDED, old_id, tenant_id),
+                )
+            )
 
             # Audit: supersede old version
             AuditLog.log(
@@ -319,12 +332,14 @@ class PromptRegistry:
             )
 
         # Step 2: Activate the target version
-        queries.append((
-            "UPDATE prompt_registry SET status = %s, "
-            "activated_by = %s, activated_at = NOW(), "
-            "updated_at = NOW() WHERE id = %s AND tenant_id = %s",
-            (PROMPT_STATUS_ACTIVATED, actor_id, target_id, tenant_id),
-        ))
+        queries.append(
+            (
+                "UPDATE prompt_registry SET status = %s, "
+                "activated_by = %s, activated_at = NOW(), "
+                "updated_at = NOW() WHERE id = %s AND tenant_id = %s",
+                (PROMPT_STATUS_ACTIVATED, actor_id, target_id, tenant_id),
+            )
+        )
 
         execute_transaction(queries, tenant_id=tenant_id)
 
@@ -344,7 +359,10 @@ class PromptRegistry:
 
         logger.info(
             "E03-S03: Prompt '%s' v%d activated [tenant=%s, actor=%s]",
-            name, version, tenant_id, actor_id,
+            name,
+            version,
+            tenant_id,
+            actor_id,
         )
 
     # ------------------------------------------------------------------
@@ -356,7 +374,7 @@ class PromptRegistry:
         name: str,
         version: int,
         tenant_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Fetch a specific prompt version.
 
@@ -391,8 +409,7 @@ class PromptRegistry:
         if not rows:
             raise PromptNotFoundError(
                 message=(
-                    f"Prompt '{name}' version {version} not found "
-                    f"[tenant={tenant_id}]"
+                    f"Prompt '{name}' version {version} not found [tenant={tenant_id}]"
                 ),
                 details={"name": name, "version": version},
             )
@@ -407,7 +424,7 @@ class PromptRegistry:
     def get_active_prompt(
         name: str,
         tenant_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Fetch the currently ACTIVATED version of a prompt.
 
@@ -458,7 +475,7 @@ class PromptRegistry:
     def list_versions(
         name: str,
         tenant_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         List all versions of a prompt (ordered by version descending).
 
@@ -491,7 +508,7 @@ class PromptRegistry:
     @staticmethod
     def render_prompt(
         template_content: str,
-        variables: Dict[str, Any],
+        variables: dict[str, Any],
     ) -> str:
         """
         Render a Jinja2 prompt template with the given variables.
@@ -570,15 +587,12 @@ class PromptRegistry:
         if isinstance(version, int):
             if version < 1:
                 raise PromptResolutionError(
-                    message=(
-                        f"Prompt version must be >= 1, got {version}."
-                    ),
+                    message=(f"Prompt version must be >= 1, got {version}."),
                 )
             return version
 
         raise PromptResolutionError(
             message=(
-                f"Prompt version must be an integer, "
-                f"got {type(version).__name__}."
+                f"Prompt version must be an integer, got {type(version).__name__}."
             ),
         )

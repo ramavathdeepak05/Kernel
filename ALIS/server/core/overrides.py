@@ -25,21 +25,23 @@ Acceptance Criteria:
 - [x] Immutable audit trail
 - [x] Time-bound validity
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Any
+from uuid import uuid4
 
 from .state_registry import OverrideState, validate_override_transition
 
-
 # --- Override Types ---
+
 
 class OverrideType(str, Enum):
     """Types of overrides in ALIS."""
+
     ATTENDANCE_WAIVER = "attendance_waiver"
     FEE_WAIVER = "fee_waiver"
     DEADLINE_EXTENSION = "deadline_extension"
@@ -52,26 +54,31 @@ class OverrideType(str, Enum):
 
 # --- Override Severity (Determines Quorum) ---
 
+
 class OverrideSeverity(str, Enum):
     """Severity level determining approval requirements."""
-    LOW = "low"        # Single approver
+
+    LOW = "low"  # Single approver
     MEDIUM = "medium"  # Two approvers
-    HIGH = "high"      # Quorum required (3+ approvers)
+    HIGH = "high"  # Quorum required (3+ approvers)
     CRITICAL = "critical"  # Super admin only
 
 
 # --- Approval Record ---
 
+
 @dataclass
 class ApprovalRecord:
     """Record of an approval action."""
+
     approver_id: str
     action: str  # "approve" or "reject"
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 # --- Override Entity ---
+
 
 @dataclass
 class Override:
@@ -83,17 +90,18 @@ class Override:
     Overrides are immutable once created. State transitions
     are recorded in the history.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
 
     # Request Details
     override_type: OverrideType = OverrideType.CUSTOM
     severity: OverrideSeverity = OverrideSeverity.LOW
     reason: str = ""  # Required
-    description: Optional[str] = None
+    description: str | None = None
 
     # Target
     entity_type: str = ""  # e.g., "student", "exam"
-    entity_id: str = ""    # ID of the entity being overridden
+    entity_id: str = ""  # ID of the entity being overridden
 
     # Requestor
     requested_by: str = ""
@@ -103,21 +111,21 @@ class Override:
     status: OverrideState = OverrideState.REQUESTED
 
     # Validity
-    valid_until: Optional[datetime] = None  # Time-bound validity
-    valid_for_action: Optional[str] = None  # Specific action this overrides
+    valid_until: datetime | None = None  # Time-bound validity
+    valid_for_action: str | None = None  # Specific action this overrides
 
     # Approvals
-    approvals: List[ApprovalRecord] = field(default_factory=list)
+    approvals: list[ApprovalRecord] = field(default_factory=list)
     required_approvals: int = 1
 
     # Execution
-    executed_at: Optional[datetime] = None
-    executed_by: Optional[str] = None
-    execution_result: Optional[Dict[str, Any]] = None
+    executed_at: datetime | None = None
+    executed_by: str | None = None
+    execution_result: dict[str, Any] | None = None
 
     # Audit
-    closed_at: Optional[datetime] = None
-    closed_by: Optional[str] = None
+    closed_at: datetime | None = None
+    closed_by: str | None = None
 
     def __post_init__(self):
         """Set required approvals based on severity."""
@@ -153,7 +161,7 @@ class Override:
         """Check if required approvals are met."""
         return self.approval_count >= self.required_approvals
 
-    def approve(self, approver_id: str, comment: Optional[str] = None) -> bool:
+    def approve(self, approver_id: str, comment: str | None = None) -> bool:
         """
         Record an approval for this override.
 
@@ -166,11 +174,9 @@ class Override:
             self._transition_to(OverrideState.EXPIRED)
             raise ValueError("Override has expired")
 
-        self.approvals.append(ApprovalRecord(
-            approver_id=approver_id,
-            action="approve",
-            comment=comment
-        ))
+        self.approvals.append(
+            ApprovalRecord(approver_id=approver_id, action="approve", comment=comment)
+        )
 
         if self.is_fully_approved:
             self._transition_to(OverrideState.APPROVED)
@@ -178,19 +184,17 @@ class Override:
 
         return False
 
-    def reject(self, approver_id: str, comment: Optional[str] = None) -> None:
+    def reject(self, approver_id: str, comment: str | None = None) -> None:
         """Reject the override."""
         if self.status != OverrideState.REQUESTED:
             raise ValueError(f"Cannot reject override in state {self.status}")
 
-        self.approvals.append(ApprovalRecord(
-            approver_id=approver_id,
-            action="reject",
-            comment=comment
-        ))
+        self.approvals.append(
+            ApprovalRecord(approver_id=approver_id, action="reject", comment=comment)
+        )
         self._transition_to(OverrideState.REJECTED)
 
-    def execute(self, executor_id: str, result: Optional[Dict] = None) -> None:
+    def execute(self, executor_id: str, result: dict | None = None) -> None:
         """Mark the override as executed."""
         if self.status != OverrideState.APPROVED:
             raise ValueError(f"Cannot execute override in state {self.status}")
@@ -209,7 +213,7 @@ class Override:
         valid_close_states = [
             OverrideState.EXECUTED,
             OverrideState.REJECTED,
-            OverrideState.EXPIRED
+            OverrideState.EXPIRED,
         ]
         if self.status not in valid_close_states:
             raise ValueError(f"Cannot close override in state {self.status}")
@@ -228,6 +232,7 @@ class Override:
 
 # --- Override Service ---
 
+
 class OverrideService:
     """
     Service for managing overrides.
@@ -235,7 +240,7 @@ class OverrideService:
     In production, this will persist to database.
     """
 
-    _overrides: Dict[str, Override] = {}
+    _overrides: dict[str, Override] = {}
 
     @classmethod
     def create(
@@ -246,8 +251,8 @@ class OverrideService:
         entity_id: str,
         requested_by: str,
         severity: OverrideSeverity = OverrideSeverity.LOW,
-        description: Optional[str] = None,
-        valid_hours: int = 24
+        description: str | None = None,
+        valid_hours: int = 24,
     ) -> Override:
         """Create a new override request."""
         if not reason:
@@ -261,32 +266,31 @@ class OverrideService:
             entity_type=entity_type,
             entity_id=entity_id,
             requested_by=requested_by,
-            valid_until=datetime.now(timezone.utc) + timedelta(hours=valid_hours)
+            valid_until=datetime.now(timezone.utc) + timedelta(hours=valid_hours),
         )
 
         cls._overrides[override.id] = override
         return override
 
     @classmethod
-    def get(cls, override_id: str) -> Optional[Override]:
+    def get(cls, override_id: str) -> Override | None:
         """Get an override by ID."""
         return cls._overrides.get(override_id)
 
     @classmethod
     def get_for_entity(
-        cls,
-        entity_type: str,
-        entity_id: str,
-        active_only: bool = True
-    ) -> List[Override]:
+        cls, entity_type: str, entity_id: str, active_only: bool = True
+    ) -> list[Override]:
         """Get all overrides for a specific entity."""
         overrides = [
-            o for o in cls._overrides.values()
+            o
+            for o in cls._overrides.values()
             if o.entity_type == entity_type and o.entity_id == entity_id
         ]
         if active_only:
             overrides = [
-                o for o in overrides
+                o
+                for o in overrides
                 if o.status in [OverrideState.REQUESTED, OverrideState.APPROVED]
                 and not o.is_expired
             ]
@@ -294,11 +298,8 @@ class OverrideService:
 
     @classmethod
     def check_active_override(
-        cls,
-        entity_type: str,
-        entity_id: str,
-        override_type: OverrideType
-    ) -> Optional[Override]:
+        cls, entity_type: str, entity_id: str, override_type: OverrideType
+    ) -> Override | None:
         """
         Check if there's an active, approved override for the entity.
 
@@ -306,6 +307,9 @@ class OverrideService:
         """
         overrides = cls.get_for_entity(entity_type, entity_id, active_only=True)
         for override in overrides:
-            if override.override_type == override_type and override.status == OverrideState.APPROVED:
+            if (
+                override.override_type == override_type
+                and override.status == OverrideState.APPROVED
+            ):
                 return override
         return None

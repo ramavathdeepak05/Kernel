@@ -21,18 +21,20 @@ Acceptance Criteria (E03-S02):
 - [x] Resource limits enforced (num_ctx, num_gpu, num_thread, keep_alive, timeout
       stored in config JSONB and forwarded to OllamaLLM at invocation time)
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field
-from enum import Enum
 import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
+from uuid import uuid4
 
-from pydantic import BaseModel, Field as PydanticField
+from pydantic import BaseModel
+from pydantic import Field as PydanticField
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ logger = logging.getLogger(__name__)
 # ENUMS
 # =============================================================================
 
+
 class ModelCapability(str, Enum):
     """
     AI role capabilities per ALIS Layer 2 Decision Declaration.
@@ -48,6 +51,7 @@ class ModelCapability(str, Enum):
     Every wizard must declare its AI Role as one of these.
     The Model Registry maps each capability to a specific model.
     """
+
     INFER = "Infer"
     SCORE = "Score"
     PLAN = "Plan"
@@ -56,6 +60,7 @@ class ModelCapability(str, Enum):
 
 class ModelStatus(str, Enum):
     """Status of a model entry in the registry."""
+
     ACTIVE = "ACTIVE"
     INACTIVE = "INACTIVE"
     DEPRECATED = "DEPRECATED"
@@ -65,33 +70,35 @@ class ModelStatus(str, Enum):
 # PYDANTIC SCHEMAS (API I/O)
 # =============================================================================
 
+
 class LLMModelRead(BaseModel):
     """Read-only representation of a registered LLM model."""
+
     id: str
     tenant_id: str
     name: str
     version: str
     capability: str
     is_active: bool
-    config: Dict[str, Any] = {}
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    config: dict[str, Any] = {}
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class LLMModelRegister(BaseModel):
     """Schema for registering a new model in the registry."""
+
     name: str = PydanticField(..., min_length=1, max_length=100)
     version: str = PydanticField(..., min_length=1, max_length=50)
     capability: ModelCapability
     is_active: bool = False
-    config: Dict[str, Any] = PydanticField(
-        default_factory=lambda: {"temperature": 0.0}
-    )
+    config: dict[str, Any] = PydanticField(default_factory=lambda: {"temperature": 0.0})
 
 
 # =============================================================================
 # RESOLVED MODEL (Internal dataclass used by AIGateway)
 # =============================================================================
+
 
 @dataclass
 class ResolvedModel:
@@ -100,17 +107,19 @@ class ResolvedModel:
 
     Contains all information needed to instantiate an OllamaLLM.
     """
+
     id: str
     name: str
     version: str
     capability: str
     ollama_model_tag: str  # e.g. "qwen:1.5-q8"
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
 # MODEL REGISTRY SERVICE
 # =============================================================================
+
 
 class ModelRegistry:
     """
@@ -159,7 +168,7 @@ class ModelRegistry:
         Returns:
             The newly created model ID.
         """
-        from ..db_service import execute_query, execute_transaction
+        from ..db_service import execute_transaction
 
         model_id = str(uuid4())
         now = datetime.now(timezone.utc)
@@ -206,7 +215,7 @@ class ModelRegistry:
             entity_type="llm_model_registry",
             entity_id=model_id,
             action_detail=f"Registered model {model.name}:{model.version} "
-                          f"for capability {model.capability.value}",
+            f"for capability {model.capability.value}",
             org_id=tenant_id,
             metadata={
                 "name": model.name,
@@ -231,7 +240,7 @@ class ModelRegistry:
         cls,
         capability: str,
         tenant_id: str,
-    ) -> Optional[ResolvedModel]:
+    ) -> ResolvedModel | None:
         """
         Retrieve the currently active model for a capability + tenant.
 
@@ -348,8 +357,8 @@ class ModelRegistry:
     def list_models(
         cls,
         tenant_id: str,
-        capability: Optional[str] = None,
-    ) -> List[LLMModelRead]:
+        capability: str | None = None,
+    ) -> list[LLMModelRead]:
         """
         List all registered models for a tenant, optionally filtered
         by capability.

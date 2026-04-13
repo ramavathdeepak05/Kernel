@@ -41,17 +41,18 @@ Vector Store Backend:
     returns empty results. In production, inject a QdrantBackend or
     PGVectorBackend instance.
 """
+
 from __future__ import annotations
 
-from typing import Any, ClassVar, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
-from server.core.tool_registry import BaseTool, ToolOutputSchema
 from server.core.exceptions import ToolSchemaViolationError
-
+from server.core.tool_registry import BaseTool, ToolOutputSchema
 
 # =============================================================================
 # VECTOR STORE BACKEND PROTOCOL
 # =============================================================================
+
 
 @runtime_checkable
 class VectorStoreBackend(Protocol):
@@ -69,7 +70,7 @@ class VectorStoreBackend(Protocol):
         top_k: int,
         score_threshold: float,
         tenant_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Perform semantic search.
 
@@ -100,8 +101,9 @@ class _StubVectorBackend:
         top_k: int,
         score_threshold: float,
         tenant_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         import logging
+
         logging.getLogger(__name__).warning(
             "RAGRetrieverTool: No vector backend configured — "
             "returning empty results. Inject a backend via "
@@ -113,6 +115,7 @@ class _StubVectorBackend:
 # =============================================================================
 # RAG RETRIEVER TOOL
 # =============================================================================
+
 
 class RAGRetrieverTool(BaseTool):
     """
@@ -155,7 +158,7 @@ class RAGRetrieverTool(BaseTool):
 
     def execute(
         self,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         tenant_id: str,
     ) -> ToolOutputSchema:
         """

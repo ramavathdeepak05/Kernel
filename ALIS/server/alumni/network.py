@@ -1,9 +1,11 @@
 """E12-S05 — Alumni Network (connections + mentorship)"""
+
 from __future__ import annotations
 
 import logging
 import uuid
 
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
 
@@ -13,13 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 class AlumniNetworkService:
-
     # ------------------------------------------------------------------
     # Connections
     # ------------------------------------------------------------------
 
     @classmethod
-    def send_connection_request(cls, org_id: str, requester_id: str, target_id: str) -> dict:
+    def send_connection_request(
+        cls, org_id: str, requester_id: str, target_id: str
+    ) -> dict:
         if requester_id == target_id:
             raise BusinessRuleViolation(message="Cannot connect with yourself")
 
@@ -33,13 +36,27 @@ class AlumniNetworkService:
             )
 
         cid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO alumni_connections (id, org_id, requester_id, target_id)
             VALUES (%s, %s, %s, %s)
             """,
-            (cid, org_id, requester_id, target_id),
-        )])
+                    (cid, org_id, requester_id, target_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="connection_request",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "send_connection_request"},
+        )
         return {"id": cid, "status": "PENDING"}
 
     @classmethod
@@ -55,16 +72,32 @@ class AlumniNetworkService:
         conn = dict(rows[0])
 
         if str(conn["target_id"]) != actor_id:
-            raise BusinessRuleViolation(message="Only the request recipient can respond")
+            raise BusinessRuleViolation(
+                message="Only the request recipient can respond"
+            )
 
         if conn["status"] != "PENDING":
             raise BusinessRuleViolation(message=f"Request is already {conn['status']}")
 
         new_status = "ACCEPTED" if accept else "REJECTED"
-        execute_transaction([(
-            "UPDATE alumni_connections SET status = %s WHERE id = %s",
-            (new_status, connection_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE alumni_connections SET status = %s WHERE id = %s",
+                    (new_status, connection_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="connection",
+            entity_id=connection_id,
+            tenant_id=org_id,
+            metadata={"source": "respond_connection"},
+        )
         return {"id": connection_id, "status": new_status}
 
     @classmethod
@@ -116,23 +149,43 @@ class AlumniNetworkService:
         if not mentor_rows:
             raise NotFoundError(f"Alumni {req.mentor_id} not found")
         if not mentor_rows[0]["is_mentor"]:
-            raise BusinessRuleViolation(message="This alumni is not available for mentorship")
+            raise BusinessRuleViolation(
+                message="This alumni is not available for mentorship"
+            )
 
         mid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO mentorship_requests
                 (id, org_id, mentor_id, mentee_id, topic, message)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (mid, org_id, req.mentor_id, mentee_id, req.topic, req.message),
-        )])
+                    (mid, org_id, req.mentor_id, mentee_id, req.topic, req.message),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="mentorship",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "request_mentorship"},
+        )
         return {"id": mid, "mentor_id": req.mentor_id, "status": "PENDING"}
 
     @classmethod
     def respond_mentorship(
-        cls, org_id: str, request_id: str, accept: bool,
-        session_date: str | None, actor_alumni_id: str
+        cls,
+        org_id: str,
+        request_id: str,
+        accept: bool,
+        session_date: str | None,
+        actor_alumni_id: str,
     ) -> dict:
         rows = execute_query(
             "SELECT * FROM mentorship_requests WHERE id = %s AND org_id = %s",
@@ -143,16 +196,32 @@ class AlumniNetworkService:
         req = dict(rows[0])
 
         if str(req["mentor_id"]) != actor_alumni_id:
-            raise BusinessRuleViolation(message="Only the mentor can respond to mentorship requests")
+            raise BusinessRuleViolation(
+                message="Only the mentor can respond to mentorship requests"
+            )
 
         if req["status"] != "PENDING":
             raise BusinessRuleViolation(message=f"Request is already {req['status']}")
 
         new_status = "ACCEPTED" if accept else "DECLINED"
-        execute_transaction([(
-            "UPDATE mentorship_requests SET status = %s, session_date = %s WHERE id = %s",
-            (new_status, session_date, request_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE mentorship_requests SET status = %s, session_date = %s WHERE id = %s",
+                    (new_status, session_date, request_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="mentorship",
+            entity_id=request_id,
+            tenant_id=org_id,
+            metadata={"source": "respond_mentorship"},
+        )
         return {"id": request_id, "status": new_status, "session_date": session_date}
 
     @classmethod
@@ -181,6 +250,7 @@ class AlumniNetworkService:
         """
         params: list = [org_id]
         if program:
-            sql += " AND program = %s"; params.append(program)
+            sql += " AND program = %s"
+            params.append(program)
         sql += " ORDER BY graduation_year DESC, name"
         return [dict(r) for r in execute_query(sql, params)]

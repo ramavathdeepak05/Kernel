@@ -1,4 +1,5 @@
 """E08-S01 — Staff Profile Management"""
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class StaffService:
-
     @classmethod
     def create(cls, org_id: str, req: StaffProfileCreate, actor_id: str) -> dict:
         # Validate user exists
@@ -47,41 +47,63 @@ class StaffService:
             )
 
         sid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO staff_profiles
                 (id, org_id, user_id, employee_code, department, designation,
                  employment_type, date_of_joining, salary_grade, reporting_to,
                  specializations, qualifications, experience_years)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
             """,
-            (sid, org_id, req.user_id, req.employee_code, req.department,
-             req.designation, req.employment_type.value, req.date_of_joining,
-             req.salary_grade, req.reporting_to,
-             req.specializations,
-             json.dumps(req.qualifications) if req.qualifications else None,
-             req.experience_years),
-        )])
+                    (
+                        sid,
+                        org_id,
+                        req.user_id,
+                        req.employee_code,
+                        req.department,
+                        req.designation,
+                        req.employment_type.value,
+                        req.date_of_joining,
+                        req.salary_grade,
+                        req.reporting_to,
+                        req.specializations,
+                        json.dumps(req.qualifications) if req.qualifications else None,
+                        req.experience_years,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="staff_profile", entity_id=sid, org_id=org_id,
-                     module="E08-S01",
-                     metadata={"employee_code": req.employee_code,
-                               "department": req.department})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="staff_profile",
+            entity_id=sid,
+            org_id=org_id,
+            module="E08-S01",
+            metadata={"employee_code": req.employee_code, "department": req.department},
+        )
 
         return cls.get(org_id, sid)
 
     @classmethod
-    def update(cls, org_id: str, staff_id: str,
-               req: StaffProfileUpdate, actor_id: str) -> dict:
+    def update(
+        cls, org_id: str, staff_id: str, req: StaffProfileUpdate, actor_id: str
+    ) -> dict:
         cls.get(org_id, staff_id)
 
         fields = []
         values: list = []
         for field, col in [
-            ("department", "department"), ("designation", "designation"),
-            ("employment_type", "employment_type"), ("salary_grade", "salary_grade"),
-            ("reporting_to", "reporting_to"), ("specializations", "specializations"),
+            ("department", "department"),
+            ("designation", "designation"),
+            ("employment_type", "employment_type"),
+            ("salary_grade", "salary_grade"),
+            ("reporting_to", "reporting_to"),
+            ("specializations", "specializations"),
             ("experience_years", "experience_years"),
         ]:
             val = getattr(req, field)
@@ -100,25 +122,51 @@ class StaffService:
 
         fields.append("updated_at = NOW()")
         values.extend([staff_id, org_id])
-        execute_transaction([(
-            f"UPDATE staff_profiles SET {', '.join(fields)} WHERE id = %s AND org_id = %s",
-            values,
-        )])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE staff_profiles SET {', '.join(fields)} WHERE id = %s AND org_id = %s",  # noqa: S608
+                    values,
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.UPDATE, actor_id=actor_id, actor_type="human",
-                     entity_type="staff_profile", entity_id=staff_id, org_id=org_id,
-                     module="E08-S01", metadata={"fields": list(req.model_fields_set)})
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="staff_profile",
+            entity_id=staff_id,
+            org_id=org_id,
+            module="E08-S01",
+            metadata={"fields": list(req.model_fields_set)},
+        )
 
         return cls.get(org_id, staff_id)
 
     @classmethod
-    def deactivate(cls, org_id: str, staff_id: str,
-                    date_of_leaving: str, actor_id: str) -> dict:
+    def deactivate(
+        cls, org_id: str, staff_id: str, date_of_leaving: str, actor_id: str
+    ) -> dict:
         cls.get(org_id, staff_id)
-        execute_transaction([(
-            "UPDATE staff_profiles SET is_active = FALSE, date_of_leaving = %s, updated_at = NOW() WHERE id = %s AND org_id = %s",
-            (date_of_leaving, staff_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE staff_profiles SET is_active = FALSE, date_of_leaving = %s, updated_at = NOW() WHERE id = %s AND org_id = %s",
+                    (date_of_leaving, staff_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.DELETE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="deactivate",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "deactivate"},
+        )
         return cls.get(org_id, staff_id)
 
     @classmethod
@@ -147,9 +195,13 @@ class StaffService:
         return dict(rows[0])
 
     @classmethod
-    def list(cls, org_id: str, department: str | None = None,
-              employment_type: str | None = None,
-              is_active: bool = True) -> list[dict]:
+    def list(
+        cls,
+        org_id: str,
+        department: str | None = None,
+        employment_type: str | None = None,
+        is_active: bool = True,
+    ) -> list[dict]:
         sql = """
             SELECT sp.*, u.name, u.email
             FROM staff_profiles sp
@@ -167,8 +219,9 @@ class StaffService:
         return [dict(r) for r in execute_query(sql, params)]
 
     @classmethod
-    def get_workload_summary(cls, org_id: str, staff_id: str,
-                              academic_year: str) -> dict:
+    def get_workload_summary(
+        cls, org_id: str, staff_id: str, academic_year: str
+    ) -> dict:
         """E08-S02: Faculty workload — courses assigned + hours."""
         profile = cls.get(org_id, staff_id)
         courses = execute_query(

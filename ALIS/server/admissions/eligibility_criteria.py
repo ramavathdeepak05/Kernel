@@ -38,42 +38,41 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 # Category relaxation applied to minimum percentage threshold
-_DEFAULT_CATEGORY_RELAXATIONS: Dict[str, float] = {
-    "SC":      5.0,   # min reduced by 5%
-    "ST":      5.0,
+_DEFAULT_CATEGORY_RELAXATIONS: dict[str, float] = {
+    "SC": 5.0,  # min reduced by 5%
+    "ST": 5.0,
     "OBC_NCL": 3.0,
-    "EWS":     3.0,
-    "PWD":     5.0,
+    "EWS": 3.0,
+    "PWD": 5.0,
 }
 
 # Known board aliases for normalization
-_BOARD_ALIASES: Dict[str, str] = {
-    "cbse":               "CBSE",
-    "central board":      "CBSE",
-    "icse":               "ICSE",
-    "isc":                "ICSE",
+_BOARD_ALIASES: dict[str, str] = {
+    "cbse": "CBSE",
+    "central board": "CBSE",
+    "icse": "ICSE",
+    "isc": "ICSE",
     "council for the indian school": "ICSE",
-    "state board":        "STATE_BOARD",
-    "state":              "STATE_BOARD",
-    "igcse":              "IGCSE",
-    "cambridge":          "IGCSE",
-    "ib":                 "IB",
+    "state board": "STATE_BOARD",
+    "state": "STATE_BOARD",
+    "igcse": "IGCSE",
+    "cambridge": "IGCSE",
+    "ib": "IB",
     "international baccalaureate": "IB",
-    "nios":               "NIOS",
-    "open school":        "NIOS",
+    "nios": "NIOS",
+    "open school": "NIOS",
 }
 
 
@@ -81,80 +80,87 @@ _BOARD_ALIASES: Dict[str, str] = {
 # Models
 # =============================================================================
 
+
 class EligibilityCriteria(BaseModel):
     """Per-program eligibility criteria definition."""
+
     program_name: str
-    intake_batch: Optional[str] = Field(
-        default=None,
-        description="NULL = applies to all batches for this program"
+    intake_batch: str | None = Field(
+        default=None, description="NULL = applies to all batches for this program"
     )
 
     # Academic threshold
     min_percentage: float = Field(
-        default=50.0, ge=0, le=100,
-        description="Minimum qualifying percentage in Class 12 (or highest qualification)"
+        default=50.0,
+        ge=0,
+        le=100,
+        description="Minimum qualifying percentage in Class 12 (or highest qualification)",
     )
     review_buffer: float = Field(
-        default=3.0, ge=0, le=20,
-        description="Applicants within [min - buffer, min) are PROVISIONALLY_ELIGIBLE"
+        default=3.0,
+        ge=0,
+        le=20,
+        description="Applicants within [min - buffer, min) are PROVISIONALLY_ELIGIBLE",
     )
 
     # Subject requirements
-    required_subjects: List[str] = Field(
+    required_subjects: list[str] = Field(
         default_factory=list,
-        description="Required subject keywords — e.g. ['Physics', 'Chemistry', 'Mathematics']"
+        description="Required subject keywords — e.g. ['Physics', 'Chemistry', 'Mathematics']",
     )
 
     # Board whitelist
-    accepted_boards: List[str] = Field(
-        default_factory=lambda: ["*"],
-        description='Board names OR ["*"] for any board'
+    accepted_boards: list[str] = Field(
+        default_factory=lambda: ["*"], description='Board names OR ["*"] for any board'
     )
 
     # Entrance test
     requires_entrance_test: bool = False
-    min_entrance_score: Optional[float] = Field(
-        default=None, ge=0,
-        description="Minimum raw score / percentile required on entrance exam"
+    min_entrance_score: float | None = Field(
+        default=None,
+        ge=0,
+        description="Minimum raw score / percentile required on entrance exam",
     )
     entrance_score_field: str = Field(
         default="percentile",
-        description="Which field to check: 'percentile' | 'score' | 'rank'"
+        description="Which field to check: 'percentile' | 'score' | 'rank'",
     )
-    accepted_exams: List[str] = Field(
+    accepted_exams: list[str] = Field(
         default_factory=list,
-        description="Accepted exam names (e.g. ['JEE_MAINS', 'STATE_CET']); empty = any"
+        description="Accepted exam names (e.g. ['JEE_MAINS', 'STATE_CET']); empty = any",
     )
 
     # Category relaxations (overrides defaults)
-    category_relaxations: Dict[str, float] = Field(
+    category_relaxations: dict[str, float] = Field(
         default_factory=lambda: dict(_DEFAULT_CATEGORY_RELAXATIONS)
     )
 
     # Metadata
-    approved_by: Optional[str] = None
-    effective_from: Optional[str] = None  # ISO date
+    approved_by: str | None = None
+    effective_from: str | None = None  # ISO date
 
 
 class EligibilityVerdictDetail(BaseModel):
     """Full breakdown of the rule engine verdict."""
+
     verdict: str  # ELIGIBLE | NOT_ELIGIBLE | PROVISIONALLY_ELIGIBLE | NEEDS_AI_REVIEW
-    pass_reasons: List[str]
-    fail_reasons: List[str]
-    warnings: List[str]
+    pass_reasons: list[str]
+    fail_reasons: list[str]
+    warnings: list[str]
 
     # Data used in evaluation
     category: str
     effective_min_percentage: float
-    applicant_percentage: Optional[float]
-    applicant_board: Optional[str]
-    entrance_score_used: Optional[float]
-    criteria_applied: Optional[str]  # program name of criteria used
+    applicant_percentage: float | None
+    applicant_board: str | None
+    entrance_score_used: float | None
+    criteria_applied: str | None  # program name of criteria used
 
 
 # =============================================================================
 # ELIGIBILITY CRITERIA SERVICE
 # =============================================================================
+
 
 class EligibilityCriteriaService:
     """
@@ -170,7 +176,7 @@ class EligibilityCriteriaService:
     _KEY_PREFIX = "admissions.eligibility.criteria."
 
     @classmethod
-    def _key(cls, program_name: str, intake_batch: Optional[str] = None) -> str:
+    def _key(cls, program_name: str, intake_batch: str | None = None) -> str:
         slug = _slugify(program_name)
         if intake_batch:
             return f"{cls._KEY_PREFIX}{slug}.{_slugify(intake_batch)}"
@@ -192,9 +198,10 @@ class EligibilityCriteriaService:
         value = criteria.model_dump()
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO institution_policies
                     (id, org_id, key, value, description, category, is_active, created_at, updated_at)
                 VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
@@ -203,16 +210,20 @@ class EligibilityCriteriaService:
                     value = EXCLUDED.value,
                     updated_at = NOW()
                 """,
-                (
-                    str(uuid4()), org_id, key,
-                    json.dumps(value),
-                    f"Eligibility criteria for {criteria.program_name}",
-                    "eligibility",
-                    True,
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        str(uuid4()),
+                        org_id,
+                        key,
+                        json.dumps(value),
+                        f"Eligibility criteria for {criteria.program_name}",
+                        "eligibility",
+                        True,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -233,7 +244,9 @@ class EligibilityCriteriaService:
 
         logger.info(
             "Eligibility criteria set: %s [org=%s min_pct=%.1f]",
-            criteria.program_name, org_id, criteria.min_percentage,
+            criteria.program_name,
+            org_id,
+            criteria.min_percentage,
         )
         return criteria
 
@@ -242,8 +255,8 @@ class EligibilityCriteriaService:
         cls,
         org_id: str,
         program_name: str,
-        intake_batch: Optional[str] = None,
-    ) -> Optional[EligibilityCriteria]:
+        intake_batch: str | None = None,
+    ) -> EligibilityCriteria | None:
         """
         Fetch eligibility criteria for a program.
 
@@ -266,7 +279,7 @@ class EligibilityCriteriaService:
         return None
 
     @classmethod
-    def list_criteria(cls, org_id: str) -> List[EligibilityCriteria]:
+    def list_criteria(cls, org_id: str) -> list[EligibilityCriteria]:
         rows = execute_query(
             "SELECT value FROM institution_policies "
             "WHERE org_id = %s AND category = 'eligibility' AND is_active = TRUE "
@@ -276,25 +289,34 @@ class EligibilityCriteriaService:
         results = []
         for r in rows:
             try:
-                val = r["value"] if isinstance(r["value"], dict) else json.loads(r["value"])
+                val = (
+                    r["value"]
+                    if isinstance(r["value"], dict)
+                    else json.loads(r["value"])
+                )
                 results.append(EligibilityCriteria(**val))
             except Exception:
-                pass
+                pass  # noqa: S110 — intentionally suppressed
         return results
 
     @classmethod
     def delete_criteria(
-        cls, org_id: str, program_name: str, actor_id: str,
-        intake_batch: Optional[str] = None,
+        cls,
+        org_id: str,
+        program_name: str,
+        actor_id: str,
+        intake_batch: str | None = None,
     ) -> None:
         key = cls._key(program_name, intake_batch)
-        execute_transaction([
-            (
-                "UPDATE institution_policies SET is_active = FALSE, updated_at = NOW() "
-                "WHERE org_id = %s AND key = %s",
-                (org_id, key),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE institution_policies SET is_active = FALSE, updated_at = NOW() "
+                    "WHERE org_id = %s AND key = %s",
+                    (org_id, key),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.UPDATE,
             actor_id=actor_id,
@@ -308,7 +330,7 @@ class EligibilityCriteriaService:
         )
 
     @classmethod
-    def _fetch_row(cls, org_id: str, key: str) -> Optional[Dict[str, Any]]:
+    def _fetch_row(cls, org_id: str, key: str) -> dict[str, Any] | None:
         rows = execute_query(
             "SELECT value FROM institution_policies "
             "WHERE org_id = %s AND key = %s AND is_active = TRUE",
@@ -323,6 +345,7 @@ class EligibilityCriteriaService:
 # =============================================================================
 # ELIGIBILITY RULE ENGINE
 # =============================================================================
+
 
 class EligibilityRuleEngine:
     """
@@ -339,7 +362,7 @@ class EligibilityRuleEngine:
         cls,
         applicant_id: str,
         org_id: str,
-        criteria: Optional[EligibilityCriteria] = None,
+        criteria: EligibilityCriteria | None = None,
     ) -> EligibilityVerdictDetail:
         """
         Evaluate an applicant against eligibility criteria.
@@ -359,7 +382,9 @@ class EligibilityRuleEngine:
             (applicant_id, org_id),
         )
         if not app_rows:
-            raise BusinessRuleViolation(message=f"Applicant '{applicant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Applicant '{applicant_id}' not found."
+            )
 
         applicant = app_rows[0]
         category = applicant.get("category") or "GENERAL"
@@ -376,9 +401,9 @@ class EligibilityRuleEngine:
         relaxation = criteria.category_relaxations.get(category, 0.0)
         effective_min = max(0.0, criteria.min_percentage - relaxation)
 
-        pass_reasons: List[str] = []
-        fail_reasons: List[str] = []
-        warnings: List[str] = []
+        pass_reasons: list[str] = []
+        fail_reasons: list[str] = []
+        warnings: list[str] = []
 
         # ----------------------------------------------------------------
         # Check 1: Academic percentage
@@ -392,8 +417,8 @@ class EligibilityRuleEngine:
             (applicant_id, org_id),
         )
 
-        applicant_pct: Optional[float] = None
-        applicant_board: Optional[str] = None
+        applicant_pct: float | None = None
+        applicant_board: str | None = None
         stream_text: str = ""
 
         if qual_rows:
@@ -434,7 +459,9 @@ class EligibilityRuleEngine:
                 pct_verdict = "FAIL"
         else:
             pct_verdict = "UNKNOWN"
-            warnings.append("Cannot check academic threshold — percentage not on record.")
+            warnings.append(
+                "Cannot check academic threshold — percentage not on record."
+            )
 
         # ----------------------------------------------------------------
         # Check 2: Required subjects
@@ -460,8 +487,13 @@ class EligibilityRuleEngine:
         if criteria.accepted_boards and criteria.accepted_boards != ["*"]:
             if applicant_board:
                 normalized = _normalize_board(applicant_board)
-                accepted_normalized = {_normalize_board(b) for b in criteria.accepted_boards}
-                if normalized not in accepted_normalized and "STATE_BOARD" not in accepted_normalized:
+                accepted_normalized = {
+                    _normalize_board(b) for b in criteria.accepted_boards
+                }
+                if (
+                    normalized not in accepted_normalized
+                    and "STATE_BOARD" not in accepted_normalized
+                ):
                     fail_reasons.append(
                         f"Board '{applicant_board}' is not in accepted boards: "
                         f"{criteria.accepted_boards}."
@@ -474,7 +506,7 @@ class EligibilityRuleEngine:
         # ----------------------------------------------------------------
         # Check 4: Entrance exam score
         # ----------------------------------------------------------------
-        entrance_score_used: Optional[float] = None
+        entrance_score_used: float | None = None
         if criteria.requires_entrance_test:
             score_rows = execute_query(
                 "SELECT exam_name, score, percentile, rank "
@@ -492,7 +524,8 @@ class EligibilityRuleEngine:
                 valid_scores = score_rows
                 if criteria.accepted_exams:
                     valid_scores = [
-                        r for r in score_rows
+                        r
+                        for r in score_rows
                         if r["exam_name"] in criteria.accepted_exams
                     ]
                     if not valid_scores:
@@ -507,7 +540,11 @@ class EligibilityRuleEngine:
                     # Use best score among valid entries
                     field = criteria.entrance_score_field
                     best = max(
-                        (float(r[field]) for r in valid_scores if r.get(field) is not None),
+                        (
+                            float(r[field])
+                            for r in valid_scores
+                            if r.get(field) is not None
+                        ),
                         default=None,
                     )
                     entrance_score_used = best
@@ -573,6 +610,7 @@ class EligibilityRuleEngine:
 # =============================================================================
 # Helpers
 # =============================================================================
+
 
 def _slugify(text: str) -> str:
     """Convert program name to a safe policy key segment."""

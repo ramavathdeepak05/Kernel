@@ -3,12 +3,12 @@
 Runs every 5 minutes (300 s).  Finds all PENDING plagiarism reports that have
 a Drillbit submission ID and calls PlagiarismService.poll_result() for each.
 """
+
 from __future__ import annotations
 
 import logging
 
 from celery import shared_task
-
 from server.db_service import execute_query
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 @shared_task(
     name="server.tasks.plagiarism_poll.poll_drillbit_results",
     bind=True,
-    max_retries=0,          # Beat task — never retry; next tick will run again
+    max_retries=0,  # Beat task — never retry; next tick will run again
     ignore_result=True,
 )
 def poll_drillbit_results(self) -> None:  # noqa: ANN001
@@ -57,12 +57,16 @@ def poll_drillbit_results(self) -> None:  # noqa: ANN001
             status = result.get("status", "UNKNOWN")
             logger.info(
                 "poll_drillbit_results: report_id=%s submission_id=%s → status=%s",
-                report_id, drillbit_submission_id, status,
+                report_id,
+                drillbit_submission_id,
+                status,
             )
         except Exception as exc:  # noqa: BLE001
             # Log and continue — do not let one failure abort the whole batch.
             logger.error(
                 "poll_drillbit_results: error polling report_id=%s submission_id=%s: %s",
-                report_id, drillbit_submission_id, exc,
+                report_id,
+                drillbit_submission_id,
+                exc,
                 exc_info=True,
             )

@@ -27,18 +27,21 @@ Acceptance Criteria:
 - [x] Non-bypassable
 - [x] Explicit violation reasons
 """
+
 from __future__ import annotations
 
-from enum import Enum
-from typing import Dict, List, Optional, Callable, Any
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-
+from enum import Enum
+from typing import Any
 
 # --- Lock Types ---
 
+
 class LockType(str, Enum):
     """Types of global locks in ALIS."""
+
     FINANCIAL_DUES = "financial_dues"
     ATTENDANCE_SHORTAGE = "attendance_shortage"
     DOCUMENT_INCOMPLETE = "document_incomplete"
@@ -52,29 +55,33 @@ class LockType(str, Enum):
 
 # --- Lock Result ---
 
+
 @dataclass
 class LockStatus:
     """Result of a global lock check."""
+
     is_locked: bool
-    lock_type: Optional[LockType] = None
-    reason: Optional[str] = None
-    details: Optional[Dict[str, Any]] = None
+    lock_type: LockType | None = None
+    reason: str | None = None
+    details: dict[str, Any] | None = None
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
 class LockCheckResult:
     """Aggregated result of all lock checks."""
+
     is_locked: bool
-    violations: List[LockStatus] = field(default_factory=list)
+    violations: list[LockStatus] = field(default_factory=list)
 
     @property
-    def reasons(self) -> List[str]:
+    def reasons(self) -> list[str]:
         """Get all violation reasons."""
         return [v.reason for v in self.violations if v.reason]
 
 
 # --- Global Lock Registry ---
+
 
 class GlobalLockRegistry:
     """
@@ -85,23 +92,18 @@ class GlobalLockRegistry:
     """
 
     # Lock check functions: Dict[LockType, Callable[[str], LockStatus]]
-    _lock_checks: Dict[LockType, Callable[[str, Optional[Dict]], LockStatus]] = {}
+    _lock_checks: dict[LockType, Callable[[str, dict | None], LockStatus]] = {}
 
     @classmethod
     def register_lock(
-        cls,
-        lock_type: LockType,
-        check_fn: Callable[[str, Optional[Dict]], LockStatus]
+        cls, lock_type: LockType, check_fn: Callable[[str, dict | None], LockStatus]
     ) -> None:
         """Register a lock check function."""
         cls._lock_checks[lock_type] = check_fn
 
     @classmethod
     def check_lock(
-        cls,
-        lock_type: LockType,
-        entity_id: str,
-        context: Optional[Dict] = None
+        cls, lock_type: LockType, entity_id: str, context: dict | None = None
     ) -> LockStatus:
         """Check a specific lock for an entity."""
         check_fn = cls._lock_checks.get(lock_type)
@@ -113,8 +115,8 @@ class GlobalLockRegistry:
     def check_all_locks(
         cls,
         entity_id: str,
-        context: Optional[Dict] = None,
-        lock_types: Optional[List[LockType]] = None
+        context: dict | None = None,
+        lock_types: list[LockType] | None = None,
     ) -> LockCheckResult:
         """
         Check all registered locks for an entity.
@@ -135,17 +137,15 @@ class GlobalLockRegistry:
             if status.is_locked:
                 violations.append(status)
 
-        return LockCheckResult(
-            is_locked=len(violations) > 0,
-            violations=violations
-        )
+        return LockCheckResult(is_locked=len(violations) > 0, violations=violations)
 
 
 # --- Default Lock Implementations ---
 # These are placeholder implementations that will be replaced
 # by actual service integrations
 
-def _check_financial_dues(entity_id: str, context: Optional[Dict] = None) -> LockStatus:
+
+def _check_financial_dues(entity_id: str, context: dict | None = None) -> LockStatus:
     """
     Check if entity has outstanding financial dues.
 
@@ -160,12 +160,14 @@ def _check_financial_dues(entity_id: str, context: Optional[Dict] = None) -> Loc
             is_locked=True,
             lock_type=LockType.FINANCIAL_DUES,
             reason=f"Outstanding dues: ₹{balance}",
-            details={"balance": balance}
+            details={"balance": balance},
         )
     return LockStatus(is_locked=False)
 
 
-def _check_attendance_shortage(entity_id: str, context: Optional[Dict] = None) -> LockStatus:
+def _check_attendance_shortage(
+    entity_id: str, context: dict | None = None
+) -> LockStatus:
     """
     Check if entity has attendance below threshold.
 
@@ -180,15 +182,14 @@ def _check_attendance_shortage(entity_id: str, context: Optional[Dict] = None) -
             is_locked=True,
             lock_type=LockType.ATTENDANCE_SHORTAGE,
             reason=f"Attendance {attendance_pct}% is below required {threshold}%",
-            details={
-                "attendance_percentage": attendance_pct,
-                "threshold": threshold
-            }
+            details={"attendance_percentage": attendance_pct, "threshold": threshold},
         )
     return LockStatus(is_locked=False)
 
 
-def _check_document_incomplete(entity_id: str, context: Optional[Dict] = None) -> LockStatus:
+def _check_document_incomplete(
+    entity_id: str, context: dict | None = None
+) -> LockStatus:
     """Check if entity has incomplete documents."""
     context = context or {}
     missing_docs = context.get("missing_documents", [])
@@ -198,12 +199,12 @@ def _check_document_incomplete(entity_id: str, context: Optional[Dict] = None) -
             is_locked=True,
             lock_type=LockType.DOCUMENT_INCOMPLETE,
             reason=f"Missing documents: {', '.join(missing_docs)}",
-            details={"missing_documents": missing_docs}
+            details={"missing_documents": missing_docs},
         )
     return LockStatus(is_locked=False)
 
 
-def _check_disciplinary_hold(entity_id: str, context: Optional[Dict] = None) -> LockStatus:
+def _check_disciplinary_hold(entity_id: str, context: dict | None = None) -> LockStatus:
     """Check if entity has active disciplinary hold."""
     context = context or {}
     has_hold = context.get("disciplinary_hold", False)
@@ -213,12 +214,12 @@ def _check_disciplinary_hold(entity_id: str, context: Optional[Dict] = None) -> 
             is_locked=True,
             lock_type=LockType.DISCIPLINARY_HOLD,
             reason="Active disciplinary hold",
-            details={"hold_reason": context.get("hold_reason")}
+            details={"hold_reason": context.get("hold_reason")},
         )
     return LockStatus(is_locked=False)
 
 
-def _check_archived_record(entity_id: str, context: Optional[Dict] = None) -> LockStatus:
+def _check_archived_record(entity_id: str, context: dict | None = None) -> LockStatus:
     """
     E00-S07: Check if entity is archived.
 
@@ -235,7 +236,7 @@ def _check_archived_record(entity_id: str, context: Optional[Dict] = None) -> Lo
             is_locked=True,
             lock_type=LockType.ARCHIVED_RECORD,
             reason="Record is permanently archived — mutations are blocked (E00-S07)",
-            details={"entity_id": entity_id, "archival_lock": True}
+            details={"entity_id": entity_id, "archival_lock": True},
         )
     return LockStatus(is_locked=False)
 
@@ -243,18 +244,25 @@ def _check_archived_record(entity_id: str, context: Optional[Dict] = None) -> Lo
 # --- Register Default Locks ---
 
 GlobalLockRegistry.register_lock(LockType.FINANCIAL_DUES, _check_financial_dues)
-GlobalLockRegistry.register_lock(LockType.ATTENDANCE_SHORTAGE, _check_attendance_shortage)
-GlobalLockRegistry.register_lock(LockType.DOCUMENT_INCOMPLETE, _check_document_incomplete)
+GlobalLockRegistry.register_lock(
+    LockType.ATTENDANCE_SHORTAGE, _check_attendance_shortage
+)
+GlobalLockRegistry.register_lock(
+    LockType.DOCUMENT_INCOMPLETE, _check_document_incomplete
+)
 GlobalLockRegistry.register_lock(LockType.DISCIPLINARY_HOLD, _check_disciplinary_hold)
-GlobalLockRegistry.register_lock(LockType.ARCHIVED_RECORD, _check_archived_record)  # E00-S07
+GlobalLockRegistry.register_lock(
+    LockType.ARCHIVED_RECORD, _check_archived_record
+)  # E00-S07
 
 
 # --- Convenience Function (Used in Rule Engines) ---
 
+
 def check_global_locks(
     entity_id: str,
-    context: Optional[Dict] = None,
-    required_locks: Optional[List[LockType]] = None
+    context: dict | None = None,
+    required_locks: list[LockType] | None = None,
 ) -> LockCheckResult:
     """
     Check global locks for an entity.

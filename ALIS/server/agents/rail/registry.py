@@ -16,18 +16,20 @@ AgentMeta.status values:
                  review until an automated divergence criterion is defined.
     DEPRECATED — no longer invoked; kept for audit history only.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from server.core.ai_gateway import AIGatewayContext, AIInvocationResult
-from server.core.audit import AuditLog, AuditAction
-
+from server.core.audit import AuditAction, AuditLog
 
 # ---------------------------------------------------------------------------
 # Agent metadata
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class AgentMeta:
@@ -35,9 +37,9 @@ class AgentMeta:
     module: str
     model_version: str
     prompt_version: str
-    invocation_class: str        # EVALUATIVE | GENERATIVE | ANALYTICAL
+    invocation_class: str  # EVALUATIVE | GENERATIVE | ANALYTICAL
     authorization_policy: str
-    allowed_tools: Tuple[str, ...] = ()
+    allowed_tools: tuple[str, ...] = ()
     description: str = ""
     status: Literal["ACTIVE", "SHADOW", "DEPRECATED"] = "ACTIVE"
 
@@ -46,10 +48,11 @@ class AgentMeta:
 # Registry
 # ---------------------------------------------------------------------------
 
+
 class RailAgentRegistry:
     """Module-scoped registry for RAIL agents."""
 
-    _agents: Dict[str, AgentMeta] = {
+    _agents: dict[str, AgentMeta] = {
         "context_advisor_v1": AgentMeta(
             agent_id="context_advisor_v1",
             module="RAIL",
@@ -57,9 +60,7 @@ class RailAgentRegistry:
             prompt_version="v2-copilot",
             invocation_class="ANALYTICAL",
             authorization_policy="any_authenticated_role",
-            allowed_tools=(
-                "tool.db.workflow_tasks.count",
-            ),
+            allowed_tools=("tool.db.workflow_tasks.count",),
             description=(
                 "Context-aware copilot for the ALIS agent rail. "
                 "Three modes: (1) view_change — programmatic proactive briefing, "
@@ -73,12 +74,13 @@ class RailAgentRegistry:
         ),
     }
 
-    _executors: Dict[str, Callable] = {}
+    _executors: dict[str, Callable] = {}
 
     @classmethod
     def _ensure_executors_loaded(cls) -> None:
         if not cls._executors:
             from server.agents.rail.context_advisor import execute_context_advisor
+
             cls._executors["context_advisor_v1"] = execute_context_advisor
 
     @classmethod
@@ -86,11 +88,11 @@ class RailAgentRegistry:
         return agent_name in cls._agents
 
     @classmethod
-    def list_agents(cls) -> List[str]:
+    def list_agents(cls) -> list[str]:
         return [n for n, m in cls._agents.items() if m.status != "DEPRECATED"]
 
     @classmethod
-    def list_agents_detail(cls) -> List[Dict[str, Any]]:
+    def list_agents_detail(cls) -> list[dict[str, Any]]:
         return [
             {
                 "agent_id": m.agent_id,
@@ -111,8 +113,8 @@ class RailAgentRegistry:
         cls,
         agent_name: str,
         context: AIGatewayContext,
-        input_data: Dict[str, Any],
-        model_override: Optional[str] = None,
+        input_data: dict[str, Any],
+        model_override: str | None = None,
     ) -> AIInvocationResult:
         if agent_name not in cls._agents:
             raise ValueError(f"Agent '{agent_name}' not registered in RAIL module.")
@@ -120,7 +122,9 @@ class RailAgentRegistry:
         meta = cls._agents[agent_name]
 
         if meta.status == "DEPRECATED":
-            raise ValueError(f"Agent '{agent_name}' is deprecated and cannot be invoked.")
+            raise ValueError(
+                f"Agent '{agent_name}' is deprecated and cannot be invoked."
+            )
 
         cls._ensure_executors_loaded()
         executor = cls._executors.get(agent_name)

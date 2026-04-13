@@ -29,22 +29,25 @@ Usage:
     # System-level (bypasses tenant scoping - use sparingly):
     result = execute_system_query("SELECT count(*) FROM pg_stat_activity")
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import re
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-from contextlib import asynccontextmanager, contextmanager
+from typing import Any
 
 try:
     import psycopg2
+    import psycopg2.pool
     from psycopg2.extras import RealDictCursor
-    from psycopg2 import pool as pg_pool_module
 except ImportError:
-    logging.warning("psycopg2 not found. Database functionality will be mocked or fail.")
+    logging.warning(
+        "psycopg2 not found. Database functionality will be mocked or fail."
+    )
     psycopg2 = None
     pg_pool_module = None
 
@@ -98,9 +101,10 @@ def safe_set_clause(updates: dict) -> tuple[str, list]:
         vals.append(v)
     return ", ".join(cols), vals
 
+
 # System pools — used by execute_system_query* (no tenant scoping)
-_pg_pool = None           # psycopg2 — Celery sync workers, system queries
-_asyncpg_pool = None      # asyncpg  — FastAPI async handlers, system queries
+_pg_pool = None  # psycopg2 — Celery sync workers, system queries
+_asyncpg_pool = None  # asyncpg  — FastAPI async handlers, system queries
 
 # Replica pools — used by execute_query_readonly (smart routing)
 _asyncpg_replica_pool = None  # asyncpg — read-only queries to replica
@@ -110,11 +114,13 @@ _asyncpg_replica_pool = None  # asyncpg — read-only queries to replica
 # S1: DBRouter — per-tenant connection pool manager
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _TenantDBConfig:
     """Resolved DB connection info for a single tenant."""
+
     tenant_id: str
-    db_url: str       # asyncpg DSN  (postgresql://...)
+    db_url: str  # asyncpg DSN  (postgresql://...)
     db_url_sync: str  # psycopg2 DSN (postgresql://...)
 
 
@@ -138,9 +144,11 @@ class DBRouter:
     """
 
     def __init__(self) -> None:
-        self._async_pools: dict[str, Any] = {}      # tenant_id → asyncpg.Pool
-        self._sync_pools: dict[str, Any] = {}        # tenant_id → psycopg2.ThreadedConnectionPool
-        self._async_lock: Optional[asyncio.Lock] = None
+        self._async_pools: dict[str, Any] = {}  # tenant_id → asyncpg.Pool
+        self._sync_pools: dict[
+            str, Any
+        ] = {}  # tenant_id → psycopg2.ThreadedConnectionPool
+        self._async_lock: asyncio.Lock | None = None
         self._sync_lock = threading.Lock()
 
     @property
@@ -156,6 +164,7 @@ class DBRouter:
 
     async def _resolve_config(self, tenant_id: str) -> _TenantDBConfig:
         from server.core.tenant_registry import TenantRegistry
+
         record = await TenantRegistry.get_by_id(tenant_id)
         return _TenantDBConfig(
             tenant_id=record.tenant_id,
@@ -165,6 +174,7 @@ class DBRouter:
 
     def _resolve_config_sync(self, tenant_id: str) -> _TenantDBConfig:
         from server.core.tenant_registry import TenantRegistry
+
         record = TenantRegistry.get_by_id_sync(tenant_id)
         return _TenantDBConfig(
             tenant_id=record.tenant_id,
@@ -190,18 +200,21 @@ class DBRouter:
 
             config = await self._resolve_config(tenant_id)
             from server.core.settings import settings
+
             pool = await asyncpg.create_pool(
                 dsn=config.db_url,
                 min_size=settings.tenant_pool_min,
                 max_size=settings.tenant_pool_max,
-                statement_cache_size=0,   # required for SET LOCAL + pgbouncer
+                statement_cache_size=0,  # required for SET LOCAL + pgbouncer
                 init=_init_connection,
                 command_timeout=30,
             )
             self._async_pools[tenant_id] = pool
             logger.info(
                 "DBRouter: asyncpg pool created for tenant=%s (min=%s max=%s)",
-                tenant_id, settings.tenant_pool_min, settings.tenant_pool_max,
+                tenant_id,
+                settings.tenant_pool_min,
+                settings.tenant_pool_max,
             )
             return pool
 
@@ -212,7 +225,9 @@ class DBRouter:
                 await pool.close()
                 logger.info("DBRouter: asyncpg pool closed for tenant=%s", tenant_id)
             except Exception as exc:
-                logger.warning("DBRouter: error closing pool for tenant=%s: %s", tenant_id, exc)
+                logger.warning(
+                    "DBRouter: error closing pool for tenant=%s: %s", tenant_id, exc
+                )
         self._async_pools.clear()
 
     # ------------------------------------------------------------------
@@ -232,15 +247,18 @@ class DBRouter:
 
             config = self._resolve_config_sync(tenant_id)
             from server.core.settings import settings
+
             pool = psycopg2.pool.ThreadedConnectionPool(
                 settings.tenant_pool_min,
                 settings.tenant_pool_max,
-                config.db_url_sync,   # psycopg2 accepts postgresql:// DSN as positional arg
+                config.db_url_sync,  # psycopg2 accepts postgresql:// DSN as positional arg
             )
             self._sync_pools[tenant_id] = pool
             logger.info(
                 "DBRouter: psycopg2 pool created for tenant=%s (min=%s max=%s)",
-                tenant_id, settings.tenant_pool_min, settings.tenant_pool_max,
+                tenant_id,
+                settings.tenant_pool_min,
+                settings.tenant_pool_max,
             )
             return pool
 
@@ -250,9 +268,15 @@ class DBRouter:
             for tenant_id, pool in list(self._sync_pools.items()):
                 try:
                     pool.closeall()
-                    logger.info("DBRouter: psycopg2 pool closed for tenant=%s", tenant_id)
+                    logger.info(
+                        "DBRouter: psycopg2 pool closed for tenant=%s", tenant_id
+                    )
                 except Exception as exc:
-                    logger.warning("DBRouter: error closing sync pool for tenant=%s: %s", tenant_id, exc)
+                    logger.warning(
+                        "DBRouter: error closing sync pool for tenant=%s: %s",
+                        tenant_id,
+                        exc,
+                    )
             self._sync_pools.clear()
 
 
@@ -263,6 +287,7 @@ _db_router = DBRouter()
 # ---------------------------------------------------------------------------
 # P0-1: asyncpg pool lifecycle (call from FastAPI lifespan)
 # ---------------------------------------------------------------------------
+
 
 def _convert_params(query: str) -> str:
     """Replace %s placeholders with asyncpg-style $N positional params."""
@@ -288,9 +313,14 @@ async def init_pool() -> None:
         logger.warning("asyncpg not installed — skipping async pool init.")
         return
     from server.core.settings import settings
+
     # Route through PgBouncer when enabled (session mode, no connection limit worries)
-    db_host = settings.pgbouncer_host if settings.pgbouncer_enabled else settings.db_host
-    db_port = settings.pgbouncer_port if settings.pgbouncer_enabled else settings.db_port
+    db_host = (
+        settings.pgbouncer_host if settings.pgbouncer_enabled else settings.db_host
+    )
+    db_port = (
+        settings.pgbouncer_port if settings.pgbouncer_enabled else settings.db_port
+    )
     _asyncpg_pool = await asyncpg.create_pool(
         user=settings.db_user,
         password=settings.db_password,
@@ -299,12 +329,21 @@ async def init_pool() -> None:
         database=settings.db_name,
         min_size=settings.db_pool_min,
         max_size=settings.db_pool_max,
-        statement_cache_size=0,   # required: SET LOCAL + pgbouncer compat
+        statement_cache_size=0,  # required: SET LOCAL + pgbouncer compat
         init=_init_connection,
         command_timeout=30,
     )
-    via = f"pgbouncer ({db_host}:{db_port})" if settings.pgbouncer_enabled else f"postgres ({db_host}:{db_port})"
-    logger.info("asyncpg pool initialised via %s (min=%s max=%s).", via, settings.db_pool_min, settings.db_pool_max)
+    via = (
+        f"pgbouncer ({db_host}:{db_port})"
+        if settings.pgbouncer_enabled
+        else f"postgres ({db_host}:{db_port})"
+    )
+    logger.info(
+        "asyncpg pool initialised via %s (min=%s max=%s).",
+        via,
+        settings.db_pool_min,
+        settings.db_pool_max,
+    )
 
     # --- Read Replica Pool (if configured) ---
     global _asyncpg_replica_pool
@@ -322,8 +361,10 @@ async def init_pool() -> None:
         )
         logger.info(
             "asyncpg REPLICA pool initialised (%s:%s, min=%s max=%s).",
-            settings.db_replica_host, settings.db_replica_port,
-            settings.db_replica_pool_min, settings.db_replica_pool_max,
+            settings.db_replica_host,
+            settings.db_replica_port,
+            settings.db_replica_pool_min,
+            settings.db_replica_pool_max,
         )
     else:
         logger.info("Read replica: disabled (db_replica_host not set).")
@@ -358,8 +399,17 @@ def get_db_pool():
     if _pg_pool is None and psycopg2:
         try:
             from server.core.settings import settings
-            db_host = settings.pgbouncer_host if settings.pgbouncer_enabled else settings.db_host
-            db_port = settings.pgbouncer_port if settings.pgbouncer_enabled else settings.db_port
+
+            db_host = (
+                settings.pgbouncer_host
+                if settings.pgbouncer_enabled
+                else settings.db_host
+            )
+            db_port = (
+                settings.pgbouncer_port
+                if settings.pgbouncer_enabled
+                else settings.db_port
+            )
             _pg_pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=settings.db_pool_min,
                 maxconn=settings.db_pool_max,
@@ -369,8 +419,14 @@ def get_db_pool():
                 port=db_port,
                 database=settings.db_name,
             )
-            via = f"pgbouncer ({db_host}:{db_port})" if settings.pgbouncer_enabled else f"postgres ({db_host}:{db_port})"
-            logger.info("psycopg2 pool initialised via %s (max=%s).", via, settings.db_pool_max)
+            via = (
+                f"pgbouncer ({db_host}:{db_port})"
+                if settings.pgbouncer_enabled
+                else f"postgres ({db_host}:{db_port})"
+            )
+            logger.info(
+                "psycopg2 pool initialised via %s (max=%s).", via, settings.db_pool_max
+            )
         except Exception as e:
             logger.error(f"Failed to initialize database pool: {e}")
             raise
@@ -396,7 +452,7 @@ def get_db_connection():
         try:
             conn.rollback()
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
         pool.putconn(conn)
 
 
@@ -421,13 +477,14 @@ def get_tenant_db_connection(tenant_id: str):
         try:
             conn.rollback()
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
         pool.putconn(conn)
 
 
 # ============================================================================
 # E00-S03: TENANT-SCOPED DATABASE ACCESS
 # ============================================================================
+
 
 def _set_tenant_on_connection(cursor, tenant_id: str) -> None:
     """
@@ -449,14 +506,13 @@ def _get_tenant_id_from_context() -> str:
     Raises TenantIsolationError if not set.
     """
     from server.core.security import get_current_tenant_id
+
     return get_current_tenant_id()
 
 
 async def execute_query_async(
-    query: str,
-    params: Optional[Tuple] = None,
-    tenant_id: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    query: str, params: tuple | None = None, tenant_id: str | None = None
+) -> list[dict[str, Any]]:
     """
     Async execute_query using asyncpg — use in async FastAPI route handlers.
 
@@ -487,9 +543,9 @@ async def execute_query_async(
 
 async def execute_query_readonly(
     query: str,
-    params: Optional[Tuple] = None,
-    tenant_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    params: tuple | None = None,
+    tenant_id: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Async read-only query with smart replica routing.
 
@@ -524,14 +580,19 @@ async def execute_query_readonly(
     use_replica = False
     if _asyncpg_replica_pool is not None and settings.replica_enabled:
         from server.core.request_context import get_request_context
+
         ctx = get_request_context()
-        use_replica = ctx.should_use_replica(settings.db_read_after_write_stickiness_seconds)
+        use_replica = ctx.should_use_replica(
+            settings.db_read_after_write_stickiness_seconds
+        )
 
     if use_replica:
         # Route to replica — still needs tenant context for RLS
         async with _asyncpg_replica_pool.acquire() as conn:
             async with conn.transaction(readonly=True):
-                await conn.execute("SET LOCAL alis.current_tenant = $1", resolved_tenant)
+                await conn.execute(
+                    "SET LOCAL alis.current_tenant = $1", resolved_tenant
+                )
                 rows = await conn.fetch(q, *p)
         return [dict(r) for r in rows]
 
@@ -545,10 +606,8 @@ async def execute_query_readonly(
 
 
 def execute_query(
-    query: str,
-    params: Optional[Tuple] = None,
-    tenant_id: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    query: str, params: tuple | None = None, tenant_id: str | None = None
+) -> list[dict[str, Any]]:
     """
     Synchronous execute_query (psycopg2) — for Celery workers only.
 
@@ -559,6 +618,7 @@ def execute_query(
     """
     try:
         import asyncio
+
         asyncio.get_running_loop()
         # Event loop is running — log a warning but proceed to avoid breaking existing routes.
         # TODO: migrate auth_router + mfa_service to execute_query_async for proper async DB access.
@@ -586,7 +646,9 @@ def execute_query(
                 return []
             except Exception as e:
                 # Log the query template (not params) to avoid leaking PII in logs
-                logger.error("Query execution failed: %s | query_template=%s", e, query[:200])
+                logger.error(
+                    "Query execution failed: %s | query_template=%s", e, query[:200]
+                )
                 raise
 
 
@@ -595,8 +657,7 @@ execute_query_sync = execute_query
 
 
 async def execute_transaction_async(
-    queries: List[Tuple[str, Optional[Tuple]]],
-    tenant_id: Optional[str] = None
+    queries: list[tuple[str, tuple | None]], tenant_id: str | None = None
 ) -> None:
     """
     Async execute_transaction (asyncpg) — use in async FastAPI route handlers.
@@ -607,6 +668,7 @@ async def execute_transaction_async(
         return
 
     from server.core.lockdown import LockdownManager
+
     LockdownManager.assert_write_allowed()
 
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
@@ -624,14 +686,14 @@ async def execute_transaction_async(
     # Mark write in request context for read-your-writes stickiness
     try:
         from server.core.request_context import get_request_context
+
         get_request_context().mark_write()
-    except Exception:
+    except Exception:  # noqa: S110
         pass  # No request context (Celery worker) — no stickiness needed
 
 
 def execute_transaction(
-    queries: List[Tuple[str, Optional[Tuple]]],
-    tenant_id: Optional[str] = None
+    queries: list[tuple[str, tuple | None]], tenant_id: str | None = None
 ) -> None:
     """
     Synchronous execute_transaction (psycopg2) — for Celery workers only.
@@ -643,6 +705,7 @@ def execute_transaction(
     """
     try:
         import asyncio
+
         asyncio.get_running_loop()
         logger.warning(
             "execute_transaction (psycopg2 sync) called inside a running asyncio event loop. "
@@ -656,6 +719,7 @@ def execute_transaction(
 
     # --- E00-S05: Lockdown Write Gate (Layer 4) ---
     from server.core.lockdown import LockdownManager
+
     LockdownManager.assert_write_allowed()
 
     resolved_tenant = tenant_id or _get_tenant_id_from_context()
@@ -679,9 +743,8 @@ execute_transaction_sync = execute_transaction
 
 
 async def execute_system_query_async(
-    query: str,
-    params: Optional[Tuple] = None
-) -> List[Dict[str, Any]]:
+    query: str, params: tuple | None = None
+) -> list[dict[str, Any]]:
     """
     Async system-level query (asyncpg) — use in async FastAPI handlers.
     USE SPARINGLY. For health checks and SUPER_ADMIN analytics.
@@ -698,9 +761,8 @@ async def execute_system_query_async(
 
 
 def execute_system_query(
-    query: str,
-    params: Optional[Tuple] = None
-) -> List[Dict[str, Any]]:
+    query: str, params: tuple | None = None
+) -> list[dict[str, Any]]:
     """
     Synchronous system-level query (psycopg2) — backward-compatible default.
     USE SPARINGLY. For Celery workers, init_db, health checks (sync context).
@@ -722,14 +784,16 @@ def execute_system_query(
 
 
 async def execute_system_transaction_async(
-    queries: List[Tuple[str, Optional[Tuple]]]
+    queries: list[tuple[str, tuple | None]],
 ) -> None:
     """
     Async system-level transaction (asyncpg) — use in async FastAPI handlers.
     USE SPARINGLY. Same restrictions as execute_system_query_async.
     """
     if asyncpg is None:
-        logger.warning("Mocking execute_system_transaction_async (asyncpg unavailable).")
+        logger.warning(
+            "Mocking execute_system_transaction_async (asyncpg unavailable)."
+        )
         return
 
     async with _get_async_pool().acquire() as conn:
@@ -740,9 +804,7 @@ async def execute_system_transaction_async(
                 await conn.execute(q, *p)
 
 
-def execute_system_transaction(
-    queries: List[Tuple[str, Optional[Tuple]]]
-) -> None:
+def execute_system_transaction(queries: list[tuple[str, tuple | None]]) -> None:
     """
     Synchronous system-level transaction (psycopg2) — backward-compatible default.
     Used by init_db and Celery workers.
@@ -771,6 +833,7 @@ execute_system_transaction_sync = execute_system_transaction
 # ============================================================================
 # DATABASE INITIALIZATION (System-Level)
 # ============================================================================
+
 
 def init_db():
     """
@@ -1702,45 +1765,47 @@ def init_db():
     """
 
     try:
-        execute_system_transaction_sync([
-            (tenant_session_var_sql, None),
-            (approval_requests_table_sql, None),
-            (approval_actions_table_sql, None),
-            (approval_rls_sql, None),
-            (organizations_table_sql, None),
-            (organizations_rls_sql, None),
-            (users_table_sql, None),
-            (users_rls_sql, None),
-            (search_table_sql, None),
-            (activity_table_sql, None),
-            (comments_table_sql, None),
-            (audit_ledger_table_sql, None),
-            (audit_ledger_immutability_sql, None),
-            (rls_policies_sql, None),
-            (policy_registry_table_sql, None),
-            (policy_immutability_sql, None),
-            (policy_rls_sql, None),
-            (llm_model_registry_table_sql, None),
-            (llm_model_rls_sql, None),
-            (llm_model_seed_sql, None),
-            (prompt_registry_table_sql, None),
-            (prompt_immutability_sql, None),
-            (prompt_rls_sql, None),
-            (prompt_seed_sql, None),
-            (custom_roles_table_sql, None),
-            (custom_role_permissions_table_sql, None),
-            (user_custom_roles_table_sql, None),
-            (custom_roles_rls_sql, None),
-            (workflows_table_sql, None),
-            (workflow_steps_table_sql, None),
-            (workflows_rls_sql, None),
-            # E04: Admissions
-            (admissions_tables_sql, None),
-            (admissions_rls_sql, None),
-            # EC-CROSS-01: Celery idempotency
-            (domain_event_handler_log_sql, None),
-            (idempotency_store_sql, None),
-        ])
+        execute_system_transaction_sync(
+            [
+                (tenant_session_var_sql, None),
+                (approval_requests_table_sql, None),
+                (approval_actions_table_sql, None),
+                (approval_rls_sql, None),
+                (organizations_table_sql, None),
+                (organizations_rls_sql, None),
+                (users_table_sql, None),
+                (users_rls_sql, None),
+                (search_table_sql, None),
+                (activity_table_sql, None),
+                (comments_table_sql, None),
+                (audit_ledger_table_sql, None),
+                (audit_ledger_immutability_sql, None),
+                (rls_policies_sql, None),
+                (policy_registry_table_sql, None),
+                (policy_immutability_sql, None),
+                (policy_rls_sql, None),
+                (llm_model_registry_table_sql, None),
+                (llm_model_rls_sql, None),
+                (llm_model_seed_sql, None),
+                (prompt_registry_table_sql, None),
+                (prompt_immutability_sql, None),
+                (prompt_rls_sql, None),
+                (prompt_seed_sql, None),
+                (custom_roles_table_sql, None),
+                (custom_role_permissions_table_sql, None),
+                (user_custom_roles_table_sql, None),
+                (custom_roles_rls_sql, None),
+                (workflows_table_sql, None),
+                (workflow_steps_table_sql, None),
+                (workflows_rls_sql, None),
+                # E04: Admissions
+                (admissions_tables_sql, None),
+                (admissions_rls_sql, None),
+                # EC-CROSS-01: Celery idempotency
+                (domain_event_handler_log_sql, None),
+                (idempotency_store_sql, None),
+            ]
+        )
         logger.info(
             "Database tables initialized with tenant isolation "
             "(users, search, activity, comments, audit_ledger, policy_registry, "
@@ -1755,4 +1820,3 @@ def init_db():
         )
     except Exception as e:
         logger.error(f"Failed to init DB: {e}")
-

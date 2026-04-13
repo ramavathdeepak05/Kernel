@@ -19,13 +19,13 @@ Implementation:
   - Reads queue depth from Redis (Celery uses Redis as broker)
   - Caches depth for 1 second to avoid Redis round-trip per request
 """
+
 from __future__ import annotations
 
 import logging
-import time
 import threading
+import time
 from dataclasses import dataclass
-from typing import Dict, Optional
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class QueuePolicy:
     """Backpressure policy for a single queue."""
+
     queue_name: str
     warn_threshold: int
     reject_threshold: int
@@ -45,6 +46,7 @@ class QueuePolicy:
 @dataclass
 class QueueStatus:
     """Cached queue depth reading."""
+
     depth: int
     checked_at: float  # time.monotonic()
 
@@ -59,7 +61,7 @@ class BackpressureMonitor:
     Thread-safe: uses threading.Lock for cache updates.
     """
 
-    _cache: Dict[str, QueueStatus] = {}
+    _cache: dict[str, QueueStatus] = {}
     _lock = threading.Lock()
     _CACHE_TTL = 1.0  # seconds
 
@@ -86,6 +88,7 @@ class BackpressureMonitor:
         """Read actual queue length from Redis (Celery broker)."""
         try:
             from server.core.perf import _get_redis
+
             r = _get_redis()
             if r is None:
                 return 0
@@ -95,7 +98,7 @@ class BackpressureMonitor:
             return 0
 
     @classmethod
-    def check_backpressure(cls, policy: QueuePolicy) -> Optional[JSONResponse]:
+    def check_backpressure(cls, policy: QueuePolicy) -> JSONResponse | None:
         """
         Check if a queue exceeds its thresholds.
 
@@ -106,7 +109,9 @@ class BackpressureMonitor:
         if depth >= policy.reject_threshold:
             logger.warning(
                 "Backpressure REJECT: queue=%s depth=%d threshold=%d",
-                policy.queue_name, depth, policy.reject_threshold,
+                policy.queue_name,
+                depth,
+                policy.reject_threshold,
             )
             if policy.reject_status == 503:
                 return JSONResponse(
@@ -118,21 +123,22 @@ class BackpressureMonitor:
                     },
                     headers={"Retry-After": "30"},
                 )
-            else:
-                # 202 — accepted but will be delayed
-                return JSONResponse(
-                    status_code=202,
-                    content={
-                        "status": "accepted",
-                        "detail": f"Request queued — processing delayed (queue depth: {depth})",
-                        "estimated_wait_seconds": max(10, depth * 2),
-                    },
-                )
+            # 202 — accepted but will be delayed
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "status": "accepted",
+                    "detail": f"Request queued — processing delayed (queue depth: {depth})",
+                    "estimated_wait_seconds": max(10, depth * 2),
+                },
+            )
 
         if depth >= policy.warn_threshold:
             logger.info(
                 "Backpressure WARN: queue=%s depth=%d threshold=%d",
-                policy.queue_name, depth, policy.warn_threshold,
+                policy.queue_name,
+                depth,
+                policy.warn_threshold,
             )
 
         return None
@@ -142,8 +148,10 @@ class BackpressureMonitor:
 # PRE-BUILT POLICIES (from settings thresholds)
 # ============================================================================
 
+
 def _get_ai_policy() -> QueuePolicy:
     from server.core.settings import settings
+
     return QueuePolicy(
         queue_name="ai_tasks",
         warn_threshold=settings.backpressure_ai_warn,
@@ -154,6 +162,7 @@ def _get_ai_policy() -> QueuePolicy:
 
 def _get_events_policy() -> QueuePolicy:
     from server.core.settings import settings
+
     return QueuePolicy(
         queue_name="event_dispatch_queue",
         warn_threshold=settings.backpressure_events_warn,
@@ -175,6 +184,7 @@ def _get_notifications_policy() -> QueuePolicy:
 # FASTAPI DEPENDENCIES — use in specific routers
 # ============================================================================
 
+
 async def require_ai_capacity(request: Request) -> None:
     """
     FastAPI dependency: check ai_tasks queue before allowing AI invocation.
@@ -188,7 +198,9 @@ async def require_ai_capacity(request: Request) -> None:
     if response is not None:
         raise HTTPException(
             status_code=response.status_code,
-            detail=response.body.decode() if hasattr(response, "body") else "Service overloaded",
+            detail=response.body.decode()
+            if hasattr(response, "body")
+            else "Service overloaded",
             headers=dict(response.headers) if response.headers else None,
         )
 

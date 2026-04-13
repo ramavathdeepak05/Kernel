@@ -7,20 +7,22 @@ the PGVector embedding ETL whenever a counsellor profile is created or updated.
 The embedding powers E04-S05 auto-assignment (vector similarity search).
 Full HR management of counsellors moves to E08 in a later phase.
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
-from server.core.audit import AuditLog, AuditAction
-from server.core.exceptions import NotFoundError, BusinessRuleViolation
+from server.core.audit import AuditAction, AuditLog
+from server.core.exceptions import NotFoundError
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 
-def _build_profile_text(name: str, specializations: list[str], bio: str, programs: list[str]) -> str:
+def _build_profile_text(
+    name: str, specializations: list[str], bio: str, programs: list[str]
+) -> str:
     """
     Combine counsellor fields into a single string for embedding.
     Keep it human-readable — the model was trained on natural language.
@@ -47,7 +49,7 @@ class CounsellorService:
         specializations: list[str],
         programs: list[str],
         bio: str = "",
-        phone: Optional[str] = None,
+        phone: str | None = None,
         actor_id: str = "system",
     ) -> dict:
         """
@@ -63,16 +65,19 @@ class CounsellorService:
         }
 
         import json
-        execute_transaction([
-            (
-                """
+
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO users
                     (id, org_id, email, phone, name, role, status, metadata)
                 VALUES (%s, %s, %s, %s, %s, 'COUNSELLOR', 'ACTIVE', %s)
                 """,
-                (counsellor_id, org_id, email, phone, name, json.dumps(metadata)),
-            )
-        ])
+                    (counsellor_id, org_id, email, phone, name, json.dumps(metadata)),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -86,7 +91,9 @@ class CounsellorService:
         )
 
         # Trigger embedding ETL asynchronously
-        cls._queue_embedding(org_id, counsellor_id, name, specializations, bio, programs)
+        cls._queue_embedding(
+            org_id, counsellor_id, name, specializations, bio, programs
+        )
 
         return {
             "id": counsellor_id,
@@ -103,9 +110,9 @@ class CounsellorService:
         cls,
         org_id: str,
         counsellor_id: str,
-        specializations: Optional[list[str]] = None,
-        programs: Optional[list[str]] = None,
-        bio: Optional[str] = None,
+        specializations: list[str] | None = None,
+        programs: list[str] | None = None,
+        bio: str | None = None,
         actor_id: str = "system",
     ) -> dict:
         """
@@ -121,18 +128,25 @@ class CounsellorService:
         row = rows[0]
         current_meta = row.get("metadata") or {}
         updated_meta = {
-            "specializations": specializations if specializations is not None else current_meta.get("specializations", []),
-            "programs": programs if programs is not None else current_meta.get("programs", []),
+            "specializations": specializations
+            if specializations is not None
+            else current_meta.get("specializations", []),
+            "programs": programs
+            if programs is not None
+            else current_meta.get("programs", []),
             "bio": bio if bio is not None else current_meta.get("bio", ""),
         }
 
         import json
-        execute_transaction([
-            (
-                "UPDATE users SET metadata = %s, updated_at = NOW() WHERE id = %s AND org_id = %s",
-                (json.dumps(updated_meta), counsellor_id, org_id),
-            )
-        ])
+
+        execute_transaction(
+            [
+                (
+                    "UPDATE users SET metadata = %s, updated_at = NOW() WHERE id = %s AND org_id = %s",
+                    (json.dumps(updated_meta), counsellor_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -196,6 +210,7 @@ class CounsellorService:
         profile_text = _build_profile_text(name, specializations, bio, programs)
         try:
             from server.tasks.ai_tasks import upsert_counsellor_embedding
+
             upsert_counsellor_embedding.delay(org_id, counsellor_id, profile_text)
             logger.info("P0-S10: Queued embedding ETL for counsellor %s", counsellor_id)
         except Exception as exc:

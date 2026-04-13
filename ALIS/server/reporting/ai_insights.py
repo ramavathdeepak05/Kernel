@@ -3,17 +3,15 @@
 Generates executive-level narrative summaries of institution performance
 using Qwen via AIGateway. Falls back to structured data if AI unavailable.
 """
+
 from __future__ import annotations
 
 import logging
-
-from server.db_service import execute_query
 
 logger = logging.getLogger(__name__)
 
 
 class AIInsightsService:
-
     @classmethod
     def institution_summary(cls, org_id: str, academic_year: str) -> dict:
         """
@@ -21,34 +19,35 @@ class AIInsightsService:
         Pulls KPIs from all modules and asks Qwen to narrate findings.
         """
         from .dashboard import DashboardService
+
         kpis = DashboardService.get_kpis(org_id, academic_year)
 
-        adm  = kpis.get("admissions", {})
+        adm = kpis.get("admissions", {})
         acad = kpis.get("academics", {})
-        fin  = kpis.get("finance", {})
+        fin = kpis.get("finance", {})
         exam = kpis.get("examinations", {})
 
         prompt = f"""You are an academic analytics advisor for an educational institution.
 Here is the institution's performance summary for Academic Year {academic_year}:
 
 ADMISSIONS:
-- Total Applications: {adm.get('total_applications', 'N/A')}
-- Enrolled: {adm.get('enrolled', 'N/A')}
-- Conversion Rate: {adm.get('conversion_rate', 'N/A')}%
+- Total Applications: {adm.get("total_applications", "N/A")}
+- Enrolled: {adm.get("enrolled", "N/A")}
+- Conversion Rate: {adm.get("conversion_rate", "N/A")}%
 
 ACADEMICS:
-- Total Enrolled Students: {acad.get('total_enrolled', 'N/A')}
-- Active Courses: {acad.get('active_courses', 'N/A')}
-- Average Attendance: {acad.get('avg_attendance_pct', 'N/A')}%
+- Total Enrolled Students: {acad.get("total_enrolled", "N/A")}
+- Active Courses: {acad.get("active_courses", "N/A")}
+- Average Attendance: {acad.get("avg_attendance_pct", "N/A")}%
 
 EXAMINATIONS:
-- Pass Rate: {exam.get('pass_rate', 'N/A')}%
-- Average CGPA: {exam.get('avg_cgpa', 'N/A')}
+- Pass Rate: {exam.get("pass_rate", "N/A")}%
+- Average CGPA: {exam.get("avg_cgpa", "N/A")}
 
 FINANCE:
-- Total Billed: Rs. {fin.get('total_billed', 'N/A')}
-- Collection Rate: {fin.get('collection_rate', 'N/A')}%
-- Overdue Invoices: {fin.get('overdue_invoices', 'N/A')}
+- Total Billed: Rs. {fin.get("total_billed", "N/A")}
+- Collection Rate: {fin.get("collection_rate", "N/A")}%
+- Overdue Invoices: {fin.get("overdue_invoices", "N/A")}
 
 Write a 4-5 sentence executive narrative that:
 1. Summarizes overall institutional health
@@ -61,15 +60,16 @@ Be factual, professional, and concise. Output JSON: {{"narrative": "..."}}"""
         narrative = cls._call_ai(org_id, prompt, "institution_summary")
         return {
             "academic_year": academic_year,
-            "kpis":          kpis,
-            "ai_narrative":  narrative,
+            "kpis": kpis,
+            "ai_narrative": narrative,
         }
 
     @classmethod
     def admissions_insights(cls, org_id: str, academic_year: str) -> dict:
         """AI narrative focused on admissions funnel and conversion."""
         from .admissions_report import AdmissionsReportService
-        funnel    = AdmissionsReportService.funnel(org_id, academic_year)
+
+        funnel = AdmissionsReportService.funnel(org_id, academic_year)
         prog_wise = AdmissionsReportService.program_wise(org_id, academic_year)
 
         prompt = f"""Analyze this admissions data for Academic Year {academic_year}:
@@ -85,23 +85,39 @@ Write a 3-4 sentence insight covering:
 Output JSON: {{"narrative": "..."}}"""
 
         return {
-            "academic_year":   academic_year,
-            "funnel":          funnel,
-            "program_wise":    prog_wise,
-            "ai_narrative":    cls._call_ai(org_id, prompt, "admissions_insights"),
+            "academic_year": academic_year,
+            "funnel": funnel,
+            "program_wise": prog_wise,
+            "ai_narrative": cls._call_ai(org_id, prompt, "admissions_insights"),
         }
 
     @classmethod
     def finance_insights(cls, org_id: str, academic_year: str) -> dict:
         """AI narrative on fee collection health and default risk."""
         from .finance_report import FinanceReportService
-        aging   = FinanceReportService.payment_aging(org_id, academic_year)
-        waiver  = FinanceReportService.waiver_impact(org_id, academic_year)
 
-        # Fee default prediction from E07
+        aging = FinanceReportService.payment_aging(org_id, academic_year)
+        waiver = FinanceReportService.waiver_impact(org_id, academic_year)
+
+        # Fee default risk — query student_invoices directly (no lateral import)
         try:
-            from server.finance.analytics import FeeDefaultAnalyticsService
-            risk = FeeDefaultAnalyticsService.predict_defaults(org_id, academic_year)
+            from server.db_service import execute_query
+
+            overdue = execute_query(
+                """
+                SELECT COUNT(*) AS overdue_count,
+                       COALESCE(SUM(amount_due), 0) AS overdue_amount
+                FROM student_invoices
+                WHERE org_id = %s AND academic_year = %s AND status = 'OVERDUE'
+                """,
+                (org_id, academic_year),
+            )
+            risk = {
+                "overdue_invoices": int(overdue[0]["overdue_count"]) if overdue else 0,
+                "overdue_amount": float(overdue[0]["overdue_amount"])
+                if overdue
+                else 0.0,
+            }
         except Exception:
             risk = {}
 
@@ -119,19 +135,22 @@ Write a 3-4 sentence insight covering:
 Output JSON: {{"narrative": "..."}}"""
 
         return {
-            "academic_year":  academic_year,
-            "aging":          aging,
-            "waiver_impact":  waiver,
-            "default_risk":   risk,
-            "ai_narrative":   cls._call_ai(org_id, prompt, "finance_insights"),
+            "academic_year": academic_year,
+            "aging": aging,
+            "waiver_impact": waiver,
+            "default_risk": risk,
+            "ai_narrative": cls._call_ai(org_id, prompt, "finance_insights"),
         }
 
     @classmethod
     def academics_insights(cls, org_id: str, academic_year: str, semester: int) -> dict:
         """AI narrative on academic performance and attendance."""
         from .academics_report import AcademicsReportService
-        att_summary = AcademicsReportService.attendance_summary(org_id, academic_year, semester)
-        low_att     = AcademicsReportService.low_attendance_students(
+
+        att_summary = AcademicsReportService.attendance_summary(
+            org_id, academic_year, semester
+        )
+        low_att = AcademicsReportService.low_attendance_students(
             org_id, academic_year, semester, threshold=75.0
         )
 
@@ -148,11 +167,11 @@ Write a 3-4 sentence insight covering:
 Output JSON: {{"narrative": "..."}}"""
 
         return {
-            "academic_year":   academic_year,
-            "semester":        semester,
-            "attendance":      att_summary,
+            "academic_year": academic_year,
+            "semester": semester,
+            "attendance": att_summary,
             "low_attendance_count": len(low_att),
-            "ai_narrative":    cls._call_ai(org_id, prompt, "academics_insights"),
+            "ai_narrative": cls._call_ai(org_id, prompt, "academics_insights"),
         }
 
     # ------------------------------------------------------------------
@@ -163,6 +182,7 @@ Output JSON: {{"narrative": "..."}}"""
     def _call_ai(cls, org_id: str, prompt: str, task: str) -> str | None:
         try:
             from server.core.ai_gateway import AIGateway
+
             result = AIGateway.invoke(
                 org_id=org_id,
                 prompt=prompt,

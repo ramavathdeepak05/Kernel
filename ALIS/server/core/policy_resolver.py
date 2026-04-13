@@ -57,14 +57,15 @@ Hard Constraints:
   - All policy access MUST go through this resolver.
   - If policy resolution fails, the operation MUST be blocked.
 """
+
 from __future__ import annotations
 
 import logging
 import threading
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, Tuple
+from typing import Any
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # POLICY RESOLVER CACHE  (Thread-Safe, TTL-Based)
 # ============================================================================
+
 
 class PolicyResolverCache:
     """
@@ -93,14 +95,14 @@ class PolicyResolverCache:
 
     def __init__(self, ttl_seconds: int = DEFAULT_TTL_SECONDS):
         self._ttl_seconds = ttl_seconds
-        self._cache: Dict[Tuple[str, str], Tuple[Dict[str, Any], datetime]] = {}
+        self._cache: dict[tuple[str, str], tuple[dict[str, Any], datetime]] = {}
         self._lock = threading.Lock()
 
     def get(
         self,
         tenant_id: str,
         policy_type: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Retrieve a cached policy if it exists and has not expired.
 
@@ -121,7 +123,9 @@ class PolicyResolverCache:
                 del self._cache[key]
                 logger.debug(
                     "Cache expired [tenant=%s type=%s elapsed=%.1fs]",
-                    tenant_id, policy_type, elapsed,
+                    tenant_id,
+                    policy_type,
+                    elapsed,
                 )
                 return None
 
@@ -131,7 +135,7 @@ class PolicyResolverCache:
         self,
         tenant_id: str,
         policy_type: str,
-        policy: Dict[str, Any],
+        policy: dict[str, Any],
     ) -> None:
         """
         Store a resolved policy in the cache.
@@ -141,13 +145,15 @@ class PolicyResolverCache:
             self._cache[key] = (policy, datetime.now(timezone.utc))
         logger.debug(
             "Cache stored [tenant=%s type=%s version=%s]",
-            tenant_id, policy_type, policy.get("version"),
+            tenant_id,
+            policy_type,
+            policy.get("version"),
         )
 
     def invalidate(
         self,
         tenant_id: str,
-        policy_type: Optional[str] = None,
+        policy_type: str | None = None,
     ) -> int:
         """
         Invalidate cached entries.
@@ -166,9 +172,7 @@ class PolicyResolverCache:
                     del self._cache[key]
                     count = 1
             else:
-                keys_to_remove = [
-                    k for k in self._cache if k[0] == tenant_id
-                ]
+                keys_to_remove = [k for k in self._cache if k[0] == tenant_id]
                 for k in keys_to_remove:
                     del self._cache[k]
                     count += 1
@@ -176,7 +180,9 @@ class PolicyResolverCache:
         if count:
             logger.info(
                 "Cache invalidated [tenant=%s type=%s entries=%d]",
-                tenant_id, policy_type or "*", count,
+                tenant_id,
+                policy_type or "*",
+                count,
             )
         return count
 
@@ -205,13 +211,14 @@ def get_resolver_cache() -> PolicyResolverCache:
 # CORE RESOLUTION LOGIC
 # ============================================================================
 
+
 def resolve_policy_for_rule(
     policy_type: str,
     tenant_id: str,
-    decision_date: Optional[datetime] = None,
+    decision_date: datetime | None = None,
     actor_id: str = "system",
     actor_role: str = "system",
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Resolve the active policy for a given type and tenant.
 
@@ -252,7 +259,9 @@ def resolve_policy_for_rule(
         if cached is not None:
             logger.debug(
                 "Policy resolved from cache [type=%s tenant=%s version=%s]",
-                policy_type, tenant_id, cached.get("version"),
+                policy_type,
+                tenant_id,
+                cached.get("version"),
             )
             return cached
 
@@ -299,7 +308,10 @@ def resolve_policy_for_rule(
 
     logger.info(
         "Policy resolved [type=%s tenant=%s version=%s id=%s]",
-        policy_type, tenant_id, policy.get("version"), policy.get("id"),
+        policy_type,
+        tenant_id,
+        policy.get("version"),
+        policy.get("id"),
     )
 
     return policy
@@ -308,6 +320,7 @@ def resolve_policy_for_rule(
 # ============================================================================
 # FASTAPI DEPENDENCY — RequirePolicy
 # ============================================================================
+
 
 class RequirePolicy:
     """
@@ -344,7 +357,7 @@ class RequirePolicy:
         """
         self.policy_type = policy_type
 
-    async def __call__(self, request: Any = None) -> Dict[str, Any]:
+    async def __call__(self, request: Any = None) -> dict[str, Any]:
         """
         FastAPI dependency callable.
 
@@ -359,7 +372,7 @@ class RequirePolicy:
         Raises:
             HTTPException(428): If no active policy is found.
         """
-        from fastapi import HTTPException, Request
+        from fastapi import HTTPException
 
         # If called from FastAPI dependency injection, `request` is a Request
         # object. Extract tenant_id and actor info from it.
@@ -401,7 +414,9 @@ class RequirePolicy:
             # Convert PolicyResolutionError to HTTP 428 Precondition Required
             logger.warning(
                 "Policy resolution failed for endpoint [type=%s tenant=%s]: %s",
-                self.policy_type, tenant_id, str(e),
+                self.policy_type,
+                tenant_id,
+                str(e),
             )
             raise HTTPException(
                 status_code=428,
@@ -429,7 +444,8 @@ class RequirePolicy:
 # CONVENIENCE: Build a Policy Context dict for ILL / Rule Engine
 # ============================================================================
 
-def build_policy_context(policy: Dict[str, Any]) -> Dict[str, Any]:
+
+def build_policy_context(policy: dict[str, Any]) -> dict[str, Any]:
     """
     Build a read-only policy context dict for ILL consumption.
 
@@ -461,6 +477,8 @@ def build_policy_context(policy: Dict[str, Any]) -> Dict[str, Any]:
         "effective_from": str(policy.get("effective_from")),
         "effective_to": str(policy.get("effective_to")),
     }
+
+
 """
 ALIS Policy Resolver Middleware — E00-S10
 """

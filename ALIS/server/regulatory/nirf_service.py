@@ -9,10 +9,11 @@ Reads from regulatory_metrics to produce the 5 NIRF parameter groups:
 
 Reference: ALIS-skills/references/architecture.md §5
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from server.db_service import execute_query, execute_transaction
 
@@ -20,9 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 class NIRFService:
-
     @staticmethod
-    def compute_submission(org_id: str, submission_year: int) -> Dict[str, Any]:
+    def compute_submission(org_id: str, submission_year: int) -> dict[str, Any]:
         """Compute NIRF parameter data from regulatory_metrics for submission_year.
 
         Writes results into nirf_data rows (one per parameter group).
@@ -46,17 +46,18 @@ class NIRFService:
         # Build parameter group data
         tlr = NIRFService._build_tlr(metrics, breakdowns)
         rpc = NIRFService._build_rpc(metrics, breakdowns)
-        go  = NIRFService._build_go(metrics, breakdowns)
-        oi  = NIRFService._build_oi(metrics, breakdowns)
+        go = NIRFService._build_go(metrics, breakdowns)
+        oi = NIRFService._build_oi(metrics, breakdowns)
 
         groups = {
             "TLR": tlr,
             "RPC": rpc,
-            "GO":  go,
-            "OI":  oi,
+            "GO": go,
+            "OI": oi,
         }
 
         import json
+
         for group, data in groups.items():
             execute_transaction(
                 [
@@ -86,7 +87,7 @@ class NIRFService:
         }
 
     @staticmethod
-    def get_submission(org_id: str, submission_year: int) -> List[Dict[str, Any]]:
+    def get_submission(org_id: str, submission_year: int) -> list[dict[str, Any]]:
         """Return existing NIRF data rows for a submission year."""
         rows = execute_query(
             """
@@ -105,7 +106,7 @@ class NIRFService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_tlr(metrics: dict, breakdowns: dict) -> Dict[str, Any]:
+    def _build_tlr(metrics: dict, breakdowns: dict) -> dict[str, Any]:
         """TLR: Teaching, Learning & Resources"""
         return {
             "pass_percentage": float(metrics.get("nirf.tlr.pass_percentage", 0) or 0),
@@ -121,24 +122,20 @@ class NIRFService:
         }
 
     @staticmethod
-    def _build_rpc(metrics: dict, breakdowns: dict) -> Dict[str, Any]:
+    def _build_rpc(metrics: dict, breakdowns: dict) -> dict[str, Any]:
         """RPC: Research & Professional Practice"""
         return {
             "publications": float(
                 metrics.get("naac.criterion_3.research_publications_count", 0) or 0
             ),
-            "fdp_completed": float(
-                metrics.get("naac.criterion_3.fdp_count", 0) or 0
-            ),
+            "fdp_completed": float(metrics.get("naac.criterion_3.fdp_count", 0) or 0),
         }
 
     @staticmethod
-    def _build_go(metrics: dict, breakdowns: dict) -> Dict[str, Any]:
+    def _build_go(metrics: dict, breakdowns: dict) -> dict[str, Any]:
         """GO: Graduation Outcomes"""
         return {
-            "placement_count": float(
-                metrics.get("nirf.go.placement_count", 0) or 0
-            ),
+            "placement_count": float(metrics.get("nirf.go.placement_count", 0) or 0),
             "students_receiving_aid": float(
                 metrics.get("nirf.go.students_receiving_financial_aid", 0) or 0
             ),
@@ -148,7 +145,7 @@ class NIRFService:
         }
 
     @staticmethod
-    def _build_oi(metrics: dict, breakdowns: dict) -> Dict[str, Any]:
+    def _build_oi(metrics: dict, breakdowns: dict) -> dict[str, Any]:
         """OI: Outreach & Inclusivity"""
         total = float(metrics.get("naac.criterion_1.total_enrollment", 0) or 0)
         return {

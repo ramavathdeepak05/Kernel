@@ -1,3 +1,6 @@
+from __future__ import annotations
+from server.core.rbac import Permission, require_permission  # noqa: E402
+
 """
 ALIS Approval & Quorum Router — E02-S02
 
@@ -33,22 +36,21 @@ Invariants:
     - APPROVED / REJECTED are terminal states
     - All actions are audit-logged
 """
-from __future__ import annotations
 
-import json
-import logging
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Header, Query
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+import json  # noqa: E402
+import logging  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from typing import Any  # noqa: E402
+from uuid import uuid4  # noqa: E402
 
-from server.core.security import SessionManager
-from server.core.rbac import Role
-from server.core.audit import AuditLedger, AuditAction
-from server.db_service import execute_query, execute_transaction
+from fastapi import APIRouter, Header, Query  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from server.core.audit import AuditAction, AuditLedger  # noqa: E402
+from server.core.rbac import Role  # noqa: E402
+from server.core.security import SessionManager  # noqa: E402
+from server.db_service import execute_query, execute_transaction  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -66,32 +68,49 @@ VALID_MODES = {"single", "any", "all"}
 # REQUEST MODELS
 # =============================================================================
 
+
 class CreateApprovalRequest(BaseModel):
-    entity_type: str = Field(..., min_length=1, max_length=100,
-                             description="Type of entity being approved, e.g. 'invoice'")
+    entity_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Type of entity being approved, e.g. 'invoice'",
+    )
     entity_id: str = Field(..., min_length=1, max_length=100)
-    action_type: str = Field(..., min_length=1, max_length=100,
-                             description="Action requiring approval, e.g. 'fee_waiver'")
-    config_id: str = Field(..., min_length=1, max_length=100,
-                           description="Label for the approval configuration, e.g. 'fee_waiver'")
-    required_roles: List[str] = Field(..., min_length=1,
-                                      description="Role values that are authorised to approve")
+    action_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Action requiring approval, e.g. 'fee_waiver'",
+    )
+    config_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Label for the approval configuration, e.g. 'fee_waiver'",
+    )
+    required_roles: list[str] = Field(
+        ..., min_length=1, description="Role values that are authorised to approve"
+    )
     mode: str = Field(default="single", description="single | any | all")
-    required_count: int = Field(default=1, ge=1,
-                                description="Minimum approvals for ANY mode")
-    context: Optional[Dict[str, Any]] = Field(default=None,
-                                              description="Contextual metadata for audit")
+    required_count: int = Field(
+        default=1, ge=1, description="Minimum approvals for ANY mode"
+    )
+    context: dict[str, Any] | None = Field(
+        default=None, description="Contextual metadata for audit"
+    )
 
 
 class ApprovalActionRequest(BaseModel):
-    comment: Optional[str] = Field(None, max_length=1000)
+    comment: str | None = Field(None, max_length=1000)
 
 
 # =============================================================================
 # INTERNAL HELPERS
 # =============================================================================
 
-def _extract_token(authorization: Optional[str]) -> Optional[str]:
+
+def _extract_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split(" ", 1)
@@ -100,7 +119,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip()
 
 
-def _require_session(authorization: Optional[str]):
+def _require_session(authorization: str | None):
     token = _extract_token(authorization)
     if not token:
         return None, "Missing or malformed Authorization header"
@@ -110,7 +129,7 @@ def _require_session(authorization: Optional[str]):
     return session, None
 
 
-def _fetch_caller(session) -> Optional[Dict[str, Any]]:
+def _fetch_caller(session) -> dict[str, Any] | None:
     rows = execute_query(
         "SELECT id, username, role, status FROM users "
         "WHERE id = %s AND is_deleted = FALSE",
@@ -121,7 +140,7 @@ def _fetch_caller(session) -> Optional[Dict[str, Any]]:
 
 
 def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
-    body: Dict[str, Any] = {"error": message, "code": code}
+    body: dict[str, Any] = {"error": message, "code": code}
     body.update(extra)
     return JSONResponse(status_code=status, content=body)
 
@@ -133,7 +152,7 @@ def _decode_jsonb(value) -> Any:
     return value
 
 
-def _fetch_request(request_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+def _fetch_request(request_id: str, tenant_id: str) -> dict[str, Any] | None:
     rows = execute_query(
         "SELECT id, tenant_id, entity_type, entity_id, action_type, config_id, "
         "status, requested_by, required_roles, mode, required_count, "
@@ -150,17 +169,20 @@ def _fetch_request(request_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     return row
 
 
-def _fetch_actions(request_id: str, tenant_id: str) -> List[Dict[str, Any]]:
-    return list(execute_query(
-        "SELECT id, actor_id, actor_role, action, comment, acted_at "
-        "FROM approval_actions WHERE request_id = %s ORDER BY acted_at",
-        (request_id,),
-        tenant_id=tenant_id,
-    ))
+def _fetch_actions(request_id: str, tenant_id: str) -> list[dict[str, Any]]:
+    return list(
+        execute_query(
+            "SELECT id, actor_id, actor_role, action, comment, acted_at "
+            "FROM approval_actions WHERE request_id = %s ORDER BY acted_at",
+            (request_id,),
+            tenant_id=tenant_id,
+        )
+    )
 
 
-def _serialize_request(req: Dict[str, Any],
-                        actions: Optional[List] = None) -> Dict[str, Any]:
+def _serialize_request(
+    req: dict[str, Any], actions: list | None = None
+) -> dict[str, Any]:
     out = {
         "id": str(req["id"]),
         "tenant_id": str(req["tenant_id"]),
@@ -173,7 +195,9 @@ def _serialize_request(req: Dict[str, Any],
         "required_roles": req["required_roles"],
         "mode": req["mode"],
         "required_count": req["required_count"],
-        "resolved_at": req["resolved_at"].isoformat() if req.get("resolved_at") else None,
+        "resolved_at": req["resolved_at"].isoformat()
+        if req.get("resolved_at")
+        else None,
         "resolution_reason": req.get("resolution_reason"),
         "context": req.get("context") or {},
         "created_at": req["created_at"].isoformat() if req.get("created_at") else None,
@@ -193,7 +217,7 @@ def _serialize_request(req: Dict[str, Any],
     return out
 
 
-def _check_quorum(req: Dict[str, Any], tenant_id: str) -> bool:
+def _check_quorum(req: dict[str, Any], tenant_id: str) -> bool:
     """
     Return True if approval quorum is now met.
     Called AFTER inserting the new approval action.
@@ -220,10 +244,12 @@ def _check_quorum(req: Dict[str, Any], tenant_id: str) -> bool:
 # POST /api/approvals — Create approval request
 # =============================================================================
 
+
 @router.post("")
+@require_permission(Permission.DUAL_CONTROL_APPROVE)
 async def create_approval_request(
     body: CreateApprovalRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Create a new approval request.
@@ -244,15 +270,22 @@ async def create_approval_request(
 
     # Validate mode
     if body.mode not in VALID_MODES:
-        return _err(422, f"Invalid mode '{body.mode}'. Must be: single, any, all",
-                    "ERR_VALIDATION")
+        return _err(
+            422,
+            f"Invalid mode '{body.mode}'. Must be: single, any, all",
+            "ERR_VALIDATION",
+        )
 
     # Validate required_roles are known Role values
     valid_role_values = {r.value for r in Role}
     bad_roles = [r for r in body.required_roles if r not in valid_role_values]
     if bad_roles:
-        return _err(422, f"Unknown role(s): {bad_roles}", "ERR_INVALID_ROLE",
-                    valid_roles=list(valid_role_values))
+        return _err(
+            422,
+            f"Unknown role(s): {bad_roles}",
+            "ERR_INVALID_ROLE",
+            valid_roles=list(valid_role_values),
+        )
 
     # Compute effective required_count
     required_count = body.required_count
@@ -280,7 +313,9 @@ async def create_approval_request(
                     body.action_type,
                     body.config_id,
                     session.user_id,
-                    json.dumps(list(dict.fromkeys(body.required_roles))),  # deduplicated
+                    json.dumps(
+                        list(dict.fromkeys(body.required_roles))
+                    ),  # deduplicated
                     body.mode,
                     required_count,
                     json.dumps(body.context or {}),
@@ -315,12 +350,14 @@ async def create_approval_request(
 # GET /api/approvals — List requests
 # =============================================================================
 
+
 @router.get("")
+@require_permission(Permission.DUAL_CONTROL_APPROVE)
 async def list_approval_requests(
-    authorization: Optional[str] = Header(default=None),
-    status: Optional[str] = None,
-    entity_type: Optional[str] = None,
-    entity_id: Optional[str] = None,
+    authorization: str | None = Header(default=None),
+    status: str | None = None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
@@ -365,7 +402,7 @@ async def list_approval_requests(
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     count_rows = execute_query(
-        f"SELECT COUNT(*) AS total FROM approval_requests {where}",
+        f"SELECT COUNT(*) AS total FROM approval_requests {where}",  # noqa: S608
         tuple(params) if params else None,
         tenant_id=session.tenant_id,
     )
@@ -373,7 +410,7 @@ async def list_approval_requests(
 
     params.extend([limit, offset])
     rows = execute_query(
-        f"SELECT id, tenant_id, entity_type, entity_id, action_type, config_id, "
+        f"SELECT id, tenant_id, entity_type, entity_id, action_type, config_id, "  # noqa: S608
         f"status, requested_by, required_roles, mode, required_count, "
         f"resolved_at, resolution_reason, context, created_at "
         f"FROM approval_requests {where} "
@@ -400,9 +437,11 @@ async def list_approval_requests(
 # NOTE: Defined BEFORE /{id} to avoid path collision.
 # =============================================================================
 
+
 @router.get("/pending")
+@require_permission(Permission.DUAL_CONTROL_APPROVE)
 async def get_pending_for_me(
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     List PENDING approval requests that the caller is authorised to act on
@@ -473,10 +512,12 @@ async def get_pending_for_me(
 # GET /api/approvals/{request_id} — Get request + actions
 # =============================================================================
 
+
 @router.get("/{request_id}")
+@require_permission(Permission.DUAL_CONTROL_APPROVE)
 async def get_approval_request(
     request_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Get a single approval request with its full action history.
@@ -508,7 +549,9 @@ async def get_approval_request(
     is_approver = caller_role.value in req["required_roles"]
 
     if not (is_admin or is_creator or is_approver):
-        return _err(403, "You do not have access to this approval request", "ERR_LAYER5_ACCESS")
+        return _err(
+            403, "You do not have access to this approval request", "ERR_LAYER5_ACCESS"
+        )
 
     actions = _fetch_actions(request_id, session.tenant_id)
     return JSONResponse(status_code=200, content=_serialize_request(req, actions))
@@ -518,11 +561,13 @@ async def get_approval_request(
 # POST /api/approvals/{request_id}/approve — Record approval
 # =============================================================================
 
+
 @router.post("/{request_id}/approve")
+@require_permission(Permission.DUAL_CONTROL_APPROVE)
 async def approve_request(
     request_id: str,
     body: ApprovalActionRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Record an approval action.
@@ -558,16 +603,20 @@ async def approve_request(
         return _err(404, "Approval request not found", "ERR_NOT_FOUND")
 
     if req["status"] != "PENDING":
-        return _err(409,
-                    f"Request is already {req['status'].lower()} — no further actions allowed",
-                    "ERR_ALREADY_RESOLVED")
+        return _err(
+            409,
+            f"Request is already {req['status'].lower()} — no further actions allowed",
+            "ERR_ALREADY_RESOLVED",
+        )
 
     # Role authorisation check
     if caller_role.value not in req["required_roles"]:
-        return _err(403,
-                    f"Role '{caller_role.value}' is not authorised to approve this request. "
-                    f"Required: {req['required_roles']}",
-                    "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            f"Role '{caller_role.value}' is not authorised to approve this request. "
+            f"Required: {req['required_roles']}",
+            "ERR_LAYER5_ACCESS",
+        )
 
     # Self-approval guard
     if req["requested_by"] == session.user_id:
@@ -582,9 +631,11 @@ async def approve_request(
             tenant_id=session.tenant_id,
         )
         if existing_role_approval:
-            return _err(409,
-                        f"Role '{caller_role.value}' has already approved this request",
-                        "ERR_DUPLICATE_ROLE_APPROVAL")
+            return _err(
+                409,
+                f"Role '{caller_role.value}' has already approved this request",
+                "ERR_DUPLICATE_ROLE_APPROVAL",
+            )
 
     action_id = str(uuid4())
     now = datetime.now(timezone.utc)
@@ -596,16 +647,27 @@ async def approve_request(
                     "INSERT INTO approval_actions "
                     "(id, tenant_id, request_id, actor_id, actor_role, action, comment, acted_at) "
                     "VALUES (%s, %s, %s, %s, %s, 'approve', %s, %s)",
-                    (action_id, session.tenant_id, request_id,
-                     session.user_id, caller_role.value, body.comment, now),
+                    (
+                        action_id,
+                        session.tenant_id,
+                        request_id,
+                        session.user_id,
+                        caller_role.value,
+                        body.comment,
+                        now,
+                    ),
                 )
             ],
             tenant_id=session.tenant_id,
         )
+
     except Exception as e:
         if "uq_approval_actor" in str(e):
-            return _err(409, "You have already taken action on this request",
-                        "ERR_DUPLICATE_ACTION")
+            return _err(
+                409,
+                "You have already taken action on this request",
+                "ERR_DUPLICATE_ACTION",
+            )
         logger.error(f"Failed to record approval action: {e}")
         return _err(500, "Internal error recording approval", "ERR_INTERNAL")
 
@@ -642,7 +704,11 @@ async def approve_request(
             entity_type="approval_request",
             entity_id=request_id,
             tenant_id=session.tenant_id,
-            metadata={"previous_state": "PENDING", "new_state": "APPROVED", "reason": "Quorum met"},
+            metadata={
+                "previous_state": "PENDING",
+                "new_state": "APPROVED",
+                "reason": "Quorum met",
+            },
         )
 
     req = _fetch_request(request_id, session.tenant_id)
@@ -651,7 +717,8 @@ async def approve_request(
     return JSONResponse(
         status_code=200,
         content={
-            "message": "Approval recorded" + (" — request approved" if quorum_met else " — awaiting more approvals"),
+            "message": "Approval recorded"
+            + (" — request approved" if quorum_met else " — awaiting more approvals"),
             "request": _serialize_request(req, actions),
         },
     )
@@ -661,11 +728,13 @@ async def approve_request(
 # POST /api/approvals/{request_id}/reject — Reject request
 # =============================================================================
 
+
 @router.post("/{request_id}/reject")
+@require_permission(Permission.DUAL_CONTROL_APPROVE)
 async def reject_request(
     request_id: str,
     body: ApprovalActionRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Reject an approval request. Terminates the request immediately.
@@ -698,14 +767,18 @@ async def reject_request(
         return _err(404, "Approval request not found", "ERR_NOT_FOUND")
 
     if req["status"] != "PENDING":
-        return _err(409,
-                    f"Request is already {req['status'].lower()} — no further actions allowed",
-                    "ERR_ALREADY_RESOLVED")
+        return _err(
+            409,
+            f"Request is already {req['status'].lower()} — no further actions allowed",
+            "ERR_ALREADY_RESOLVED",
+        )
 
     if caller_role.value not in req["required_roles"]:
-        return _err(403,
-                    f"Role '{caller_role.value}' is not authorised to reject this request",
-                    "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            f"Role '{caller_role.value}' is not authorised to reject this request",
+            "ERR_LAYER5_ACCESS",
+        )
 
     if req["requested_by"] == session.user_id:
         return _err(403, "You cannot reject a request you created", "ERR_SELF_REJECT")
@@ -721,8 +794,15 @@ async def reject_request(
                     "INSERT INTO approval_actions "
                     "(id, tenant_id, request_id, actor_id, actor_role, action, comment, acted_at) "
                     "VALUES (%s, %s, %s, %s, %s, 'reject', %s, %s)",
-                    (action_id, session.tenant_id, request_id,
-                     session.user_id, caller_role.value, body.comment, now),
+                    (
+                        action_id,
+                        session.tenant_id,
+                        request_id,
+                        session.user_id,
+                        caller_role.value,
+                        body.comment,
+                        now,
+                    ),
                 ),
                 (
                     "UPDATE approval_requests "
@@ -733,10 +813,14 @@ async def reject_request(
             ],
             tenant_id=session.tenant_id,
         )
+
     except Exception as e:
         if "uq_approval_actor" in str(e):
-            return _err(409, "You have already taken action on this request",
-                        "ERR_DUPLICATE_ACTION")
+            return _err(
+                409,
+                "You have already taken action on this request",
+                "ERR_DUPLICATE_ACTION",
+            )
         logger.error(f"Failed to record rejection: {e}")
         return _err(500, "Internal error recording rejection", "ERR_INTERNAL")
 

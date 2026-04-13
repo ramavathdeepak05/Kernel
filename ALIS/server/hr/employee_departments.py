@@ -9,15 +9,14 @@ Rules
 • Exactly one assignment may have is_primary = TRUE per staff member.
 • Used by Regulatory E14 to compute faculty-to-student ratio per department.
 """
+
 from __future__ import annotations
 
-import uuid
 import logging
+import uuid
 from datetime import date
-from typing import Optional
 
 from pydantic import BaseModel, field_validator
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
@@ -29,6 +28,7 @@ logger = logging.getLogger(__name__)
 # Models
 # ---------------------------------------------------------------------------
 
+
 class DepartmentAssignmentCreate(BaseModel):
     staff_id: str
     department_id: str
@@ -36,7 +36,7 @@ class DepartmentAssignmentCreate(BaseModel):
     weight_pct: float
     is_primary: bool = False
     effective_from: date
-    effective_to: Optional[date] = None
+    effective_to: date | None = None
 
     @field_validator("weight_pct")
     @classmethod
@@ -50,8 +50,8 @@ class DepartmentAssignmentCreate(BaseModel):
 # Service
 # ---------------------------------------------------------------------------
 
-class EmployeeDepartmentService:
 
+class EmployeeDepartmentService:
     @classmethod
     def list_assignments(
         cls,
@@ -106,19 +106,34 @@ class EmployeeDepartmentService:
                     )
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO employee_department_assignments
                 (id, org_id, staff_id, department_id, department_name,
                  weight_pct, is_primary, effective_from, effective_to)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (aid, org_id, req.staff_id, req.department_id, req.department_name,
-             req.weight_pct, req.is_primary, req.effective_from, req.effective_to),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        req.staff_id,
+                        req.department_id,
+                        req.department_name,
+                        req.weight_pct,
+                        req.is_primary,
+                        req.effective_from,
+                        req.effective_to,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
-            org_id=org_id, actor_id=actor_id, actor_type="human",
+            org_id=org_id,
+            actor_id=actor_id,
+            actor_type="human",
             action=AuditAction.CREATE,
             resource_type="employee_department_assignment",
             resource_id=aid,
@@ -145,15 +160,21 @@ class EmployeeDepartmentService:
         if not rows:
             raise NotFoundError(f"Assignment {assignment_id} not found")
 
-        execute_transaction([(
-            """UPDATE employee_department_assignments
+        execute_transaction(
+            [
+                (
+                    """UPDATE employee_department_assignments
                SET effective_to = CURRENT_DATE
                WHERE id = %s AND org_id = %s""",
-            (assignment_id, org_id),
-        )])
+                    (assignment_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
-            org_id=org_id, actor_id=actor_id, actor_type="human",
+            org_id=org_id,
+            actor_id=actor_id,
+            actor_type="human",
             action=AuditAction.UPDATE,
             resource_type="employee_department_assignment",
             resource_id=assignment_id,

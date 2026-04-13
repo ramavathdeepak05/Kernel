@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, GlobalLockViolationError
 from server.db_service import execute_query, execute_transaction
 
@@ -127,21 +127,28 @@ class CounsellorAllocationService:
         assignment_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO counsellor_assignments
                     (id, org_id, applicant_id, counsellor_id, method,
                      similarity_score, assigned_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    assignment_id, org_id,
-                    request.applicant_id, counsellor_id,
-                    method, score, actor_id, now,
-                ),
-            )
-        ])
+                    (
+                        assignment_id,
+                        org_id,
+                        request.applicant_id,
+                        counsellor_id,
+                        method,
+                        score,
+                        actor_id,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -163,7 +170,9 @@ class CounsellorAllocationService:
 
         logger.info(
             "E04-S05: Counsellor assigned [applicant=%s, counsellor=%s, method=%s]",
-            request.applicant_id, counsellor_id, method,
+            request.applicant_id,
+            counsellor_id,
+            method,
         )
 
         return CounsellorAssignmentRead(
@@ -183,17 +192,17 @@ class CounsellorAllocationService:
 
     @classmethod
     def _auto_assign(
-        cls, applicant: Dict, org_id: str
-    ) -> tuple[str, str, Optional[float]]:
+        cls, applicant: dict, org_id: str
+    ) -> tuple[str, str, float | None]:
         """
         Auto-assign counsellor via vector similarity search.
 
         Falls back to load-balanced assignment if no vector matches found.
         """
-        from server.tools.rag_retriever import RAGRetrieverTool
-        from server.core.tool_registry import ToolInvoker
         from server.core.ai_gateway import AIGatewayContext
         from server.core.rbac import Role
+        from server.core.tool_registry import ToolInvoker
+        from server.tools.rag_retriever import RAGRetrieverTool
 
         profile_text = (
             f"Applicant: {applicant.get('name', '')}. "
@@ -203,13 +212,13 @@ class CounsellorAllocationService:
 
         # Try vector search for counsellor match
         try:
-            ctx = AIGatewayContext(
+            AIGatewayContext(
                 actor_id="counsellor_allocator",
                 actor_role=Role.SYSTEM,
                 org_id=org_id,
                 module="M1",
             )
-            tool = RAGRetrieverTool()
+            RAGRetrieverTool()
             output = ToolInvoker.invoke(
                 tool_name="tool.rag.retriever",
                 input_data={
@@ -228,12 +237,19 @@ class CounsellorAllocationService:
             if chunks:
                 # Pick highest-score counsellor with lowest load
                 best = cls._pick_lowest_load(
-                    [c.get("metadata", {}).get("counsellor_id") for c in chunks
-                     if c.get("metadata", {}).get("counsellor_id")],
+                    [
+                        c.get("metadata", {}).get("counsellor_id")
+                        for c in chunks
+                        if c.get("metadata", {}).get("counsellor_id")
+                    ],
                     org_id,
                 )
                 if best:
-                    return best, AllocationMethod.VECTOR_SEARCH.value, chunks[0].get("score")
+                    return (
+                        best,
+                        AllocationMethod.VECTOR_SEARCH.value,
+                        chunks[0].get("score"),
+                    )
         except Exception as e:
             logger.warning("E04-S05: Vector search failed, falling back: %s", e)
 
@@ -251,10 +267,11 @@ class CounsellorAllocationService:
         preferred_id: str,
         org_id: str,
         actor_role: Any,
-        justification: Optional[str],
+        justification: str | None,
     ) -> tuple[str, str, None]:
         """Validate and accept a manually chosen counsellor."""
         from server.core.rbac import Role
+
         try:
             role = Role(actor_role)
         except (ValueError, TypeError):
@@ -290,8 +307,8 @@ class CounsellorAllocationService:
 
     @classmethod
     def _pick_lowest_load(
-        cls, counsellor_ids: List[Optional[str]], org_id: str
-    ) -> Optional[str]:
+        cls, counsellor_ids: list[str | None], org_id: str
+    ) -> str | None:
         """From a list of candidate IDs, return the one with fewest assignments."""
         valid = [c for c in counsellor_ids if c]
         if not valid:
@@ -300,7 +317,7 @@ class CounsellorAllocationService:
         return min(loads, key=loads.__getitem__)
 
     @classmethod
-    def _load_balanced_fallback(cls, org_id: str) -> Optional[str]:
+    def _load_balanced_fallback(cls, org_id: str) -> str | None:
         """Pick the counsellor with the fewest assignments in this tenant."""
         rows = execute_query(
             """

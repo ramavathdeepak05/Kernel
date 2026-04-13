@@ -1,4 +1,5 @@
 """E10-S07 — Bulk Messaging"""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class BulkMessagingService:
-
     @classmethod
     def create_job(cls, org_id: str, req: BulkMessageCreate, actor_id: str) -> dict:
         """Create a bulk message job and enqueue it for async processing."""
@@ -22,30 +22,46 @@ class BulkMessagingService:
         recipients = cls._resolve_targets(org_id, req.target_filter)
         job_id = str(uuid.uuid4())
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO bulk_message_jobs
                 (id, org_id, title, message, channel, target_filter, recipient_count,
                  status, created_by)
             VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, 'QUEUED', %s)
             """,
-            (
-                job_id, org_id, req.title, req.message, req.channel.value,
-                __import__('json').dumps(req.target_filter),
-                len(recipients), actor_id,
-            ),
-        )])
+                    (
+                        job_id,
+                        org_id,
+                        req.title,
+                        req.message,
+                        req.channel.value,
+                        __import__("json").dumps(req.target_filter),
+                        len(recipients),
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
         # Enqueue Celery task
         try:
-            from server.tasks.notifications import task_process_bulk_message
-            task_process_bulk_message.delay(org_id, job_id)
+            from server.worker import celery_app
+
+            celery_app.send_task(
+                "notifications.process_bulk_message", args=[org_id, job_id]
+            )
         except Exception as exc:
             logger.warning("BulkMessage: enqueue failed (non-fatal): %s", exc)
 
         AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-            entity_type="bulk_message_job", entity_id=job_id, org_id=org_id,
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="bulk_message_job",
+            entity_id=job_id,
+            org_id=org_id,
             module="E10-S07",
             metadata={"channel": req.channel.value, "recipients": len(recipients)},
         )
@@ -82,7 +98,8 @@ class BulkMessagingService:
             sql = "SELECT DISTINCT s.id FROM students s WHERE s.org_id = %s AND s.status = 'ENROLLED'"
             params: list = [org_id]
             if program_id:
-                sql += " AND s.program_id = %s"; params.append(program_id)
+                sql += " AND s.program_id = %s"
+                params.append(program_id)
             if academic_year:
                 sql += """ AND EXISTS (
                     SELECT 1 FROM course_enrollments ce
@@ -90,7 +107,8 @@ class BulkMessagingService:
                     """
                 params.append(academic_year)
                 if semester:
-                    sql += " AND ce.semester = %s"; params.append(semester)
+                    sql += " AND ce.semester = %s"
+                    params.append(semester)
                 sql += ")"
             rows = execute_query(sql, params)
         elif role:
@@ -123,12 +141,27 @@ class BulkMessagingService:
         if job["status"] != "QUEUED":
             return  # already running or done
 
-        execute_transaction([(
-            "UPDATE bulk_message_jobs SET status = 'RUNNING' WHERE id = %s",
-            (job_id,),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE bulk_message_jobs SET status = 'RUNNING' WHERE id = %s",
+                    (job_id,),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="job",
+            entity_id=job_id,
+            tenant_id=org_id,
+            metadata={"source": "process_job"},
+        )
 
         import json
+
         target_filter = job["target_filter"]
         if isinstance(target_filter, str):
             target_filter = json.loads(target_filter)
@@ -141,6 +174,7 @@ class BulkMessagingService:
             try:
                 if channel == "IN_APP":
                     from .in_app import InAppNotificationService
+
                     InAppNotificationService.send(
                         org_id=org_id,
                         recipient_id=user_id,
@@ -157,6 +191,7 @@ class BulkMessagingService:
                         continue
                     addr = user_rows[0]["email"]
                     from server.core.notifications.service import NotificationDispatcher
+
                     NotificationDispatcher.dispatch(
                         template_key="_bulk_direct",
                         recipient_id=user_id,
@@ -171,12 +206,16 @@ class BulkMessagingService:
                 logger.warning("BulkMessage: send failed for user %s: %s", user_id, exc)
                 failed += 1
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE bulk_message_jobs
             SET status = 'DONE', sent_count = %s, failed_count = %s, completed_at = NOW()
             WHERE id = %s
             """,
-            (sent, failed, job_id),
-        )])
+                    (sent, failed, job_id),
+                )
+            ]
+        )
         logger.info("BulkMessage job %s: sent=%d failed=%d", job_id, sent, failed)

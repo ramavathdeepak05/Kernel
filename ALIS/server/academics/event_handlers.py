@@ -3,6 +3,7 @@
 Subscribes: StudentEnrolled
 Publishes:  AttendanceFinalized (via AttendanceService)
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,6 +27,7 @@ def on_student_enrolled(event: DomainEvent) -> None:
             return
 
         from server.db_service import execute_query
+
         student = execute_query(
             "SELECT id, program, enrolled_at FROM students WHERE id = %s AND org_id = %s",
             (student_id, org_id),
@@ -42,7 +44,10 @@ def on_student_enrolled(event: DomainEvent) -> None:
             (org_id, program_name),
         )
         if not program:
-            logger.warning("E05: no active program found for '%s' — skipping auto-enrollment", program_name)
+            logger.warning(
+                "E05: no active program found for '%s' — skipping auto-enrollment",
+                program_name,
+            )
             return
 
         program_id = str(program[0]["id"])
@@ -50,6 +55,7 @@ def on_student_enrolled(event: DomainEvent) -> None:
         academic_year = f"{enrolled_year}-{enrolled_year + 1}"
 
         from server.academics.enrollment import AcademicEnrollmentService
+
         AcademicEnrollmentService.auto_enroll_from_program(
             org_id=org_id,
             student_id=student_id,

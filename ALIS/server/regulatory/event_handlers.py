@@ -21,10 +21,11 @@ Event subscriptions (from architecture.md §15, E14 subscriber list):
 
 Reference: ALIS-skills/references/architecture.md §15
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from server.core.domain_events import DomainEventBus
 
@@ -35,19 +36,20 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _org(event: Dict[str, Any]) -> str:
+
+def _org(event: dict[str, Any]) -> str:
     return str(event.get("org_id", ""))
 
 
-def _payload(event: Dict[str, Any]) -> Dict[str, Any]:
+def _payload(event: dict[str, Any]) -> dict[str, Any]:
     return event.get("payload", {})
 
 
-def _event_id(event: Dict[str, Any]) -> str:
+def _event_id(event: dict[str, Any]) -> str:
     return str(event.get("id", ""))
 
 
-def _event_type(event: Dict[str, Any]) -> str:
+def _event_type(event: dict[str, Any]) -> str:
     return str(event.get("event_type", ""))
 
 
@@ -55,15 +57,17 @@ def _event_type(event: Dict[str, Any]) -> str:
 # Handlers
 # ---------------------------------------------------------------------------
 
-def on_student_enrolled(event: Dict[str, Any]) -> None:
+
+def on_student_enrolled(event: dict[str, Any]) -> None:
     """naac.criterion_1.total_enrollment ++"""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
     try:
         payload = _payload(event)
-        breakdown = {
+        {
             "program": payload.get("program"),
             "category": payload.get("category"),
             "gender": payload.get("gender"),
@@ -82,9 +86,10 @@ def on_student_enrolled(event: Dict[str, Any]) -> None:
         logger.error("E14: on_student_enrolled failed: %s", exc, exc_info=True)
 
 
-def on_student_cancelled(event: Dict[str, Any]) -> None:
+def on_student_cancelled(event: dict[str, Any]) -> None:
     """naac.criterion_1.attrition_count ++"""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -101,9 +106,10 @@ def on_student_cancelled(event: Dict[str, Any]) -> None:
         logger.error("E14: on_student_cancelled failed: %s", exc, exc_info=True)
 
 
-def on_result_published(event: Dict[str, Any]) -> None:
+def on_result_published(event: dict[str, Any]) -> None:
     """naac.criterion_2.pass_percentage and sgpa_avg (rolling snapshot)."""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -117,7 +123,10 @@ def on_result_published(event: Dict[str, Any]) -> None:
                 metric_key="naac.criterion_2.pass_percentage",
                 metric_value=float(pass_pct),
                 framework="NAAC",
-                breakdown={"semester": payload.get("semester"), "batch": payload.get("batch")},
+                breakdown={
+                    "semester": payload.get("semester"),
+                    "batch": payload.get("batch"),
+                },
                 source_event=_event_type(event),
                 source_event_id=_event_id(event),
             )
@@ -127,7 +136,10 @@ def on_result_published(event: Dict[str, Any]) -> None:
                 metric_key="naac.criterion_2.sgpa_avg",
                 metric_value=float(sgpa_avg),
                 framework="NAAC",
-                breakdown={"semester": payload.get("semester"), "batch": payload.get("batch")},
+                breakdown={
+                    "semester": payload.get("semester"),
+                    "batch": payload.get("batch"),
+                },
                 source_event=_event_type(event),
                 source_event_id=_event_id(event),
             )
@@ -145,14 +157,15 @@ def on_result_published(event: Dict[str, Any]) -> None:
         logger.error("E14: on_result_published failed: %s", exc, exc_info=True)
 
 
-def on_scholarship_disbursed(event: Dict[str, Any]) -> None:
+def on_scholarship_disbursed(event: dict[str, Any]) -> None:
     """naac.criterion_5.students_receiving_aid_count ++"""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
     try:
-        payload = _payload(event)
+        _payload(event)
         RegulatoryMetricsService.increment(
             org_id=org_id,
             metric_key="naac.criterion_5.students_receiving_aid_count",
@@ -174,9 +187,10 @@ def on_scholarship_disbursed(event: Dict[str, Any]) -> None:
         logger.error("E14: on_scholarship_disbursed failed: %s", exc, exc_info=True)
 
 
-def on_employee_joined(event: Dict[str, Any]) -> None:
+def on_employee_joined(event: dict[str, Any]) -> None:
     """naac.criterion_2.faculty_total_count ++ and phd count if qualified."""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -207,9 +221,10 @@ def on_employee_joined(event: Dict[str, Any]) -> None:
         logger.error("E14: on_employee_joined failed: %s", exc, exc_info=True)
 
 
-def on_appraisal_submitted(event: Dict[str, Any]) -> None:
+def on_appraisal_submitted(event: dict[str, Any]) -> None:
     """naac.criterion_3.research_publications_count += publications in this appraisal."""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -229,9 +244,10 @@ def on_appraisal_submitted(event: Dict[str, Any]) -> None:
         logger.error("E14: on_appraisal_submitted failed: %s", exc, exc_info=True)
 
 
-def on_library_catalogue_updated(event: Dict[str, Any]) -> None:
+def on_library_catalogue_updated(event: dict[str, Any]) -> None:
     """naac.criterion_4.library_holdings_count = total holdings (absolute, not delta)."""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -256,9 +272,10 @@ def on_library_catalogue_updated(event: Dict[str, Any]) -> None:
         logger.error("E14: on_library_catalogue_updated failed: %s", exc, exc_info=True)
 
 
-def on_grievance_closed(event: Dict[str, Any]) -> None:
+def on_grievance_closed(event: dict[str, Any]) -> None:
     """naac.criterion_6.grievance_resolved_count ++"""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -275,9 +292,10 @@ def on_grievance_closed(event: Dict[str, Any]) -> None:
         logger.error("E14: on_grievance_closed failed: %s", exc, exc_info=True)
 
 
-def on_training_completed(event: Dict[str, Any]) -> None:
+def on_training_completed(event: dict[str, Any]) -> None:
     """naac.criterion_3.fdp_count ++"""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -297,9 +315,10 @@ def on_training_completed(event: Dict[str, Any]) -> None:
         logger.error("E14: on_training_completed failed: %s", exc, exc_info=True)
 
 
-def on_offer_received(event: Dict[str, Any]) -> None:
+def on_offer_received(event: dict[str, Any]) -> None:
     """naac.criterion_5.placement_count ++ and nirf.go.placement_count ++"""
     from .metrics_service import RegulatoryMetricsService
+
     org_id = _org(event)
     if not org_id:
         return
@@ -331,16 +350,17 @@ def on_offer_received(event: Dict[str, Any]) -> None:
 # Registration
 # ---------------------------------------------------------------------------
 
+
 def register_all() -> None:
     """Register all E14 domain event subscriptions."""
-    DomainEventBus.subscribe("StudentEnrolled",          on_student_enrolled)
-    DomainEventBus.subscribe("StudentCancelled",         on_student_cancelled)
-    DomainEventBus.subscribe("ResultPublished",          on_result_published)
-    DomainEventBus.subscribe("ScholarshipDisbursed",     on_scholarship_disbursed)
-    DomainEventBus.subscribe("EmployeeJoined",           on_employee_joined)
-    DomainEventBus.subscribe("AppraisalSubmitted",       on_appraisal_submitted)
-    DomainEventBus.subscribe("LibraryCatalogueUpdated",  on_library_catalogue_updated)
-    DomainEventBus.subscribe("GrievanceClosed",          on_grievance_closed)
-    DomainEventBus.subscribe("TrainingCompleted",        on_training_completed)
-    DomainEventBus.subscribe("OfferReceived",            on_offer_received)
+    DomainEventBus.subscribe("StudentEnrolled", on_student_enrolled)
+    DomainEventBus.subscribe("StudentCancelled", on_student_cancelled)
+    DomainEventBus.subscribe("ResultPublished", on_result_published)
+    DomainEventBus.subscribe("ScholarshipDisbursed", on_scholarship_disbursed)
+    DomainEventBus.subscribe("EmployeeJoined", on_employee_joined)
+    DomainEventBus.subscribe("AppraisalSubmitted", on_appraisal_submitted)
+    DomainEventBus.subscribe("LibraryCatalogueUpdated", on_library_catalogue_updated)
+    DomainEventBus.subscribe("GrievanceClosed", on_grievance_closed)
+    DomainEventBus.subscribe("TrainingCompleted", on_training_completed)
+    DomainEventBus.subscribe("OfferReceived", on_offer_received)
     logger.info("E14 Regulatory event handlers registered (10 subscriptions)")

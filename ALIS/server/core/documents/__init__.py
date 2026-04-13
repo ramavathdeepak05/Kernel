@@ -5,14 +5,16 @@ Centralized service for generating official PDF documents.
 
 Part of E02 - Shared Services.
 """
+
 from __future__ import annotations
-from .service import DocumentService
+
 from .models import (
-    TemplateType,
+    DocumentGenerationRequest,
     DocumentTemplate,
     GeneratedDocument,
-    DocumentGenerationRequest,
+    TemplateType,
 )
+from .service import DocumentService
 
 __all__ = [
     "DocumentService",

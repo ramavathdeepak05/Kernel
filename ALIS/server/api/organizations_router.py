@@ -1,3 +1,6 @@
+from __future__ import annotations
+from server.core.rbac import Permission, require_permission  # noqa: E402
+
 """
 ALIS Organization Management Router — E01-S05
 
@@ -35,21 +38,20 @@ Invariants:
     - Suspending a parent does NOT cascade to children (explicit intent required)
     - All mutations are audit-logged
 """
-from __future__ import annotations
 
-import logging
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Header
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+import logging  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from typing import Any  # noqa: E402
+from uuid import uuid4  # noqa: E402
 
-from server.core.security import SessionManager
-from server.core.rbac import Role
-from server.core.audit import AuditLedger, AuditAction
-from server.db_service import execute_query, execute_transaction, safe_identifier
+from fastapi import APIRouter, Header  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from server.core.audit import AuditAction, AuditLedger  # noqa: E402
+from server.core.rbac import Role  # noqa: E402
+from server.core.security import SessionManager  # noqa: E402
+from server.db_service import execute_query, execute_transaction  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -60,23 +62,29 @@ router = APIRouter(prefix="/api/organizations", tags=["organizations"])
 # REQUEST MODELS
 # =============================================================================
 
+
 class CreateOrgRequest(BaseModel):
     name: str = Field(..., min_length=2, max_length=256)
-    code: str = Field(..., min_length=2, max_length=32,
-                      description="Short unique code within tenant, e.g. 'CSE', 'FINANCE'")
-    parent_id: Optional[str] = Field(None, description="Parent org ID for hierarchy")
+    code: str = Field(
+        ...,
+        min_length=2,
+        max_length=32,
+        description="Short unique code within tenant, e.g. 'CSE', 'FINANCE'",
+    )
+    parent_id: str | None = Field(None, description="Parent org ID for hierarchy")
 
 
 class UpdateOrgRequest(BaseModel):
-    name: Optional[str] = Field(None, min_length=2, max_length=256)
-    code: Optional[str] = Field(None, min_length=2, max_length=32)
+    name: str | None = Field(None, min_length=2, max_length=256)
+    code: str | None = Field(None, min_length=2, max_length=32)
 
 
 # =============================================================================
 # INTERNAL HELPERS
 # =============================================================================
 
-def _extract_token(authorization: Optional[str]) -> Optional[str]:
+
+def _extract_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split(" ", 1)
@@ -85,7 +93,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip()
 
 
-def _require_session(authorization: Optional[str]):
+def _require_session(authorization: str | None):
     token = _extract_token(authorization)
     if not token:
         return None, "Missing or malformed Authorization header"
@@ -95,7 +103,7 @@ def _require_session(authorization: Optional[str]):
     return session, None
 
 
-def _fetch_caller(session) -> Optional[Dict[str, Any]]:
+def _fetch_caller(session) -> dict[str, Any] | None:
     rows = execute_query(
         "SELECT id, username, role, status FROM users "
         "WHERE id = %s AND is_deleted = FALSE",
@@ -106,12 +114,12 @@ def _fetch_caller(session) -> Optional[Dict[str, Any]]:
 
 
 def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
-    body: Dict[str, Any] = {"error": message, "code": code}
+    body: dict[str, Any] = {"error": message, "code": code}
     body.update(extra)
     return JSONResponse(status_code=status, content=body)
 
 
-def _fetch_org(org_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+def _fetch_org(org_id: str, tenant_id: str) -> dict[str, Any] | None:
     """Fetch a non-deleted org by ID within a tenant."""
     rows = execute_query(
         "SELECT id, tenant_id, name, code, parent_id, status, "
@@ -123,7 +131,7 @@ def _fetch_org(org_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
-def _serialize_org(org: Dict[str, Any]) -> Dict[str, Any]:
+def _serialize_org(org: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": str(org["id"]),
         "tenant_id": str(org["tenant_id"]),
@@ -141,10 +149,12 @@ def _serialize_org(org: Dict[str, Any]) -> Dict[str, Any]:
 # POST /api/organizations — Create organization
 # =============================================================================
 
+
 @router.post("")
+@require_permission(Permission.CONFIG_WRITE)
 async def create_organization(
     body: CreateOrgRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Create a new organization unit within the tenant.
@@ -170,7 +180,11 @@ async def create_organization(
         return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
 
     if caller_role != Role.SUPER_ADMIN:
-        return _err(403, "SUPER_ADMIN role required to create organizations", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "SUPER_ADMIN role required to create organizations",
+            "ERR_LAYER5_ACCESS",
+        )
 
     # Validate parent exists (if provided)
     if body.parent_id:
@@ -178,7 +192,11 @@ async def create_organization(
         if not parent:
             return _err(404, "Parent organization not found", "ERR_PARENT_NOT_FOUND")
         if parent["status"] == "ARCHIVED":
-            return _err(409, "Cannot create a child under an archived organization", "ERR_PARENT_ARCHIVED")
+            return _err(
+                409,
+                "Cannot create a child under an archived organization",
+                "ERR_PARENT_ARCHIVED",
+            )
 
     org_id = str(uuid4())
     now = datetime.now(timezone.utc)
@@ -205,6 +223,7 @@ async def create_organization(
             ],
             tenant_id=session.tenant_id,
         )
+
     except Exception as e:
         if "uq_org_code_tenant" in str(e):
             return _err(
@@ -222,7 +241,11 @@ async def create_organization(
         entity_type="organization",
         entity_id=org_id,
         tenant_id=session.tenant_id,
-        metadata={"name": body.name, "code": body.code.upper(), "parent_id": body.parent_id},
+        metadata={
+            "name": body.name,
+            "code": body.code.upper(),
+            "parent_id": body.parent_id,
+        },
     )
 
     org = _fetch_org(org_id, session.tenant_id)
@@ -233,11 +256,13 @@ async def create_organization(
 # GET /api/organizations — List organizations
 # =============================================================================
 
+
 @router.get("")
+@require_permission(Permission.CONFIG_READ)
 async def list_organizations(
-    authorization: Optional[str] = Header(default=None),
-    parent_id: Optional[str] = None,
-    status: Optional[str] = None,
+    authorization: str | None = Header(default=None),
+    parent_id: str | None = None,
+    status: str | None = None,
 ) -> JSONResponse:
     """
     List organizations within the tenant.
@@ -281,7 +306,7 @@ async def list_organizations(
 
     where = " AND ".join(conditions)
     rows = execute_query(
-        f"SELECT id, tenant_id, name, code, parent_id, status, "
+        f"SELECT id, tenant_id, name, code, parent_id, status, "  # noqa: S608
         f"is_deleted, created_by, created_at, updated_at "
         f"FROM organizations WHERE {where} ORDER BY name ASC",
         tuple(params) if params else None,
@@ -290,7 +315,10 @@ async def list_organizations(
 
     return JSONResponse(
         status_code=200,
-        content={"total": len(rows), "organizations": [_serialize_org(r) for r in rows]},
+        content={
+            "total": len(rows),
+            "organizations": [_serialize_org(r) for r in rows],
+        },
     )
 
 
@@ -298,10 +326,12 @@ async def list_organizations(
 # GET /api/organizations/{org_id} — Get single organization
 # =============================================================================
 
+
 @router.get("/{org_id}")
+@require_permission(Permission.CONFIG_READ)
 async def get_organization(
     org_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Get a single organization by ID.
@@ -346,11 +376,13 @@ async def get_organization(
 # PATCH /api/organizations/{org_id} — Update organization
 # =============================================================================
 
+
 @router.patch("/{org_id}")
+@require_permission(Permission.CONFIG_WRITE)
 async def update_organization(
     org_id: str,
     body: UpdateOrgRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Update an organization's name or code.
@@ -372,7 +404,11 @@ async def update_organization(
         return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
 
     if caller_role != Role.SUPER_ADMIN:
-        return _err(403, "SUPER_ADMIN role required to update organizations", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "SUPER_ADMIN role required to update organizations",
+            "ERR_LAYER5_ACCESS",
+        )
 
     org = _fetch_org(org_id, session.tenant_id)
     if not org:
@@ -400,12 +436,22 @@ async def update_organization(
 
     try:
         execute_transaction(
-            [(f"UPDATE organizations SET {', '.join(fields)} WHERE id = %s", tuple(values))],
+            [
+                (
+                    f"UPDATE organizations SET {', '.join(fields)} WHERE id = %s",  # noqa: S608
+                    tuple(values),
+                )
+            ],
             tenant_id=session.tenant_id,
         )
+
     except Exception as e:
         if "uq_org_code_tenant" in str(e):
-            return _err(409, f"An organization with that code already exists", "ERR_DUPLICATE_ORG_CODE")
+            return _err(
+                409,
+                "An organization with that code already exists",
+                "ERR_DUPLICATE_ORG_CODE",
+            )
         logger.error(f"Failed to update organization: {e}")
         return _err(500, "Internal error updating organization", "ERR_INTERNAL")
 
@@ -427,10 +473,12 @@ async def update_organization(
 # POST /api/organizations/{org_id}/suspend — Suspend
 # =============================================================================
 
+
 @router.post("/{org_id}/suspend")
+@require_permission(Permission.CONFIG_WRITE)
 async def suspend_organization(
     org_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Suspend an organization (ACTIVE → SUSPENDED).
@@ -469,8 +517,12 @@ async def suspend_organization(
         )
 
     execute_transaction(
-        [("UPDATE organizations SET status = 'SUSPENDED', updated_at = %s WHERE id = %s",
-          (datetime.now(timezone.utc), org_id))],
+        [
+            (
+                "UPDATE organizations SET status = 'SUSPENDED', updated_at = %s WHERE id = %s",
+                (datetime.now(timezone.utc), org_id),
+            )
+        ],
         tenant_id=session.tenant_id,
     )
 
@@ -481,7 +533,11 @@ async def suspend_organization(
         entity_type="organization",
         entity_id=org_id,
         tenant_id=session.tenant_id,
-        metadata={"previous_state": "ACTIVE", "new_state": "SUSPENDED", "org_name": org["name"]},
+        metadata={
+            "previous_state": "ACTIVE",
+            "new_state": "SUSPENDED",
+            "org_name": org["name"],
+        },
     )
 
     return JSONResponse(
@@ -494,10 +550,12 @@ async def suspend_organization(
 # POST /api/organizations/{org_id}/activate — Reactivate
 # =============================================================================
 
+
 @router.post("/{org_id}/activate")
+@require_permission(Permission.CONFIG_WRITE)
 async def activate_organization(
     org_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Reactivate a suspended organization (SUSPENDED → ACTIVE).
@@ -530,14 +588,24 @@ async def activate_organization(
         return _err(404, "Organization not found", "ERR_ORG_NOT_FOUND")
 
     if org["status"] == "ARCHIVED":
-        return _err(409, "Archived organizations cannot be reactivated", "ERR_INVALID_STATE_TRANSITION")
+        return _err(
+            409,
+            "Archived organizations cannot be reactivated",
+            "ERR_INVALID_STATE_TRANSITION",
+        )
 
     if org["status"] == "ACTIVE":
-        return _err(409, "Organization is already active", "ERR_INVALID_STATE_TRANSITION")
+        return _err(
+            409, "Organization is already active", "ERR_INVALID_STATE_TRANSITION"
+        )
 
     execute_transaction(
-        [("UPDATE organizations SET status = 'ACTIVE', updated_at = %s WHERE id = %s",
-          (datetime.now(timezone.utc), org_id))],
+        [
+            (
+                "UPDATE organizations SET status = 'ACTIVE', updated_at = %s WHERE id = %s",
+                (datetime.now(timezone.utc), org_id),
+            )
+        ],
         tenant_id=session.tenant_id,
     )
 
@@ -548,7 +616,11 @@ async def activate_organization(
         entity_type="organization",
         entity_id=org_id,
         tenant_id=session.tenant_id,
-        metadata={"previous_state": "SUSPENDED", "new_state": "ACTIVE", "org_name": org["name"]},
+        metadata={
+            "previous_state": "SUSPENDED",
+            "new_state": "ACTIVE",
+            "org_name": org["name"],
+        },
     )
 
     return JSONResponse(
@@ -561,10 +633,12 @@ async def activate_organization(
 # DELETE /api/organizations/{org_id} — Soft-delete (ARCHIVED)
 # =============================================================================
 
+
 @router.delete("/{org_id}")
+@require_permission(Permission.CONFIG_WRITE)
 async def delete_organization(
     org_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Soft-delete an organization (status → ARCHIVED, is_deleted = TRUE).
@@ -592,7 +666,11 @@ async def delete_organization(
         return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
 
     if caller_role != Role.SUPER_ADMIN:
-        return _err(403, "SUPER_ADMIN role required to delete organizations", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "SUPER_ADMIN role required to delete organizations",
+            "ERR_LAYER5_ACCESS",
+        )
 
     org = _fetch_org(org_id, session.tenant_id)
     if not org:
@@ -634,7 +712,11 @@ async def delete_organization(
         entity_type="organization",
         entity_id=org_id,
         tenant_id=session.tenant_id,
-        metadata={"org_name": org["name"], "org_code": org["code"], "deleted_by": caller["username"]},
+        metadata={
+            "org_name": org["name"],
+            "org_code": org["code"],
+            "deleted_by": caller["username"],
+        },
     )
 
     return JSONResponse(

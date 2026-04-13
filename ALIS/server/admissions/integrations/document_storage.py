@@ -18,15 +18,12 @@ ALIS_DATA_DIR/uploads/ so development never breaks.
 
 from __future__ import annotations
 
-import io
 import logging
 import mimetypes
-import os
-import shutil
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 logger = logging.getLogger(__name__)
@@ -35,6 +32,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # PROVIDER ENUM
 # =============================================================================
+
 
 class StorageProvider(str, Enum):
     S3 = "S3"
@@ -46,32 +44,36 @@ class StorageProvider(str, Enum):
 # DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class UploadResult:
     """Result of a file upload."""
+
     success: bool
-    storage_key: str             # Full path/key in storage (e.g. org/applicant/doc.pdf)
-    storage_url: Optional[str]   # Public or pre-signed URL (None for local)
+    storage_key: str  # Full path/key in storage (e.g. org/applicant/doc.pdf)
+    storage_url: str | None  # Public or pre-signed URL (None for local)
     provider: str
     size_bytes: int = 0
     content_type: str = ""
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class DownloadResult:
     """Result of a file download."""
+
     success: bool
-    content: Optional[bytes] = None
+    content: bytes | None = None
     content_type: str = ""
     size_bytes: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class PresignedURL:
     """A pre-signed URL for upload or download."""
+
     url: str
     expires_in_seconds: int
     method: str  # GET or PUT
@@ -81,16 +83,18 @@ class PresignedURL:
 @dataclass
 class FileInfo:
     """Metadata about a file in storage."""
+
     storage_key: str
     size_bytes: int
     content_type: str
-    last_modified: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    last_modified: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
 # DOCUMENT STORAGE CLIENT
 # =============================================================================
+
 
 class DocumentStorageClient:
     """
@@ -124,6 +128,7 @@ class DocumentStorageClient:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
         self._provider = getattr(settings, "storage_provider", "LOCAL").upper()
         self._bucket = getattr(settings, "storage_bucket", "alis-documents")
@@ -150,7 +155,7 @@ class DocumentStorageClient:
         content: bytes,
         content_type: str = "",
         doc_type: str = "OTHER",
-        metadata: Optional[Dict[str, str]] = None,
+        metadata: dict[str, str] | None = None,
     ) -> UploadResult:
         """
         Upload a file to cloud storage.
@@ -159,7 +164,9 @@ class DocumentStorageClient:
         This ensures uniqueness and tenant isolation.
         """
         if not content_type:
-            content_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+            content_type = (
+                mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+            )
 
         # Build storage key
         unique_prefix = uuid4().hex[:8]
@@ -176,21 +183,23 @@ class DocumentStorageClient:
 
         if self._provider == StorageProvider.S3:
             return self._s3_upload(storage_key, content, content_type, file_metadata)
-        elif self._provider == StorageProvider.AZURE_BLOB:
+        if self._provider == StorageProvider.AZURE_BLOB:
             return self._azure_upload(storage_key, content, content_type, file_metadata)
-        else:
-            return self._local_upload(storage_key, content, content_type, file_metadata)
+        return self._local_upload(storage_key, content, content_type, file_metadata)
 
     def _s3_upload(
-        self, key: str, content: bytes, content_type: str, metadata: Dict[str, str]
+        self, key: str, content: bytes, content_type: str, metadata: dict[str, str]
     ) -> UploadResult:
         try:
             import boto3
+
             s3 = boto3.client(
                 "s3",
                 region_name=self._region,
                 aws_access_key_id=getattr(self._settings, "aws_access_key_id", None),
-                aws_secret_access_key=getattr(self._settings, "aws_secret_access_key", None),
+                aws_secret_access_key=getattr(
+                    self._settings, "aws_secret_access_key", None
+                ),
             )
             s3.put_object(
                 Bucket=self._bucket,
@@ -221,10 +230,11 @@ class DocumentStorageClient:
             )
 
     def _azure_upload(
-        self, key: str, content: bytes, content_type: str, metadata: Dict[str, str]
+        self, key: str, content: bytes, content_type: str, metadata: dict[str, str]
     ) -> UploadResult:
         try:
             from azure.storage.blob import BlobServiceClient, ContentSettings
+
             conn_str = self._settings.azure_storage_connection_string
             blob_service = BlobServiceClient.from_connection_string(conn_str)
             container = blob_service.get_container_client(self._bucket)
@@ -257,7 +267,7 @@ class DocumentStorageClient:
             )
 
     def _local_upload(
-        self, key: str, content: bytes, content_type: str, metadata: Dict[str, str]
+        self, key: str, content: bytes, content_type: str, metadata: dict[str, str]
     ) -> UploadResult:
         try:
             file_path = self._local_root / key
@@ -291,19 +301,21 @@ class DocumentStorageClient:
         """Download a file from storage."""
         if self._provider == StorageProvider.S3:
             return self._s3_download(storage_key)
-        elif self._provider == StorageProvider.AZURE_BLOB:
+        if self._provider == StorageProvider.AZURE_BLOB:
             return self._azure_download(storage_key)
-        else:
-            return self._local_download(storage_key)
+        return self._local_download(storage_key)
 
     def _s3_download(self, key: str) -> DownloadResult:
         try:
             import boto3
+
             s3 = boto3.client(
                 "s3",
                 region_name=self._region,
                 aws_access_key_id=getattr(self._settings, "aws_access_key_id", None),
-                aws_secret_access_key=getattr(self._settings, "aws_secret_access_key", None),
+                aws_secret_access_key=getattr(
+                    self._settings, "aws_secret_access_key", None
+                ),
             )
             response = s3.get_object(Bucket=self._bucket, Key=key)
             content = response["Body"].read()
@@ -320,6 +332,7 @@ class DocumentStorageClient:
     def _azure_download(self, key: str) -> DownloadResult:
         try:
             from azure.storage.blob import BlobServiceClient
+
             conn_str = self._settings.azure_storage_connection_string
             blob_service = BlobServiceClient.from_connection_string(conn_str)
             blob = blob_service.get_container_client(self._bucket).get_blob_client(key)
@@ -359,42 +372,43 @@ class DocumentStorageClient:
 
     def get_download_url(
         self, storage_key: str, expires_in: int = 3600
-    ) -> Optional[PresignedURL]:
+    ) -> PresignedURL | None:
         """
         Generate a pre-signed download URL.
         Only supported for S3 and Azure Blob. Returns None for local storage.
         """
         if self._provider == StorageProvider.S3:
             return self._s3_presigned_url(storage_key, expires_in, "get_object")
-        elif self._provider == StorageProvider.AZURE_BLOB:
+        if self._provider == StorageProvider.AZURE_BLOB:
             return self._azure_presigned_url(storage_key, expires_in, "r")
-        else:
-            logger.warning("Pre-signed URLs not supported for LOCAL storage")
-            return None
+        logger.warning("Pre-signed URLs not supported for LOCAL storage")
+        return None
 
     def get_upload_url(
         self, storage_key: str, expires_in: int = 3600
-    ) -> Optional[PresignedURL]:
+    ) -> PresignedURL | None:
         """
         Generate a pre-signed upload URL for direct browser uploads.
         Reduces server load — the file goes directly from browser to S3/Azure.
         """
         if self._provider == StorageProvider.S3:
             return self._s3_presigned_url(storage_key, expires_in, "put_object")
-        else:
-            logger.warning("Pre-signed upload URLs only supported for S3")
-            return None
+        logger.warning("Pre-signed upload URLs only supported for S3")
+        return None
 
     def _s3_presigned_url(
         self, key: str, expires_in: int, method: str
-    ) -> Optional[PresignedURL]:
+    ) -> PresignedURL | None:
         try:
             import boto3
+
             s3 = boto3.client(
                 "s3",
                 region_name=self._region,
                 aws_access_key_id=getattr(self._settings, "aws_access_key_id", None),
-                aws_secret_access_key=getattr(self._settings, "aws_secret_access_key", None),
+                aws_secret_access_key=getattr(
+                    self._settings, "aws_secret_access_key", None
+                ),
             )
             url = s3.generate_presigned_url(
                 method,
@@ -413,14 +427,12 @@ class DocumentStorageClient:
 
     def _azure_presigned_url(
         self, key: str, expires_in: int, permission: str
-    ) -> Optional[PresignedURL]:
+    ) -> PresignedURL | None:
         try:
             from datetime import datetime, timedelta, timezone
-            from azure.storage.blob import (
-                BlobServiceClient, BlobSasPermissions, generate_blob_sas
-            )
 
-            conn_str = self._settings.azure_storage_connection_string
+            from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+
             account_name = self._settings.azure_storage_account_name
             account_key = self._settings.azure_storage_account_key
 
@@ -454,19 +466,21 @@ class DocumentStorageClient:
         """
         if self._provider == StorageProvider.S3:
             return self._s3_delete(storage_key)
-        elif self._provider == StorageProvider.AZURE_BLOB:
+        if self._provider == StorageProvider.AZURE_BLOB:
             return self._azure_delete(storage_key)
-        else:
-            return self._local_delete(storage_key)
+        return self._local_delete(storage_key)
 
     def _s3_delete(self, key: str) -> bool:
         try:
             import boto3
+
             s3 = boto3.client(
                 "s3",
                 region_name=self._region,
                 aws_access_key_id=getattr(self._settings, "aws_access_key_id", None),
-                aws_secret_access_key=getattr(self._settings, "aws_secret_access_key", None),
+                aws_secret_access_key=getattr(
+                    self._settings, "aws_secret_access_key", None
+                ),
             )
             s3.delete_object(Bucket=self._bucket, Key=key)
             logger.info("S3: deleted [%s]", key)
@@ -478,6 +492,7 @@ class DocumentStorageClient:
     def _azure_delete(self, key: str) -> bool:
         try:
             from azure.storage.blob import BlobServiceClient
+
             conn_str = self._settings.azure_storage_connection_string
             blob_service = BlobServiceClient.from_connection_string(conn_str)
             blob = blob_service.get_container_client(self._bucket).get_blob_client(key)
@@ -495,9 +510,8 @@ class DocumentStorageClient:
                 file_path.unlink()
                 logger.info("Local: deleted [%s]", key)
                 return True
-            else:
-                logger.warning("Local: file not found for deletion [%s]", key)
-                return False
+            logger.warning("Local: file not found for deletion [%s]", key)
+            return False
         except Exception as exc:
             logger.error("Local: delete failed [%s] — %s", key, exc)
             return False
@@ -507,8 +521,8 @@ class DocumentStorageClient:
     # -------------------------------------------------------------------------
 
     def list_files(
-        self, org_id: str, applicant_id: Optional[str] = None
-    ) -> List[FileInfo]:
+        self, org_id: str, applicant_id: str | None = None
+    ) -> list[FileInfo]:
         """
         List all files stored for an org (optionally filtered by applicant).
         """
@@ -518,54 +532,65 @@ class DocumentStorageClient:
 
         if self._provider == StorageProvider.S3:
             return self._s3_list(prefix)
-        elif self._provider == StorageProvider.AZURE_BLOB:
+        if self._provider == StorageProvider.AZURE_BLOB:
             return self._azure_list(prefix)
-        else:
-            return self._local_list(prefix)
+        return self._local_list(prefix)
 
-    def _s3_list(self, prefix: str) -> List[FileInfo]:
+    def _s3_list(self, prefix: str) -> list[FileInfo]:
         try:
             import boto3
+
             s3 = boto3.client(
                 "s3",
                 region_name=self._region,
                 aws_access_key_id=getattr(self._settings, "aws_access_key_id", None),
-                aws_secret_access_key=getattr(self._settings, "aws_secret_access_key", None),
+                aws_secret_access_key=getattr(
+                    self._settings, "aws_secret_access_key", None
+                ),
             )
-            response = s3.list_objects_v2(Bucket=self._bucket, Prefix=prefix, MaxKeys=1000)
+            response = s3.list_objects_v2(
+                Bucket=self._bucket, Prefix=prefix, MaxKeys=1000
+            )
             files = []
             for obj in response.get("Contents", []):
-                files.append(FileInfo(
-                    storage_key=obj["Key"],
-                    size_bytes=obj["Size"],
-                    content_type="",  # Would need head_object for this
-                    last_modified=str(obj.get("LastModified", "")),
-                ))
+                files.append(
+                    FileInfo(
+                        storage_key=obj["Key"],
+                        size_bytes=obj["Size"],
+                        content_type="",  # Would need head_object for this
+                        last_modified=str(obj.get("LastModified", "")),
+                    )
+                )
             return files
         except Exception as exc:
             logger.error("S3: list failed [%s] — %s", prefix, exc)
             return []
 
-    def _azure_list(self, prefix: str) -> List[FileInfo]:
+    def _azure_list(self, prefix: str) -> list[FileInfo]:
         try:
             from azure.storage.blob import BlobServiceClient
+
             conn_str = self._settings.azure_storage_connection_string
             blob_service = BlobServiceClient.from_connection_string(conn_str)
             container = blob_service.get_container_client(self._bucket)
             files = []
             for blob in container.list_blobs(name_starts_with=prefix):
-                files.append(FileInfo(
-                    storage_key=blob.name,
-                    size_bytes=blob.size or 0,
-                    content_type=blob.content_settings.content_type or "",
-                    last_modified=str(blob.last_modified) if blob.last_modified else None,
-                ))
+                files.append(
+                    FileInfo(
+                        storage_key=blob.name,
+                        size_bytes=blob.size or 0,
+                        content_type=blob.content_settings.content_type or "",
+                        last_modified=str(blob.last_modified)
+                        if blob.last_modified
+                        else None,
+                    )
+                )
             return files
         except Exception as exc:
             logger.error("Azure: list failed [%s] — %s", prefix, exc)
             return []
 
-    def _local_list(self, prefix: str) -> List[FileInfo]:
+    def _local_list(self, prefix: str) -> list[FileInfo]:
         try:
             search_dir = self._local_root / prefix
             if not search_dir.exists():
@@ -575,11 +600,13 @@ class DocumentStorageClient:
                 if file_path.is_file():
                     rel = file_path.relative_to(self._local_root)
                     content_type = mimetypes.guess_type(str(file_path))[0] or ""
-                    files.append(FileInfo(
-                        storage_key=str(rel).replace("\\", "/"),
-                        size_bytes=file_path.stat().st_size,
-                        content_type=content_type,
-                    ))
+                    files.append(
+                        FileInfo(
+                            storage_key=str(rel).replace("\\", "/"),
+                            size_bytes=file_path.stat().st_size,
+                            content_type=content_type,
+                        )
+                    )
             return files
         except Exception as exc:
             logger.error("Local: list failed [%s] — %s", prefix, exc)

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.domain_events import DomainEvent, DomainEventBus
-from server.core.exceptions import BusinessRuleViolation, NotFoundError
+from server.core.audit import AuditAction, AuditLog
+from server.core.exceptions import BusinessRuleViolation
 from server.core.policy_engine import policy_engine
 from server.db_service import execute_query, execute_transaction
 
@@ -24,13 +24,14 @@ logger = logging.getLogger(__name__)
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class COPOStrength(str, Enum):
     H = "H"
     M = "M"
     L = "L"
 
 
-_STRENGTH_WEIGHTS: Dict[str, int] = {
+_STRENGTH_WEIGHTS: dict[str, int] = {
     COPOStrength.H: 3,
     COPOStrength.M: 2,
     COPOStrength.L: 1,
@@ -41,8 +42,8 @@ _STRENGTH_WEIGHTS: Dict[str, int] = {
 # Service
 # ---------------------------------------------------------------------------
 
-class OBEService:
 
+class OBEService:
     # ------------------------------------------------------------------
     # Program Outcomes
     # ------------------------------------------------------------------
@@ -54,27 +55,49 @@ class OBEService:
         program_id: str,
         code: str,
         description: str,
-        domain: Optional[str] = None,
-        nba_mapping: Optional[str] = None,
+        domain: str | None = None,
+        nba_mapping: str | None = None,
     ) -> dict:
         """Create a Program Outcome (PO). ON CONFLICT DO NOTHING on org+program+code."""
         po_id = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO program_outcomes
                     (id, org_id, program_id, code, description, domain, nba_mapping, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (org_id, program_id, code) DO NOTHING
                 """,
-                (po_id, org_id, program_id, code, description, domain, nba_mapping),
-            )
-        ])
+                    (po_id, org_id, program_id, code, description, domain, nba_mapping),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="program_outcome",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "create_program_outcome"},
+        )
         rows = execute_query(
             "SELECT * FROM program_outcomes WHERE org_id = %s AND program_id = %s AND code = %s",
             (org_id, program_id, code),
         )
-        return rows[0] if rows else {"id": po_id, "org_id": org_id, "program_id": program_id, "code": code, "description": description}
+        return (
+            rows[0]
+            if rows
+            else {
+                "id": po_id,
+                "org_id": org_id,
+                "program_id": program_id,
+                "code": code,
+                "description": description,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Course Outcomes
@@ -87,25 +110,47 @@ class OBEService:
         course_id: str,
         code: str,
         description: str,
-        bloom_level: Optional[str] = None,
+        bloom_level: str | None = None,
     ) -> dict:
         """Create a Course Outcome (CO)."""
         co_id = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO course_outcomes
                     (id, org_id, course_id, code, description, bloom_level, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, NOW())
                 """,
-                (co_id, org_id, course_id, code, description, bloom_level),
-            )
-        ])
+                    (co_id, org_id, course_id, code, description, bloom_level),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="course_outcome",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "create_course_outcome"},
+        )
         rows = execute_query(
             "SELECT * FROM course_outcomes WHERE id = %s AND org_id = %s",
             (co_id, org_id),
         )
-        return rows[0] if rows else {"id": co_id, "org_id": org_id, "course_id": course_id, "code": code, "description": description}
+        return (
+            rows[0]
+            if rows
+            else {
+                "id": co_id,
+                "org_id": org_id,
+                "course_id": course_id,
+                "code": code,
+                "description": description,
+            }
+        )
 
     # ------------------------------------------------------------------
     # CO-PO Mapping
@@ -119,7 +164,7 @@ class OBEService:
         co_id: str,
         po_id: str,
         strength: str,
-        justification: Optional[str] = None,
+        justification: str | None = None,
     ) -> dict:
         """Map a CO to a PO with H/M/L strength. Upserts on (co_id, po_id)."""
         if strength not in ("H", "M", "L"):
@@ -128,9 +173,10 @@ class OBEService:
                 code="OBE_INVALID_STRENGTH",
             )
         mapping_id = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO co_po_mapping
                     (id, org_id, course_id, co_id, po_id, strength, justification, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
@@ -140,22 +186,45 @@ class OBEService:
                     justification = EXCLUDED.justification,
                     updated_at = NOW()
                 """,
-                (mapping_id, org_id, course_id, co_id, po_id, strength, justification),
-            )
-        ])
+                    (
+                        mapping_id,
+                        org_id,
+                        course_id,
+                        co_id,
+                        po_id,
+                        strength,
+                        justification,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="map_co_to_po",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "map_co_to_po"},
+        )
         rows = execute_query(
             "SELECT * FROM co_po_mapping WHERE co_id = %s AND po_id = %s",
             (co_id, po_id),
         )
-        return rows[0] if rows else {
-            "id": mapping_id,
-            "org_id": org_id,
-            "course_id": course_id,
-            "co_id": co_id,
-            "po_id": po_id,
-            "strength": strength,
-            "justification": justification,
-        }
+        return (
+            rows[0]
+            if rows
+            else {
+                "id": mapping_id,
+                "org_id": org_id,
+                "course_id": course_id,
+                "co_id": co_id,
+                "po_id": po_id,
+                "strength": strength,
+                "justification": justification,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Assessment Rubrics
@@ -173,31 +242,54 @@ class OBEService:
     ) -> dict:
         """Define how an assessment type contributes to a CO's attainment."""
         rubric_id = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO assessment_rubrics
                     (id, org_id, course_id, assessment_type, co_id,
                      max_marks, co_weight_pct, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 """,
-                (rubric_id, org_id, course_id, assessment_type, co_id,
-                 max_marks, co_weight_pct),
-            )
-        ])
+                    (
+                        rubric_id,
+                        org_id,
+                        course_id,
+                        assessment_type,
+                        co_id,
+                        max_marks,
+                        co_weight_pct,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="assessment_rubric",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "set_assessment_rubric"},
+        )
         rows = execute_query(
             "SELECT * FROM assessment_rubrics WHERE id = %s AND org_id = %s",
             (rubric_id, org_id),
         )
-        return rows[0] if rows else {
-            "id": rubric_id,
-            "org_id": org_id,
-            "course_id": course_id,
-            "assessment_type": assessment_type,
-            "co_id": co_id,
-            "max_marks": max_marks,
-            "co_weight_pct": co_weight_pct,
-        }
+        return (
+            rows[0]
+            if rows
+            else {
+                "id": rubric_id,
+                "org_id": org_id,
+                "course_id": course_id,
+                "assessment_type": assessment_type,
+                "co_id": co_id,
+                "max_marks": max_marks,
+                "co_weight_pct": co_weight_pct,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Attainment Computation
@@ -245,7 +337,7 @@ class OBEService:
         )
 
         results = []
-        ops: List[tuple] = []
+        ops: list[tuple] = []
 
         for m in mappings:
             co_id = m["co_id"]
@@ -284,8 +376,9 @@ class OBEService:
             weighted_attainment = attainment_pct * strength_weight / 3.0
 
             record_id = str(uuid4())
-            ops.append((
-                """
+            ops.append(
+                (
+                    """
                 INSERT INTO attainment_records
                     (id, org_id, program_id, course_id, semester_id,
                      co_id, po_id, strength, strength_weight,
@@ -306,30 +399,52 @@ class OBEService:
                     policy_version_id  = EXCLUDED.policy_version_id,
                     computed_at        = NOW()
                 """,
-                (
-                    record_id, org_id, program_id, course_id, semester_id,
-                    co_id, po_id, strength, strength_weight,
-                    students_assessed, students_attained,
-                    attainment_pct, weighted_attainment,
-                    policy_version_id,
-                ),
-            ))
+                    (
+                        record_id,
+                        org_id,
+                        program_id,
+                        course_id,
+                        semester_id,
+                        co_id,
+                        po_id,
+                        strength,
+                        strength_weight,
+                        students_assessed,
+                        students_attained,
+                        attainment_pct,
+                        weighted_attainment,
+                        policy_version_id,
+                    ),
+                )
+            )
 
-            results.append({
-                "co_id": co_id,
-                "co_code": m["co_code"],
-                "po_id": po_id,
-                "po_code": m["po_code"],
-                "strength": strength,
-                "students_assessed": students_assessed,
-                "students_attained": students_attained,
-                "attainment_pct": round(attainment_pct, 2),
-                "weighted_attainment": round(weighted_attainment, 2),
-                "policy_version_id": policy_version_id,
-            })
+            results.append(
+                {
+                    "co_id": co_id,
+                    "co_code": m["co_code"],
+                    "po_id": po_id,
+                    "po_code": m["po_code"],
+                    "strength": strength,
+                    "students_assessed": students_assessed,
+                    "students_attained": students_attained,
+                    "attainment_pct": round(attainment_pct, 2),
+                    "weighted_attainment": round(weighted_attainment, 2),
+                    "policy_version_id": policy_version_id,
+                }
+            )
 
         if ops:
             execute_transaction(ops)
+
+            AuditLog.log(
+                action=AuditAction.UPDATE,
+                actor_id=actor_id,
+                actor_role="system",
+                entity_type="compute_attainment",
+                entity_id=record_id,
+                tenant_id=org_id,
+                metadata={"source": "compute_attainment"},
+            )
 
         return results
 
@@ -354,7 +469,7 @@ class OBEService:
         )
 
         # Group by CO
-        co_map: Dict[str, Any] = {}
+        co_map: dict[str, Any] = {}
         for r in rows:
             cid = r["co_id"]
             if cid not in co_map:
@@ -364,11 +479,13 @@ class OBEService:
                     "description": r["co_description"],
                     "po_mappings": [],
                 }
-            co_map[cid]["po_mappings"].append({
-                "po_id": r["po_id"],
-                "po_code": r["po_code"],
-                "strength": r["strength"],
-            })
+            co_map[cid]["po_mappings"].append(
+                {
+                    "po_id": r["po_id"],
+                    "po_code": r["po_code"],
+                    "strength": r["strength"],
+                }
+            )
 
         return {
             "course_id": course_id,
@@ -430,12 +547,14 @@ class OBEService:
             attainment = entry["avg_attainment_pct"]
             target = entry["target_pct"]
             gap = target - attainment
-            gaps.append({
-                "po_id": entry["po_id"],
-                "po_code": entry["po_code"],
-                "attainment_pct": attainment,
-                "target_pct": target,
-                "gap_pct": round(gap, 2),
-                "status": "MET" if attainment >= target else "GAP",
-            })
+            gaps.append(
+                {
+                    "po_id": entry["po_id"],
+                    "po_code": entry["po_code"],
+                    "attainment_pct": attainment,
+                    "target_pct": target,
+                    "gap_pct": round(gap, 2),
+                    "status": "MET" if attainment >= target else "GAP",
+                }
+            )
         return gaps

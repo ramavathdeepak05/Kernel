@@ -53,29 +53,38 @@ Endpoints:
            POST   /hr/employee-departments
            DELETE /hr/employee-departments/{assignment_id}
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
-
 from server.core.rbac import Permission, require_permission
-
-from server.hr.staff        import StaffService
-from server.hr.leave        import LeaveTypeService, LeaveService
-from server.hr.payroll      import PayrollComponentService, SalaryStructureService, PayslipService
-from server.hr.performance  import PerformanceReviewService
-from server.hr.attendance   import StaffAttendanceService
-from server.hr.analytics    import HRAnalyticsService
-from server.hr.models       import (
-    StaffProfileCreate, StaffProfileUpdate,
-    LeaveTypeCreate, LeaveRequestCreate, LeaveDecision,
-    PayrollComponentCreate, SalaryStructureCreate, PayslipGenerate,
-    PerformanceReviewCreate, PerformanceReviewUpdate,
-    StaffAttendanceMark, StaffAttendanceBulk,
+from server.hr.analytics import HRAnalyticsService
+from server.hr.attendance import StaffAttendanceService
+from server.hr.leave import LeaveService, LeaveTypeService
+from server.hr.models import (
+    LeaveDecision,
+    LeaveRequestCreate,
+    LeaveTypeCreate,
+    PayrollComponentCreate,
+    PayslipGenerate,
+    PerformanceReviewCreate,
+    PerformanceReviewUpdate,
+    SalaryStructureCreate,
+    StaffAttendanceBulk,
+    StaffAttendanceMark,
+    StaffProfileCreate,
+    StaffProfileUpdate,
 )
+from server.hr.payroll import (
+    PayrollComponentService,
+    PayslipService,
+    SalaryStructureService,
+)
+from server.hr.performance import PerformanceReviewService
+from server.hr.staff import StaffService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/hr", tags=["hr"])
@@ -84,13 +93,17 @@ router = APIRouter(prefix="/api/v1/hr", tags=["hr"])
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
 
+
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
 
+
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from datetime import date, datetime
+    from datetime import time as _time
     from decimal import Decimal
-    from datetime import datetime, date, time as _time
+
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -108,6 +121,7 @@ def _jsonify(obj):
 # E08-S01 — Staff Profiles
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/staff", status_code=201)
 @require_permission(Permission.STAFF_CREATE)
 async def create_staff(request: Request, body: StaffProfileCreate) -> JSONResponse:
@@ -119,8 +133,8 @@ async def create_staff(request: Request, body: StaffProfileCreate) -> JSONRespon
 @require_permission(Permission.STAFF_READ)
 async def list_staff(
     request: Request,
-    department: Optional[str] = Query(None),
-    employment_type: Optional[str] = Query(None),
+    department: str | None = Query(None),
+    employment_type: str | None = Query(None),
     is_active: bool = Query(True),
 ) -> JSONResponse:
     items = StaffService.list(_org(request), department, employment_type, is_active)
@@ -135,7 +149,9 @@ async def get_staff(request: Request, staff_id: str) -> JSONResponse:
 
 @router.patch("/staff/{staff_id}")
 @require_permission(Permission.STAFF_UPDATE)
-async def update_staff(request: Request, staff_id: str, body: StaffProfileUpdate) -> JSONResponse:
+async def update_staff(
+    request: Request, staff_id: str, body: StaffProfileUpdate
+) -> JSONResponse:
     result = StaffService.update(_org(request), staff_id, body, _actor(request))
     return JSONResponse(content=result)
 
@@ -155,13 +171,16 @@ async def staff_workload(
     request: Request, staff_id: str, academic_year: str = Query(...)
 ) -> JSONResponse:
     return JSONResponse(
-        content=StaffService.get_workload_summary(_org(request), staff_id, academic_year)
+        content=StaffService.get_workload_summary(
+            _org(request), staff_id, academic_year
+        )
     )
 
 
 # ──────────────────────────────────────────────────────────────
 # E08-S03 — Leave Management
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/leave-types", status_code=201)
 @require_permission(Permission.STAFF_CREATE)
@@ -181,6 +200,7 @@ async def list_leave_types(request: Request) -> JSONResponse:
 @require_permission(Permission.STAFF_READ)
 async def apply_leave(request: Request, body: LeaveRequestCreate) -> JSONResponse:
     from server.hr.staff import StaffService as SS
+
     staff = SS.get_by_user(_org(request), _actor(request))
     result = LeaveService.apply(_org(request), str(staff["id"]), body, _actor(request))
     return JSONResponse(status_code=201, content=result)
@@ -198,7 +218,7 @@ async def list_pending_leave(request: Request) -> JSONResponse:
 async def list_staff_leave(
     request: Request,
     staff_id: str,
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
 ) -> JSONResponse:
     items = LeaveService.list_for_staff(_org(request), staff_id, status)
     return JSONResponse(content={"leave_requests": items})
@@ -233,6 +253,7 @@ async def cancel_leave(request: Request, request_id: str) -> JSONResponse:
 # E08-S04 — Payroll
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/payroll/components", status_code=201)
 @require_permission(Permission.PAYROLL_PROCESS)
 async def create_payroll_component(
@@ -262,7 +283,9 @@ async def create_salary_structure(
 @require_permission(Permission.PAYROLL_PROCESS)
 async def generate_payslip(request: Request, body: dict) -> JSONResponse:
     req = PayslipGenerate(month=body["month"], year=body["year"])
-    result = PayslipService.generate(_org(request), body["staff_id"], req, _actor(request))
+    result = PayslipService.generate(
+        _org(request), body["staff_id"], req, _actor(request)
+    )
     return JSONResponse(status_code=201, content=result)
 
 
@@ -287,16 +310,21 @@ async def payroll_monthly_summary(
     month: int = Query(...),
     year: int = Query(...),
 ) -> JSONResponse:
-    return JSONResponse(content=PayslipService.monthly_summary(_org(request), month, year))
+    return JSONResponse(
+        content=PayslipService.monthly_summary(_org(request), month, year)
+    )
 
 
 # ──────────────────────────────────────────────────────────────
 # E08-S05 — Performance Reviews
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/reviews", status_code=201)
 @require_permission(Permission.STAFF_UPDATE)
-async def create_review(request: Request, body: PerformanceReviewCreate) -> JSONResponse:
+async def create_review(
+    request: Request, body: PerformanceReviewCreate
+) -> JSONResponse:
     result = PerformanceReviewService.create(_org(request), body, _actor(request))
     return JSONResponse(status_code=201, content=result)
 
@@ -306,7 +334,9 @@ async def create_review(request: Request, body: PerformanceReviewCreate) -> JSON
 async def update_review(
     request: Request, review_id: str, body: PerformanceReviewUpdate
 ) -> JSONResponse:
-    result = PerformanceReviewService.update(_org(request), review_id, body, _actor(request))
+    result = PerformanceReviewService.update(
+        _org(request), review_id, body, _actor(request)
+    )
     return JSONResponse(content=result)
 
 
@@ -328,6 +358,7 @@ async def list_staff_reviews(request: Request, staff_id: str) -> JSONResponse:
 # E08-S06 — Staff Attendance
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/attendance/mark")
 @require_permission(Permission.STAFF_UPDATE)
 async def mark_attendance(request: Request, body: StaffAttendanceMark) -> JSONResponse:
@@ -337,7 +368,9 @@ async def mark_attendance(request: Request, body: StaffAttendanceMark) -> JSONRe
 
 @router.post("/attendance/bulk")
 @require_permission(Permission.STAFF_UPDATE)
-async def bulk_mark_attendance(request: Request, body: StaffAttendanceBulk) -> JSONResponse:
+async def bulk_mark_attendance(
+    request: Request, body: StaffAttendanceBulk
+) -> JSONResponse:
     result = StaffAttendanceService.bulk_mark(_org(request), body, _actor(request))
     return JSONResponse(content=result)
 
@@ -358,7 +391,9 @@ async def staff_monthly_attendance(
     year: int = Query(...),
 ) -> JSONResponse:
     return JSONResponse(
-        content=StaffAttendanceService.get_monthly_summary(_org(request), staff_id, month, year)
+        content=StaffAttendanceService.get_monthly_summary(
+            _org(request), staff_id, month, year
+        )
     )
 
 
@@ -376,6 +411,7 @@ async def department_attendance_summary(
 # ──────────────────────────────────────────────────────────────
 # E08-S07 — HR Analytics
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/analytics/workload")
 @require_permission(Permission.STAFF_READ)
@@ -397,7 +433,9 @@ async def leave_patterns(request: Request, year: int = Query(...)) -> JSONRespon
 async def department_performance(
     request: Request, review_period: str = Query(...)
 ) -> JSONResponse:
-    items = HRAnalyticsService.department_performance_summary(_org(request), review_period)
+    items = HRAnalyticsService.department_performance_summary(
+        _org(request), review_period
+    )
     return JSONResponse(content={"departments": items})
 
 
@@ -415,17 +453,21 @@ async def hr_ai_insights(
 # EC-HR-01 — Visiting Faculty Session Billing
 # ──────────────────────────────────────────────────────────────
 
-from server.hr.visiting_faculty_sessions import (
-    VisitingFacultySessionService,
+from server.hr.visiting_faculty_sessions import (  # noqa: E402
     SessionCreate,
     SessionOTPConfirm,
+    VisitingFacultySessionService,
 )
 
 
 @router.post("/visiting-faculty/sessions", status_code=201)
 @require_permission(Permission.STAFF_CREATE)
-async def create_visiting_session(request: Request, body: SessionCreate) -> JSONResponse:
-    result = VisitingFacultySessionService.create_session(_org(request), body, _actor(request))
+async def create_visiting_session(
+    request: Request, body: SessionCreate
+) -> JSONResponse:
+    result = VisitingFacultySessionService.create_session(
+        _org(request), body, _actor(request)
+    )
     return JSONResponse(status_code=201, content=_jsonify(result))
 
 
@@ -434,10 +476,11 @@ async def create_visiting_session(request: Request, body: SessionCreate) -> JSON
 async def list_visiting_sessions(
     request: Request,
     faculty_id: str,
-    month: Optional[str] = Query(None, description="YYYY-MM-DD — any day in target month"),
+    month: str | None = Query(None, description="YYYY-MM-DD — any day in target month"),
     payable_only: bool = Query(False),
 ) -> JSONResponse:
     from datetime import date as _date
+
     month_date = _date.fromisoformat(month) if month else None
     items = VisitingFacultySessionService.list_sessions(
         _org(request), faculty_id, month_date, payable_only
@@ -487,9 +530,12 @@ async def cancel_visiting_session(request: Request, session_id: str) -> JSONResp
 async def generate_visiting_payroll_input(
     request: Request,
     faculty_id: str,
-    payroll_month: str = Query(..., description="YYYY-MM-DD — first day of payroll month"),
+    payroll_month: str = Query(
+        ..., description="YYYY-MM-DD — first day of payroll month"
+    ),
 ) -> JSONResponse:
     from datetime import date as _date
+
     result = VisitingFacultySessionService.generate_payroll_input(
         _org(request), faculty_id, _date.fromisoformat(payroll_month), _actor(request)
     )
@@ -500,9 +546,9 @@ async def generate_visiting_payroll_input(
 # EC-HR-03 — Employee Department Assignments (shared faculty)
 # ──────────────────────────────────────────────────────────────
 
-from server.hr.employee_departments import (
-    EmployeeDepartmentService,
+from server.hr.employee_departments import (  # noqa: E402
     DepartmentAssignmentCreate,
+    EmployeeDepartmentService,
 )
 
 
@@ -511,7 +557,9 @@ from server.hr.employee_departments import (
 async def get_employee_departments(
     request: Request, staff_id: str, active_only: bool = Query(True)
 ) -> JSONResponse:
-    items = EmployeeDepartmentService.list_assignments(_org(request), staff_id, active_only)
+    items = EmployeeDepartmentService.list_assignments(
+        _org(request), staff_id, active_only
+    )
     return JSONResponse(content={"assignments": _jsonify(items), "total": len(items)})
 
 
@@ -524,10 +572,10 @@ async def assign_employee_department(
     return JSONResponse(status_code=201, content=_jsonify(result))
 
 
-@router.delete("/employee-departments/{assignment_id}", status_code=204, response_model=None)
+@router.delete(
+    "/employee-departments/{assignment_id}", status_code=204, response_model=None
+)
 @require_permission(Permission.STAFF_UPDATE)
-async def remove_employee_department(
-    request: Request, assignment_id: str
-) -> Response:
+async def remove_employee_department(request: Request, assignment_id: str) -> Response:
     EmployeeDepartmentService.remove(_org(request), assignment_id, _actor(request))
     return Response(status_code=204)

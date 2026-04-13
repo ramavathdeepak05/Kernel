@@ -9,12 +9,12 @@ Flow:
      - Generate payslip record (+ PDF via ReportLab)
      - Status: DRAFT → PROCESSED → PAID
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from io import BytesIO
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 class PayrollComponentService:
-
     @classmethod
     def create(cls, org_id: str, req: PayrollComponentCreate, actor_id: str) -> dict:
         existing = execute_query(
@@ -34,19 +33,42 @@ class PayrollComponentService:
             (org_id, req.code.upper()),
         )
         if existing:
-            raise BusinessRuleViolation(message=f"Component code {req.code} already exists")
+            raise BusinessRuleViolation(
+                message=f"Component code {req.code} already exists"
+            )
 
         cid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO payroll_components
                 (id, org_id, name, code, component_type, calc_type, value, is_taxable)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (cid, org_id, req.name, req.code.upper(),
-             req.component_type.value, req.calc_type.value,
-             req.value, req.is_taxable),
-        )])
+                    (
+                        cid,
+                        org_id,
+                        req.name,
+                        req.code.upper(),
+                        req.component_type.value,
+                        req.calc_type.value,
+                        req.value,
+                        req.is_taxable,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="create",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "create"},
+        )
         rows = execute_query("SELECT * FROM payroll_components WHERE id = %s", (cid,))
         return dict(rows[0])
 
@@ -60,36 +82,58 @@ class PayrollComponentService:
 
 
 class SalaryStructureService:
-
     @classmethod
     def create(cls, org_id: str, req: SalaryStructureCreate, actor_id: str) -> dict:
         # Close any existing open structure
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE staff_salary_structures
             SET effective_to = %s::date - INTERVAL '1 day'
             WHERE staff_id = %s AND org_id = %s AND effective_to IS NULL
             """,
-            (req.effective_from, req.staff_id, org_id),
-        )])
+                    (req.effective_from, req.staff_id, org_id),
+                )
+            ]
+        )
 
         sid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO staff_salary_structures
                 (id, org_id, staff_id, basic_salary, components, effective_from, created_by)
             VALUES (%s, %s, %s, %s, %s::jsonb, %s, %s)
             """,
-            (sid, org_id, req.staff_id, req.basic_salary,
-             json.dumps(req.components), req.effective_from, actor_id),
-        )])
+                    (
+                        sid,
+                        org_id,
+                        req.staff_id,
+                        req.basic_salary,
+                        json.dumps(req.components),
+                        req.effective_from,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="salary_structure", entity_id=sid, org_id=org_id,
-                     module="E08-S04",
-                     metadata={"staff_id": req.staff_id, "basic": req.basic_salary})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="salary_structure",
+            entity_id=sid,
+            org_id=org_id,
+            module="E08-S04",
+            metadata={"staff_id": req.staff_id, "basic": req.basic_salary},
+        )
 
-        rows = execute_query("SELECT * FROM staff_salary_structures WHERE id = %s", (sid,))
+        rows = execute_query(
+            "SELECT * FROM staff_salary_structures WHERE id = %s", (sid,)
+        )
         return dict(rows[0])
 
     @classmethod
@@ -108,10 +152,10 @@ class SalaryStructureService:
 
 
 class PayslipService:
-
     @classmethod
-    def generate(cls, org_id: str, staff_id: str,
-                  req: PayslipGenerate, actor_id: str) -> dict:
+    def generate(
+        cls, org_id: str, staff_id: str, req: PayslipGenerate, actor_id: str
+    ) -> dict:
         """Compute and upsert a payslip for the given month/year."""
         # Idempotency check
         existing = execute_query(
@@ -149,9 +193,9 @@ class PayslipService:
         att = dict(att_rows[0]) if att_rows else {}
         working_days = int(att.get("working_days") or 26)  # default 26 working days
         present_days = int(att.get("present_days") or working_days)
-        leave_days   = float(att.get("leave_days") or 0)
-        absent_days  = float(att.get("absent_days") or 0)
-        lop_days     = absent_days  # Loss of Pay = unpaid absences
+        leave_days = float(att.get("leave_days") or 0)
+        absent_days = float(att.get("absent_days") or 0)
+        lop_days = absent_days  # Loss of Pay = unpaid absences
 
         # Attendance ratio
         ratio = (present_days + leave_days) / working_days if working_days > 0 else 1.0
@@ -162,15 +206,20 @@ class PayslipService:
         if isinstance(component_overrides, str):
             component_overrides = json.loads(component_overrides)
 
-        org_components = {r["id"]: dict(r) for r in execute_query(
-            "SELECT * FROM payroll_components WHERE org_id = %s AND is_active = TRUE",
-            (org_id,),
-        )}
+        org_components = {
+            r["id"]: dict(r)
+            for r in execute_query(
+                "SELECT * FROM payroll_components WHERE org_id = %s AND is_active = TRUE",
+                (org_id,),
+            )
+        }
 
-        overrides_map = {c["component_id"]: c.get("override_value") for c in component_overrides}
+        overrides_map = {
+            c["component_id"]: c.get("override_value") for c in component_overrides
+        }
 
-        earnings    = {}
-        deductions  = {}
+        earnings = {}
+        deductions = {}
         gross = basic * ratio
 
         for comp_id, comp in org_components.items():
@@ -190,14 +239,16 @@ class PayslipService:
             else:
                 deductions[comp["name"]] = amount
 
-        total_earnings   = basic * ratio + sum(earnings.values())
+        total_earnings = basic * ratio + sum(earnings.values())
         total_deductions = sum(deductions.values())
-        net_salary       = round(total_earnings - total_deductions, 2)
+        net_salary = round(total_earnings - total_deductions, 2)
 
         pid = str(uuid.uuid4()) if not existing else str(existing[0]["id"])
         if existing:
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 UPDATE payslips SET
                     working_days = %s, present_days = %s, leave_days = %s, lop_days = %s,
                     gross_salary = %s, total_deductions = %s, net_salary = %s,
@@ -205,14 +256,27 @@ class PayslipService:
                     processed_by = %s, processed_at = NOW(), status = 'PROCESSED'
                 WHERE id = %s
                 """,
-                (working_days, present_days, leave_days, lop_days,
-                 round(total_earnings, 2), total_deductions, net_salary,
-                 json.dumps(earnings), json.dumps(deductions),
-                 actor_id, pid),
-            )])
+                        (
+                            working_days,
+                            present_days,
+                            leave_days,
+                            lop_days,
+                            round(total_earnings, 2),
+                            total_deductions,
+                            net_salary,
+                            json.dumps(earnings),
+                            json.dumps(deductions),
+                            actor_id,
+                            pid,
+                        ),
+                    )
+                ]
+            )
         else:
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO payslips
                     (id, org_id, staff_id, month, year, working_days, present_days,
                      leave_days, lop_days, gross_salary, total_deductions, net_salary,
@@ -220,17 +284,42 @@ class PayslipService:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         %s::jsonb, %s::jsonb, %s, NOW(), 'PROCESSED')
                 """,
-                (pid, org_id, staff_id, req.month, req.year,
-                 working_days, present_days, leave_days, lop_days,
-                 round(total_earnings, 2), total_deductions, net_salary,
-                 json.dumps(earnings), json.dumps(deductions), actor_id),
-            )])
+                        (
+                            pid,
+                            org_id,
+                            staff_id,
+                            req.month,
+                            req.year,
+                            working_days,
+                            present_days,
+                            leave_days,
+                            lop_days,
+                            round(total_earnings, 2),
+                            total_deductions,
+                            net_salary,
+                            json.dumps(earnings),
+                            json.dumps(deductions),
+                            actor_id,
+                        ),
+                    )
+                ]
+            )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="payslip", entity_id=pid, org_id=org_id,
-                     module="E08-S04",
-                     metadata={"staff_id": staff_id, "month": req.month,
-                               "year": req.year, "net": net_salary})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="payslip",
+            entity_id=pid,
+            org_id=org_id,
+            module="E08-S04",
+            metadata={
+                "staff_id": staff_id,
+                "month": req.month,
+                "year": req.year,
+                "net": net_salary,
+            },
+        )
 
         return cls.get(org_id, pid)
 
@@ -243,12 +332,28 @@ class PayslipService:
         if not rows:
             raise NotFoundError(f"Payslip {payslip_id} not found")
         if rows[0]["status"] != "PROCESSED":
-            raise BusinessRuleViolation(message="Only PROCESSED payslips can be marked as PAID")
+            raise BusinessRuleViolation(
+                message="Only PROCESSED payslips can be marked as PAID"
+            )
 
-        execute_transaction([(
-            "UPDATE payslips SET status = 'PAID', paid_at = NOW() WHERE id = %s AND org_id = %s",
-            (payslip_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE payslips SET status = 'PAID', paid_at = NOW() WHERE id = %s AND org_id = %s",
+                    (payslip_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="paid",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark_paid"},
+        )
         return cls.get(org_id, payslip_id)
 
     @classmethod

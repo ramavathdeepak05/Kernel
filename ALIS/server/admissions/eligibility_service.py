@@ -29,15 +29,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
-from server.core.audit import AuditLog, AuditAction
-from server.core.exceptions import BusinessRuleViolation, IllegalStateTransitionError
+from server.core.audit import AuditAction, AuditLog
+from server.core.exceptions import BusinessRuleViolation
 from server.core.state_registry import StudentState
 from server.db_service import execute_query
 
-from .service import ApplicantService
 from .eligibility_criteria import EligibilityCriteriaService, EligibilityRuleEngine
+from .service import ApplicantService
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,7 @@ class EligibilityService:
         admission_criteria: str,
         actor_id: str,
         actor_role: Any = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run eligibility evaluation for an applicant.
 
@@ -96,9 +96,9 @@ class EligibilityService:
             BusinessRuleViolation: If applicant is not in APPLIED state.
             IllegalStateTransitionError: If transition cannot be executed.
         """
+        from server.agents.admissions.registry import AdmissionsAgentRegistry
         from server.core.ai_gateway import AIGatewayContext
         from server.core.rbac import Role
-        from server.agents.admissions.registry import AdmissionsAgentRegistry
 
         # --- Pre-condition: Applicant must be APPLIED ---
         rows = execute_query(
@@ -124,7 +124,9 @@ class EligibilityService:
         intake_batch = rows[0].get("intake_batch")
 
         # --- P6: Load criteria + run deterministic rule engine first ---
-        criteria = EligibilityCriteriaService.get_criteria(org_id, program_name, intake_batch)
+        criteria = EligibilityCriteriaService.get_criteria(
+            org_id, program_name, intake_batch
+        )
         rule_verdict = EligibilityRuleEngine.evaluate(applicant_id, org_id, criteria)
 
         # --- Short-circuit for clear PASS or FAIL (no AI needed) ---
@@ -155,7 +157,9 @@ class EligibilityService:
             )
             logger.info(
                 "E04-S03 P6: Rule engine short-circuit [applicant=%s, verdict=%s, new_status=%s]",
-                applicant_id, rule_verdict.verdict, updated.status,
+                applicant_id,
+                rule_verdict.verdict,
+                updated.status,
             )
             return {
                 "applicant_id": applicant_id,
@@ -182,7 +186,9 @@ class EligibilityService:
         context = AIGatewayContext(
             actor_id=actor_id,
             actor_role=role,
-            actor_type="human" if role not in (Role.AI_AGENT, Role.SYSTEM) else "system",
+            actor_type="human"
+            if role not in (Role.AI_AGENT, Role.SYSTEM)
+            else "system",
             org_id=org_id,
             module="M1",
             wizard="Eligibility Eval",
@@ -210,7 +216,8 @@ class EligibilityService:
             # AI failed — fall back to PROVISIONALLY_ELIGIBLE rule verdict
             logger.warning(
                 "E04-S03: AI agent failed (err=%s); applying rule engine verdict=%s",
-                result.error, rule_verdict.verdict,
+                result.error,
+                rule_verdict.verdict,
             )
             updated = ApplicantService.transition_state(
                 applicant_id=applicant_id,
@@ -296,7 +303,10 @@ class EligibilityService:
         logger.info(
             "E04-S03: Eligibility evaluated [applicant=%s, score=%.2f, "
             "proposed=%s, new_status=%s]",
-            applicant_id, eligibility_score, proposed_state_str, new_status,
+            applicant_id,
+            eligibility_score,
+            proposed_state_str,
+            new_status,
         )
 
         return {

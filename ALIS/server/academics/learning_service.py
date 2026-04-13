@@ -15,12 +15,13 @@ Design:
   - Grade attainment fed back to OBE module via domain event
   - Late-penalty policy read from PolicyStore per org (never hardcoded)
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from server.core.audit import AuditAction, AuditLog
@@ -38,28 +39,28 @@ logger = logging.getLogger(__name__)
 StateRegistry.register_entity(
     "course_material",
     {
-        "DRAFT":     {"PUBLISHED"},
+        "DRAFT": {"PUBLISHED"},
         "PUBLISHED": {"ARCHIVED"},
-        "ARCHIVED":  set(),
+        "ARCHIVED": set(),
     },
 )
 StateRegistry.register_entity(
     "assignment",
     {
-        "DRAFT":     {"PUBLISHED"},
+        "DRAFT": {"PUBLISHED"},
         "PUBLISHED": {"CLOSED"},
-        "CLOSED":    {"ARCHIVED"},
-        "ARCHIVED":  set(),
+        "CLOSED": {"ARCHIVED"},
+        "ARCHIVED": set(),
     },
 )
 StateRegistry.register_entity(
     "assignment_submission",
     {
-        "DRAFT":        {"SUBMITTED"},
-        "SUBMITTED":    {"UNDER_REVIEW"},
+        "DRAFT": {"SUBMITTED"},
+        "SUBMITTED": {"UNDER_REVIEW"},
         "UNDER_REVIEW": {"GRADED"},
-        "GRADED":       {"RETURNED"},
-        "RETURNED":     set(),
+        "GRADED": {"RETURNED"},
+        "RETURNED": set(),
     },
 )
 
@@ -69,6 +70,7 @@ _NOW = lambda: datetime.now(timezone.utc)  # noqa: E731
 # ---------------------------------------------------------------------------
 # CourseMaterialService
 # ---------------------------------------------------------------------------
+
 
 class CourseMaterialService:
     """CRUD + lifecycle for course materials (lecture notes, quizzes, etc.)."""
@@ -80,29 +82,35 @@ class CourseMaterialService:
         faculty_id: str,
         title: str,
         material_type: str,
-        content_body: Optional[str] = None,
-        file_url: Optional[str] = None,
-        co_id: Optional[str] = None,
-        week_number: Optional[int] = None,
+        content_body: str | None = None,
+        file_url: str | None = None,
+        co_id: str | None = None,
+        week_number: int | None = None,
         is_ai_generated: bool = False,
-        ai_prompt_name: Optional[str] = None,
-        ai_prompt_version: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        ai_prompt_name: str | None = None,
+        ai_prompt_version: int | None = None,
+    ) -> dict[str, Any]:
         """Insert a DRAFT material. Faculty must be assigned to the course."""
         _assert_faculty_owns_course(org_id, course_id, faculty_id)
 
         valid_types = {
-            "LECTURE_NOTES", "LESSON_PLAN", "QUIZ",
-            "ASSIGNMENT_BRIEF", "REFERENCE", "VIDEO_LINK", "OTHER",
+            "LECTURE_NOTES",
+            "LESSON_PLAN",
+            "QUIZ",
+            "ASSIGNMENT_BRIEF",
+            "REFERENCE",
+            "VIDEO_LINK",
+            "OTHER",
         }
         if material_type not in valid_types:
             raise ValueError(f"material_type must be one of {valid_types}")
 
         mid = str(uuid4())
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO course_materials
                     (id, org_id, course_id, co_id, title, material_type,
                      content_body, file_url, is_ai_generated, ai_prompt_name,
@@ -110,11 +118,25 @@ class CourseMaterialService:
                      week_number, created_by, created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'DRAFT',FALSE,%s,%s,%s)
                 """,
-                (mid, org_id, course_id, co_id, title, material_type,
-                 content_body, file_url, is_ai_generated, ai_prompt_name,
-                 ai_prompt_version, week_number, faculty_id, now),
-            )
-        ])
+                    (
+                        mid,
+                        org_id,
+                        course_id,
+                        co_id,
+                        title,
+                        material_type,
+                        content_body,
+                        file_url,
+                        is_ai_generated,
+                        ai_prompt_name,
+                        ai_prompt_version,
+                        week_number,
+                        faculty_id,
+                        now,
+                    ),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.ENTITY_CREATED,
             actor_id=faculty_id,
@@ -130,7 +152,7 @@ class CourseMaterialService:
         org_id: str,
         material_id: str,
         faculty_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """DRAFT → PUBLISHED. Sets visible_to_students=TRUE."""
         row = _get_material_or_404(org_id, material_id)
         result = StateRegistry.validate_transition(
@@ -140,32 +162,44 @@ class CourseMaterialService:
             raise ValueError(result.reason)
 
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE course_materials
                 SET status='PUBLISHED', visible_to_students=TRUE,
                     published_at=%s, updated_at=%s
                 WHERE id=%s AND org_id=%s
                 """,
-                (now, now, material_id, org_id),
-            )
-        ])
-        DomainEventBus.publish(DomainEvent(
-            event_type="course_material.published",
-            org_id=org_id,
+                    (now, now, material_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=faculty_id,
             entity_type="course_material",
             entity_id=material_id,
-            actor_id=faculty_id,
-            payload={
-                "material_id": material_id,
-                "course_id": str(row["course_id"]),
-                "title": row["title"],
-                "material_type": row["material_type"],
-                "week_number": row["week_number"],
-                "is_ai_generated": row["is_ai_generated"],
-            },
-        ))
+            org_id=org_id,
+            metadata={"status": "PUBLISHED"},
+        )
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="course_material.published",
+                org_id=org_id,
+                entity_type="course_material",
+                entity_id=material_id,
+                actor_id=faculty_id,
+                payload={
+                    "material_id": material_id,
+                    "course_id": str(row["course_id"]),
+                    "title": row["title"],
+                    "material_type": row["material_type"],
+                    "week_number": row["week_number"],
+                    "is_ai_generated": row["is_ai_generated"],
+                },
+            )
+        )
         return _fetch_material(org_id, material_id)
 
     @staticmethod
@@ -173,7 +207,7 @@ class CourseMaterialService:
         org_id: str,
         material_id: str,
         faculty_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """PUBLISHED → ARCHIVED. Hides from students."""
         row = _get_material_or_404(org_id, material_id)
         result = StateRegistry.validate_transition(
@@ -183,16 +217,26 @@ class CourseMaterialService:
             raise ValueError(result.reason)
 
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE course_materials
                 SET status='ARCHIVED', visible_to_students=FALSE, updated_at=%s
                 WHERE id=%s AND org_id=%s
                 """,
-                (now, material_id, org_id),
-            )
-        ])
+                    (now, material_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=faculty_id,
+            entity_type="course_material",
+            entity_id=material_id,
+            org_id=org_id,
+            metadata={"status": "ARCHIVED"},
+        )
         return _fetch_material(org_id, material_id)
 
     @staticmethod
@@ -200,9 +244,9 @@ class CourseMaterialService:
         org_id: str,
         course_id: str,
         actor_role: str,
-        week_number: Optional[int] = None,
-        material_type: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        week_number: int | None = None,
+        material_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Faculty see DRAFT+PUBLISHED. Students see PUBLISHED only."""
         is_student = actor_role.upper() == "STUDENT"
         filters = ["org_id=%s", "course_id=%s"]
@@ -223,7 +267,7 @@ class CourseMaterialService:
 
         where = " AND ".join(filters)
         return execute_query(
-            f"SELECT * FROM course_materials WHERE {where} ORDER BY week_number NULLS LAST, created_at",
+            f"SELECT * FROM course_materials WHERE {where} ORDER BY week_number NULLS LAST, created_at",  # noqa: S608
             tuple(params),
         )
 
@@ -232,7 +276,7 @@ class CourseMaterialService:
         org_id: str,
         material_id: str,
         actor_role: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         row = _get_material_or_404(org_id, material_id)
         if actor_role.upper() == "STUDENT" and row["status"] != "PUBLISHED":
             raise NotFoundError("course_material", material_id)
@@ -242,6 +286,7 @@ class CourseMaterialService:
 # ---------------------------------------------------------------------------
 # AssignmentService
 # ---------------------------------------------------------------------------
+
 
 class AssignmentService:
     """CRUD + lifecycle for assignments."""
@@ -255,14 +300,14 @@ class AssignmentService:
         description: str,
         max_marks: Decimal,
         due_date: str,
-        co_id: Optional[str] = None,
-        passing_marks: Optional[Decimal] = None,
+        co_id: str | None = None,
+        passing_marks: Decimal | None = None,
         allow_late: bool = False,
-        late_penalty_pct: Optional[Decimal] = None,
+        late_penalty_pct: Decimal | None = None,
         is_ai_generated: bool = False,
-        ai_prompt_name: Optional[str] = None,
-        ai_prompt_version: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        ai_prompt_name: str | None = None,
+        ai_prompt_version: int | None = None,
+    ) -> dict[str, Any]:
         _assert_faculty_owns_course(org_id, course_id, faculty_id)
 
         due_dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
@@ -270,15 +315,16 @@ class AssignmentService:
             raise ValueError("due_date must be in the future")
 
         if late_penalty_pct is None:
-            late_penalty_pct = Decimal(str(
-                PolicyStore.get(org_id, PolicyKey.LEARNING_LATE_PENALTY_PCT) or 10
-            ))
+            late_penalty_pct = Decimal(
+                str(PolicyStore.get(org_id, PolicyKey.LEARNING_LATE_PENALTY_PCT) or 10)
+            )
 
         aid = str(uuid4())
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO assignments
                     (id, org_id, course_id, co_id, title, description,
                      max_marks, passing_marks, due_date, allow_late,
@@ -286,12 +332,27 @@ class AssignmentService:
                      ai_prompt_version, status, created_by, created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'DRAFT',%s,%s)
                 """,
-                (aid, org_id, course_id, co_id, title, description,
-                 max_marks, passing_marks, due_dt, allow_late,
-                 late_penalty_pct, is_ai_generated, ai_prompt_name,
-                 ai_prompt_version, faculty_id, now),
-            )
-        ])
+                    (
+                        aid,
+                        org_id,
+                        course_id,
+                        co_id,
+                        title,
+                        description,
+                        max_marks,
+                        passing_marks,
+                        due_dt,
+                        allow_late,
+                        late_penalty_pct,
+                        is_ai_generated,
+                        ai_prompt_name,
+                        ai_prompt_version,
+                        faculty_id,
+                        now,
+                    ),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.ENTITY_CREATED,
             actor_id=faculty_id,
@@ -307,36 +368,52 @@ class AssignmentService:
         org_id: str,
         assignment_id: str,
         faculty_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         row = _get_assignment_or_404(org_id, assignment_id)
-        result = StateRegistry.validate_transition("assignment", row["status"], "PUBLISHED")
+        result = StateRegistry.validate_transition(
+            "assignment", row["status"], "PUBLISHED"
+        )
         if not result.allowed:
             raise ValueError(result.reason)
 
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE assignments
                 SET status='PUBLISHED', published_at=%s, updated_at=%s
                 WHERE id=%s AND org_id=%s
                 """,
-                (now, now, assignment_id, org_id),
-            )
-        ])
-        DomainEventBus.publish(DomainEvent(
-            event_type="assignment.published",
-            org_id=org_id,
+                    (now, now, assignment_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=faculty_id,
             entity_type="assignment",
             entity_id=assignment_id,
-            actor_id=faculty_id,
-            payload={
-                "assignment_id": assignment_id,
-                "course_id": str(row["course_id"]),
-                "title": row["title"],
-                "due_date": row["due_date"].isoformat() if row.get("due_date") else None,
-            },
-        ))
+            org_id=org_id,
+            metadata={"status": "PUBLISHED"},
+        )
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="assignment.published",
+                org_id=org_id,
+                entity_type="assignment",
+                entity_id=assignment_id,
+                actor_id=faculty_id,
+                payload={
+                    "assignment_id": assignment_id,
+                    "course_id": str(row["course_id"]),
+                    "title": row["title"],
+                    "due_date": row["due_date"].isoformat()
+                    if row.get("due_date")
+                    else None,
+                },
+            )
+        )
         return _fetch_assignment(org_id, assignment_id)
 
     @staticmethod
@@ -344,24 +421,36 @@ class AssignmentService:
         org_id: str,
         assignment_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """PUBLISHED → CLOSED. Called by faculty manually or by Celery beat."""
         row = _get_assignment_or_404(org_id, assignment_id)
-        result = StateRegistry.validate_transition("assignment", row["status"], "CLOSED")
+        result = StateRegistry.validate_transition(
+            "assignment", row["status"], "CLOSED"
+        )
         if not result.allowed:
             raise ValueError(result.reason)
 
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE assignments
                 SET status='CLOSED', closed_at=%s, updated_at=%s
                 WHERE id=%s AND org_id=%s
                 """,
-                (now, now, assignment_id, org_id),
-            )
-        ])
+                    (now, now, assignment_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            entity_type="assignment",
+            entity_id=assignment_id,
+            org_id=org_id,
+            metadata={"status": "CLOSED"},
+        )
         return _fetch_assignment(org_id, assignment_id)
 
     @staticmethod
@@ -369,8 +458,8 @@ class AssignmentService:
         org_id: str,
         course_id: str,
         actor_role: str,
-        student_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        student_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         is_student = actor_role.upper() == "STUDENT"
         if is_student:
             # Join submission status for the student
@@ -412,7 +501,7 @@ class AssignmentService:
         org_id: str,
         assignment_id: str,
         actor_role: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         row = _get_assignment_or_404(org_id, assignment_id)
         if actor_role.upper() == "STUDENT" and row["status"] == "DRAFT":
             raise NotFoundError("assignment", assignment_id)
@@ -423,17 +512,18 @@ class AssignmentService:
 # SubmissionService
 # ---------------------------------------------------------------------------
 
+
 class SubmissionService:
     """Student submission lifecycle + faculty grading."""
 
     @staticmethod
-    def create_or_update_draft(
+    def save_draft(
         org_id: str,
         assignment_id: str,
         student_id: str,
-        content_text: Optional[str] = None,
-        file_url: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        content_text: str | None = None,
+        file_url: str | None = None,
+    ) -> dict[str, Any]:
         """Upsert DRAFT submission. Assignment must be PUBLISHED, student enrolled."""
         asgn = _get_assignment_or_404(org_id, assignment_id)
         if asgn["status"] != "PUBLISHED":
@@ -448,30 +538,58 @@ class SubmissionService:
         if existing:
             if existing[0]["status"] != "DRAFT":
                 raise ValueError("Submission already submitted — cannot edit")
-            execute_transaction([
-                (
-                    """
+            execute_transaction(
+                [
+                    (
+                        """
                     UPDATE assignment_submissions
                     SET content_text=%s, file_url=%s, updated_at=%s
                     WHERE id=%s
                     """,
-                    (content_text, file_url, now, existing[0]["id"]),
-                )
-            ])
+                        (content_text, file_url, now, existing[0]["id"]),
+                    )
+                ]
+            )
+            AuditLog.log(
+                action=AuditAction.UPDATE,
+                actor_id=student_id,
+                entity_type="assignment_submission",
+                entity_id=existing[0]["id"],
+                org_id=org_id,
+                metadata={"action": "update_draft"},
+            )
             return _fetch_submission(existing[0]["id"])
 
         sid = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO assignment_submissions
                     (id, org_id, assignment_id, student_id, content_text,
                      file_url, status, created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,'DRAFT',%s)
                 """,
-                (sid, org_id, assignment_id, student_id, content_text, file_url, now),
-            )
-        ])
+                    (
+                        sid,
+                        org_id,
+                        assignment_id,
+                        student_id,
+                        content_text,
+                        file_url,
+                        now,
+                    ),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.ENTITY_CREATED,
+            actor_id=student_id,
+            entity_type="assignment_submission",
+            entity_id=sid,
+            org_id=org_id,
+            metadata={"action": "create_draft"},
+        )
         return _fetch_submission(sid)
 
     @staticmethod
@@ -479,64 +597,104 @@ class SubmissionService:
         org_id: str,
         assignment_id: str,
         student_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """DRAFT → SUBMITTED."""
         existing = execute_query(
             "SELECT id, status FROM assignment_submissions WHERE assignment_id=%s AND student_id=%s",
             (assignment_id, student_id),
         )
         if not existing:
-            raise NotFoundError("assignment_submission", f"{assignment_id}/{student_id}")
+            raise NotFoundError(
+                "assignment_submission", f"{assignment_id}/{student_id}"
+            )
 
         row = existing[0]
-        result = StateRegistry.validate_transition("assignment_submission", row["status"], "SUBMITTED")
+        result = StateRegistry.validate_transition(
+            "assignment_submission", row["status"], "SUBMITTED"
+        )
         if not result.allowed:
             raise ValueError(result.reason)
 
         asgn = _get_assignment_or_404(org_id, assignment_id)
         now = _NOW()
-        is_late = now > asgn["due_date"].replace(tzinfo=timezone.utc) if asgn["due_date"].tzinfo is None else now > asgn["due_date"]
+        is_late = (
+            now > asgn["due_date"].replace(tzinfo=timezone.utc)
+            if asgn["due_date"].tzinfo is None
+            else now > asgn["due_date"]
+        )
 
         # Check max late days policy
         if is_late:
-            max_late = int(PolicyStore.get(org_id, PolicyKey.LEARNING_MAX_LATE_DAYS) or 3)
-            delta_days = (now - asgn["due_date"]).days if not asgn.get("allow_late") else 0
-            if not asgn["allow_late"] or delta_days > max_late:
-                raise ValueError(f"Submission deadline passed (allow_late={asgn['allow_late']}, max_late_days={max_late})")
-
-        execute_transaction([
-            (
-                """
-                UPDATE assignment_submissions
-                SET status='SUBMITTED', submitted_at=%s, is_late=%s, updated_at=%s
-                WHERE id=%s
-                """,
-                (now, is_late, now, row["id"]),
+            max_late = int(
+                PolicyStore.get(org_id, PolicyKey.LEARNING_MAX_LATE_DAYS) or 3
             )
-        ])
-
-        sub = _fetch_submission(row["id"])
-        DomainEventBus.publish(DomainEvent(
-            event_type="assignment.submitted",
-            org_id=org_id,
-            entity_type="assignment_submission",
-            entity_id=row["id"],
-            actor_id=student_id,
-            payload={
-                "submission_id": row["id"],
-                "assignment_id": assignment_id,
-                "assignment_title": asgn["title"],
-                "course_id": str(asgn["course_id"]),
-                "student_id": student_id,
-                "submitted_at": now.isoformat(),
-                "is_late": is_late,
-            },
-        ))
+            delta_days = (
+                (now - asgn["due_date"]).days if not asgn.get("allow_late") else 0
+            )
+            if not asgn["allow_late"] or delta_days > max_late:
+                raise ValueError(
+                    f"Submission deadline passed (allow_late={asgn['allow_late']}, max_late_days={max_late})"
+                )
 
         # Auto-begin-review if policy is set
         auto = PolicyStore.get(org_id, PolicyKey.LEARNING_AUTO_BEGIN_REVIEW)
         if auto:
-            SubmissionService.begin_review(org_id, row["id"], "system")
+            result_auto = StateRegistry.validate_transition(
+                "assignment_submission", "SUBMITTED", "UNDER_REVIEW"
+            )
+            if not result_auto.allowed:
+                raise ValueError(result_auto.reason)
+
+        queries = [
+            (
+                """
+            UPDATE assignment_submissions
+            SET status='SUBMITTED', submitted_at=%s, is_late=%s, updated_at=%s
+            WHERE id=%s
+            """,
+                (now, is_late, now, row["id"]),
+            )
+        ]
+
+        if auto:
+            queries.append(
+                (
+                    "UPDATE assignment_submissions SET status='UNDER_REVIEW', updated_at=%s WHERE id=%s",
+                    (now, row["id"]),
+                )
+            )
+
+        execute_transaction(queries)
+
+        sub = _fetch_submission(row["id"])
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=student_id,
+            entity_type="assignment_submission",
+            entity_id=row["id"],
+            org_id=org_id,
+            metadata={"status": "SUBMITTED", "is_late": is_late, "auto_review": auto},
+        )
+
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="assignment.submitted",
+                org_id=org_id,
+                entity_type="assignment_submission",
+                entity_id=row["id"],
+                actor_id=student_id,
+                payload={
+                    "submission_id": row["id"],
+                    "assignment_id": assignment_id,
+                    "assignment_title": asgn["title"],
+                    "course_id": str(asgn["course_id"]),
+                    "student_id": student_id,
+                    "submitted_at": now.isoformat(),
+                    "is_late": is_late,
+                },
+            )
+        )
 
         return sub
 
@@ -545,7 +703,7 @@ class SubmissionService:
         org_id: str,
         submission_id: str,
         faculty_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """SUBMITTED → UNDER_REVIEW."""
         row = _fetch_submission(submission_id)
         result = StateRegistry.validate_transition(
@@ -554,12 +712,22 @@ class SubmissionService:
         if not result.allowed:
             raise ValueError(result.reason)
         now = _NOW()
-        execute_transaction([
-            (
-                "UPDATE assignment_submissions SET status='UNDER_REVIEW', updated_at=%s WHERE id=%s",
-                (now, submission_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE assignment_submissions SET status='UNDER_REVIEW', updated_at=%s WHERE id=%s",
+                    (now, submission_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=faculty_id,
+            entity_type="assignment_submission",
+            entity_id=submission_id,
+            org_id=org_id,
+            metadata={"status": "UNDER_REVIEW"},
+        )
         return _fetch_submission(submission_id)
 
     @staticmethod
@@ -568,8 +736,8 @@ class SubmissionService:
         submission_id: str,
         faculty_id: str,
         marks_awarded: Decimal,
-        feedback: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        feedback: str | None = None,
+    ) -> dict[str, Any]:
         """UNDER_REVIEW → GRADED. Computes late_deduction, fires attainment event."""
         sub = _fetch_submission(submission_id)
         result = StateRegistry.validate_transition(
@@ -585,9 +753,9 @@ class SubmissionService:
         # Late deduction
         late_deduction = Decimal("0")
         if sub["is_late"] and sub["submitted_at"] and asgn["due_date"]:
-            penalty_pct = Decimal(str(
-                PolicyStore.get(org_id, PolicyKey.LEARNING_LATE_PENALTY_PCT) or 10
-            ))
+            penalty_pct = Decimal(
+                str(PolicyStore.get(org_id, PolicyKey.LEARNING_LATE_PENALTY_PCT) or 10)
+            )
             days_late = max(0, (sub["submitted_at"] - asgn["due_date"]).days)
             late_deduction = min(
                 marks_awarded,
@@ -596,37 +764,57 @@ class SubmissionService:
         effective = max(Decimal("0"), marks_awarded - late_deduction)
 
         now = _NOW()
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE assignment_submissions
                 SET status='GRADED', marks_awarded=%s, late_deduction=%s,
                     effective_marks=%s, feedback=%s, graded_by=%s, graded_at=%s, updated_at=%s
                 WHERE id=%s
                 """,
-                (marks_awarded, late_deduction, effective,
-                 feedback, faculty_id, now, now, submission_id),
-            )
-        ])
-
-        graded = _fetch_submission(submission_id)
-        DomainEventBus.publish(DomainEvent(
-            event_type="assignment.graded",
-            org_id=org_id,
+                    (
+                        marks_awarded,
+                        late_deduction,
+                        effective,
+                        feedback,
+                        faculty_id,
+                        now,
+                        now,
+                        submission_id,
+                    ),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=faculty_id,
             entity_type="assignment_submission",
             entity_id=submission_id,
-            actor_id=faculty_id,
-            payload={
-                "submission_id": submission_id,
-                "assignment_id": str(sub["assignment_id"]),
-                "student_id": str(sub["student_id"]),
-                "marks_awarded": float(marks_awarded),
-                "effective_marks": float(effective),
-                "max_marks": float(asgn["max_marks"]),
-                "co_id": str(asgn["co_id"]) if asgn.get("co_id") else None,
-                "feedback_available": bool(feedback),
-            },
-        ))
+            org_id=org_id,
+            metadata={"status": "GRADED", "marks": float(marks_awarded)},
+        )
+
+        graded = _fetch_submission(submission_id)
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="assignment.graded",
+                org_id=org_id,
+                entity_type="assignment_submission",
+                entity_id=submission_id,
+                actor_id=faculty_id,
+                payload={
+                    "submission_id": submission_id,
+                    "assignment_id": str(sub["assignment_id"]),
+                    "student_id": str(sub["student_id"]),
+                    "marks_awarded": float(marks_awarded),
+                    "effective_marks": float(effective),
+                    "max_marks": float(asgn["max_marks"]),
+                    "co_id": str(asgn["co_id"]) if asgn.get("co_id") else None,
+                    "feedback_available": bool(feedback),
+                },
+            )
+        )
         return graded
 
     @staticmethod
@@ -634,7 +822,7 @@ class SubmissionService:
         org_id: str,
         submission_id: str,
         faculty_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """GRADED → RETURNED. Makes feedback visible to student."""
         sub = _fetch_submission(submission_id)
         result = StateRegistry.validate_transition(
@@ -643,27 +831,29 @@ class SubmissionService:
         if not result.allowed:
             raise ValueError(result.reason)
         now = _NOW()
-        execute_transaction([
-            (
-                "UPDATE assignment_submissions SET status='RETURNED', updated_at=%s WHERE id=%s",
-                (now, submission_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE assignment_submissions SET status='RETURNED', updated_at=%s WHERE id=%s",
+                    (now, submission_id),
+                )
+            ]
+        )
         return _fetch_submission(submission_id)
 
     @staticmethod
     def list_submissions(
         org_id: str,
         assignment_id: str,
-        status_filter: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        status_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
         params: list = [org_id, assignment_id]
         where = "org_id=%s AND assignment_id=%s"
         if status_filter:
             where += " AND status=%s"
             params.append(status_filter)
         return execute_query(
-            f"SELECT * FROM assignment_submissions WHERE {where} ORDER BY submitted_at NULLS LAST",
+            f"SELECT * FROM assignment_submissions WHERE {where} ORDER BY submitted_at NULLS LAST",  # noqa: S608
             tuple(params),
         )
 
@@ -672,7 +862,7 @@ class SubmissionService:
         org_id: str,
         assignment_id: str,
         student_id: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         rows = execute_query(
             "SELECT * FROM assignment_submissions WHERE assignment_id=%s AND student_id=%s",
             (assignment_id, student_id),
@@ -684,20 +874,22 @@ class SubmissionService:
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_material(org_id: str, material_id: str) -> Dict[str, Any]:
+
+def _fetch_material(org_id: str, material_id: str) -> dict[str, Any]:
     rows = execute_query(
-        "SELECT * FROM course_materials WHERE id=%s AND org_id=%s", (material_id, org_id)
+        "SELECT * FROM course_materials WHERE id=%s AND org_id=%s",
+        (material_id, org_id),
     )
     if not rows:
         raise NotFoundError("course_material", material_id)
     return dict(rows[0])
 
 
-def _get_material_or_404(org_id: str, material_id: str) -> Dict[str, Any]:
+def _get_material_or_404(org_id: str, material_id: str) -> dict[str, Any]:
     return _fetch_material(org_id, material_id)
 
 
-def _fetch_assignment(org_id: str, assignment_id: str) -> Dict[str, Any]:
+def _fetch_assignment(org_id: str, assignment_id: str) -> dict[str, Any]:
     rows = execute_query(
         "SELECT * FROM assignments WHERE id=%s AND org_id=%s", (assignment_id, org_id)
     )
@@ -706,11 +898,11 @@ def _fetch_assignment(org_id: str, assignment_id: str) -> Dict[str, Any]:
     return dict(rows[0])
 
 
-def _get_assignment_or_404(org_id: str, assignment_id: str) -> Dict[str, Any]:
+def _get_assignment_or_404(org_id: str, assignment_id: str) -> dict[str, Any]:
     return _fetch_assignment(org_id, assignment_id)
 
 
-def _fetch_submission(submission_id: str) -> Dict[str, Any]:
+def _fetch_submission(submission_id: str) -> dict[str, Any]:
     rows = execute_query(
         "SELECT * FROM assignment_submissions WHERE id=%s", (submission_id,)
     )
@@ -725,7 +917,9 @@ def _assert_faculty_owns_course(org_id: str, course_id: str, faculty_id: str) ->
         (course_id, org_id, faculty_id),
     )
     if not rows:
-        raise PermissionError(f"Faculty {faculty_id} is not assigned to course {course_id}")
+        raise PermissionError(
+            f"Faculty {faculty_id} is not assigned to course {course_id}"
+        )
 
 
 def _assert_student_enrolled(org_id: str, course_id: str, student_id: str) -> None:
@@ -737,4 +931,6 @@ def _assert_student_enrolled(org_id: str, course_id: str, student_id: str) -> No
         (org_id, course_id, student_id),
     )
     if not rows:
-        raise PermissionError(f"Student {student_id} is not enrolled in course {course_id}")
+        raise PermissionError(
+            f"Student {student_id} is not enrolled in course {course_id}"
+        )

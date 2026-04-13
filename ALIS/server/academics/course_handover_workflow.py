@@ -14,15 +14,14 @@ Steps
 4. Freeze pending IA auto-releases
 5. Assign temporary substitute via workflow approval queue (SLA from policy)
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
 
 from pydantic import BaseModel
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.policy_engine import policy_engine
@@ -38,11 +37,10 @@ class CourseHandoverPackage(BaseModel):
     completed_units: int
     remaining_units: int
     pending_assessments: list
-    materials_location: Optional[str]
+    materials_location: str | None
 
 
 class CourseHandoverWorkflow:
-
     @classmethod
     def trigger(cls, faculty_id: str, org_id: str, actor_id: str) -> dict:
         """Trigger the full course handover for a departing faculty member.
@@ -51,20 +49,24 @@ class CourseHandoverWorkflow:
         """
         # SLA: read from policy, store as absolute deadline (R3)
         from datetime import timedelta
-        sla_hours = int(policy_engine.get_value(
-            "academics.course_handover_sla_hours", org_id, 48
-        ))
+
+        sla_hours = int(
+            policy_engine.get_value("academics.course_handover_sla_hours", org_id, 48)
+        )
         sla_deadline = datetime.now(timezone.utc) + timedelta(hours=sla_hours)
 
         # 1. Find all active courses for this faculty member
-        courses = execute_query("""
+        courses = execute_query(
+            """
             SELECT c.id, c.course_code, c.title, c.department_id
             FROM course_assignments ca
             JOIN courses c ON c.id = ca.course_id
             WHERE ca.faculty_id = %s
               AND ca.org_id = %s
               AND ca.status = 'ACTIVE'
-        """, (faculty_id, org_id))
+        """,
+            (faculty_id, org_id),
+        )
 
         if not courses:
             logger.info("No active courses found for faculty %s", faculty_id)
@@ -82,51 +84,74 @@ class CourseHandoverWorkflow:
             packages.append(package.model_dump())
 
             # 2. Transition course → INSTRUCTOR_MISSING
-            ops.append(("""
+            ops.append(
+                (
+                    """
                 UPDATE course_assignments
                 SET status = 'INSTRUCTOR_MISSING', updated_at = NOW()
                 WHERE course_id = %s AND faculty_id = %s AND org_id = %s
-            """, (course_id, faculty_id, org_id)))
+            """,
+                    (course_id, faculty_id, org_id),
+                )
+            )
 
             # 4. Freeze pending IA auto-releases for this course
-            ops.append(("""
+            ops.append(
+                (
+                    """
                 UPDATE assessment_schedules
                 SET auto_release_frozen = TRUE
                 WHERE course_id = %s AND org_id = %s AND status = 'SCHEDULED'
-            """, (course_id, org_id)))
+            """,
+                    (course_id, org_id),
+                )
+            )
 
         # 5. Create approval workflow task for substitute assignment (R2 — no hardcoded chain)
         import json
-        ops.append(("""
+
+        ops.append(
+            (
+                """
             INSERT INTO workflow_tasks
                 (id, org_id, workflow_type, resource_id, status, created_by,
                  payload, sla_deadline, created_at)
             VALUES (%s, %s, 'COURSE_HANDOVER_SUBSTITUTE', %s, 'PENDING_APPROVAL',
                     %s, %s, %s, NOW())
-        """, (
-            handover_id, org_id, faculty_id, actor_id,
-            json.dumps({
-                "faculty_id": faculty_id,
-                "courses": [str(c["id"]) for c in courses],
-                "packages": packages,
-                "sla_hours": sla_hours,
-            }),
-            sla_deadline,
-        )))
+        """,
+                (
+                    handover_id,
+                    org_id,
+                    faculty_id,
+                    actor_id,
+                    json.dumps(
+                        {
+                            "faculty_id": faculty_id,
+                            "courses": [str(c["id"]) for c in courses],
+                            "packages": packages,
+                            "sla_hours": sla_hours,
+                        }
+                    ),
+                    sla_deadline,
+                ),
+            )
+        )
 
         if ops:
             execute_transaction(ops)
 
         # 3. Transfer LMS ownership to HOD (via domain event — LMS service handles it)
-        DomainEventBus.publish(DomainEvent(
-            event_type="academics.faculty_lms_transfer_to_hod",
-            org_id=org_id,
-            payload={
-                "faculty_id": faculty_id,
-                "course_ids": [str(c["id"]) for c in courses],
-                "handover_task_id": handover_id,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="academics.faculty_lms_transfer_to_hod",
+                org_id=org_id,
+                payload={
+                    "faculty_id": faculty_id,
+                    "course_ids": [str(c["id"]) for c in courses],
+                    "handover_task_id": handover_id,
+                },
+            )
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -141,21 +166,25 @@ class CourseHandoverWorkflow:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="academics.course_handover_initiated",
-            org_id=org_id,
-            payload={
-                "handover_task_id": handover_id,
-                "faculty_id": faculty_id,
-                "courses_affected": len(courses),
-                "sla_deadline": sla_deadline.isoformat(),
-                "packages": packages,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="academics.course_handover_initiated",
+                org_id=org_id,
+                payload={
+                    "handover_task_id": handover_id,
+                    "faculty_id": faculty_id,
+                    "courses_affected": len(courses),
+                    "sla_deadline": sla_deadline.isoformat(),
+                    "packages": packages,
+                },
+            )
+        )
 
         logger.info(
             "Course handover triggered for faculty %s: %d courses, SLA %s",
-            faculty_id, len(courses), sla_deadline.isoformat(),
+            faculty_id,
+            len(courses),
+            sla_deadline.isoformat(),
         )
 
         return {
@@ -175,22 +204,28 @@ class CourseHandoverWorkflow:
         course: dict,
     ) -> CourseHandoverPackage:
         """Snapshot the handover package for a single course."""
-        units = execute_query("""
+        units = execute_query(
+            """
             SELECT
                 COUNT(*) FILTER (WHERE status = 'COMPLETED') AS completed,
                 COUNT(*) FILTER (WHERE status != 'COMPLETED') AS remaining
             FROM course_units
             WHERE course_id = %s AND org_id = %s
-        """, (course_id, org_id))
+        """,
+            (course_id, org_id),
+        )
 
         completed = int(units[0]["completed"] or 0) if units else 0
         remaining = int(units[0]["remaining"] or 0) if units else 0
 
-        assessments = execute_query("""
+        assessments = execute_query(
+            """
             SELECT id, title, due_date, status
             FROM assessments
             WHERE course_id = %s AND org_id = %s AND status IN ('PENDING', 'DRAFT')
-        """, (course_id, org_id))
+        """,
+            (course_id, org_id),
+        )
 
         return CourseHandoverPackage(
             faculty_id=faculty_id,

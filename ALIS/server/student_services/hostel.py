@@ -1,4 +1,5 @@
 """E09-S01 — Hostel Management"""
+
 from __future__ import annotations
 
 import logging
@@ -8,13 +9,17 @@ from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
 
-from .models import HostelAllocationCreate, HostelBlockCreate, HostelComplaintCreate, HostelRoomCreate
+from .models import (
+    HostelAllocationCreate,
+    HostelBlockCreate,
+    HostelComplaintCreate,
+    HostelRoomCreate,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class HostelService:
-
     # ── Blocks ──────────────────────────────────────────────
 
     @classmethod
@@ -27,10 +32,24 @@ class HostelService:
             raise BusinessRuleViolation(message=f"Block '{req.name}' already exists")
 
         bid = str(uuid.uuid4())
-        execute_transaction([(
-            "INSERT INTO hostel_blocks (id, org_id, name, gender, total_rooms, warden_id) VALUES (%s,%s,%s,%s,%s,%s)",
-            (bid, org_id, req.name, req.gender, req.total_rooms, req.warden_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO hostel_blocks (id, org_id, name, gender, total_rooms, warden_id) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (bid, org_id, req.name, req.gender, req.total_rooms, req.warden_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="block",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "create_block"},
+        )
         return cls.get_block(org_id, bid)
 
     @classmethod
@@ -60,20 +79,45 @@ class HostelService:
             (org_id, req.block_id, req.room_number),
         )
         if existing:
-            raise BusinessRuleViolation(message=f"Room {req.room_number} already exists in block")
+            raise BusinessRuleViolation(
+                message=f"Room {req.room_number} already exists in block"
+            )
 
         rid = str(uuid.uuid4())
-        execute_transaction([(
-            "INSERT INTO hostel_rooms (id, org_id, block_id, room_number, room_type, capacity, floor, amenities) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (rid, org_id, req.block_id, req.room_number, req.room_type.value,
-             req.capacity, req.floor, req.amenities),
-        )])
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO hostel_rooms (id, org_id, block_id, room_number, room_type, capacity, floor, amenities) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        rid,
+                        org_id,
+                        req.block_id,
+                        req.room_number,
+                        req.room_type.value,
+                        req.capacity,
+                        req.floor,
+                        req.amenities,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="room",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "create_room"},
+        )
         rows = execute_query("SELECT * FROM hostel_rooms WHERE id = %s", (rid,))
         return dict(rows[0])
 
     @classmethod
-    def list_rooms(cls, org_id: str, block_id: str,
-                    available_only: bool = False) -> list[dict]:
+    def list_rooms(
+        cls, org_id: str, block_id: str, available_only: bool = False
+    ) -> list[dict]:
         sql = """
             SELECT r.*,
                    COUNT(a.id) FILTER (WHERE a.status = 'ACTIVE') AS occupied
@@ -98,7 +142,9 @@ class HostelService:
             (req.student_id, req.academic_year, org_id),
         )
         if existing:
-            raise BusinessRuleViolation(message="Student already has an active hostel allocation this year")
+            raise BusinessRuleViolation(
+                message="Student already has an active hostel allocation this year"
+            )
 
         # Check room capacity
         room_rows = execute_query(
@@ -112,26 +158,59 @@ class HostelService:
             raise BusinessRuleViolation(message="Room is at full capacity")
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            "INSERT INTO hostel_allocations (id, org_id, student_id, room_id, academic_year, check_in_date, allocated_by, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
-            (aid, org_id, req.student_id, req.room_id, req.academic_year,
-             req.check_in_date, actor_id, req.notes),
-        )])
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO hostel_allocations (id, org_id, student_id, room_id, academic_year, check_in_date, allocated_by, notes) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        aid,
+                        org_id,
+                        req.student_id,
+                        req.room_id,
+                        req.academic_year,
+                        req.check_in_date,
+                        actor_id,
+                        req.notes,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="hostel_allocation", entity_id=aid, org_id=org_id,
-                     module="E09-S01",
-                     metadata={"student_id": req.student_id, "room_id": req.room_id})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="hostel_allocation",
+            entity_id=aid,
+            org_id=org_id,
+            module="E09-S01",
+            metadata={"student_id": req.student_id, "room_id": req.room_id},
+        )
 
         return cls.get_allocation(org_id, aid)
 
     @classmethod
-    def vacate(cls, org_id: str, allocation_id: str,
-                checkout_date: str, actor_id: str) -> dict:
-        execute_transaction([(
-            "UPDATE hostel_allocations SET status = 'VACATED', check_out_date = %s WHERE id = %s AND org_id = %s",
-            (checkout_date, allocation_id, org_id),
-        )])
+    def vacate(
+        cls, org_id: str, allocation_id: str, checkout_date: str, actor_id: str
+    ) -> dict:
+        execute_transaction(
+            [
+                (
+                    "UPDATE hostel_allocations SET status = 'VACATED', check_out_date = %s WHERE id = %s AND org_id = %s",
+                    (checkout_date, allocation_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="vacate",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "vacate"},
+        )
         return cls.get_allocation(org_id, allocation_id)
 
     @classmethod
@@ -153,8 +232,9 @@ class HostelService:
         return dict(rows[0])
 
     @classmethod
-    def get_student_allocation(cls, org_id: str, student_id: str,
-                                academic_year: str) -> dict | None:
+    def get_student_allocation(
+        cls, org_id: str, student_id: str, academic_year: str
+    ) -> dict | None:
         rows = execute_query(
             """
             SELECT a.*, r.room_number, b.name AS block_name
@@ -170,31 +250,74 @@ class HostelService:
     # ── Complaints ──────────────────────────────────────────
 
     @classmethod
-    def file_complaint(cls, org_id: str, student_id: str,
-                        req: HostelComplaintCreate, actor_id: str) -> dict:
+    def file_complaint(
+        cls, org_id: str, student_id: str, req: HostelComplaintCreate, actor_id: str
+    ) -> dict:
         cid = str(uuid.uuid4())
-        execute_transaction([(
-            "INSERT INTO hostel_complaints (id, org_id, student_id, room_id, category, description, priority) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (cid, org_id, student_id, req.room_id, req.category,
-             req.description, req.priority.value),
-        )])
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO hostel_complaints (id, org_id, student_id, room_id, category, description, priority) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (
+                        cid,
+                        org_id,
+                        student_id,
+                        req.room_id,
+                        req.category,
+                        req.description,
+                        req.priority.value,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="file_complaint",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "file_complaint"},
+        )
         rows = execute_query("SELECT * FROM hostel_complaints WHERE id = %s", (cid,))
         return dict(rows[0])
 
     @classmethod
-    def update_complaint(cls, org_id: str, complaint_id: str,
-                          status: str, resolution_note: str | None,
-                          actor_id: str) -> dict:
-        execute_transaction([(
-            """
+    def update_complaint(
+        cls,
+        org_id: str,
+        complaint_id: str,
+        status: str,
+        resolution_note: str | None,
+        actor_id: str,
+    ) -> dict:
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE hostel_complaints
             SET status = %s, assigned_to = %s, resolution_note = %s,
                 resolved_at = CASE WHEN %s IN ('RESOLVED','CLOSED') THEN NOW() ELSE resolved_at END
             WHERE id = %s AND org_id = %s
             """,
-            (status, actor_id, resolution_note, status, complaint_id, org_id),
-        )])
-        rows = execute_query("SELECT * FROM hostel_complaints WHERE id = %s", (complaint_id,))
+                    (status, actor_id, resolution_note, status, complaint_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="complaint",
+            entity_id=complaint_id,
+            tenant_id=org_id,
+            metadata={"source": "update_complaint"},
+        )
+        rows = execute_query(
+            "SELECT * FROM hostel_complaints WHERE id = %s", (complaint_id,)
+        )
         return dict(rows[0]) if rows else {}
 
     @classmethod
@@ -231,6 +354,6 @@ class HostelService:
             cap = int(row.get("total_capacity") or 0)
             occ = int(row.get("occupied") or 0)
             row["occupancy_pct"] = round((occ / cap * 100), 1) if cap > 0 else 0.0
-            row["available"]     = cap - occ
+            row["available"] = cap - occ
             result.append(row)
         return result

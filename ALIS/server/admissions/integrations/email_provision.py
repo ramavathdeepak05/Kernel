@@ -27,7 +27,6 @@ import re
 import secrets
 import string
 from dataclasses import dataclass
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +34,10 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EmailProvisionResult:
     success: bool
-    university_email: Optional[str] = None
-    temp_password: Optional[str] = None
-    provider: str = ""          # GOOGLE | MICROSOFT | STUB
-    error: Optional[str] = None
+    university_email: str | None = None
+    temp_password: str | None = None
+    provider: str = ""  # GOOGLE | MICROSOFT | STUB
+    error: str | None = None
 
 
 def _temp_password(length: int = 14) -> str:
@@ -83,6 +82,7 @@ class EmailProvisionClient:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
 
     def is_enabled(self) -> bool:
@@ -103,10 +103,9 @@ class EmailProvisionClient:
 
         if provider == "GOOGLE":
             return self._create_google(full_name, roll_number)
-        elif provider == "MICROSOFT":
+        if provider == "MICROSOFT":
             return self._create_microsoft(full_name, roll_number)
-        else:
-            return self._create_stub(full_name, roll_number)
+        return self._create_stub(full_name, roll_number)
 
     def suspend_student_email(self, university_email: str) -> bool:
         """Suspend/disable the email account (e.g. on cancellation)."""
@@ -117,10 +116,12 @@ class EmailProvisionClient:
         try:
             if provider == "GOOGLE":
                 return self._suspend_google(university_email)
-            elif provider == "MICROSOFT":
+            if provider == "MICROSOFT":
                 return self._suspend_microsoft(university_email)
         except Exception as exc:
-            logger.error("EmailProvision: suspend failed [%s] — %s", university_email, exc)
+            logger.error(
+                "EmailProvision: suspend failed [%s] — %s", university_email, exc
+            )
         return False
 
     # -------------------------------------------------------------------------
@@ -130,7 +131,9 @@ class EmailProvisionClient:
     def _create_google(self, full_name: str, roll_number: str) -> EmailProvisionResult:
         domain = self._settings.google_domain
         if not domain:
-            return EmailProvisionResult(success=False, error="google_domain not configured.", provider="GOOGLE")
+            return EmailProvisionResult(
+                success=False, error="google_domain not configured.", provider="GOOGLE"
+            )
 
         username = _derive_username(full_name, roll_number)
         email = f"{username}@{domain}"
@@ -159,7 +162,9 @@ class EmailProvisionClient:
             )
         except Exception as exc:
             logger.error("Google Workspace: create failed — %s", exc)
-            return EmailProvisionResult(success=False, error=str(exc), provider="GOOGLE")
+            return EmailProvisionResult(
+                success=False, error=str(exc), provider="GOOGLE"
+            )
 
     def _suspend_google(self, email: str) -> bool:
         service = self._google_directory_service()
@@ -169,6 +174,7 @@ class EmailProvisionClient:
     def _google_directory_service(self):
         """Build Google Admin SDK Directory service from service account JSON."""
         import json
+
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
 
@@ -178,16 +184,22 @@ class EmailProvisionClient:
             scopes=["https://www.googleapis.com/auth/admin.directory.user"],
             subject=self._settings.google_admin_email,
         )
-        return build("admin", "directory_v1", credentials=credentials, cache_discovery=False)
+        return build(
+            "admin", "directory_v1", credentials=credentials, cache_discovery=False
+        )
 
     # -------------------------------------------------------------------------
     # Microsoft 365 (Graph API)
     # -------------------------------------------------------------------------
 
-    def _create_microsoft(self, full_name: str, roll_number: str) -> EmailProvisionResult:
+    def _create_microsoft(
+        self, full_name: str, roll_number: str
+    ) -> EmailProvisionResult:
         domain = self._settings.ms_domain
         if not domain:
-            return EmailProvisionResult(success=False, error="ms_domain not configured.", provider="MICROSOFT")
+            return EmailProvisionResult(
+                success=False, error="ms_domain not configured.", provider="MICROSOFT"
+            )
 
         username = _derive_username(full_name, roll_number)
         email = f"{username}@{domain}"
@@ -197,6 +209,7 @@ class EmailProvisionClient:
         try:
             token = self._ms_access_token()
             import httpx
+
             resp = httpx.post(
                 "https://graph.microsoft.com/v1.0/users",
                 headers={
@@ -227,14 +240,20 @@ class EmailProvisionClient:
             )
         except Exception as exc:
             logger.error("Microsoft 365: create failed — %s", exc)
-            return EmailProvisionResult(success=False, error=str(exc), provider="MICROSOFT")
+            return EmailProvisionResult(
+                success=False, error=str(exc), provider="MICROSOFT"
+            )
 
     def _suspend_microsoft(self, email: str) -> bool:
         token = self._ms_access_token()
         import httpx
+
         resp = httpx.patch(
             f"https://graph.microsoft.com/v1.0/users/{email}",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
             json={"accountEnabled": False},
             timeout=30,
         )
@@ -244,6 +263,7 @@ class EmailProvisionClient:
     def _ms_access_token(self) -> str:
         """Acquire Microsoft 365 access token via client credentials flow."""
         import httpx
+
         s = self._settings
         resp = httpx.post(
             f"https://login.microsoftonline.com/{s.ms_tenant_id}/oauth2/v2.0/token",

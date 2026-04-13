@@ -29,13 +29,12 @@ Acceptance Criteria (E04-S04):
 from __future__ import annotations
 
 import base64
-import hashlib
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, PermissionDeniedError
 from server.core.rbac import Role
 from server.db_service import execute_query, execute_transaction
@@ -103,32 +102,42 @@ class DocumentVerificationService:
             file_content=file_bytes,
             filename=request.file_name,
             owner_id=uploaded_by,
-            context={"role": "staff", "entity_type": "application_document",
-                     "entity_id": request.applicant_id},
+            context={
+                "role": "staff",
+                "entity_type": "application_document",
+                "entity_id": request.applicant_id,
+            },
         )
-        file_path = str(file_meta.get_version().storage_path) if file_meta.get_version() else request.file_name
+        file_path = (
+            str(file_meta.get_version().storage_path)
+            if file_meta.get_version()
+            else request.file_name
+        )
 
         doc_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO application_documents
                     (id, org_id, applicant_id, doc_type, file_path,
                      is_verified, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    doc_id, org_id,
-                    request.applicant_id,
-                    request.doc_type.value,
-                    file_path,
-                    False,
-                    now,
-                ),
-            )
-        ])
+                    (
+                        doc_id,
+                        org_id,
+                        request.applicant_id,
+                        request.doc_type.value,
+                        file_path,
+                        False,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -146,118 +155,21 @@ class DocumentVerificationService:
             },
         )
 
-        # Trigger AI verification (synchronous for now — use task queue in prod)
-        cls._run_ai_verification(doc_id, file_path, request.doc_type.value, org_id, uploaded_by)
+        # Trigger AI verification (dispatched to celery to prevent HTTP transaction blocking)
+        from server.core.tenant_tasks import apply_tenant_task
 
-        return cls.get_document(doc_id, org_id)
-
-    # -------------------------------------------------------------------------
-    # AI Verification
-    # -------------------------------------------------------------------------
-
-    @classmethod
-    def _run_ai_verification(
-        cls,
-        doc_id: str,
-        file_path: str,
-        doc_type: str,
-        org_id: str,
-        actor_id: str,
-    ) -> None:
-        """
-        Run AI-based verification on a document.
-
-        Uses the AI Gateway to invoke an LLM check for:
-        - Stamp/seal presence on marksheets and certificates
-        - Date validity (not expired, not future-dated)
-        - Format consistency
-
-        Updates is_verified and verification_method in DB.
-        """
-        from server.core.ai_gateway import AIGateway, AIGatewayContext
-        from server.core.rbac import Role
-
-        context = AIGatewayContext(
-            actor_id="document_verifier_v1",
-            actor_role=Role.SYSTEM,
-            actor_type="ai_agent",
-            org_id=org_id,
-            module="M1",
-            wizard="Document Verification",
-        )
-
-        # Read file content for LLM context
-        try:
-            with open(file_path, "rb") as f:
-                content_sample = f.read(4096)  # First 4KB for text extraction
-            content_text = content_sample.decode("utf-8", errors="replace")
-        except Exception:
-            content_text = f"[Binary document: {doc_type}]"
-
-        llm = AIGateway.get_llm(context)
-        prompt = (
-            f"You are a document verification AI for a university admissions system.\n"
-            f"Document type: {doc_type}\n"
-            f"Document content sample:\n{content_text[:2000]}\n\n"
-            f"Verify this document and return JSON with fields:\n"
-            f"  decision: 'VERIFIED' or 'REJECTED'\n"
-            f"  confidence_score: 0.0-1.0\n"
-            f"  confidence_tier: HIGH/MEDIUM/LOW\n"
-            f"  state_impact: Draft\n"
-            f"  reasoning: brief explanation\n"
-        )
-
-        result = llm.invoke(prompt, validate_schema=True)
-
-        is_verified = False
-        detail = "AI verification inconclusive"
-
-        if result.success and result.validated_output:
-            vo = result.validated_output
-            is_verified = (
-                "VERIFIED" in vo.decision.upper()
-                and vo.confidence_score >= 0.6
-            )
-            detail = vo.reasoning or vo.decision
-
-        now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
-                UPDATE application_documents
-                SET is_verified = %s,
-                    verification_method = %s,
-                    verification_detail = %s,
-                    verified_by = %s,
-                    verified_at = %s
-                WHERE id = %s AND org_id = %s
-                """,
-                (
-                    is_verified,
-                    DocumentVerificationMethod.AI_AUTO.value,
-                    detail[:500],
-                    "ai_agent:document_verifier_v1",
-                    now,
-                    doc_id, org_id,
-                ),
-            )
-        ])
-
-        AuditLog.log(
-            action=AuditAction.UPDATE,
-            actor_id=actor_id,
-            entity_type="application_document",
-            entity_id=doc_id,
-            org_id=org_id,
-            module="M1",
-            wizard="Document Verification",
-            success=True,
-            metadata={
-                "is_verified": is_verified,
-                "method": DocumentVerificationMethod.AI_AUTO.value,
-                "detail": detail,
+        apply_tenant_task(
+            "ai_tasks.run_document_verification",
+            tenant_id=org_id,
+            kwargs={
+                "doc_id": doc_id,
+                "file_path": file_path,
+                "doc_type": request.doc_type.value,
+                "actor_id": uploaded_by,
             },
         )
+
+        return cls.get_document(doc_id, org_id)
 
     # -------------------------------------------------------------------------
     # Admin Override
@@ -299,9 +211,10 @@ class DocumentVerificationService:
             )
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE application_documents
                 SET is_verified = %s,
                     verification_method = %s,
@@ -310,16 +223,18 @@ class DocumentVerificationService:
                     verified_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    is_verified,
-                    DocumentVerificationMethod.ADMIN_OVERRIDE.value,
-                    justification[:500],
-                    actor_id,
-                    now,
-                    doc_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        is_verified,
+                        DocumentVerificationMethod.ADMIN_OVERRIDE.value,
+                        justification[:500],
+                        actor_id,
+                        now,
+                        doc_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.OVERRIDE_EXECUTED,
@@ -339,7 +254,9 @@ class DocumentVerificationService:
 
         logger.info(
             "E04-S04: Admin override — doc %s → is_verified=%s [actor=%s]",
-            doc_id, is_verified, actor_id,
+            doc_id,
+            is_verified,
+            actor_id,
         )
         return cls.get_document(doc_id, org_id)
 
@@ -360,7 +277,7 @@ class DocumentVerificationService:
     @classmethod
     def list_documents(
         cls, applicant_id: str, org_id: str
-    ) -> List[ApplicationDocumentRead]:
+    ) -> list[ApplicationDocumentRead]:
         rows = execute_query(
             "SELECT * FROM application_documents "
             "WHERE applicant_id = %s AND org_id = %s ORDER BY created_at ASC",
@@ -382,7 +299,8 @@ class DocumentVerificationService:
             (applicant_id, org_id),
         )
         approved_types = {
-            r["doc_type"] for r in rows
+            r["doc_type"]
+            for r in rows
             if r.get("doc_status") == DocumentStatus.APPROVED.value or r["is_verified"]
         }
         return _REQUIRED_FOR_OFFER.issubset(approved_types)
@@ -417,13 +335,15 @@ class DocumentVerificationService:
             )
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE application_documents SET doc_status = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (DocumentStatus.UNDER_REVIEW.value, now, doc_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE application_documents SET doc_status = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (DocumentStatus.UNDER_REVIEW.value, now, doc_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -452,9 +372,10 @@ class DocumentVerificationService:
         Requires at least STAFF role (officer or admin).
         """
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE application_documents
                 SET doc_status = %s,
                     is_verified = TRUE,
@@ -463,14 +384,17 @@ class DocumentVerificationService:
                     verified_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    DocumentStatus.APPROVED.value,
-                    DocumentVerificationMethod.MANUAL_OFFICER.value,
-                    actor_id, now,
-                    doc_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        DocumentStatus.APPROVED.value,
+                        DocumentVerificationMethod.MANUAL_OFFICER.value,
+                        actor_id,
+                        now,
+                        doc_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -495,7 +419,7 @@ class DocumentVerificationService:
         actor_id: str,
         rejection_reason: str,
         allow_reupload: bool = True,
-        reupload_deadline: "datetime | None" = None,
+        reupload_deadline: datetime | None = None,
     ) -> ApplicationDocumentRead:
         """
         Reject a document.
@@ -513,11 +437,12 @@ class DocumentVerificationService:
             if allow_reupload
             else DocumentStatus.REJECTED.value
         )
-        now = datetime.now(timezone.utc)
+        datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE application_documents
                 SET doc_status = %s,
                     is_verified = FALSE,
@@ -525,14 +450,16 @@ class DocumentVerificationService:
                     reupload_deadline = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    new_status,
-                    rejection_reason[:500],
-                    reupload_deadline,
-                    doc_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        new_status,
+                        rejection_reason[:500],
+                        reupload_deadline,
+                        doc_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -552,7 +479,9 @@ class DocumentVerificationService:
 
         logger.info(
             "E04-S04: Document rejected — doc %s status=%s [actor=%s]",
-            doc_id, new_status, actor_id,
+            doc_id,
+            new_status,
+            actor_id,
         )
         return cls.get_document(doc_id, org_id)
 
@@ -586,10 +515,10 @@ class DocumentVerificationService:
         ):
             raise BusinessRuleViolation(
                 message=f"Document must be in REUPLOAD_REQUESTED or REJECTED status. "
-                        f"Current: {doc['doc_status']}",
+                f"Current: {doc['doc_status']}",
             )
 
-        reupload_count = (doc["reupload_count"] or 0)
+        reupload_count = doc["reupload_count"] or 0
         if reupload_count >= 3:
             raise BusinessRuleViolation(
                 message="Maximum reupload limit (3) reached for this document.",
@@ -598,19 +527,29 @@ class DocumentVerificationService:
 
         # Store new file
         from server.fs_service import FileStorageService
+
         fs = FileStorageService()
         file_meta = fs.upload_file(
             file_content=file_bytes,
             filename=file_name,
             owner_id=actor_id,
-            context={"role": "staff", "entity_type": "application_document", "entity_id": doc_id},
+            context={
+                "role": "staff",
+                "entity_type": "application_document",
+                "entity_id": doc_id,
+            },
         )
-        new_path = str(file_meta.get_version().storage_path) if file_meta.get_version() else file_name
+        new_path = (
+            str(file_meta.get_version().storage_path)
+            if file_meta.get_version()
+            else file_name
+        )
 
-        now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
+        datetime.now(timezone.utc)
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE application_documents
                 SET file_path = %s,
                     original_file_name = %s,
@@ -625,13 +564,16 @@ class DocumentVerificationService:
                     verified_at = NULL
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    new_path, file_name,
-                    DocumentStatus.PENDING.value,
-                    doc_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        new_path,
+                        file_name,
+                        DocumentStatus.PENDING.value,
+                        doc_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -650,10 +592,23 @@ class DocumentVerificationService:
         )
 
         # Trigger AI re-verification on new file
-        cls._run_ai_verification(doc_id, new_path, doc["doc_type"], org_id, actor_id)
+        from server.core.tenant_tasks import apply_tenant_task
+
+        apply_tenant_task(
+            "ai_tasks.run_document_verification",
+            tenant_id=org_id,
+            kwargs={
+                "doc_id": doc_id,
+                "file_path": new_path,
+                "doc_type": doc["doc_type"],
+                "actor_id": actor_id,
+            },
+        )
 
         logger.info(
             "E04-S04: Document reuploaded — doc %s [count=%d actor=%s]",
-            doc_id, reupload_count + 1, actor_id,
+            doc_id,
+            reupload_count + 1,
+            actor_id,
         )
         return cls.get_document(doc_id, org_id)

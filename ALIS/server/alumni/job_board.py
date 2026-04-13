@@ -1,11 +1,12 @@
 """E12-S03 — Job Board"""
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
 
-from server.core.audit import AuditAction, AuditLog
+from server.core.audit import AuditAction, AuditLedger
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
 
@@ -15,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class JobBoardService:
-
     # ------------------------------------------------------------------
     # Postings
     # ------------------------------------------------------------------
@@ -23,8 +23,10 @@ class JobBoardService:
     @classmethod
     def create_posting(cls, org_id: str, req: JobPostingCreate, actor_id: str) -> dict:
         jid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO job_postings
                 (id, org_id, title, company_name, description, location,
                  job_type, experience_min, experience_max, salary_range,
@@ -32,17 +34,35 @@ class JobBoardService:
                  posted_by, source, expires_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
             """,
-            (
-                jid, org_id, req.title, req.company_name, req.description,
-                req.location, req.job_type.value, req.experience_min, req.experience_max,
-                req.salary_range, json.dumps(req.skills_required),
-                req.apply_url, req.apply_email, actor_id, req.source, req.expires_at,
-            ),
-        )])
+                    (
+                        jid,
+                        org_id,
+                        req.title,
+                        req.company_name,
+                        req.description,
+                        req.location,
+                        req.job_type.value,
+                        req.experience_min,
+                        req.experience_max,
+                        req.salary_range,
+                        json.dumps(req.skills_required),
+                        req.apply_url,
+                        req.apply_email,
+                        actor_id,
+                        req.source,
+                        req.expires_at,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-            entity_type="job_posting", entity_id=jid, org_id=org_id,
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="job_posting",
+            entity_id=jid,
+            org_id=org_id,
             module="E12-S03",
             metadata={"title": req.title, "company": req.company_name},
         )
@@ -70,11 +90,16 @@ class JobBoardService:
         sql = "SELECT * FROM job_postings WHERE org_id = %s"
         params: list = [org_id]
         if active_only:
-            sql += " AND status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW())"
+            sql += (
+                " AND status = 'ACTIVE' AND (expires_at IS NULL OR expires_at > NOW())"
+            )
         if job_type:
-            sql += " AND job_type = %s"; params.append(job_type)
+            sql += " AND job_type = %s"
+            params.append(job_type)
         if search:
-            sql += " AND (title ILIKE %s OR company_name ILIKE %s OR description ILIKE %s)"
+            sql += (
+                " AND (title ILIKE %s OR company_name ILIKE %s OR description ILIKE %s)"
+            )
             params += [f"%{search}%", f"%{search}%", f"%{search}%"]
         sql += " ORDER BY created_at DESC LIMIT %s"
         params.append(limit)
@@ -83,10 +108,24 @@ class JobBoardService:
     @classmethod
     def close_posting(cls, org_id: str, job_id: str, actor_id: str) -> dict:
         cls.get_posting(org_id, job_id)
-        execute_transaction([(
-            "UPDATE job_postings SET status = 'CLOSED' WHERE id = %s AND org_id = %s",
-            (job_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE job_postings SET status = 'CLOSED' WHERE id = %s AND org_id = %s",
+                    (job_id, org_id),
+                )
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="posting",
+            entity_id=job_id,
+            tenant_id=org_id,
+            metadata={"source": "close_posting"},
+        )
         return cls.get_posting(org_id, job_id)
 
     # ------------------------------------------------------------------
@@ -97,25 +136,50 @@ class JobBoardService:
     def apply(cls, org_id: str, req: JobApplicationCreate, actor_id: str) -> dict:
         job = cls.get_posting(org_id, req.job_id)
         if job["status"] != "ACTIVE":
-            raise BusinessRuleViolation(message="This job posting is no longer accepting applications")
+            raise BusinessRuleViolation(
+                message="This job posting is no longer accepting applications"
+            )
 
         existing = execute_query(
             "SELECT id FROM job_applications WHERE job_id = %s AND applicant_id = %s",
             (req.job_id, actor_id),
         )
         if existing:
-            raise BusinessRuleViolation(message="You have already applied for this position")
+            raise BusinessRuleViolation(
+                message="You have already applied for this position"
+            )
 
         app_id = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO job_applications
                 (id, org_id, job_id, applicant_id, applicant_type, resume_path, cover_note)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (app_id, org_id, req.job_id, actor_id, req.applicant_type,
-             req.resume_path, req.cover_note),
-        )])
+                    (
+                        app_id,
+                        org_id,
+                        req.job_id,
+                        actor_id,
+                        req.applicant_type,
+                        req.resume_path,
+                        req.cover_note,
+                    ),
+                )
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="apply",
+            entity_id=str(req.job_id),
+            tenant_id=org_id,
+            metadata={"source": "apply"},
+        )
         return {"id": app_id, "job_id": req.job_id, "status": "APPLIED"}
 
     @classmethod
@@ -132,10 +196,24 @@ class JobBoardService:
     ) -> dict:
         if status not in ("APPLIED", "SHORTLISTED", "REJECTED", "HIRED"):
             raise BusinessRuleViolation(message=f"Invalid application status: {status}")
-        execute_transaction([(
-            "UPDATE job_applications SET status = %s WHERE id = %s AND org_id = %s",
-            (status, application_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE job_applications SET status = %s WHERE id = %s AND org_id = %s",
+                    (status, application_id, org_id),
+                )
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="application_status",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "update_application_status"},
+        )
         rows = execute_query(
             "SELECT * FROM job_applications WHERE id = %s AND org_id = %s",
             (application_id, org_id),

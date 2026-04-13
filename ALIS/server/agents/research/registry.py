@@ -7,13 +7,15 @@ LAYER: Layer 2 (Agentic Decisions)
 Registered Agents:
     plagiarism_advisor_v1 — PhD thesis plagiarism remediation advice
 """
+
 from __future__ import annotations
 
-from typing import Dict, Any, List, Callable, Literal, Optional, Tuple
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, Literal
 
 from server.core.ai_gateway import AIGatewayContext, AIInvocationResult
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 
 
 @dataclass(frozen=True)
@@ -24,7 +26,7 @@ class AgentMeta:
     prompt_version: str
     invocation_class: str
     authorization_policy: str
-    allowed_tools: Tuple[str, ...] = ()
+    allowed_tools: tuple[str, ...] = ()
     description: str = ""
     status: Literal["ACTIVE", "SHADOW", "DEPRECATED"] = "ACTIVE"
 
@@ -32,7 +34,7 @@ class AgentMeta:
 class ResearchAgentRegistry:
     """Module-scoped agent registry for M8 — Research."""
 
-    _agents: Dict[str, AgentMeta] = {
+    _agents: dict[str, AgentMeta] = {
         "plagiarism_advisor_v1": AgentMeta(
             agent_id="plagiarism_advisor_v1",
             module="M8",
@@ -54,12 +56,15 @@ class ResearchAgentRegistry:
         ),
     }
 
-    _executors: Dict[str, Callable] = {}
+    _executors: dict[str, Callable] = {}
 
     @classmethod
     def _ensure_executors_loaded(cls):
         if not cls._executors:
-            from server.agents.research.plagiarism_advisor_v1 import execute_plagiarism_advisor
+            from server.agents.research.plagiarism_advisor_v1 import (
+                execute_plagiarism_advisor,
+            )
+
             cls._executors["plagiarism_advisor_v1"] = execute_plagiarism_advisor
 
     @classmethod
@@ -67,22 +72,33 @@ class ResearchAgentRegistry:
         return agent_name in cls._agents
 
     @classmethod
-    def list_agents(cls) -> List[str]:
+    def list_agents(cls) -> list[str]:
         return list(cls._agents.keys())
 
     @classmethod
-    def list_agents_detail(cls) -> List[Dict[str, Any]]:
+    def list_agents_detail(cls) -> list[dict[str, Any]]:
         return [
-            {"agent_id": m.agent_id, "module": m.module, "model_version": m.model_version,
-             "prompt_version": m.prompt_version, "invocation_class": m.invocation_class,
-             "authorization_policy": m.authorization_policy, "allowed_tools": list(m.allowed_tools),
-             "description": m.description}
+            {
+                "agent_id": m.agent_id,
+                "module": m.module,
+                "model_version": m.model_version,
+                "prompt_version": m.prompt_version,
+                "invocation_class": m.invocation_class,
+                "authorization_policy": m.authorization_policy,
+                "allowed_tools": list(m.allowed_tools),
+                "description": m.description,
+            }
             for m in cls._agents.values()
         ]
 
     @classmethod
-    def execute(cls, agent_name: str, context: AIGatewayContext,
-                input_data: Dict[str, Any], model_override: Optional[str] = None) -> AIInvocationResult:
+    def execute(
+        cls,
+        agent_name: str,
+        context: AIGatewayContext,
+        input_data: dict[str, Any],
+        model_override: str | None = None,
+    ) -> AIInvocationResult:
         if agent_name not in cls._agents:
             raise ValueError(f"Agent '{agent_name}' not registered in M8 (Research).")
         cls._ensure_executors_loaded()
@@ -90,14 +106,37 @@ class ResearchAgentRegistry:
         if executor is None:
             raise ValueError(f"Agent '{agent_name}' has no executor.")
         meta = cls._agents[agent_name]
-        AuditLog.log(action=AuditAction.AGENT_EXECUTION, actor_id=context.actor_id,
-                     actor_type=context.actor_type, actor_role=context.actor_role.value if context.actor_role else None,
-                     entity_type="ai_agent", entity_id=meta.agent_id, tenant_id=context.org_id,
-                     metadata={"phase": "start", "module": "M8", "request_id": context.request_id})
-        result = executor(context=context, input_data=input_data, model_override=model_override)
-        AuditLog.log(action=AuditAction.AGENT_EXECUTION, actor_id=context.actor_id,
-                     actor_type=context.actor_type, actor_role=context.actor_role.value if context.actor_role else None,
-                     entity_type="ai_agent", entity_id=meta.agent_id, tenant_id=context.org_id,
-                     success=result.success, failure_reason=result.error,
-                     metadata={"phase": "complete", "request_id": context.request_id, "latency_ms": result.latency_ms})
+        AuditLog.log(
+            action=AuditAction.AGENT_EXECUTION,
+            actor_id=context.actor_id,
+            actor_type=context.actor_type,
+            actor_role=context.actor_role.value if context.actor_role else None,
+            entity_type="ai_agent",
+            entity_id=meta.agent_id,
+            tenant_id=context.org_id,
+            metadata={
+                "phase": "start",
+                "module": "M8",
+                "request_id": context.request_id,
+            },
+        )
+        result = executor(
+            context=context, input_data=input_data, model_override=model_override
+        )
+        AuditLog.log(
+            action=AuditAction.AGENT_EXECUTION,
+            actor_id=context.actor_id,
+            actor_type=context.actor_type,
+            actor_role=context.actor_role.value if context.actor_role else None,
+            entity_type="ai_agent",
+            entity_id=meta.agent_id,
+            tenant_id=context.org_id,
+            success=result.success,
+            failure_reason=result.error,
+            metadata={
+                "phase": "complete",
+                "request_id": context.request_id,
+                "latency_ms": result.latency_ms,
+            },
+        )
         return result

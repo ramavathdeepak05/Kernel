@@ -7,30 +7,30 @@ CRITICAL: This module must NEVER call or import from any other business module.
 It only reads from and writes to regulatory_metrics.
 Cross-module data flows via domain events → event_handlers → record().
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import date
-from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 
 class RegulatoryMetricsService:
-
     @staticmethod
     def record(
         org_id: str,
         metric_key: str,
-        metric_value: Optional[float],
+        metric_value: float | None,
         framework: str = "NAAC",
-        breakdown: Optional[Dict[str, Any]] = None,
-        metric_date: Optional[date] = None,
-        source_event: Optional[str] = None,
-        source_event_id: Optional[str] = None,
+        breakdown: dict[str, Any] | None = None,
+        metric_date: date | None = None,
+        source_event: str | None = None,
+        source_event_id: str | None = None,
     ) -> None:
         """Upsert a single metric value for today (or metric_date).
 
@@ -38,11 +38,20 @@ class RegulatoryMetricsService:
         idempotently from re-run Celery event handlers.
         """
         import json
+
         target_date = metric_date or date.today()
         breakdown_json = json.dumps(breakdown or {})
 
         execute_transaction(
-            [
+            AuditLog.log(
+                action=AuditAction.CREATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="metric",
+                entity_id="",
+                tenant_id="",
+                metadata={"source": "record"},
+            )[
                 (
                     """
                     INSERT INTO regulatory_metrics
@@ -79,9 +88,9 @@ class RegulatoryMetricsService:
         metric_key: str,
         delta: float = 1.0,
         framework: str = "NAAC",
-        metric_date: Optional[date] = None,
-        source_event: Optional[str] = None,
-        source_event_id: Optional[str] = None,
+        metric_date: date | None = None,
+        source_event: str | None = None,
+        source_event_id: str | None = None,
     ) -> None:
         """Atomically increment a counter metric.
 
@@ -118,13 +127,22 @@ class RegulatoryMetricsService:
             ],
             tenant_id=org_id,
         )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="metric",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "increment"},
+        )
 
     @staticmethod
     def get_metric(
         org_id: str,
         metric_key: str,
-        metric_date: Optional[date] = None,
-    ) -> Optional[Dict[str, Any]]:
+        metric_date: date | None = None,
+    ) -> dict[str, Any] | None:
         """Return the metric row for a specific date (defaults to today)."""
         target_date = metric_date or date.today()
         rows = execute_query(
@@ -143,7 +161,7 @@ class RegulatoryMetricsService:
         org_id: str,
         framework: str = "NAAC",
         limit: int = 100,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return the most recent value for each metric under a framework."""
         rows = execute_query(
             """
@@ -164,7 +182,7 @@ class RegulatoryMetricsService:
         org_id: str,
         metric_key: str,
         days: int = 30,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Return daily values for a metric over the past N days."""
         rows = execute_query(
             """

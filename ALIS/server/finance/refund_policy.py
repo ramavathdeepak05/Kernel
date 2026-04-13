@@ -10,15 +10,16 @@ Also:
 - Fee version locking per student (FM-1 gap)
 - Scholarship revocation uses reversal entries, never UPDATE (EC-FIN-03)
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class UGCRefundPolicyService:
         class_start_date: datetime,
         total_fee_paid: float,
         reason: str = "voluntary",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Compute refund amount per UGC policy.
 
@@ -59,7 +60,9 @@ class UGCRefundPolicyService:
         if days_before > 15:
             # 15+ days before: full refund minus processing fee
             refund = max(total_fee_paid - cls.PROCESSING_FEE, 0)
-            policy = "UGC: >15 days before classes — full refund minus ₹1,000 processing fee"
+            policy = (
+                "UGC: >15 days before classes — full refund minus ₹1,000 processing fee"
+            )
             deduction_pct = 0.0
         elif 0 < days_before <= 15:
             # Within 15 days: proportional deduction
@@ -98,44 +101,72 @@ class UGCRefundPolicyService:
         class_start_date: datetime,
         reason: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Submit a refund request. Computes amount per UGC policy."""
         now = datetime.now(timezone.utc)
         computation = cls.compute_refund(now, class_start_date, total_fee_paid, reason)
 
         refund_id = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO refund_requests
                     (id, org_id, student_id, total_fee_paid, refund_amount,
                      processing_fee, deduction_pct, policy_applied, reason,
                      status, requested_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    refund_id, org_id, student_id, total_fee_paid,
-                    computation["refund_amount"], computation["processing_fee"],
-                    computation["deduction_percentage"], computation["policy_applied"],
-                    reason, RefundStatus.REQUESTED.value, actor_id, now,
-                ),
-            )
-        ], tenant_id=org_id)
+                    (
+                        refund_id,
+                        org_id,
+                        student_id,
+                        total_fee_paid,
+                        computation["refund_amount"],
+                        computation["processing_fee"],
+                        computation["deduction_percentage"],
+                        computation["policy_applied"],
+                        reason,
+                        RefundStatus.REQUESTED.value,
+                        actor_id,
+                        now,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_role="finance",
-            entity_type="refund_request", entity_id=refund_id, tenant_id=org_id,
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="finance",
+            entity_type="refund_request",
+            entity_id=refund_id,
+            tenant_id=org_id,
             metadata=computation,
         )
         return {"id": refund_id, **computation, "status": RefundStatus.REQUESTED.value}
 
     @classmethod
-    def approve_refund(cls, org_id: str, refund_id: str, actor_id: str) -> Dict[str, Any]:
-        execute_transaction([
-            ("UPDATE refund_requests SET status = %s, approved_by = %s, approved_at = NOW() "
-             "WHERE id = %s AND org_id = %s AND status = %s",
-             (RefundStatus.APPROVED.value, actor_id, refund_id, org_id, RefundStatus.REQUESTED.value))
-        ], tenant_id=org_id)
+    def approve_refund(
+        cls, org_id: str, refund_id: str, actor_id: str
+    ) -> dict[str, Any]:
+        execute_transaction(
+            [
+                (
+                    "UPDATE refund_requests SET status = %s, approved_by = %s, approved_at = NOW() "
+                    "WHERE id = %s AND org_id = %s AND status = %s",
+                    (
+                        RefundStatus.APPROVED.value,
+                        actor_id,
+                        refund_id,
+                        org_id,
+                        RefundStatus.REQUESTED.value,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
         return {"id": refund_id, "status": RefundStatus.APPROVED.value}
 
 
@@ -150,15 +181,20 @@ class FeeVersionLockService:
 
     @classmethod
     def lock_fee_version(
-        cls, org_id: str, student_id: str, fee_structure_id: str, academic_year: str,
-    ) -> Dict[str, Any]:
+        cls,
+        org_id: str,
+        student_id: str,
+        fee_structure_id: str,
+        academic_year: str,
+    ) -> dict[str, Any]:
         """Lock a student to a specific fee structure version at admission."""
         assignment_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO student_fee_assignments
                     (id, org_id, student_id, fee_structure_id, academic_year,
                      locked_at, is_locked)
@@ -166,14 +202,23 @@ class FeeVersionLockService:
                 ON CONFLICT (org_id, student_id, fee_structure_id)
                 DO NOTHING
                 """,
-                (assignment_id, org_id, student_id, fee_structure_id, academic_year, now),
-            )
-        ], tenant_id=org_id)
+                    (
+                        assignment_id,
+                        org_id,
+                        student_id,
+                        fee_structure_id,
+                        academic_year,
+                        now,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         return {"assignment_id": assignment_id, "locked": True}
 
     @classmethod
-    def get_locked_fee(cls, org_id: str, student_id: str) -> Optional[Dict[str, Any]]:
+    def get_locked_fee(cls, org_id: str, student_id: str) -> dict[str, Any] | None:
         """Get the locked fee structure for a student."""
         rows = execute_query(
             """

@@ -9,11 +9,12 @@ Table: institution_policies
   org_id + key → UNIQUE constraint (one value per rule per org)
   value is JSONB — supports scalars, lists, and dicts
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import NotFoundError
@@ -27,40 +28,40 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 class PolicyKey:
     # Eligibility thresholds
-    MIN_ACADEMIC_PCT        = "admissions.eligibility.min_academic_percentage"
-    REVIEW_BAND_LOWER       = "admissions.eligibility.review_band_lower"
-    MIN_ENTRANCE_SCORE      = "admissions.eligibility.min_entrance_score"
+    MIN_ACADEMIC_PCT = "admissions.eligibility.min_academic_percentage"
+    REVIEW_BAND_LOWER = "admissions.eligibility.review_band_lower"
+    MIN_ENTRANCE_SCORE = "admissions.eligibility.min_entrance_score"
     DOCS_REQUIRED_FOR_OFFER = "admissions.eligibility.docs_required_for_offer"
 
     # Counsellor
-    MAX_COUNSELLOR_LOAD     = "admissions.counsellor.max_load"
+    MAX_COUNSELLOR_LOAD = "admissions.counsellor.max_load"
 
     # Offer letter
-    OFFER_VALIDITY_DAYS     = "admissions.offer_letter.validity_days"
+    OFFER_VALIDITY_DAYS = "admissions.offer_letter.validity_days"
 
     # Finance
-    FEE_OVERDUE_GRACE_DAYS  = "finance.fee.overdue_grace_days"
+    FEE_OVERDUE_GRACE_DAYS = "finance.fee.overdue_grace_days"
 
     # Academics
-    MIN_ATTENDANCE_PCT      = "academics.attendance.min_percentage"
+    MIN_ATTENDANCE_PCT = "academics.attendance.min_percentage"
 
     # Learning (in-house LMS)
     LEARNING_LATE_PENALTY_PCT = "learning.assignment.late_penalty_pct_default"
-    LEARNING_MAX_LATE_DAYS    = "learning.assignment.max_late_days"
+    LEARNING_MAX_LATE_DAYS = "learning.assignment.max_late_days"
     LEARNING_AUTO_BEGIN_REVIEW = "learning.auto_begin_review"
 
     # Defaults (used when no DB row exists for an org)
     _DEFAULTS: dict[str, Any] = {
-        MIN_ACADEMIC_PCT:          55.0,
-        REVIEW_BAND_LOWER:         50.0,
-        MIN_ENTRANCE_SCORE:        40.0,
-        DOCS_REQUIRED_FOR_OFFER:   True,
-        MAX_COUNSELLOR_LOAD:       30,
-        OFFER_VALIDITY_DAYS:       30,
-        FEE_OVERDUE_GRACE_DAYS:    7,
-        MIN_ATTENDANCE_PCT:        75.0,
+        MIN_ACADEMIC_PCT: 55.0,
+        REVIEW_BAND_LOWER: 50.0,
+        MIN_ENTRANCE_SCORE: 40.0,
+        DOCS_REQUIRED_FOR_OFFER: True,
+        MAX_COUNSELLOR_LOAD: 30,
+        OFFER_VALIDITY_DAYS: 30,
+        FEE_OVERDUE_GRACE_DAYS: 7,
+        MIN_ATTENDANCE_PCT: 75.0,
         LEARNING_LATE_PENALTY_PCT: 10.0,
-        LEARNING_MAX_LATE_DAYS:    3,
+        LEARNING_MAX_LATE_DAYS: 3,
         LEARNING_AUTO_BEGIN_REVIEW: False,
     }
 
@@ -87,7 +88,7 @@ class PolicyStore:
         return PolicyKey._DEFAULTS.get(key)
 
     @classmethod
-    def get_all(cls, org_id: str, category: Optional[str] = None) -> list[dict]:
+    def get_all(cls, org_id: str, category: str | None = None) -> list[dict]:
         """Return all active policies for an org, optionally filtered by category."""
         if category:
             rows = execute_query(
@@ -116,23 +117,26 @@ class PolicyStore:
         actor_id: str = "system",
     ) -> dict:
         """Create or update a policy. Returns the stored row."""
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO institution_policies
-                    (org_id, key, value, description, category, updated_by, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    (org_id, key, value, description, category, is_active, updated_by, updated_at)
+                VALUES (%s, %s, %s, %s, %s, TRUE, %s, NOW())
                 ON CONFLICT (org_id, key)
                 DO UPDATE SET
                     value       = EXCLUDED.value,
                     description = EXCLUDED.description,
                     category    = EXCLUDED.category,
+                    is_active   = EXCLUDED.is_active,
                     updated_by  = EXCLUDED.updated_by,
                     updated_at  = NOW()
                 """,
-                (org_id, key, json.dumps(value), description, category, actor_id),
-            )
-        ])
+                    (org_id, key, json.dumps(value), description, category, actor_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -157,12 +161,14 @@ class PolicyStore:
         if not rows:
             raise NotFoundError(f"Policy not found: {key}")
 
-        execute_transaction([
-            (
-                "UPDATE institution_policies SET is_active = FALSE, updated_by = %s, updated_at = NOW() WHERE org_id = %s AND key = %s",
-                (actor_id, org_id, key),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE institution_policies SET is_active = FALSE, updated_by = %s, updated_at = NOW() WHERE org_id = %s AND key = %s",
+                    (actor_id, org_id, key),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.DELETE,
@@ -195,8 +201,8 @@ class PolicyStore:
                 PolicyKey.MAX_COUNSELLOR_LOAD,
                 PolicyKey.OFFER_VALIDITY_DAYS,
             ],
-            "finance":    [PolicyKey.FEE_OVERDUE_GRACE_DAYS],
-            "academics":  [PolicyKey.MIN_ATTENDANCE_PCT],
+            "finance": [PolicyKey.FEE_OVERDUE_GRACE_DAYS],
+            "academics": [PolicyKey.MIN_ATTENDANCE_PCT],
         }
         count = 0
         for category, keys in _CATEGORY_MAP.items():

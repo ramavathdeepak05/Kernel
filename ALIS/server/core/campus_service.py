@@ -9,13 +9,12 @@ Feature flag: platform.multi_campus_enabled
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from server.core.domain_events import DomainEvent, DomainEventBus
-from server.core.exceptions import BusinessRuleViolation, NotFoundError
+from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
@@ -60,7 +59,7 @@ class CampusService:
         if flag_value != "true":
             raise BusinessRuleViolation("Multi-campus feature is not enabled")
 
-    def _get_entity_type(self, org_id: str) -> Optional[str]:
+    def _get_entity_type(self, org_id: str) -> str | None:
         rows = execute_query(
             "SELECT entity_type FROM organizations WHERE id = %s",
             (org_id,),
@@ -78,12 +77,12 @@ class CampusService:
         campus_name: str,
         city: str,
         state: str,
-        address: Optional[str] = None,
-        pincode: Optional[str] = None,
-        phone: Optional[str] = None,
-        principal_user_id: Optional[str] = None,
-        actor_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        address: str | None = None,
+        pincode: str | None = None,
+        phone: str | None = None,
+        principal_user_id: str | None = None,
+        actor_id: str | None = None,
+    ) -> dict[str, Any]:
         """Provision a new campus under a GROUP organisation.
 
         Creates a fresh CAMPUS org (own org_id / RLS tenant) and a
@@ -177,7 +176,7 @@ class CampusService:
         campus_org_id: str,
         role_scope: str,
         assigned_by: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Assign a user to a campus with a scoped role.
 
         Uses INSERT … ON CONFLICT DO UPDATE so the call is idempotent — a
@@ -222,7 +221,7 @@ class CampusService:
 
     async def get_group_summary(
         self, group_org_id: str, actor_id: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Return aggregate metrics for all campuses under a GROUP.
 
         Fetches per-campus student and faculty counts in a single loop.
@@ -250,7 +249,7 @@ class CampusService:
             (group_org_id,),
         )
 
-        enriched: List[Dict[str, Any]] = []
+        enriched: list[dict[str, Any]] = []
         for campus in campuses:
             campus_org_id = campus["id"]
 
@@ -274,12 +273,8 @@ class CampusService:
                     "campus_code": campus["campus_code"],
                     "city": campus["city"],
                     "is_active": campus.get("is_active", True),
-                    "student_count": int(
-                        student_rows[0]["cnt"] if student_rows else 0
-                    ),
-                    "faculty_count": int(
-                        faculty_rows[0]["cnt"] if faculty_rows else 0
-                    ),
+                    "student_count": int(student_rows[0]["cnt"] if student_rows else 0),
+                    "faculty_count": int(faculty_rows[0]["cnt"] if faculty_rows else 0),
                 }
             )
 
@@ -289,7 +284,7 @@ class CampusService:
             "campuses": enriched,
         }
 
-    def promote_to_group(self, org_id: str, actor_id: str) -> Dict[str, Any]:
+    def promote_to_group(self, org_id: str, actor_id: str) -> dict[str, Any]:
         """Promote a STANDALONE organisation to GROUP status.
 
         Once promoted the org can provision CAMPUS children via
@@ -333,7 +328,7 @@ class CampusService:
         )
         return rows[0] if rows else {"id": org_id, "entity_type": "GROUP"}
 
-    def list_campuses(self, group_org_id: str) -> List[Dict[str, Any]]:
+    def list_campuses(self, group_org_id: str) -> list[dict[str, Any]]:
         """Return all CAMPUS orgs under the given GROUP.
 
         Args:

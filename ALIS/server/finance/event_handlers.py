@@ -11,6 +11,7 @@ Publishes:
   - FeePaymentReceived   (payment.py)
   - FeeWaiverApproved    (waiver.py)
 """
+
 from __future__ import annotations
 
 import logging
@@ -22,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 def on_student_enrolled(event: dict) -> None:
     """Auto-generate admission fee invoice when a student is enrolled."""
-    payload    = event.get("payload", {})
-    org_id     = event.get("org_id")
+    payload = event.get("payload", {})
+    org_id = event.get("org_id")
     student_id = payload.get("student_id") or event.get("entity_id")
-    actor_id   = event.get("actor_id", "system")
+    actor_id = event.get("actor_id", "system")
 
     if not (org_id and student_id):
         return
@@ -45,7 +46,10 @@ def on_student_enrolled(event: dict) -> None:
             return
 
         from datetime import datetime, timezone
-        academic_year = payload.get("academic_year") or str(datetime.now(timezone.utc).year)
+
+        academic_year = payload.get("academic_year") or str(
+            datetime.now(timezone.utc).year
+        )
 
         # Find applicable fee structure (program-specific or org-wide)
         structures = execute_query(
@@ -58,10 +62,13 @@ def on_student_enrolled(event: dict) -> None:
             (org_id, academic_year),
         )
         if not structures:
-            logger.info("E07: No fee structure for auto-invoice on enrollment of %s", student_id)
+            logger.info(
+                "E07: No fee structure for auto-invoice on enrollment of %s", student_id
+            )
             return
 
         from datetime import date, timedelta
+
         due = (date.today() + timedelta(days=30)).isoformat()
         InvoiceService.create_for_student(
             org_id=org_id,
@@ -80,8 +87,8 @@ def on_student_enrolled(event: dict) -> None:
 
 def on_fee_payment_received(event: dict) -> None:
     """Notify student on full payment."""
-    payload    = event.get("payload", {})
-    org_id     = event.get("org_id")
+    payload = event.get("payload", {})
+    org_id = event.get("org_id")
     invoice_id = payload.get("invoice_id")
     student_id = payload.get("student_id")
 
@@ -89,8 +96,8 @@ def on_fee_payment_received(event: dict) -> None:
         return
 
     try:
-        from server.db_service import execute_query
         from server.core.notifications.service import NotificationDispatcher
+        from server.db_service import execute_query
 
         inv_rows = execute_query(
             "SELECT status, invoice_number FROM student_invoices WHERE id = %s AND org_id = %s",
@@ -119,21 +126,23 @@ def on_fee_payment_received(event: dict) -> None:
             org_id=org_id,
         )
     except Exception as exc:
-        logger.warning("E07: FeePaymentReceived notification failed (non-fatal): %s", exc)
+        logger.warning(
+            "E07: FeePaymentReceived notification failed (non-fatal): %s", exc
+        )
 
 
 def on_fee_waiver_approved(event: dict) -> None:
     """Notify student when fee waiver is approved."""
-    payload    = event.get("payload", {})
-    org_id     = event.get("org_id")
+    payload = event.get("payload", {})
+    org_id = event.get("org_id")
     student_id = payload.get("student_id")
 
     if not (org_id and student_id):
         return
 
     try:
-        from server.db_service import execute_query
         from server.core.notifications.service import NotificationDispatcher
+        from server.db_service import execute_query
 
         student_rows = execute_query(
             "SELECT name, email FROM students WHERE id = %s AND org_id = %s",
@@ -155,11 +164,13 @@ def on_fee_waiver_approved(event: dict) -> None:
             org_id=org_id,
         )
     except Exception as exc:
-        logger.warning("E07: FeeWaiverApproved notification failed (non-fatal): %s", exc)
+        logger.warning(
+            "E07: FeeWaiverApproved notification failed (non-fatal): %s", exc
+        )
 
 
 def register_all() -> None:
-    DomainEventBus.subscribe("StudentEnrolled",      on_student_enrolled)
-    DomainEventBus.subscribe("FeePaymentReceived",   on_fee_payment_received)
-    DomainEventBus.subscribe("FeeWaiverApproved",    on_fee_waiver_approved)
+    DomainEventBus.subscribe("StudentEnrolled", on_student_enrolled)
+    DomainEventBus.subscribe("FeePaymentReceived", on_fee_payment_received)
+    DomainEventBus.subscribe("FeeWaiverApproved", on_fee_waiver_approved)
     logger.info("E07 event handlers registered")

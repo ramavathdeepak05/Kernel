@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +39,22 @@ DIGILOCKER_DOC_TYPES = {
 
 @dataclass
 class DigiLockerDocument:
-    doc_type: str           # ALIS doc type key
-    issuer: str             # DigiLocker issuer URI
-    name: str               # Document name
-    size: Optional[int]     # File size in bytes
-    mime_type: str          # application/pdf | image/jpeg
-    uri: str                # DigiLocker document URI
-    is_valid: bool          # DigiLocker verification status
-    raw: Dict[str, Any] = field(default_factory=dict)
+    doc_type: str  # ALIS doc type key
+    issuer: str  # DigiLocker issuer URI
+    name: str  # Document name
+    size: int | None  # File size in bytes
+    mime_type: str  # application/pdf | image/jpeg
+    uri: str  # DigiLocker document URI
+    is_valid: bool  # DigiLocker verification status
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class DigiLockerPullResult:
     success: bool
-    documents: List[DigiLockerDocument]
-    error: Optional[str] = None
-    token_used: Optional[str] = None
+    documents: list[DigiLockerDocument]
+    error: str | None = None
+    token_used: str | None = None
 
 
 class DigiLockerClient:
@@ -77,6 +77,7 @@ class DigiLockerClient:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
         self.BASE_URL = settings.digilocker_base_url
 
@@ -103,7 +104,7 @@ class DigiLockerClient:
         query = "&".join(f"{k}={v}" for k, v in params.items())
         return f"{self.BASE_URL}/authorize?{query}"
 
-    def exchange_code(self, code: str) -> Dict[str, Any]:
+    def exchange_code(self, code: str) -> dict[str, Any]:
         """
         Exchange the authorization code for an access token.
 
@@ -113,6 +114,7 @@ class DigiLockerClient:
             raise RuntimeError("DigiLocker integration is not configured.")
 
         import httpx
+
         timeout = self._settings.digilocker_timeout_seconds
 
         try:
@@ -142,9 +144,12 @@ class DigiLockerClient:
         Returns a DigiLockerPullResult with all available documents.
         """
         if not self.is_enabled():
-            return DigiLockerPullResult(success=False, documents=[], error="DigiLocker not configured")
+            return DigiLockerPullResult(
+                success=False, documents=[], error="DigiLocker not configured"
+            )
 
         import httpx
+
         timeout = self._settings.digilocker_timeout_seconds
         headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -167,9 +172,7 @@ class DigiLockerClient:
             logger.error("DigiLocker: document pull failed — %s", exc)
             return DigiLockerPullResult(success=False, documents=[], error=str(exc))
 
-    def fetch_document_file(
-        self, access_token: str, doc_uri: str
-    ) -> Optional[bytes]:
+    def fetch_document_file(self, access_token: str, doc_uri: str) -> bytes | None:
         """
         Download the actual file bytes for a specific DigiLocker document URI.
         Returns None on failure.
@@ -178,6 +181,7 @@ class DigiLockerClient:
             return None
 
         import httpx
+
         timeout = self._settings.digilocker_timeout_seconds
         headers = {"Authorization": f"Bearer {access_token}"}
 
@@ -190,21 +194,23 @@ class DigiLockerClient:
             logger.error("DigiLocker: file download failed — %s", exc)
             return None
 
-    def _parse_documents(self, items: List[Dict[str, Any]]) -> List[DigiLockerDocument]:
+    def _parse_documents(self, items: list[dict[str, Any]]) -> list[DigiLockerDocument]:
         docs = []
         for item in items:
             issuer = item.get("issuer", "")
             doc_type = self._issuer_to_doc_type(issuer)
-            docs.append(DigiLockerDocument(
-                doc_type=doc_type,
-                issuer=issuer,
-                name=item.get("name", ""),
-                size=item.get("size"),
-                mime_type=item.get("mime", "application/pdf"),
-                uri=item.get("uri", ""),
-                is_valid=item.get("validFrom") is not None,
-                raw=item,
-            ))
+            docs.append(
+                DigiLockerDocument(
+                    doc_type=doc_type,
+                    issuer=issuer,
+                    name=item.get("name", ""),
+                    size=item.get("size"),
+                    mime_type=item.get("mime", "application/pdf"),
+                    uri=item.get("uri", ""),
+                    is_valid=item.get("validFrom") is not None,
+                    raw=item,
+                )
+            )
         return docs
 
     def _issuer_to_doc_type(self, issuer: str) -> str:

@@ -33,12 +33,14 @@ Must Align With
 - migration 0016 (tenant_feature_flags table)
 - SKILL.md invariant 2: "Configuration is data, not code"
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
+from server.core.audit import AuditAction, AuditLog
 from server.core.settings import settings
 from server.db_service import execute_query, execute_transaction
 
@@ -53,42 +55,41 @@ _CACHE_TTL = 300  # 5 minutes
 # Enabled defaults represent the safe/compliant baseline.
 # ---------------------------------------------------------------------------
 
-DEFAULT_FLAGS: Dict[str, Dict[str, Any]] = {
+DEFAULT_FLAGS: dict[str, dict[str, Any]] = {
     # ── MODULE FLAGS ────────────────────────────────────────────────────────
     # Off until institution contracts the specific integration/hardware
-    "admissions.digilocker_verification":   {"enabled": False, "config": {}},
-    "admissions.nta_score_import":          {"enabled": False, "config": {}},
-    "academics.ai_ppt_generation":          {"enabled": False, "config": {}},
-    "academics.ai_assignment_drafting":     {"enabled": False, "config": {}},
-    "examinations.online_proctoring":       {"enabled": False, "config": {}},
-    "examinations.qr_hall_entry":           {"enabled": False, "config": {}},
-    "examinations.question_paper_vault":    {"enabled": False, "config": {}},
-    "finance.emi_payment_plans":            {"enabled": True,  "config": {}},
-    "finance.gst_auto_filing":             {"enabled": False, "config": {}},
-    "hr.cas_promotion_tracking":            {"enabled": True,  "config": {}},
-    "regulatory.naac_evidence_collection":  {"enabled": False, "config": {}},
-
+    "admissions.digilocker_verification": {"enabled": False, "config": {}},
+    "admissions.nta_score_import": {"enabled": False, "config": {}},
+    "academics.ai_ppt_generation": {"enabled": False, "config": {}},
+    "academics.ai_assignment_drafting": {"enabled": False, "config": {}},
+    "examinations.online_proctoring": {"enabled": False, "config": {}},
+    "examinations.qr_hall_entry": {"enabled": False, "config": {}},
+    "examinations.question_paper_vault": {"enabled": False, "config": {}},
+    "finance.emi_payment_plans": {"enabled": True, "config": {}},
+    "finance.gst_auto_filing": {"enabled": False, "config": {}},
+    "hr.cas_promotion_tracking": {"enabled": True, "config": {}},
+    "regulatory.naac_evidence_collection": {"enabled": False, "config": {}},
     # ── AI CAPABILITY FLAGS ─────────────────────────────────────────────────
     # Tier values: "small" | "medium" | "large"
     # These are read by llm_router.py to select the correct model
-    "ai.model_tier.extraction":  {"enabled": True, "config": {"tier": "small"}},
-    "ai.model_tier.drafting":    {"enabled": True, "config": {"tier": "medium"}},
-    "ai.model_tier.generation":  {"enabled": True, "config": {"tier": "medium"}},
-    "ai.model_tier.narrative":   {"enabled": True, "config": {"tier": "large"}},
-    "ai.local_inference_only":   {"enabled": True, "config": {}},
+    "ai.model_tier.extraction": {"enabled": True, "config": {"tier": "small"}},
+    "ai.model_tier.drafting": {"enabled": True, "config": {"tier": "medium"}},
+    "ai.model_tier.generation": {"enabled": True, "config": {"tier": "medium"}},
+    "ai.model_tier.narrative": {"enabled": True, "config": {"tier": "large"}},
+    "ai.local_inference_only": {"enabled": True, "config": {}},
     "ai.content_generation_enabled": {"enabled": True, "config": {}},
-
     # ── COMPLIANCE FLAGS ────────────────────────────────────────────────────
     # On by default — institutions must explicitly opt out (and document why)
-    "compliance.dpdp_strict_mode":          {"enabled": True,  "config": {}},
-    "compliance.ugc_fee_regulation_checks": {"enabled": True,  "config": {}},
-    "compliance.naac_evidence_collection":  {"enabled": False, "config": {}},
+    "compliance.dpdp_strict_mode": {"enabled": True, "config": {}},
+    "compliance.ugc_fee_regulation_checks": {"enabled": True, "config": {}},
+    "compliance.naac_evidence_collection": {"enabled": False, "config": {}},
 }
 
 
 def _get_redis():
     """Return a Redis client. Import deferred so tests can patch before import."""
     import redis as _redis_lib
+
     return _redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
 
 
@@ -149,7 +150,7 @@ class FeatureFlags:
                 json.dumps({"enabled": enabled, "config": row.get("config") or {}}),
             )
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         return enabled
 
@@ -190,7 +191,7 @@ class FeatureFlags:
         return cfg if cfg else default
 
     @staticmethod
-    def get_all(tenant_id: str) -> Dict[str, Dict[str, Any]]:
+    def get_all(tenant_id: str) -> dict[str, dict[str, Any]]:
         """Return all flags for `tenant_id` as a dict keyed by flag_key."""
         rows = execute_query(
             "SELECT flag_key, enabled, config "
@@ -215,7 +216,7 @@ class FeatureFlags:
         flag_key: str,
         tenant_id: str,
         enabled: bool,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         actor_id: str = "system",
     ) -> None:
         """Enable or disable a flag and optionally update its config.
@@ -241,12 +242,21 @@ class FeatureFlags:
             ],
             tenant_id=tenant_id,
         )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="feature_flag",
+            entity_id=flag_key,
+            tenant_id=tenant_id,
+            metadata={"source": "set_flag", "enabled": enabled},
+        )
 
         # Invalidate cache
         try:
             _get_redis().delete(_cache_key(tenant_id, flag_key))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
     @staticmethod
     def seed_defaults(org_id: str, actor_id: str = "system") -> int:
@@ -284,9 +294,20 @@ class FeatureFlags:
                 ],
                 tenant_id=org_id,
             )
+            AuditLog.log(
+                action=AuditAction.CREATE,
+                actor_id=actor_id,
+                actor_role="system",
+                entity_type="feature_flag",
+                entity_id=flag_key,
+                tenant_id=org_id,
+                metadata={"source": "seed_defaults"},
+            )
             created += 1
 
-        logger.info("feature_flags.seed_defaults: created %d flags for org %s", created, org_id)
+        logger.info(
+            "feature_flags.seed_defaults: created %d flags for org %s", created, org_id
+        )
         return created
 
     @staticmethod
@@ -298,7 +319,7 @@ class FeatureFlags:
         try:
             _get_redis().delete(_cache_key(tenant_id, flag_key))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
     @staticmethod
     def invalidate_all(tenant_id: str) -> None:
@@ -310,7 +331,7 @@ class FeatureFlags:
             if keys:
                 r.delete(*keys)
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
 
 # Module-level singleton — import and use directly

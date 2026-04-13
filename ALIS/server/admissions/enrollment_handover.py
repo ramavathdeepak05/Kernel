@@ -26,10 +26,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, GlobalLockViolationError
 from server.core.state_registry import StudentState
 from server.db_service import execute_query, execute_transaction
@@ -80,7 +79,11 @@ class EnrollmentHandoverService:
             )
         applicant = rows[0]
 
-        if applicant["status"] not in (StudentState.ADMITTED.value, "ADMITTED", "SEAT_CONFIRMED"):
+        if applicant["status"] not in (
+            StudentState.ADMITTED.value,
+            "ADMITTED",
+            "SEAT_CONFIRMED",
+        ):
             raise BusinessRuleViolation(
                 message=(
                     f"Enrollment handover requires ADMITTED status — "
@@ -127,26 +130,29 @@ class EnrollmentHandoverService:
         student_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO students
                     (id, org_id, applicant_id, roll_number, name, email,
                      phone, program, enrolled_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    student_id, org_id,
-                    request.applicant_id,
-                    roll_number,
-                    applicant["name"],
-                    applicant["email"],
-                    applicant["phone"],
-                    applicant.get("intended_program", ""),
-                    now,
-                ),
-            )
-        ])
+                    (
+                        student_id,
+                        org_id,
+                        request.applicant_id,
+                        roll_number,
+                        applicant["name"],
+                        applicant["email"],
+                        applicant["phone"],
+                        applicant.get("intended_program", ""),
+                        now,
+                    ),
+                )
+            ]
+        )
 
         # --- Layer 3: Execute ADMITTED → ENROLLED transition ---
         ApplicantService.transition_state(
@@ -183,7 +189,10 @@ class EnrollmentHandoverService:
 
         logger.info(
             "E04-S09: Enrollment complete [applicant=%s, student=%s, roll=%s, org=%s]",
-            request.applicant_id, student_id, roll_number, org_id,
+            request.applicant_id,
+            student_id,
+            roll_number,
+            org_id,
         )
 
         return StudentRecordRead(
@@ -213,9 +222,7 @@ class EnrollmentHandoverService:
         """
         year = datetime.now(timezone.utc).year
         org_code = org_id[:4].upper().replace("-", "")
-        prog_code = "".join(
-            w[0].upper() for w in program.split()[:3] if w
-        ) or "GEN"
+        prog_code = "".join(w[0].upper() for w in program.split()[:3] if w) or "GEN"
 
         rows = execute_query(
             "SELECT COUNT(*) AS cnt FROM students WHERE org_id = %s "

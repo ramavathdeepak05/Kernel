@@ -9,10 +9,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.core.policy_engine import policy_engine
@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Enums
 # =============================================================================
 
+
 class ReadmissionStatus(str, Enum):
     SUBMITTED = "SUBMITTED"
     UNDER_REVIEW = "UNDER_REVIEW"
@@ -36,6 +37,7 @@ class ReadmissionStatus(str, Enum):
 # =============================================================================
 # RE-ADMISSION SERVICE
 # =============================================================================
+
 
 class ReadmissionService:
     """
@@ -64,10 +66,10 @@ class ReadmissionService:
         gap_to: datetime,
         semesters_completed: int,
         gap_reason: str,
-        previous_roll_number: Optional[str] = None,
-        previous_institution: Optional[str] = None,
-        applicant_phone: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        previous_roll_number: str | None = None,
+        previous_institution: str | None = None,
+        applicant_phone: str | None = None,
+    ) -> dict[str, Any]:
         """
         Submit a re-admission application.
 
@@ -114,9 +116,10 @@ class ReadmissionService:
         app_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO readmission_applications (
                     id, org_id, applicant_name, applicant_email, applicant_phone,
                     program_id, gap_from, gap_to, gap_years, semesters_completed,
@@ -129,14 +132,28 @@ class ReadmissionService:
                     %s, %s, %s, %s
                 )
                 """,
-                (
-                    app_id, org_id, applicant_name, applicant_email, applicant_phone,
-                    program_id, gap_from, gap_to, round(gap_years, 4), semesters_completed,
-                    gap_reason, previous_roll_number, previous_institution,
-                    ReadmissionStatus.SUBMITTED.value, now, now, now,
-                ),
-            )
-        ])
+                    (
+                        app_id,
+                        org_id,
+                        applicant_name,
+                        applicant_email,
+                        applicant_phone,
+                        program_id,
+                        gap_from,
+                        gap_to,
+                        round(gap_years, 4),
+                        semesters_completed,
+                        gap_reason,
+                        previous_roll_number,
+                        previous_institution,
+                        ReadmissionStatus.SUBMITTED.value,
+                        now,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -154,24 +171,29 @@ class ReadmissionService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.readmission_submitted",
-            org_id=org_id,
-            entity_type="readmission_application",
-            entity_id=app_id,
-            payload={
-                "application_id": app_id,
-                "org_id": org_id,
-                "applicant_email": applicant_email,
-                "program_id": program_id,
-                "gap_years": round(gap_years, 2),
-                "semesters_completed": semesters_completed,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.readmission_submitted",
+                org_id=org_id,
+                entity_type="readmission_application",
+                entity_id=app_id,
+                payload={
+                    "application_id": app_id,
+                    "org_id": org_id,
+                    "applicant_email": applicant_email,
+                    "program_id": program_id,
+                    "gap_years": round(gap_years, 2),
+                    "semesters_completed": semesters_completed,
+                },
+            )
+        )
 
         logger.info(
             "E17: Re-admission application submitted [id=%s, email=%s, program=%s, gap=%.1f yrs]",
-            app_id, applicant_email, program_id, gap_years,
+            app_id,
+            applicant_email,
+            program_id,
+            gap_years,
         )
         return cls.get_application(app_id, org_id)
 
@@ -185,7 +207,7 @@ class ReadmissionService:
         application_id: str,
         org_id: str,
         reviewer_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Transition application from SUBMITTED to UNDER_REVIEW.
 
@@ -210,20 +232,25 @@ class ReadmissionService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE readmission_applications
                 SET status = %s, reviewed_by = %s, review_started_at = %s, updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    ReadmissionStatus.UNDER_REVIEW.value,
-                    reviewer_id, now, now,
-                    application_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        ReadmissionStatus.UNDER_REVIEW.value,
+                        reviewer_id,
+                        now,
+                        now,
+                        application_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -239,7 +266,8 @@ class ReadmissionService:
 
         logger.info(
             "E17: Re-admission review started [id=%s, reviewer=%s]",
-            application_id, reviewer_id,
+            application_id,
+            reviewer_id,
         )
         return cls.get_application(application_id, org_id)
 
@@ -253,8 +281,8 @@ class ReadmissionService:
         application_id: str,
         org_id: str,
         reviewer_id: str,
-        review_notes: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        review_notes: str | None = None,
+    ) -> dict[str, Any]:
         """
         Approve a re-admission application.
 
@@ -308,9 +336,10 @@ class ReadmissionService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE readmission_applications
                 SET status = %s,
                     reviewed_by = %s,
@@ -320,17 +349,19 @@ class ReadmissionService:
                     updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    ReadmissionStatus.APPROVED.value,
-                    reviewer_id,
-                    review_notes,
-                    now,
-                    new_roll_number,
-                    now,
-                    application_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        ReadmissionStatus.APPROVED.value,
+                        reviewer_id,
+                        review_notes,
+                        now,
+                        new_roll_number,
+                        now,
+                        application_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -349,31 +380,35 @@ class ReadmissionService:
         )
 
         # Downstream provisioning is event-driven — fire and let handlers do the work
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.readmission_approved",
-            org_id=org_id,
-            entity_type="readmission_application",
-            entity_id=application_id,
-            actor_id=reviewer_id,
-            payload={
-                "application_id": application_id,
-                "org_id": org_id,
-                "applicant_email": app["applicant_email"],
-                "applicant_name": app["applicant_name"],
-                "program_id": app["program_id"],
-                "new_roll_number": new_roll_number,
-                "semesters_completed": app["semesters_completed"],
-                "previous_roll_number": app.get("previous_roll_number"),
-                # Semester lock payload — provisioning handler inserts into
-                # readmission_semester_locks (table created via migration)
-                "completed_semesters_to_lock": app["semesters_completed"],
-                "reviewer_id": reviewer_id,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.readmission_approved",
+                org_id=org_id,
+                entity_type="readmission_application",
+                entity_id=application_id,
+                actor_id=reviewer_id,
+                payload={
+                    "application_id": application_id,
+                    "org_id": org_id,
+                    "applicant_email": app["applicant_email"],
+                    "applicant_name": app["applicant_name"],
+                    "program_id": app["program_id"],
+                    "new_roll_number": new_roll_number,
+                    "semesters_completed": app["semesters_completed"],
+                    "previous_roll_number": app.get("previous_roll_number"),
+                    # Semester lock payload — provisioning handler inserts into
+                    # readmission_semester_locks (table created via migration)
+                    "completed_semesters_to_lock": app["semesters_completed"],
+                    "reviewer_id": reviewer_id,
+                },
+            )
+        )
 
         logger.info(
             "E17: Re-admission approved [id=%s, roll=%s, reviewer=%s]",
-            application_id, new_roll_number, reviewer_id,
+            application_id,
+            new_roll_number,
+            reviewer_id,
         )
         return cls.get_application(application_id, org_id)
 
@@ -388,7 +423,7 @@ class ReadmissionService:
         org_id: str,
         reviewer_id: str,
         review_notes: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Reject a re-admission application.
 
@@ -422,9 +457,10 @@ class ReadmissionService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE readmission_applications
                 SET status = %s,
                     reviewed_by = %s,
@@ -433,15 +469,18 @@ class ReadmissionService:
                     updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    ReadmissionStatus.REJECTED.value,
-                    reviewer_id,
-                    review_notes.strip(),
-                    now, now,
-                    application_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        ReadmissionStatus.REJECTED.value,
+                        reviewer_id,
+                        review_notes.strip(),
+                        now,
+                        now,
+                        application_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -459,24 +498,27 @@ class ReadmissionService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.readmission_rejected",
-            org_id=org_id,
-            entity_type="readmission_application",
-            entity_id=application_id,
-            actor_id=reviewer_id,
-            payload={
-                "application_id": application_id,
-                "org_id": org_id,
-                "applicant_email": app["applicant_email"],
-                "program_id": app["program_id"],
-                "review_notes": review_notes,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.readmission_rejected",
+                org_id=org_id,
+                entity_type="readmission_application",
+                entity_id=application_id,
+                actor_id=reviewer_id,
+                payload={
+                    "application_id": application_id,
+                    "org_id": org_id,
+                    "applicant_email": app["applicant_email"],
+                    "program_id": app["program_id"],
+                    "review_notes": review_notes,
+                },
+            )
+        )
 
         logger.info(
             "E17: Re-admission rejected [id=%s, reviewer=%s]",
-            application_id, reviewer_id,
+            application_id,
+            reviewer_id,
         )
         return cls.get_application(application_id, org_id)
 
@@ -485,7 +527,7 @@ class ReadmissionService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def get_application(cls, application_id: str, org_id: str) -> Dict[str, Any]:
+    def get_application(cls, application_id: str, org_id: str) -> dict[str, Any]:
         """
         Fetch a re-admission application by ID, including associated credit transfers.
 
@@ -516,7 +558,9 @@ class ReadmissionService:
             "SELECT * FROM credit_transfer_requests WHERE readmission_id = %s AND org_id = %s",
             (application_id, org_id),
         )
-        app["credit_transfers"] = [dict(r) for r in credit_transfers] if credit_transfers else []
+        app["credit_transfers"] = (
+            [dict(r) for r in credit_transfers] if credit_transfers else []
+        )
 
         return app
 
@@ -524,9 +568,9 @@ class ReadmissionService:
     def list_applications(
         cls,
         org_id: str,
-        status: Optional[str] = None,
-        program_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        status: str | None = None,
+        program_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         List re-admission applications for a tenant with optional filters.
 
@@ -550,7 +594,7 @@ class ReadmissionService:
             params.append(program_id)
 
         rows = execute_query(
-            f"SELECT * FROM readmission_applications WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM readmission_applications WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY submitted_at DESC",
             tuple(params),
         )
@@ -561,7 +605,7 @@ class ReadmissionService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _require(cls, application_id: str, org_id: str) -> Dict[str, Any]:
+    def _require(cls, application_id: str, org_id: str) -> dict[str, Any]:
         """Fetch application or raise NotFoundError."""
         rows = execute_query(
             "SELECT * FROM readmission_applications WHERE id = %s AND org_id = %s",

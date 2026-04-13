@@ -5,6 +5,7 @@ Subscribes to:
   - LeaveApproved     → notify staff
   - LeaveRejected     → notify staff
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,16 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 def on_leave_requested(event: dict) -> None:
-    payload  = event.get("payload", {})
-    org_id   = event.get("org_id")
+    payload = event.get("payload", {})
+    org_id = event.get("org_id")
     staff_id = payload.get("staff_id")
 
     if not (org_id and staff_id):
         return
 
     try:
-        from server.db_service import execute_query
         from server.core.notifications.service import NotificationDispatcher
+        from server.db_service import execute_query
 
         # Find HOD / reporting manager
         staff_rows = execute_query(
@@ -57,10 +58,10 @@ def on_leave_requested(event: dict) -> None:
             recipient_email=approver["email"],
             context={
                 "approver_name": approver["name"],
-                "staff_name":    staff["staff_name"],
-                "department":    staff["department"],
-                "days":          payload.get("days"),
-                "leave_type":    payload.get("leave_type"),
+                "staff_name": staff["staff_name"],
+                "department": staff["department"],
+                "days": payload.get("days"),
+                "leave_type": payload.get("leave_type"),
             },
             org_id=org_id,
         )

@@ -30,18 +30,19 @@ Acceptance Criteria:
 - [x] No tool chaining allowed
 - [x] RAG implemented via this framework
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, ClassVar, Dict, List, Optional, Tuple
+from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field as PydanticField
+from pydantic import BaseModel
+from pydantic import Field as PydanticField
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .exceptions import (
     ToolNotAllowedError,
     ToolNotRegisteredError,
@@ -55,6 +56,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # TOOL OUTPUT SCHEMA (Mandatory Output Contract)
 # =============================================================================
+
 
 class ToolOutputSchema(BaseModel):
     """
@@ -70,25 +72,26 @@ class ToolOutputSchema(BaseModel):
         source:       Human-readable source description (table/index/service)
         retrieved_at: UTC timestamp of when the data was retrieved
     """
+
     tool_id: str = PydanticField(..., description="Registered tool identifier")
     tool_version: int = PydanticField(..., description="Tool implementation version")
-    data: Dict[str, Any] = PydanticField(
-        default_factory=dict,
-        description="Structured result data from the tool"
+    data: dict[str, Any] = PydanticField(
+        default_factory=dict, description="Structured result data from the tool"
     )
-    source: Optional[str] = PydanticField(
+    source: str | None = PydanticField(
         default=None,
-        description="Data source description (e.g. 'policy_registry', 'rag_index')"
+        description="Data source description (e.g. 'policy_registry', 'rag_index')",
     )
     retrieved_at: datetime = PydanticField(
         default_factory=lambda: datetime.now(timezone.utc),
-        description="UTC timestamp of retrieval"
+        description="UTC timestamp of retrieval",
     )
 
 
 # =============================================================================
 # BASE TOOL (Abstract)
 # =============================================================================
+
 
 class BaseTool(ABC):
     """
@@ -124,7 +127,7 @@ class BaseTool(ABC):
     @abstractmethod
     def execute(
         self,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         tenant_id: str,
     ) -> ToolOutputSchema:
         """
@@ -148,6 +151,7 @@ class BaseTool(ABC):
 # TOOL REGISTRY
 # =============================================================================
 
+
 class ToolRegistry:
     """
     Central registry for all ALIS tools.
@@ -161,7 +165,7 @@ class ToolRegistry:
     - No anonymous or ad-hoc tool registration
     """
 
-    _tools: Dict[str, BaseTool] = {}
+    _tools: dict[str, BaseTool] = {}
 
     # ------------------------------------------------------------------
     # REGISTER
@@ -198,7 +202,8 @@ class ToolRegistry:
         cls._tools[tool.tool_id] = tool
         logger.info(
             "E03-S05: Tool registered — id=%s version=%d",
-            tool.tool_id, tool.version,
+            tool.tool_id,
+            tool.version,
         )
 
     # ------------------------------------------------------------------
@@ -206,12 +211,12 @@ class ToolRegistry:
     # ------------------------------------------------------------------
 
     @classmethod
-    def get(cls, tool_id: str) -> Optional[BaseTool]:
+    def get(cls, tool_id: str) -> BaseTool | None:
         """Retrieve a registered tool by ID. Returns None if not found."""
         return cls._tools.get(tool_id)
 
     @classmethod
-    def list_tools(cls) -> List[Dict[str, Any]]:
+    def list_tools(cls) -> list[dict[str, Any]]:
         """List all registered tools with their metadata."""
         return [
             {
@@ -232,6 +237,7 @@ class ToolRegistry:
 # =============================================================================
 # TOOL INVOKER
 # =============================================================================
+
 
 class ToolInvoker:
     """
@@ -257,14 +263,14 @@ class ToolInvoker:
     @staticmethod
     def invoke(
         tool_name: str,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         agent_id: str,
-        allowed_tools: Tuple[str, ...],
+        allowed_tools: tuple[str, ...],
         tenant_id: str,
-        module: Optional[str] = None,
-        wizard: Optional[str] = None,
-        actor_id: Optional[str] = None,
-        actor_role: Optional[str] = None,
+        module: str | None = None,
+        wizard: str | None = None,
+        actor_id: str | None = None,
+        actor_role: str | None = None,
     ) -> ToolOutputSchema:
         """
         Invoke a registered tool on behalf of an agent.

@@ -1,11 +1,10 @@
 """E08-S06 — Staff Attendance"""
+
 from __future__ import annotations
 
 import logging
-import uuid
 
 from server.core.audit import AuditAction, AuditLog
-from server.core.exceptions import NotFoundError
 from server.db_service import execute_query, execute_transaction
 
 from .models import StaffAttendanceBulk, StaffAttendanceMark
@@ -14,11 +13,12 @@ logger = logging.getLogger(__name__)
 
 
 class StaffAttendanceService:
-
     @classmethod
     def mark(cls, org_id: str, record: StaffAttendanceMark, actor_id: str) -> dict:
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO staff_attendance
                 (id, org_id, staff_id, date, check_in, check_out,
                  status, source, remarks, marked_by)
@@ -30,10 +30,29 @@ class StaffAttendanceService:
                 remarks   = EXCLUDED.remarks,
                 marked_by = EXCLUDED.marked_by
             """,
-            (org_id, record.staff_id, record.date,
-             record.check_in, record.check_out,
-             record.status.value, record.remarks, actor_id),
-        )])
+                    (
+                        org_id,
+                        record.staff_id,
+                        record.date,
+                        record.check_in,
+                        record.check_out,
+                        record.status.value,
+                        record.remarks,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="mark",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark"},
+        )
 
         rows = execute_query(
             "SELECT * FROM staff_attendance WHERE org_id = %s AND staff_id = %s AND date = %s",
@@ -45,8 +64,9 @@ class StaffAttendanceService:
     def bulk_mark(cls, org_id: str, req: StaffAttendanceBulk, actor_id: str) -> dict:
         ops = []
         for record in req.records:
-            ops.append((
-                """
+            ops.append(
+                (
+                    """
                 INSERT INTO staff_attendance
                     (id, org_id, staff_id, date, check_in, check_out,
                      status, source, remarks, marked_by)
@@ -58,22 +78,38 @@ class StaffAttendanceService:
                     remarks   = EXCLUDED.remarks,
                     marked_by = EXCLUDED.marked_by
                 """,
-                (org_id, record.staff_id, req.date,
-                 record.check_in, record.check_out,
-                 record.status.value, record.remarks, actor_id),
-            ))
+                    (
+                        org_id,
+                        record.staff_id,
+                        req.date,
+                        record.check_in,
+                        record.check_out,
+                        record.status.value,
+                        record.remarks,
+                        actor_id,
+                    ),
+                )
+            )
         if ops:
             execute_transaction(ops)
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="staff_attendance_bulk", entity_id=req.date, org_id=org_id,
-                     module="E08-S06", metadata={"date": req.date, "count": len(ops)})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="staff_attendance_bulk",
+            entity_id=req.date,
+            org_id=org_id,
+            module="E08-S06",
+            metadata={"date": req.date, "count": len(ops)},
+        )
 
         return {"marked": len(ops), "date": req.date}
 
     @classmethod
-    def get_monthly_summary(cls, org_id: str, staff_id: str,
-                              month: int, year: int) -> dict:
+    def get_monthly_summary(
+        cls, org_id: str, staff_id: str, month: int, year: int
+    ) -> dict:
         rows = execute_query(
             """
             SELECT
@@ -94,12 +130,16 @@ class StaffAttendanceService:
         summary = dict(rows[0]) if rows else {}
 
         # Attendance %
-        working = int(summary.get("total_days") or 0) - int(summary.get("holidays") or 0)
+        working = int(summary.get("total_days") or 0) - int(
+            summary.get("holidays") or 0
+        )
         present = int(summary.get("present") or 0) + int(summary.get("wfh") or 0)
-        summary["attendance_pct"] = round((present / working * 100), 1) if working > 0 else 0.0
+        summary["attendance_pct"] = (
+            round((present / working * 100), 1) if working > 0 else 0.0
+        )
         summary["staff_id"] = staff_id
         summary["month"] = month
-        summary["year"]  = year
+        summary["year"] = year
 
         return summary
 

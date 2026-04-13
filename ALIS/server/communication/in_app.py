@@ -1,16 +1,17 @@
 """E10-S04 — In-App Notifications"""
+
 from __future__ import annotations
 
 import logging
 import uuid
 
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 
 class InAppNotificationService:
-
     @classmethod
     def send(
         cls,
@@ -21,13 +22,27 @@ class InAppNotificationService:
         link: str | None = None,
     ) -> dict:
         nid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO in_app_notifications (id, org_id, recipient_id, title, body, link)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (nid, org_id, recipient_id, title, body, link),
-        )])
+                    (nid, org_id, recipient_id, title, body, link),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="send",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "send"},
+        )
         return {"id": nid, "recipient_id": recipient_id, "title": title}
 
     @classmethod
@@ -51,14 +66,28 @@ class InAppNotificationService:
 
     @classmethod
     def mark_read(cls, org_id: str, user_id: str, notification_id: str) -> dict:
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE in_app_notifications
             SET is_read = TRUE, read_at = NOW()
             WHERE id = %s AND recipient_id = %s AND org_id = %s
             """,
-            (notification_id, user_id, org_id),
-        )])
+                    (notification_id, user_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="read",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark_read"},
+        )
         rows = execute_query(
             "SELECT * FROM in_app_notifications WHERE id = %s AND org_id = %s",
             (notification_id, org_id),
@@ -67,14 +96,28 @@ class InAppNotificationService:
 
     @classmethod
     def mark_all_read(cls, org_id: str, user_id: str) -> dict:
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE in_app_notifications
             SET is_read = TRUE, read_at = NOW()
             WHERE recipient_id = %s AND org_id = %s AND is_read = FALSE
             """,
-            (user_id, org_id),
-        )])
+                    (user_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="all_read",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark_all_read"},
+        )
         return {"status": "ok"}
 
     @classmethod

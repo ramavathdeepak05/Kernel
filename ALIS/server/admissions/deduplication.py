@@ -27,10 +27,9 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction
 
@@ -58,9 +57,7 @@ class LeadDeduplicationService:
     """
 
     @classmethod
-    def compute_similarity(
-        cls, applicant_a: Dict, applicant_b: Dict
-    ) -> float:
+    def compute_similarity(cls, applicant_a: dict, applicant_b: dict) -> float:
         """
         Compute composite similarity between two applicant records.
 
@@ -87,7 +84,7 @@ class LeadDeduplicationService:
     @classmethod
     def find_duplicates(
         cls, applicant_id: str, org_id: str, top_n: int = 5
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Find the top-N most similar applicants to a given applicant.
 
@@ -115,14 +112,16 @@ class LeadDeduplicationService:
         for c in candidates:
             score = cls.compute_similarity(target, c)
             if score >= _MERGE_FLOOR:
-                scored.append({
-                    "applicant_id": c["id"],
-                    "name": c["name"],
-                    "email": c["email"],
-                    "phone": c["phone"],
-                    "status": c["status"],
-                    "similarity_score": score,
-                })
+                scored.append(
+                    {
+                        "applicant_id": c["id"],
+                        "name": c["name"],
+                        "email": c["email"],
+                        "phone": c["phone"],
+                        "status": c["status"],
+                        "similarity_score": score,
+                    }
+                )
 
         return sorted(scored, key=lambda x: x["similarity_score"], reverse=True)[:top_n]
 
@@ -214,27 +213,34 @@ class LeadDeduplicationService:
         # --- Execute merge: ANNUL duplicate, preserve primary ---
         now = datetime.now(timezone.utc)
         log_id = str(uuid4())
-        execute_transaction([
-            (
-                "UPDATE applicants SET status = 'ANNULLED', updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, duplicate["id"], org_id),
-            ),
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    "UPDATE applicants SET status = 'ANNULLED', updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (now, duplicate["id"], org_id),
+                ),
+                (
+                    """
                 INSERT INTO lead_merge_log
                     (id, org_id, primary_id, merged_id, similarity_score,
                      method, justification, merged_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    log_id, org_id,
-                    primary["id"], duplicate["id"],
-                    score, method,
-                    request.justification, actor_id, now,
+                    (
+                        log_id,
+                        org_id,
+                        primary["id"],
+                        duplicate["id"],
+                        score,
+                        method,
+                        request.justification,
+                        actor_id,
+                        now,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -255,9 +261,12 @@ class LeadDeduplicationService:
         )
 
         logger.info(
-            "E04-S02: Merged applicant %s → primary %s "
-            "[score=%.2f, method=%s, org=%s]",
-            duplicate["id"], primary["id"], score, method, org_id,
+            "E04-S02: Merged applicant %s → primary %s [score=%.2f, method=%s, org=%s]",
+            duplicate["id"],
+            primary["id"],
+            score,
+            method,
+            org_id,
         )
 
         return LeadMergeLog(
@@ -276,6 +285,7 @@ class LeadDeduplicationService:
 # =============================================================================
 # Jaro-Winkler Implementation
 # =============================================================================
+
 
 def _jaro_winkler(s1: str, s2: str, p: float = 0.1) -> float:
     """
@@ -328,9 +338,7 @@ def _jaro_winkler(s1: str, s2: str, p: float = 0.1) -> float:
         k += 1
 
     jaro = (
-        matches / len_s1
-        + matches / len_s2
-        + (matches - transpositions / 2) / matches
+        matches / len_s1 + matches / len_s2 + (matches - transpositions / 2) / matches
     ) / 3.0
 
     # Winkler prefix bonus

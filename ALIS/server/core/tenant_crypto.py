@@ -20,24 +20,25 @@ Must Align With:
 - "No Cloud" Rule
 - Layer 4: Global Locks & Invariants
 """
+
 from __future__ import annotations
 
-import os
-import secrets
 import hashlib
 import logging
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict
+import os
+import secrets
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from uuid import uuid4
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .exceptions import TenantIsolationError
 
 logger = logging.getLogger(__name__)
 
 
 # --- Tenant Key Entry ---
+
 
 @dataclass
 class TenantKeyEntry:
@@ -47,16 +48,18 @@ class TenantKeyEntry:
     key_material is the raw symmetric key (Fernet-compatible).
     In production, this would be protected by HSM or OS keyring.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
     tenant_id: str = ""
     key_hash: str = ""  # SHA-256 hash of key (for verification, not the key itself)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    rotated_at: Optional[datetime] = None
+    rotated_at: datetime | None = None
     is_active: bool = True
     version: int = 1
 
 
 # --- Tenant Key Manager ---
+
 
 class TenantKeyManager:
     """
@@ -74,11 +77,11 @@ class TenantKeyManager:
 
     # In-memory key store (development only)
     # In production: encrypted file or HSM-backed store
-    _keys: Dict[str, TenantKeyEntry] = {}
-    _key_material: Dict[str, bytes] = {}  # tenant_id -> raw key bytes
+    _keys: dict[str, TenantKeyEntry] = {}
+    _key_material: dict[str, bytes] = {}  # tenant_id -> raw key bytes
 
     # Master key for encrypting tenant keys at rest
-    _master_key: Optional[bytes] = None
+    _master_key: bytes | None = None
 
     @classmethod
     def _get_master_key(cls) -> bytes:
@@ -105,9 +108,7 @@ class TenantKeyManager:
 
     @classmethod
     def generate_tenant_key(
-        cls,
-        tenant_id: str,
-        actor_id: str = "system"
+        cls, tenant_id: str, actor_id: str = "system"
     ) -> TenantKeyEntry:
         """
         Generate a new encryption key for a tenant.
@@ -122,7 +123,7 @@ class TenantKeyManager:
         if not tenant_id:
             raise TenantIsolationError(
                 message="Cannot generate key without tenant_id",
-                details={"operation": "generate_tenant_key"}
+                details={"operation": "generate_tenant_key"},
             )
 
         # Generate 256-bit symmetric key
@@ -157,15 +158,15 @@ class TenantKeyManager:
             metadata={
                 "key_hash": key_hash,
                 "version": version,
-                "operation": "generate"
-            }
+                "operation": "generate",
+            },
         )
 
         logger.info(f"Generated encryption key v{version} for tenant {tenant_id}")
         return entry
 
     @classmethod
-    def get_tenant_key(cls, tenant_id: str) -> Optional[bytes]:
+    def get_tenant_key(cls, tenant_id: str) -> bytes | None:
         """
         Retrieve the active encryption key for a tenant.
 
@@ -180,7 +181,7 @@ class TenantKeyManager:
         if not tenant_id:
             raise TenantIsolationError(
                 message="Cannot retrieve key without tenant_id",
-                details={"operation": "get_tenant_key"}
+                details={"operation": "get_tenant_key"},
             )
 
         return cls._key_material.get(tenant_id)
@@ -192,11 +193,7 @@ class TenantKeyManager:
         return entry is not None and entry.is_active
 
     @classmethod
-    def rotate_key(
-        cls,
-        tenant_id: str,
-        actor_id: str = "system"
-    ) -> TenantKeyEntry:
+    def rotate_key(cls, tenant_id: str, actor_id: str = "system") -> TenantKeyEntry:
         """
         Rotate the encryption key for a tenant.
 
@@ -214,7 +211,7 @@ class TenantKeyManager:
         if not old_entry:
             raise TenantIsolationError(
                 message=f"No existing key for tenant {tenant_id} to rotate",
-                details={"operation": "rotate_key"}
+                details={"operation": "rotate_key"},
             )
 
         new_entry = cls.generate_tenant_key(tenant_id, actor_id)
@@ -233,8 +230,8 @@ class TenantKeyManager:
                 "new_key_hash": new_entry.key_hash,
                 "old_version": old_entry.version,
                 "new_version": new_entry.version,
-                "operation": "rotate"
-            }
+                "operation": "rotate",
+            },
         )
 
         logger.info(
@@ -265,16 +262,17 @@ class TenantKeyManager:
         # Simple XOR-based encryption for development
         # In production, use Fernet or AES-GCM
         try:
-            from cryptography.fernet import Fernet
             import base64
+
+            from cryptography.fernet import Fernet
+
             fernet_key = base64.urlsafe_b64encode(key)
             f = Fernet(fernet_key)
             return f.encrypt(plaintext)
         except ImportError:
             # Fallback: no encryption if cryptography not installed
             logger.warning(
-                "cryptography library not installed. "
-                "Tenant encryption is disabled."
+                "cryptography library not installed. Tenant encryption is disabled."
             )
             return plaintext
 
@@ -297,14 +295,15 @@ class TenantKeyManager:
             return ciphertext
 
         try:
-            from cryptography.fernet import Fernet
             import base64
+
+            from cryptography.fernet import Fernet
+
             fernet_key = base64.urlsafe_b64encode(key)
             f = Fernet(fernet_key)
             return f.decrypt(ciphertext)
         except ImportError:
             logger.warning(
-                "cryptography library not installed. "
-                "Tenant decryption is disabled."
+                "cryptography library not installed. Tenant decryption is disabled."
             )
             return ciphertext

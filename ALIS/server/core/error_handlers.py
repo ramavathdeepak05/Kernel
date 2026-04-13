@@ -15,10 +15,12 @@ Response Format:
     "details": { ... }
 }
 """
+
 from __future__ import annotations
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
+
 from .exceptions import ALISError
 
 
@@ -33,8 +35,8 @@ async def alis_exception_handler(request: Request, exc: ALISError):
             "status": "error",
             "code": exc.code,
             "message": exc.message,
-            "details": exc.details
-        }
+            "details": exc.details,
+        },
     )
 
 
@@ -44,16 +46,17 @@ async def global_exception_handler(request: Request, exc: Exception):
     Prevents raw stack traces from leaking to the user.
     """
     import logging as _logging
+
     _logging.getLogger(__name__).exception("CRITICAL UNHANDLED ERROR: %s", exc)
-    
+
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "status": "error",
             "code": "ERR_INTERNAL_SYSTEM",
             "message": "An internal system error occurred.",
-            "details": {"error": str(exc)}  # Dev mode only? Decide based on env.
-        }
+            "details": {"error": str(exc)},  # Dev mode only? Decide based on env.
+        },
     )
 
 

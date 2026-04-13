@@ -25,15 +25,13 @@ Endpoints:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
-
+from fastapi import APIRouter, Depends, HTTPException, Query
 from server.core.rbac import require_permission
 from server.process_engine.models import (
+    FormSubmission,
     ProcessDefinitionCreate,
     ProcessDefinitionUpdate,
     ProcessLaunchRequest,
-    FormSubmission,
 )
 
 router = APIRouter(prefix="/api/v1/processes", tags=["Process Engine (E13)"])
@@ -43,12 +41,14 @@ router = APIRouter(prefix="/api/v1/processes", tags=["Process Engine (E13)"])
 # Process Definitions
 # ---------------------------------------------------------------------------
 
+
 @router.post("/", status_code=201)
 def create_definition(
     body: ProcessDefinitionCreate,
     ctx=Depends(require_permission("process:manage")),
 ):
     from server.process_engine.definition import ProcessDefinitionService
+
     return ProcessDefinitionService.create(
         org_id=ctx["org_id"],
         created_by=ctx["user_id"],
@@ -64,6 +64,7 @@ def list_definitions(
     ctx=Depends(require_permission("process:read")),
 ):
     from server.process_engine.definition import ProcessDefinitionService
+
     return ProcessDefinitionService.list(
         org_id=ctx["org_id"],
         active_only=active_only,
@@ -75,20 +76,22 @@ def list_definitions(
 @router.get("/actions")
 def list_actions(ctx=Depends(require_permission("process:manage"))):
     from server.process_engine.actions import ActionRegistry
+
     return {"actions": ActionRegistry.list_actions()}
 
 
 @router.get("/instances")
 def list_instances(
-    process_id: Optional[str] = None,
-    entity_type: Optional[str] = None,
-    entity_id: Optional[str] = None,
-    status: Optional[str] = None,
+    process_id: str | None = None,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    status: str | None = None,
     limit: int = Query(default=50, le=200),
     offset: int = 0,
     ctx=Depends(require_permission("process:read")),
 ):
     from server.process_engine.instance import ProcessInstanceService
+
     return ProcessInstanceService.list(
         org_id=ctx["org_id"],
         process_id=process_id,
@@ -106,6 +109,7 @@ def get_instance(
     ctx=Depends(require_permission("process:read")),
 ):
     from server.process_engine.instance import ProcessInstanceService
+
     instance = ProcessInstanceService.get(ctx["org_id"], instance_id)
     if not instance:
         raise HTTPException(status_code=404, detail="Instance not found")
@@ -118,6 +122,7 @@ def cancel_instance(
     ctx=Depends(require_permission("process:manage")),
 ):
     from server.process_engine.instance import ProcessInstanceService
+
     ProcessInstanceService.cancel(ctx["org_id"], instance_id)
     return {"status": "cancelled", "instance_id": instance_id}
 
@@ -128,6 +133,7 @@ def resume_instance(
     ctx=Depends(require_permission("process:manage")),
 ):
     from server.process_engine.instance import ProcessInstanceService
+
     return ProcessInstanceService.resume(ctx["org_id"], instance_id)
 
 
@@ -137,6 +143,7 @@ def get_pending_form(
     ctx=Depends(require_permission("process:read")),
 ):
     from server.process_engine.forms import FormRenderer
+
     form = FormRenderer.get_pending_form(ctx["org_id"], instance_id)
     if not form:
         raise HTTPException(status_code=404, detail="No pending form for this instance")
@@ -150,9 +157,9 @@ def submit_form(
     body: FormSubmission,
     ctx=Depends(require_permission("process:read")),
 ):
+    from server.db_service import execute_query
     from server.process_engine.forms import FormRenderer
     from server.process_engine.instance import ProcessInstanceService
-    from server.db_service import execute_query
 
     # Load step config for validation
     rows = execute_query(
@@ -161,7 +168,12 @@ def submit_form(
     )
     if rows:
         import json
-        config = rows[0]["config"] if isinstance(rows[0]["config"], dict) else json.loads(rows[0]["config"] or "{}")
+
+        config = (
+            rows[0]["config"]
+            if isinstance(rows[0]["config"], dict)
+            else json.loads(rows[0]["config"] or "{}")
+        )
         fields = config.get("fields", [])
         errors = FormRenderer.validate_submission(fields, body.form_data)
         if errors:
@@ -182,6 +194,7 @@ def get_definition(
     ctx=Depends(require_permission("process:read")),
 ):
     from server.process_engine.definition import ProcessDefinitionService
+
     defn = ProcessDefinitionService.get(ctx["org_id"], process_id)
     if not defn:
         raise HTTPException(status_code=404, detail="Process definition not found")
@@ -195,6 +208,7 @@ def update_definition(
     ctx=Depends(require_permission("process:manage")),
 ):
     from server.process_engine.definition import ProcessDefinitionService
+
     return ProcessDefinitionService.update(
         org_id=ctx["org_id"],
         process_id=process_id,
@@ -208,6 +222,7 @@ def delete_definition(
     ctx=Depends(require_permission("process:manage")),
 ):
     from server.process_engine.definition import ProcessDefinitionService
+
     ProcessDefinitionService.delete(ctx["org_id"], process_id)
 
 
@@ -218,6 +233,7 @@ def launch_process(
     ctx=Depends(require_permission("process:manage")),
 ):
     from server.process_engine.instance import ProcessInstanceService
+
     return ProcessInstanceService.launch(
         org_id=ctx["org_id"],
         process_id=process_id,

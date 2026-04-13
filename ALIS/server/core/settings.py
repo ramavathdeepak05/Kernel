@@ -13,10 +13,10 @@ Usage:
 Loaded from environment variables. In production, set via .env file
 mounted into the Docker container. Never commit .env to git.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,7 +24,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(".env", "../.env"),   # supports running from ALIS/ or repo root
+        env_file=(".env", "../.env"),  # supports running from ALIS/ or repo root
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -33,10 +33,14 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Application
     # -------------------------------------------------------------------------
-    app_env: str = Field(default="development", description="development | staging | production")
+    app_env: str = Field(
+        default="development", description="development | staging | production"
+    )
     app_secret_key: str = Field(default="change-me-in-production-use-32-char-min")
     app_debug: bool = Field(default=False)
-    allowed_origins: List[str] = Field(default=["http://localhost:5173", "http://localhost:3000"])
+    allowed_origins: list[str] = Field(
+        default=["http://localhost:5173", "http://localhost:3000"]
+    )
 
     # -------------------------------------------------------------------------
     # Database (PostgreSQL)
@@ -47,13 +51,22 @@ class Settings(BaseSettings):
     db_user: str = Field(default="postgres")
     db_password: str = Field(default="postgres")
     db_pool_min: int = Field(default=5)
-    db_pool_max: int = Field(default=80)     # PgBouncer → Postgres; was 20
-    pgbouncer_enabled: bool = Field(default=False, description="Route DB connections through PgBouncer")
-    pgbouncer_host: str = Field(default="localhost", description="PgBouncer host (set to 'pgbouncer' in docker-compose)")
-    pgbouncer_port: int = Field(default=6432, description="PgBouncer port (5432 inside docker network)")
+    db_pool_max: int = Field(default=80)  # PgBouncer → Postgres; was 20
+    pgbouncer_enabled: bool = Field(
+        default=False, description="Route DB connections through PgBouncer"
+    )
+    pgbouncer_host: str = Field(
+        default="localhost",
+        description="PgBouncer host (set to 'pgbouncer' in docker-compose)",
+    )
+    pgbouncer_port: int = Field(
+        default=6432, description="PgBouncer port (5432 inside docker network)"
+    )
 
     # ---- Read Replica (empty = disabled, all reads go to primary) ----
-    db_replica_host: str = Field(default="", description="Read replica host. Empty = no replica.")
+    db_replica_host: str = Field(
+        default="", description="Read replica host. Empty = no replica."
+    )
     db_replica_port: int = Field(default=5432)
     db_replica_pool_min: int = Field(default=2)
     db_replica_pool_max: int = Field(default=20)
@@ -65,10 +78,18 @@ class Settings(BaseSettings):
     )
 
     # ---- Backpressure (queue depth thresholds) ----
-    backpressure_ai_warn: int = Field(default=50, description="ai_tasks queue: warn threshold")
-    backpressure_ai_reject: int = Field(default=100, description="ai_tasks queue: reject threshold")
-    backpressure_events_warn: int = Field(default=500, description="event_dispatch queue: warn threshold")
-    backpressure_events_reject: int = Field(default=2000, description="event_dispatch queue: reject threshold")
+    backpressure_ai_warn: int = Field(
+        default=50, description="ai_tasks queue: warn threshold"
+    )
+    backpressure_ai_reject: int = Field(
+        default=100, description="ai_tasks queue: reject threshold"
+    )
+    backpressure_events_warn: int = Field(
+        default=500, description="event_dispatch queue: warn threshold"
+    )
+    backpressure_events_reject: int = Field(
+        default=2000, description="event_dispatch queue: reject threshold"
+    )
 
     @property
     def replica_enabled(self) -> bool:
@@ -174,7 +195,7 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # MFA / Two-Factor Authentication
     # -------------------------------------------------------------------------
-    mfa_required_roles: List[str] = Field(
+    mfa_required_roles: list[str] = Field(
         default=["SUPER_ADMIN", "ADMIN", "REGISTRAR", "FINANCE_OFFICER", "HOD", "COE"],
         description="Roles that must have MFA enabled before a full session is issued.",
     )
@@ -190,7 +211,7 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(
         default="HS256",
         description="HS256 (symmetric, single key) or RS256 (asymmetric, key pair). "
-                    "RS256 is recommended for multi-tenant production — rotate keys via JWKS without downtime.",
+        "RS256 is recommended for multi-tenant production — rotate keys via JWKS without downtime.",
     )
     jwt_access_token_expire_minutes: int = Field(default=60)
     jwt_refresh_token_expire_days: int = Field(default=7)
@@ -245,9 +266,15 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # WhatsApp (Meta Business API)
     # -------------------------------------------------------------------------
-    whatsapp_phone_number_id: str = Field(default="", description="Meta Business phone number ID")
-    whatsapp_access_token: str = Field(default="", description="Meta Graph API permanent access token")
-    whatsapp_webhook_verify_token: str = Field(default="", description="Webhook verification token")
+    whatsapp_phone_number_id: str = Field(
+        default="", description="Meta Business phone number ID"
+    )
+    whatsapp_access_token: str = Field(
+        default="", description="Meta Graph API permanent access token"
+    )
+    whatsapp_webhook_verify_token: str = Field(
+        default="", description="Webhook verification token"
+    )
     whatsapp_timeout_seconds: int = Field(default=10)
 
     # -------------------------------------------------------------------------
@@ -291,7 +318,9 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     digilocker_client_id: str = Field(default="")
     digilocker_client_secret: str = Field(default="")
-    digilocker_base_url: str = Field(default="https://api.digitallocker.gov.in/public/oauth2/1")
+    digilocker_base_url: str = Field(
+        default="https://api.digitallocker.gov.in/public/oauth2/1"
+    )
     digilocker_redirect_uri: str = Field(default="")
     digilocker_timeout_seconds: int = Field(default=30)
 
@@ -326,8 +355,7 @@ class Settings(BaseSettings):
     # Email Provisioning (Google Workspace / Microsoft 365)
     # -------------------------------------------------------------------------
     email_provider: str = Field(
-        default="",
-        description="GOOGLE | MICROSOFT | SMTP_ONLY (empty = disabled)"
+        default="", description="GOOGLE | MICROSOFT | SMTP_ONLY (empty = disabled)"
     )
     # Google Workspace
     google_admin_email: str = Field(default="")
@@ -346,7 +374,9 @@ class Settings(BaseSettings):
     # -------------------------------------------------------------------------
     # Drillbit (Plagiarism Detection — PhD module)
     # -------------------------------------------------------------------------
-    drillbit_api_key: str = Field(default="", description="Drillbit API key — obtain from drillbit.in")
+    drillbit_api_key: str = Field(
+        default="", description="Drillbit API key — obtain from drillbit.in"
+    )
     drillbit_base_url: str = Field(default="https://api.drillbit.in/v1")
     drillbit_timeout_seconds: int = Field(default=60)
 
@@ -363,7 +393,9 @@ class Settings(BaseSettings):
     )
     nic_einvoice_client_id: str = Field(default="")
     nic_einvoice_client_secret: str = Field(default="")
-    nic_einvoice_gstin: str = Field(default="", description="Institution GSTIN (15 chars)")
+    nic_einvoice_gstin: str = Field(
+        default="", description="Institution GSTIN (15 chars)"
+    )
     nic_einvoice_username: str = Field(default="")
     nic_einvoice_password: str = Field(default="")
     nic_einvoice_timeout_seconds: int = Field(default=30)
@@ -386,7 +418,7 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = Field(
         default=0.05,
         description="Fraction of transactions to send to Sentry Performance (0.0–1.0). "
-                    "0.05 = 5% sampling in production to control volume.",
+        "0.05 = 5% sampling in production to control volume.",
     )
     sentry_profiles_sample_rate: float = Field(
         default=0.01,
@@ -424,7 +456,7 @@ class Settings(BaseSettings):
     ai_service_url: str = Field(
         default="",
         description="AI Service base URL (e.g. https://ai.alis.app). "
-                    "Empty = direct Ollama fallback.",
+        "Empty = direct Ollama fallback.",
     )
     ai_service_token: str = Field(
         default="change-me-ai-service-token",
@@ -439,7 +471,7 @@ class Settings(BaseSettings):
     control_plane_url: str = Field(
         default="",
         description="Control plane base URL (e.g. https://control.alis.app). "
-                    "Empty = single-tenant fallback mode.",
+        "Empty = single-tenant fallback mode.",
     )
     control_plane_token: str = Field(
         default="",
@@ -448,12 +480,12 @@ class Settings(BaseSettings):
     static_tenant_id: str = Field(
         default="",
         description="Tier 2 (dedicated stack): hardcode a single tenant_id, "
-                    "bypassing all subdomain and JWT tenant resolution.",
+        "bypassing all subdomain and JWT tenant resolution.",
     )
     saas_domain_suffix: str = Field(
         default="alis.app",
         description="Domain suffix used to extract subdomain tenant slug. "
-                    "E.g., 'alis.app' → iitb.alis.app → slug='iitb'.",
+        "E.g., 'alis.app' → iitb.alis.app → slug='iitb'.",
     )
     # -------------------------------------------------------------------------
     # Internal Service Auth (E00-S03 — X-Tenant-ID header guard)
@@ -483,7 +515,7 @@ class Settings(BaseSettings):
     tenant_pool_max: int = Field(
         default=10,
         description="Max connections per per-tenant DB pool. "
-                    "Total server connections ≈ tenant_count × tenant_pool_max.",
+        "Total server connections ≈ tenant_count × tenant_pool_max.",
     )
 
     # -------------------------------------------------------------------------
@@ -506,7 +538,7 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
-    def validate_production_secrets(self) -> "Settings":
+    def validate_production_secrets(self) -> Settings:
         """Block startup if insecure defaults are used in production."""
         if self.app_env != "production":
             return self
@@ -539,7 +571,10 @@ class Settings(BaseSettings):
             )
 
         _MINIO_DEFAULTS = {"minioadmin"}
-        if self.minio_access_key in _MINIO_DEFAULTS or self.minio_secret_key in _MINIO_DEFAULTS:
+        if (
+            self.minio_access_key in _MINIO_DEFAULTS
+            or self.minio_secret_key in _MINIO_DEFAULTS
+        ):
             raise ValueError(
                 "[SECURITY] MINIO_ACCESS_KEY and MINIO_SECRET_KEY must be changed from defaults in production. "
                 "Default 'minioadmin' credentials expose all uploaded documents."

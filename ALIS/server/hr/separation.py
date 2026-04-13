@@ -16,16 +16,16 @@ State Machine:
 No-dues departments:
     Library, Finance, IT, Hostel, Lab, Department (HOD), Admin
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.db_service import execute_query, execute_transaction
 
@@ -48,92 +48,145 @@ class NoDuesStatus(str, Enum):
 
 
 NO_DUES_DEPARTMENTS = [
-    "LIBRARY", "FINANCE", "IT", "HOSTEL", "LAB", "DEPARTMENT", "ADMIN",
+    "LIBRARY",
+    "FINANCE",
+    "IT",
+    "HOSTEL",
+    "LAB",
+    "DEPARTMENT",
+    "ADMIN",
 ]
 
 
 class SeparationService:
-
     @classmethod
-    def initiate(cls, org_id: str, staff_id: str, data: Dict[str, Any], actor_id: str) -> Dict[str, Any]:
+    def initiate(
+        cls, org_id: str, staff_id: str, data: dict[str, Any], actor_id: str
+    ) -> dict[str, Any]:
         """Initiate employee separation. Fires separation.initiated event."""
         sep_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO separations
                     (id, org_id, staff_id, separation_type, reason,
                      last_working_date, status, initiated_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    sep_id, org_id, staff_id,
-                    data.get("separation_type", "RESIGNATION"),
-                    data.get("reason", ""),
-                    data.get("last_working_date"),
-                    SeparationStatus.INITIATED.value, actor_id, now,
+                    (
+                        sep_id,
+                        org_id,
+                        staff_id,
+                        data.get("separation_type", "RESIGNATION"),
+                        data.get("reason", ""),
+                        data.get("last_working_date"),
+                        SeparationStatus.INITIATED.value,
+                        actor_id,
+                        now,
+                    ),
                 ),
-            ),
-        ], tenant_id=org_id)
+            ],
+            tenant_id=org_id,
+        )
 
         # Create no-dues records for all departments
         for dept in NO_DUES_DEPARTMENTS:
-            execute_transaction([
-                (
-                    """
+            execute_transaction(
+                [
+                    (
+                        """
                     INSERT INTO no_dues_clearances
                         (id, org_id, separation_id, staff_id, department, status, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     """,
-                    (str(uuid4()), org_id, sep_id, staff_id, dept,
-                     NoDuesStatus.PENDING.value, now),
-                )
-            ], tenant_id=org_id)
+                        (
+                            str(uuid4()),
+                            org_id,
+                            sep_id,
+                            staff_id,
+                            dept,
+                            NoDuesStatus.PENDING.value,
+                            now,
+                        ),
+                    )
+                ],
+                tenant_id=org_id,
+            )
 
         # Fire separation.initiated → triggers Academic CourseHandoverWorkflow (EC-ACA-02)
-        DomainEventBus.publish(DomainEvent(
-            event_type="separation.initiated",
-            org_id=org_id,
-            payload={
-                "separation_id": sep_id,
-                "staff_id": staff_id,
-                "last_working_date": str(data.get("last_working_date", "")),
-                "separation_type": data.get("separation_type", "RESIGNATION"),
-            },
-            actor_id=actor_id,
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="separation.initiated",
+                org_id=org_id,
+                payload={
+                    "separation_id": sep_id,
+                    "staff_id": staff_id,
+                    "last_working_date": str(data.get("last_working_date", "")),
+                    "separation_type": data.get("separation_type", "RESIGNATION"),
+                },
+                actor_id=actor_id,
+            )
+        )
 
         AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_role="admin",
-            entity_type="separation", entity_id=sep_id, tenant_id=org_id,
-            metadata={"staff_id": staff_id, "type": data.get("separation_type", "RESIGNATION")},
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="admin",
+            entity_type="separation",
+            entity_id=sep_id,
+            tenant_id=org_id,
+            metadata={
+                "staff_id": staff_id,
+                "type": data.get("separation_type", "RESIGNATION"),
+            },
         )
 
         return {"id": sep_id, "status": SeparationStatus.INITIATED.value}
 
     @classmethod
-    def clear_no_dues(cls, org_id: str, clearance_id: str, actor_id: str) -> Dict[str, Any]:
+    def clear_no_dues(
+        cls, org_id: str, clearance_id: str, actor_id: str
+    ) -> dict[str, Any]:
         """Department head clears no-dues for a specific department."""
-        execute_transaction([
-            ("UPDATE no_dues_clearances SET status = %s, cleared_by = %s, cleared_at = NOW() "
-             "WHERE id = %s AND org_id = %s AND status = %s",
-             (NoDuesStatus.CLEARED.value, actor_id, clearance_id, org_id, NoDuesStatus.PENDING.value))
-        ], tenant_id=org_id)
+        execute_transaction(
+            [
+                (
+                    "UPDATE no_dues_clearances SET status = %s, cleared_by = %s, cleared_at = NOW() "
+                    "WHERE id = %s AND org_id = %s AND status = %s",
+                    (
+                        NoDuesStatus.CLEARED.value,
+                        actor_id,
+                        clearance_id,
+                        org_id,
+                        NoDuesStatus.PENDING.value,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
         return {"id": clearance_id, "status": NoDuesStatus.CLEARED.value}
 
     @classmethod
-    def check_all_cleared(cls, org_id: str, separation_id: str) -> Dict[str, Any]:
+    def check_all_cleared(cls, org_id: str, separation_id: str) -> dict[str, Any]:
         """Check if all no-dues departments have cleared."""
         rows = execute_query(
             "SELECT department, status FROM no_dues_clearances "
             "WHERE separation_id = %s AND org_id = %s ORDER BY department",
-            (separation_id, org_id), tenant_id=org_id,
+            (separation_id, org_id),
+            tenant_id=org_id,
         )
         departments = [dict(r) for r in rows]
-        all_cleared = all(d["status"] == NoDuesStatus.CLEARED.value for d in departments)
-        pending = [d["department"] for d in departments if d["status"] != NoDuesStatus.CLEARED.value]
+        all_cleared = all(
+            d["status"] == NoDuesStatus.CLEARED.value for d in departments
+        )
+        pending = [
+            d["department"]
+            for d in departments
+            if d["status"] != NoDuesStatus.CLEARED.value
+        ]
 
         return {
             "separation_id": separation_id,
@@ -144,8 +197,11 @@ class SeparationService:
 
     @classmethod
     def compute_gratuity(
-        cls, basic_salary: float, da: float, completed_years: float,
-    ) -> Dict[str, Any]:
+        cls,
+        basic_salary: float,
+        da: float,
+        completed_years: float,
+    ) -> dict[str, Any]:
         """
         Compute gratuity per Payment of Gratuity Act, 1972.
 
@@ -182,8 +238,10 @@ class SeparationService:
 
     @classmethod
     def compute_el_encashment(
-        cls, basic_salary: float, el_balance_days: int,
-    ) -> Dict[str, Any]:
+        cls,
+        basic_salary: float,
+        el_balance_days: int,
+    ) -> dict[str, Any]:
         """
         Compute Earned Leave encashment.
 
@@ -206,13 +264,17 @@ class SeparationService:
 
     @classmethod
     def compute_full_settlement(
-        cls, org_id: str, staff_id: str, separation_id: str,
-    ) -> Dict[str, Any]:
+        cls,
+        org_id: str,
+        staff_id: str,
+        separation_id: str,
+    ) -> dict[str, Any]:
         """Compute full and final settlement for an employee."""
         staff = execute_query(
             "SELECT basic_salary, da, date_of_joining, el_balance FROM staff_profiles "
             "WHERE id = %s AND org_id = %s",
-            (staff_id, org_id), tenant_id=org_id,
+            (staff_id, org_id),
+            tenant_id=org_id,
         )
         if not staff:
             raise ValueError(f"Staff {staff_id} not found")

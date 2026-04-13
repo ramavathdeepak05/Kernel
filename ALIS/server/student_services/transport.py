@@ -1,4 +1,5 @@
 """E09-S03 — Transport Management"""
+
 from __future__ import annotations
 
 import json
@@ -15,41 +16,72 @@ logger = logging.getLogger(__name__)
 
 
 class TransportService:
-
     # ── Routes ───────────────────────────────────────────────
 
     @classmethod
-    def create_route(cls, org_id: str, req: TransportRouteCreate, actor_id: str) -> dict:
+    def create_route(
+        cls, org_id: str, req: TransportRouteCreate, actor_id: str
+    ) -> dict:
         existing = execute_query(
             "SELECT id FROM transport_routes WHERE org_id = %s AND route_code = %s",
             (org_id, req.route_code.upper()),
         )
         if existing:
-            raise BusinessRuleViolation(message=f"Route code {req.route_code} already exists")
+            raise BusinessRuleViolation(
+                message=f"Route code {req.route_code} already exists"
+            )
 
         rid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO transport_routes
                 (id, org_id, route_name, route_code, stops, vehicle_number,
                  driver_name, driver_contact, capacity)
             VALUES (%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s)
             """,
-            (rid, org_id, req.route_name, req.route_code.upper(),
-             json.dumps(req.stops), req.vehicle_number,
-             req.driver_name, req.driver_contact, req.capacity),
-        )])
+                    (
+                        rid,
+                        org_id,
+                        req.route_name,
+                        req.route_code.upper(),
+                        json.dumps(req.stops),
+                        req.vehicle_number,
+                        req.driver_name,
+                        req.driver_contact,
+                        req.capacity,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="transport_route", entity_id=rid, org_id=org_id,
-                     module="E09-S03", metadata={"code": req.route_code})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="transport_route",
+            entity_id=rid,
+            org_id=org_id,
+            module="E09-S03",
+            metadata={"code": req.route_code},
+        )
 
         return cls.get_route(org_id, rid)
 
     @classmethod
-    def update_route(cls, org_id: str, route_id: str, updates: dict, actor_id: str) -> dict:
-        allowed = {"route_name", "stops", "vehicle_number", "driver_name",
-                   "driver_contact", "capacity", "is_active"}
+    def update_route(
+        cls, org_id: str, route_id: str, updates: dict, actor_id: str
+    ) -> dict:
+        allowed = {
+            "route_name",
+            "stops",
+            "vehicle_number",
+            "driver_name",
+            "driver_contact",
+            "capacity",
+            "is_active",
+        }
         fields = []
         values: list = []
         for k, v in updates.items():
@@ -63,10 +95,24 @@ class TransportService:
         if not fields:
             return cls.get_route(org_id, route_id)
         values.extend([route_id, org_id])
-        execute_transaction([(
-            f"UPDATE transport_routes SET {', '.join(fields)} WHERE id = %s AND org_id = %s",
-            values,
-        )])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE transport_routes SET {', '.join(fields)} WHERE id = %s AND org_id = %s",  # noqa: S608
+                    values,
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="route",
+            entity_id=route_id,
+            tenant_id=org_id,
+            metadata={"source": "update_route"},
+        )
         return cls.get_route(org_id, route_id)
 
     @classmethod
@@ -98,7 +144,9 @@ class TransportService:
     # ── Assignments ──────────────────────────────────────────
 
     @classmethod
-    def assign_student(cls, org_id: str, req: TransportAssignCreate, actor_id: str) -> dict:
+    def assign_student(
+        cls, org_id: str, req: TransportAssignCreate, actor_id: str
+    ) -> dict:
         # Unique per student per year
         existing = execute_query(
             "SELECT id FROM transport_assignments WHERE student_id = %s AND academic_year = %s AND org_id = %s AND status = 'ACTIVE'",
@@ -125,34 +173,69 @@ class TransportService:
             "SELECT roll_number FROM students WHERE id = %s", (req.student_id,)
         )
         roll = student_rows[0]["roll_number"] if student_rows else req.student_id[:8]
-        pass_number = f"TP-{route['route_code']}-{roll}-{req.academic_year.replace('-','')}"
+        pass_number = (
+            f"TP-{route['route_code']}-{roll}-{req.academic_year.replace('-', '')}"
+        )
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO transport_assignments
                 (id, org_id, student_id, route_id, stop_name, academic_year,
                  pass_number, valid_from, valid_to, assigned_by)
             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """,
-            (aid, org_id, req.student_id, req.route_id, req.stop_name,
-             req.academic_year, pass_number, req.valid_from,
-             req.valid_to, actor_id),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        req.student_id,
+                        req.route_id,
+                        req.stop_name,
+                        req.academic_year,
+                        pass_number,
+                        req.valid_from,
+                        req.valid_to,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="transport_assignment", entity_id=aid, org_id=org_id,
-                     module="E09-S03",
-                     metadata={"student_id": req.student_id, "route": route["route_name"]})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="transport_assignment",
+            entity_id=aid,
+            org_id=org_id,
+            module="E09-S03",
+            metadata={"student_id": req.student_id, "route": route["route_name"]},
+        )
 
         return cls.get_assignment(org_id, aid)
 
     @classmethod
     def cancel_assignment(cls, org_id: str, assignment_id: str, actor_id: str) -> dict:
-        execute_transaction([(
-            "UPDATE transport_assignments SET status = 'CANCELLED' WHERE id = %s AND org_id = %s",
-            (assignment_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE transport_assignments SET status = 'CANCELLED' WHERE id = %s AND org_id = %s",
+                    (assignment_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="cancel_assignment",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "cancel_assignment"},
+        )
         return cls.get_assignment(org_id, assignment_id)
 
     @classmethod
@@ -173,8 +256,9 @@ class TransportService:
         return dict(rows[0])
 
     @classmethod
-    def get_student_assignment(cls, org_id: str, student_id: str,
-                                academic_year: str) -> dict | None:
+    def get_student_assignment(
+        cls, org_id: str, student_id: str, academic_year: str
+    ) -> dict | None:
         rows = execute_query(
             """
             SELECT a.*, r.route_name, r.route_code, r.stops, r.vehicle_number,
@@ -189,8 +273,9 @@ class TransportService:
         return dict(rows[0]) if rows else None
 
     @classmethod
-    def list_route_students(cls, org_id: str, route_id: str,
-                             academic_year: str) -> list[dict]:
+    def list_route_students(
+        cls, org_id: str, route_id: str, academic_year: str
+    ) -> list[dict]:
         rows = execute_query(
             """
             SELECT a.*, s.name AS student_name, s.roll_number, s.email

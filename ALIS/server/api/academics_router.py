@@ -1,14 +1,16 @@
 """E05 — Academics API Router"""
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-
-from server.core.rbac import Permission, require_permission
-
+from server.academics.analytics import AttendanceAnalyticsService
+from server.academics.attendance import AttendanceService
+from server.academics.courses import CourseService
+from server.academics.enrollment import AcademicEnrollmentService
+from server.academics.faculty import FacultyAssignmentService
 from server.academics.models import (
     AttendanceMarkRequest,
     CourseCreate,
@@ -18,13 +20,9 @@ from server.academics.models import (
     TimetableSlotCreate,
 )
 from server.academics.programs import ProgramService
-from server.academics.courses import CourseService
-from server.academics.enrollment import AcademicEnrollmentService
-from server.academics.faculty import FacultyAssignmentService
-from server.academics.timetable import TimetableService
-from server.academics.attendance import AttendanceService
-from server.academics.analytics import AttendanceAnalyticsService
 from server.academics.ta_assignment_service import TAAssignmentService
+from server.academics.timetable import TimetableService
+from server.core.rbac import Permission, require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/academics", tags=["academics"])
@@ -32,8 +30,9 @@ router = APIRouter(prefix="/api/v1/academics", tags=["academics"])
 
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime to JSON-safe types."""
+    from datetime import date, datetime
     from decimal import Decimal
-    from datetime import datetime, date
+
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -43,6 +42,7 @@ def _jsonify(obj):
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     from datetime import time as _time
+
     if isinstance(obj, _time):
         return obj.strftime("%H:%M")
     return obj
@@ -51,8 +51,10 @@ def _jsonify(obj):
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
 
+
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
+
 
 def _role(r: Request) -> str:
     return getattr(r.state, "user_role", "STUDENT")
@@ -62,10 +64,13 @@ def _role(r: Request) -> str:
 # E05-S01 — Programs
 # =============================================================================
 
+
 @router.post("/programs", status_code=201)
 @require_permission(Permission.STUDENT_CREATE)
 async def create_program(request: Request, body: ProgramCreate) -> JSONResponse:
-    result = ProgramService.create(org_id=_org(request), req=body, actor_id=_actor(request))
+    result = ProgramService.create(
+        org_id=_org(request), req=body, actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=_jsonify(result))
 
 
@@ -79,14 +84,22 @@ async def list_programs(request: Request) -> JSONResponse:
 @router.get("/programs/{program_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_program(request: Request, program_id: str) -> JSONResponse:
-    return JSONResponse(content=_jsonify(ProgramService.get(org_id=_org(request), program_id=program_id)))
+    return JSONResponse(
+        content=_jsonify(
+            ProgramService.get(org_id=_org(request), program_id=program_id)
+        )
+    )
 
 
 @router.patch("/programs/{program_id}")
 @require_permission(Permission.STUDENT_CREATE)
 async def update_program(request: Request, program_id: str, body: dict) -> JSONResponse:
-    result = ProgramService.update(org_id=_org(request), program_id=program_id,
-                                   updates=body, actor_id=_actor(request))
+    result = ProgramService.update(
+        org_id=_org(request),
+        program_id=program_id,
+        updates=body,
+        actor_id=_actor(request),
+    )
     return JSONResponse(content=_jsonify(result))
 
 
@@ -94,30 +107,39 @@ async def update_program(request: Request, program_id: str, body: dict) -> JSONR
 # E05-S02 — Courses
 # =============================================================================
 
+
 @router.post("/courses", status_code=201)
 @require_permission(Permission.STUDENT_CREATE)
 async def create_course(request: Request, body: CourseCreate) -> JSONResponse:
-    result = CourseService.create(org_id=_org(request), req=body, actor_id=_actor(request))
+    result = CourseService.create(
+        org_id=_org(request), req=body, actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=_jsonify(result))
 
 
 @router.get("/courses")
 @require_permission(Permission.STUDENT_READ)
-async def list_courses(request: Request, program_id: Optional[str] = None,
-                       semester: Optional[int] = None) -> JSONResponse:
-    items = CourseService.list(org_id=_org(request), program_id=program_id, semester=semester)
+async def list_courses(
+    request: Request, program_id: str | None = None, semester: int | None = None
+) -> JSONResponse:
+    items = CourseService.list(
+        org_id=_org(request), program_id=program_id, semester=semester
+    )
     return JSONResponse(content=_jsonify({"courses": items, "total": len(items)}))
 
 
 @router.get("/courses/{course_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_course(request: Request, course_id: str) -> JSONResponse:
-    return JSONResponse(content=_jsonify(CourseService.get(org_id=_org(request), course_id=course_id)))
+    return JSONResponse(
+        content=_jsonify(CourseService.get(org_id=_org(request), course_id=course_id))
+    )
 
 
 # =============================================================================
 # E05-S03 — Student-Course Enrollment
 # =============================================================================
+
 
 @router.post("/enrollments", status_code=201)
 @require_permission(Permission.STUDENT_CREATE)
@@ -130,8 +152,9 @@ async def enroll_student(request: Request, body: StudentEnrollRequest) -> JSONRe
 
 @router.get("/enrollments/student/{student_id}")
 @require_permission(Permission.STUDENT_READ)
-async def get_student_enrollments(request: Request, student_id: str,
-                                   academic_year: str = "") -> JSONResponse:
+async def get_student_enrollments(
+    request: Request, student_id: str, academic_year: str = ""
+) -> JSONResponse:
     items = AcademicEnrollmentService.list_for_student(
         org_id=_org(request), student_id=student_id, academic_year=academic_year
     )
@@ -140,11 +163,15 @@ async def get_student_enrollments(request: Request, student_id: str,
 
 @router.delete("/enrollments/{student_id}/{course_id}")
 @require_permission(Permission.STUDENT_CREATE)
-async def drop_course(request: Request, student_id: str, course_id: str,
-                      academic_year: str = "") -> JSONResponse:
+async def drop_course(
+    request: Request, student_id: str, course_id: str, academic_year: str = ""
+) -> JSONResponse:
     result = AcademicEnrollmentService.drop_course(
-        org_id=_org(request), student_id=student_id, course_id=course_id,
-        academic_year=academic_year, actor_id=_actor(request)
+        org_id=_org(request),
+        student_id=student_id,
+        course_id=course_id,
+        academic_year=academic_year,
+        actor_id=_actor(request),
     )
     return JSONResponse(content=result)
 
@@ -152,6 +179,7 @@ async def drop_course(request: Request, student_id: str, course_id: str,
 # =============================================================================
 # E05-S04 — Faculty Assignments
 # =============================================================================
+
 
 @router.post("/faculty/assign", status_code=201)
 @require_permission(Permission.STUDENT_CREATE)
@@ -164,15 +192,18 @@ async def assign_faculty(request: Request, body: FacultyAssignRequest) -> JSONRe
 
 @router.get("/faculty/{faculty_id}/assignments")
 @require_permission(Permission.STUDENT_READ)
-async def get_faculty_assignments(request: Request, faculty_id: str,
-                                   academic_year: str = "") -> JSONResponse:
+async def get_faculty_assignments(
+    request: Request, faculty_id: str, academic_year: str = ""
+) -> JSONResponse:
     items = FacultyAssignmentService.list_for_faculty(
         org_id=_org(request), faculty_id=faculty_id, academic_year=academic_year
     )
     return JSONResponse(content={"assignments": items, "total": len(items)})
 
 
-@router.delete("/faculty/assignments/{assignment_id}", status_code=204, response_model=None)
+@router.delete(
+    "/faculty/assignments/{assignment_id}", status_code=204, response_model=None
+)
 @require_permission(Permission.STUDENT_CREATE)
 async def unassign_faculty(request: Request, assignment_id: str) -> None:
     FacultyAssignmentService.unassign(
@@ -184,9 +215,12 @@ async def unassign_faculty(request: Request, assignment_id: str) -> None:
 # E05-S05 — Timetable
 # =============================================================================
 
+
 @router.post("/timetable", status_code=201)
 @require_permission(Permission.STUDENT_CREATE)
-async def add_timetable_slot(request: Request, body: TimetableSlotCreate) -> JSONResponse:
+async def add_timetable_slot(
+    request: Request, body: TimetableSlotCreate
+) -> JSONResponse:
     result = TimetableService.add_slot(
         org_id=_org(request), req=body, actor_id=_actor(request)
     )
@@ -195,12 +229,17 @@ async def add_timetable_slot(request: Request, body: TimetableSlotCreate) -> JSO
 
 @router.get("/timetable")
 @require_permission(Permission.STUDENT_READ)
-async def get_timetable(request: Request, academic_year: str = "",
-                         course_id: Optional[str] = None,
-                         faculty_id: Optional[str] = None) -> JSONResponse:
+async def get_timetable(
+    request: Request,
+    academic_year: str = "",
+    course_id: str | None = None,
+    faculty_id: str | None = None,
+) -> JSONResponse:
     slots = TimetableService.get_weekly(
-        org_id=_org(request), academic_year=academic_year,
-        course_id=course_id, faculty_id=faculty_id
+        org_id=_org(request),
+        academic_year=academic_year,
+        course_id=course_id,
+        faculty_id=faculty_id,
     )
     return JSONResponse(content=_jsonify({"slots": slots, "total": len(slots)}))
 
@@ -217,12 +256,17 @@ async def delete_timetable_slot(request: Request, slot_id: str) -> None:
 # E05-S06 — Attendance
 # =============================================================================
 
+
 @router.post("/attendance", status_code=201)
 @require_permission(Permission.STUDENT_UPDATE)
-async def mark_attendance(request: Request, body: AttendanceMarkRequest) -> JSONResponse:
+async def mark_attendance(
+    request: Request, body: AttendanceMarkRequest
+) -> JSONResponse:
     result = AttendanceService.mark_session(
-        org_id=_org(request), req=body,
-        faculty_id=_actor(request), actor_id=_actor(request)
+        org_id=_org(request),
+        req=body,
+        faculty_id=_actor(request),
+        actor_id=_actor(request),
     )
     return JSONResponse(status_code=201, content=result)
 
@@ -238,19 +282,23 @@ async def finalize_session(request: Request, session_id: str) -> JSONResponse:
 
 @router.get("/attendance/student/{student_id}")
 @require_permission(Permission.STUDENT_READ)
-async def get_student_attendance(request: Request, student_id: str,
-                                  course_id: str = "", academic_year: str = "") -> JSONResponse:
+async def get_student_attendance(
+    request: Request, student_id: str, course_id: str = "", academic_year: str = ""
+) -> JSONResponse:
     result = AttendanceService.get_student_summary(
-        org_id=_org(request), student_id=student_id,
-        course_id=course_id, academic_year=academic_year
+        org_id=_org(request),
+        student_id=student_id,
+        course_id=course_id,
+        academic_year=academic_year,
     )
     return JSONResponse(content=_jsonify(result))
 
 
 @router.get("/attendance/course/{course_id}")
 @require_permission(Permission.STUDENT_READ)
-async def get_course_attendance(request: Request, course_id: str,
-                                 academic_year: str = "") -> JSONResponse:
+async def get_course_attendance(
+    request: Request, course_id: str, academic_year: str = ""
+) -> JSONResponse:
     result = AttendanceService.get_course_summary(
         org_id=_org(request), course_id=course_id, academic_year=academic_year
     )
@@ -261,10 +309,12 @@ async def get_course_attendance(request: Request, course_id: str,
 # E05-S07 — Attendance Analytics (AI)
 # =============================================================================
 
+
 @router.get("/analytics/at-risk")
 @require_permission(Permission.STUDENT_READ)
-async def get_at_risk_students(request: Request, academic_year: str = "",
-                                course_id: Optional[str] = None) -> JSONResponse:
+async def get_at_risk_students(
+    request: Request, academic_year: str = "", course_id: str | None = None
+) -> JSONResponse:
     result = AttendanceAnalyticsService.get_at_risk_students(
         org_id=_org(request), academic_year=academic_year, course_id=course_id
     )
@@ -273,11 +323,14 @@ async def get_at_risk_students(request: Request, academic_year: str = "",
 
 @router.get("/analytics/insights")
 @require_permission(Permission.STUDENT_READ)
-async def get_ai_insights(request: Request, academic_year: str = "",
-                           course_id: Optional[str] = None) -> JSONResponse:
+async def get_ai_insights(
+    request: Request, academic_year: str = "", course_id: str | None = None
+) -> JSONResponse:
     result = AttendanceAnalyticsService.generate_ai_insights(
-        org_id=_org(request), academic_year=academic_year,
-        course_id=course_id, actor_id=_actor(request)
+        org_id=_org(request),
+        academic_year=academic_year,
+        course_id=course_id,
+        actor_id=_actor(request),
     )
     return JSONResponse(content=_jsonify(result))
 
@@ -286,13 +339,19 @@ async def get_ai_insights(request: Request, academic_year: str = "",
 # E20 — OBE / CO-PO Mapping Routes (P22)
 # ---------------------------------------------------------------------------
 
+
 @router.post("/obe/program-outcomes")
 @require_permission(Permission.ACADEMICS_MANAGE)
 async def create_program_outcome(request: Request, body: dict) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.create_program_outcome(
-        org_id=_org(request), program_id=body["program_id"], code=body["code"],
-        description=body["description"], domain=body.get("domain"), nba_mapping=body.get("nba_mapping"),
+        org_id=_org(request),
+        program_id=body["program_id"],
+        code=body["code"],
+        description=body["description"],
+        domain=body.get("domain"),
+        nba_mapping=body.get("nba_mapping"),
     )
     return JSONResponse(content=_jsonify(result), status_code=201)
 
@@ -301,9 +360,13 @@ async def create_program_outcome(request: Request, body: dict) -> JSONResponse:
 @require_permission(Permission.ACADEMICS_MANAGE)
 async def create_course_outcome(request: Request, body: dict) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.create_course_outcome(
-        org_id=_org(request), course_id=body["course_id"], code=body["code"],
-        description=body["description"], bloom_level=body.get("bloom_level"),
+        org_id=_org(request),
+        course_id=body["course_id"],
+        code=body["code"],
+        description=body["description"],
+        bloom_level=body.get("bloom_level"),
     )
     return JSONResponse(content=_jsonify(result), status_code=201)
 
@@ -312,9 +375,14 @@ async def create_course_outcome(request: Request, body: dict) -> JSONResponse:
 @require_permission(Permission.ACADEMICS_MANAGE)
 async def map_co_to_po(request: Request, body: dict) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.map_co_to_po(
-        org_id=_org(request), course_id=body["course_id"], co_id=body["co_id"],
-        po_id=body["po_id"], strength=body.get("strength", "M"), justification=body.get("justification"),
+        org_id=_org(request),
+        course_id=body["course_id"],
+        co_id=body["co_id"],
+        po_id=body["po_id"],
+        strength=body.get("strength", "M"),
+        justification=body.get("justification"),
     )
     return JSONResponse(content=_jsonify(result), status_code=201)
 
@@ -323,17 +391,24 @@ async def map_co_to_po(request: Request, body: dict) -> JSONResponse:
 @require_permission(Permission.ACADEMICS_READ)
 async def get_co_po_matrix(request: Request, course_id: str) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.get_co_po_matrix(_org(request), course_id)
     return JSONResponse(content=_jsonify(result))
 
 
 @router.post("/obe/attainment/{course_id}")
 @require_permission(Permission.ACADEMICS_MANAGE)
-async def compute_attainment(request: Request, course_id: str, body: dict) -> JSONResponse:
+async def compute_attainment(
+    request: Request, course_id: str, body: dict
+) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.compute_attainment(
-        org_id=_org(request), program_id=body["program_id"], course_id=course_id,
-        semester_id=body["semester_id"], actor_id=_actor(request),
+        org_id=_org(request),
+        program_id=body["program_id"],
+        course_id=course_id,
+        semester_id=body["semester_id"],
+        actor_id=_actor(request),
     )
     return JSONResponse(content=_jsonify(result))
 
@@ -342,6 +417,7 @@ async def compute_attainment(request: Request, course_id: str, body: dict) -> JS
 @require_permission(Permission.ACADEMICS_READ)
 async def get_attainment_report(request: Request, program_id: str) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.get_attainment_report(_org(request), program_id)
     return JSONResponse(content=_jsonify(result))
 
@@ -350,6 +426,7 @@ async def get_attainment_report(request: Request, program_id: str) -> JSONRespon
 @require_permission(Permission.ACADEMICS_READ)
 async def get_gap_analysis(request: Request, program_id: str) -> JSONResponse:
     from server.academics.obe_service import OBEService
+
     result = OBEService.get_gap_analysis(_org(request), program_id)
     return JSONResponse(content=_jsonify(result))
 
@@ -358,9 +435,14 @@ async def get_gap_analysis(request: Request, program_id: str) -> JSONResponse:
 # P26-TA — Teaching Assistant Assignments
 # =============================================================================
 
-@router.post("/courses/{course_id}/ta-assignments", status_code=201, tags=["TA Assignments"])
+
+@router.post(
+    "/courses/{course_id}/ta-assignments", status_code=201, tags=["TA Assignments"]
+)
 @require_permission(Permission.ACADEMICS_MANAGE)
-async def assign_course_ta(request: Request, course_id: str, body: dict) -> JSONResponse:
+async def assign_course_ta(
+    request: Request, course_id: str, body: dict
+) -> JSONResponse:
     """
     Assign a student as TA for a course (semester-long).
     Replaces any existing active course TA — old TA is notified of revocation.
@@ -389,9 +471,13 @@ async def list_course_tas(request: Request, course_id: str) -> JSONResponse:
     return JSONResponse(content=_jsonify(result))
 
 
-@router.delete("/courses/{course_id}/ta-assignments/{assignment_id}", tags=["TA Assignments"])
+@router.delete(
+    "/courses/{course_id}/ta-assignments/{assignment_id}", tags=["TA Assignments"]
+)
 @require_permission(Permission.ACADEMICS_MANAGE)
-async def revoke_course_ta(request: Request, course_id: str, assignment_id: str) -> JSONResponse:
+async def revoke_course_ta(
+    request: Request, course_id: str, assignment_id: str
+) -> JSONResponse:
     """Revoke a course-level TA assignment. TA is notified via WhatsApp/SMS."""
     result = TAAssignmentService.revoke_course_ta(
         tenant_id=_org(request),
@@ -402,9 +488,13 @@ async def revoke_course_ta(request: Request, course_id: str, assignment_id: str)
     return JSONResponse(content=_jsonify(result))
 
 
-@router.post("/sessions/{session_ref}/ta-assignments", status_code=201, tags=["TA Assignments"])
+@router.post(
+    "/sessions/{session_ref}/ta-assignments", status_code=201, tags=["TA Assignments"]
+)
 @require_permission(Permission.ACADEMICS_MANAGE)
-async def assign_session_ta(request: Request, session_ref: str, body: dict) -> JSONResponse:
+async def assign_session_ta(
+    request: Request, session_ref: str, body: dict
+) -> JSONResponse:
     """
     Assign a TA for a specific attendance session only (one-time delegation).
     body.student_identifier: student UUID, roll number, or email.

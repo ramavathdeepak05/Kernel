@@ -27,12 +27,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.core.state_registry import StudentState
 from server.db_service import execute_query, execute_transaction
@@ -43,16 +42,29 @@ logger = logging.getLogger(__name__)
 
 # Valid statuses
 _VERIFICATION_STATUSES = {
-    "PENDING", "IN_PROGRESS", "VERIFIED",
-    "DISCREPANCY_FOUND", "CLEARED_WITH_UNDERTAKING", "REJECTED",
+    "PENDING",
+    "IN_PROGRESS",
+    "VERIFIED",
+    "DISCREPANCY_FOUND",
+    "CLEARED_WITH_UNDERTAKING",
+    "REJECTED",
 }
 _ITEM_OUTCOMES = {"PENDING", "VERIFIED", "DISCREPANCY", "NOT_PRODUCED"}
 _DISCREPANCY_TYPES = {
-    "DATA_MISMATCH", "SUSPECTED_FRAUD", "DOCUMENT_MISSING",
-    "DOCUMENT_EXPIRED", "UNRECOGNIZED_BOARD",
+    "DATA_MISMATCH",
+    "SUSPECTED_FRAUD",
+    "DOCUMENT_MISSING",
+    "DOCUMENT_EXPIRED",
+    "UNRECOGNIZED_BOARD",
 }
 _SEVERITY_LEVELS = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
-_DISCREPANCY_STATUSES = {"OPEN", "UNDER_REVIEW", "RESOLVED", "ESCALATED", "CLOSED_REJECTED"}
+_DISCREPANCY_STATUSES = {
+    "OPEN",
+    "UNDER_REVIEW",
+    "RESOLVED",
+    "ESCALATED",
+    "CLOSED_REJECTED",
+}
 
 # Statuses from which a verification can be cleared/rejected
 _ACTIONABLE = {"IN_PROGRESS", "DISCREPANCY_FOUND", "PENDING"}
@@ -62,18 +74,17 @@ _ACTIONABLE = {"IN_PROGRESS", "DISCREPANCY_FOUND", "PENDING"}
 # Pydantic Models
 # =============================================================================
 
+
 class FinalVerificationCreate(BaseModel):
     applicant_id: str
     verification_mode: str = Field(
-        default="IN_PERSON",
-        description="IN_PERSON | DIGILOCKER | COURIER"
+        default="IN_PERSON", description="IN_PERSON | DIGILOCKER | COURIER"
     )
-    reporting_date: Optional[str] = Field(
-        default=None,
-        description="ISO date YYYY-MM-DD (for IN_PERSON appointments)"
+    reporting_date: str | None = Field(
+        default=None, description="ISO date YYYY-MM-DD (for IN_PERSON appointments)"
     )
-    assigned_officer: Optional[str] = None
-    notes: Optional[str] = None
+    assigned_officer: str | None = None
+    notes: str | None = None
 
 
 class FinalVerificationRead(BaseModel):
@@ -81,20 +92,20 @@ class FinalVerificationRead(BaseModel):
     org_id: str
     applicant_id: str
     verification_mode: str
-    reporting_date: Optional[str] = None
+    reporting_date: str | None = None
     status: str
-    assigned_officer: Optional[str] = None
-    completed_at: Optional[datetime] = None
-    notes: Optional[str] = None
+    assigned_officer: str | None = None
+    completed_at: datetime | None = None
+    notes: str | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class VerificationItemCreate(BaseModel):
     doc_type: str = Field(..., min_length=2, max_length=100)
     outcome: str = Field(..., description="VERIFIED | DISCREPANCY | NOT_PRODUCED")
-    discrepancy_detail: Optional[str] = None
-    officer_notes: Optional[str] = None
+    discrepancy_detail: str | None = None
+    officer_notes: str | None = None
 
 
 class VerificationItemRead(BaseModel):
@@ -103,20 +114,23 @@ class VerificationItemRead(BaseModel):
     verification_id: str
     doc_type: str
     outcome: str
-    discrepancy_detail: Optional[str] = None
-    officer_notes: Optional[str] = None
-    checked_at: Optional[datetime] = None
-    checked_by: Optional[str] = None
+    discrepancy_detail: str | None = None
+    officer_notes: str | None = None
+    checked_at: datetime | None = None
+    checked_by: str | None = None
 
 
 class DiscrepancyCreate(BaseModel):
     doc_type: str = Field(..., min_length=2)
     discrepancy_type: str = Field(
-        ..., description="DATA_MISMATCH | SUSPECTED_FRAUD | DOCUMENT_MISSING | DOCUMENT_EXPIRED | UNRECOGNIZED_BOARD"
+        ...,
+        description="DATA_MISMATCH | SUSPECTED_FRAUD | DOCUMENT_MISSING | DOCUMENT_EXPIRED | UNRECOGNIZED_BOARD",
     )
     description: str = Field(..., min_length=10, max_length=2000)
-    severity: str = Field(default="MEDIUM", description="LOW | MEDIUM | HIGH | CRITICAL")
-    escalated_to: Optional[str] = None
+    severity: str = Field(
+        default="MEDIUM", description="LOW | MEDIUM | HIGH | CRITICAL"
+    )
+    escalated_to: str | None = None
 
 
 class DiscrepancyRead(BaseModel):
@@ -128,18 +142,19 @@ class DiscrepancyRead(BaseModel):
     discrepancy_type: str
     description: str
     severity: str
-    escalated_to: Optional[str] = None
-    resolution: Optional[str] = None
-    resolved_at: Optional[datetime] = None
-    resolved_by: Optional[str] = None
+    escalated_to: str | None = None
+    resolution: str | None = None
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
     status: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 # =============================================================================
 # FINAL VERIFICATION SERVICE
 # =============================================================================
+
 
 class FinalVerificationService:
     """
@@ -180,7 +195,10 @@ class FinalVerificationService:
                 message=f"Applicant '{request.applicant_id}' not found."
             )
         status = app_rows[0]["status"]
-        if status not in (StudentState.VERIFICATION_PENDING.value, "VERIFICATION_PENDING"):
+        if status not in (
+            StudentState.VERIFICATION_PENDING.value,
+            "VERIFICATION_PENDING",
+        ):
             raise BusinessRuleViolation(
                 message=(
                     f"Final verification requires VERIFICATION_PENDING status — "
@@ -192,27 +210,31 @@ class FinalVerificationService:
         ver_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO final_verifications (
                     id, org_id, applicant_id, verification_mode,
                     reporting_date, status, assigned_officer, notes,
                     created_at, updated_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    ver_id, org_id,
-                    request.applicant_id,
-                    request.verification_mode,
-                    request.reporting_date,
-                    "PENDING",
-                    request.assigned_officer,
-                    request.notes,
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        ver_id,
+                        org_id,
+                        request.applicant_id,
+                        request.verification_mode,
+                        request.reporting_date,
+                        "PENDING",
+                        request.assigned_officer,
+                        request.notes,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -232,7 +254,9 @@ class FinalVerificationService:
 
         logger.info(
             "P11: Verification initiated [id=%s, applicant=%s, mode=%s]",
-            ver_id, request.applicant_id, request.verification_mode,
+            ver_id,
+            request.applicant_id,
+            request.verification_mode,
         )
         return cls.get(ver_id, org_id)
 
@@ -242,7 +266,7 @@ class FinalVerificationService:
         verification_id: str,
         org_id: str,
         actor_id: str,
-        assigned_officer: Optional[str] = None,
+        assigned_officer: str | None = None,
     ) -> FinalVerificationRead:
         """Mark verification as IN_PROGRESS. Optionally assign/reassign officer."""
         ver = cls._require(verification_id, org_id)
@@ -255,13 +279,15 @@ class FinalVerificationService:
         now = datetime.now(timezone.utc)
         officer = assigned_officer or ver.get("assigned_officer") or actor_id
 
-        execute_transaction([
-            (
-                "UPDATE final_verifications SET status = 'IN_PROGRESS', "
-                "assigned_officer = %s, updated_at = %s WHERE id = %s AND org_id = %s",
-                (officer, now, verification_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE final_verifications SET status = 'IN_PROGRESS', "
+                    "assigned_officer = %s, updated_at = %s WHERE id = %s AND org_id = %s",
+                    (officer, now, verification_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -306,41 +332,56 @@ class FinalVerificationService:
         now = datetime.now(timezone.utc)
         item_id = str(uuid4())
 
-        execute_transaction([
-            (
-                "DELETE FROM final_verification_items "
-                "WHERE verification_id = %s AND doc_type = %s AND org_id = %s",
-                (verification_id, item.doc_type, org_id),
-            ),
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM final_verification_items "
+                    "WHERE verification_id = %s AND doc_type = %s AND org_id = %s",
+                    (verification_id, item.doc_type, org_id),
+                ),
+                (
+                    """
                 INSERT INTO final_verification_items (
                     id, org_id, verification_id, doc_type, outcome,
                     discrepancy_detail, officer_notes, checked_at, checked_by
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    item_id, org_id,
-                    verification_id,
-                    item.doc_type,
-                    item.outcome,
-                    item.discrepancy_detail,
-                    item.officer_notes,
-                    now,
-                    actor_id,
+                    (
+                        item_id,
+                        org_id,
+                        verification_id,
+                        item.doc_type,
+                        item.outcome,
+                        item.discrepancy_detail,
+                        item.officer_notes,
+                        now,
+                        actor_id,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="document",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "check_document"},
+        )
 
         # Auto-escalate verification status if discrepancy found
         if item.outcome in ("DISCREPANCY", "NOT_PRODUCED"):
-            execute_transaction([
-                (
-                    "UPDATE final_verifications SET status = 'DISCREPANCY_FOUND', updated_at = %s "
-                    "WHERE id = %s AND org_id = %s AND status NOT IN ('VERIFIED', 'REJECTED', 'CLEARED_WITH_UNDERTAKING')",
-                    (now, verification_id, org_id),
-                )
-            ])
+            execute_transaction(
+                [
+                    (
+                        "UPDATE final_verifications SET status = 'DISCREPANCY_FOUND', updated_at = %s "
+                        "WHERE id = %s AND org_id = %s AND status NOT IN ('VERIFIED', 'REJECTED', 'CLEARED_WITH_UNDERTAKING')",
+                        (now, verification_id, org_id),
+                    )
+                ]
+            )
 
         rows = execute_query(
             "SELECT * FROM final_verification_items WHERE id = %s",
@@ -354,7 +395,7 @@ class FinalVerificationService:
         verification_id: str,
         org_id: str,
         actor_id: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> FinalVerificationRead:
         """
         All documents verified — mark VERIFIED → transition applicant → READY_FOR_ENROLLMENT.
@@ -380,14 +421,16 @@ class FinalVerificationService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE final_verifications SET status = 'VERIFIED', "
-                "completed_at = %s, notes = COALESCE(%s, notes), updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, notes, now, verification_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE final_verifications SET status = 'VERIFIED', "
+                    "completed_at = %s, notes = COALESCE(%s, notes), updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (now, notes, now, verification_id, org_id),
+                )
+            ]
+        )
 
         ApplicantService.transition_state(
             applicant_id=ver["applicant_id"],
@@ -410,7 +453,11 @@ class FinalVerificationService:
             metadata={"action": "cleared", "applicant_id": ver["applicant_id"]},
         )
 
-        logger.info("P11: Verification cleared [id=%s, applicant=%s]", verification_id, ver["applicant_id"])
+        logger.info(
+            "P11: Verification cleared [id=%s, applicant=%s]",
+            verification_id,
+            ver["applicant_id"],
+        )
         return cls.get(verification_id, org_id)
 
     @classmethod
@@ -439,14 +486,16 @@ class FinalVerificationService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE final_verifications SET status = 'CLEARED_WITH_UNDERTAKING', "
-                "completed_at = %s, notes = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, notes.strip(), now, verification_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE final_verifications SET status = 'CLEARED_WITH_UNDERTAKING', "
+                    "completed_at = %s, notes = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (now, notes.strip(), now, verification_id, org_id),
+                )
+            ]
+        )
 
         ApplicantService.transition_state(
             applicant_id=ver["applicant_id"],
@@ -504,14 +553,16 @@ class FinalVerificationService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE final_verifications SET status = 'REJECTED', "
-                "completed_at = %s, notes = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, reason.strip(), now, verification_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE final_verifications SET status = 'REJECTED', "
+                    "completed_at = %s, notes = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (now, reason.strip(), now, verification_id, org_id),
+                )
+            ]
+        )
 
         ApplicantService.transition_state(
             applicant_id=ver["applicant_id"],
@@ -558,7 +609,9 @@ class FinalVerificationService:
         return cls._row_to_read(rows[0])
 
     @classmethod
-    def get_for_applicant(cls, applicant_id: str, org_id: str) -> Optional[FinalVerificationRead]:
+    def get_for_applicant(
+        cls, applicant_id: str, org_id: str
+    ) -> FinalVerificationRead | None:
         rows = execute_query(
             "SELECT * FROM final_verifications WHERE applicant_id = %s AND org_id = %s",
             (applicant_id, org_id),
@@ -566,7 +619,9 @@ class FinalVerificationService:
         return cls._row_to_read(rows[0]) if rows else None
 
     @classmethod
-    def list_items(cls, verification_id: str, org_id: str) -> List[VerificationItemRead]:
+    def list_items(
+        cls, verification_id: str, org_id: str
+    ) -> list[VerificationItemRead]:
         rows = execute_query(
             "SELECT * FROM final_verification_items "
             "WHERE verification_id = %s AND org_id = %s ORDER BY checked_at ASC",
@@ -575,7 +630,7 @@ class FinalVerificationService:
         return [VerificationItemRead(**r) for r in rows]
 
     @classmethod
-    def _require(cls, verification_id: str, org_id: str) -> Dict[str, Any]:
+    def _require(cls, verification_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM final_verifications WHERE id = %s AND org_id = %s",
             (verification_id, org_id),
@@ -587,7 +642,7 @@ class FinalVerificationService:
         return rows[0]
 
     @classmethod
-    def _row_to_read(cls, row: Dict[str, Any]) -> FinalVerificationRead:
+    def _row_to_read(cls, row: dict[str, Any]) -> FinalVerificationRead:
         data = dict(row)
         if hasattr(data.get("reporting_date"), "isoformat"):
             data["reporting_date"] = data["reporting_date"].isoformat()
@@ -597,6 +652,7 @@ class FinalVerificationService:
 # =============================================================================
 # DISCREPANCY SERVICE
 # =============================================================================
+
 
 class DiscrepancyService:
     """
@@ -635,40 +691,46 @@ class DiscrepancyService:
         disc_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO verification_discrepancies (
                     id, org_id, verification_id, applicant_id, doc_type,
                     discrepancy_type, description, severity, escalated_to,
                     status, created_at, updated_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    disc_id, org_id,
-                    verification_id,
-                    ver["applicant_id"],
-                    request.doc_type,
-                    request.discrepancy_type,
-                    request.description,
-                    request.severity,
-                    request.escalated_to,
-                    "OPEN",
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        disc_id,
+                        org_id,
+                        verification_id,
+                        ver["applicant_id"],
+                        request.doc_type,
+                        request.discrepancy_type,
+                        request.description,
+                        request.severity,
+                        request.escalated_to,
+                        "OPEN",
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         # Escalate verification status for HIGH/CRITICAL
         if request.severity in ("HIGH", "CRITICAL"):
-            execute_transaction([
-                (
-                    "UPDATE final_verifications SET status = 'DISCREPANCY_FOUND', updated_at = %s "
-                    "WHERE id = %s AND org_id = %s "
-                    "AND status NOT IN ('VERIFIED', 'REJECTED', 'CLEARED_WITH_UNDERTAKING')",
-                    (now, verification_id, org_id),
-                )
-            ])
+            execute_transaction(
+                [
+                    (
+                        "UPDATE final_verifications SET status = 'DISCREPANCY_FOUND', updated_at = %s "
+                        "WHERE id = %s AND org_id = %s "
+                        "AND status NOT IN ('VERIFIED', 'REJECTED', 'CLEARED_WITH_UNDERTAKING')",
+                        (now, verification_id, org_id),
+                    )
+                ]
+            )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -689,7 +751,9 @@ class DiscrepancyService:
 
         logger.info(
             "P11: Discrepancy raised [id=%s, ver=%s, severity=%s]",
-            disc_id, verification_id, request.severity,
+            disc_id,
+            verification_id,
+            request.severity,
         )
         return cls.get_discrepancy(disc_id, org_id)
 
@@ -703,7 +767,9 @@ class DiscrepancyService:
     ) -> DiscrepancyRead:
         """Mark a discrepancy as RESOLVED with a resolution note."""
         if not resolution or len(resolution.strip()) < 5:
-            raise BusinessRuleViolation(message="Resolution note required (min 5 chars).")
+            raise BusinessRuleViolation(
+                message="Resolution note required (min 5 chars)."
+            )
 
         disc = cls._require_disc(discrepancy_id, org_id)
 
@@ -714,15 +780,17 @@ class DiscrepancyService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE verification_discrepancies "
-                "SET status = 'RESOLVED', resolution = %s, resolved_at = %s, "
-                "resolved_by = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (resolution.strip(), now, actor_id, now, discrepancy_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE verification_discrepancies "
+                    "SET status = 'RESOLVED', resolution = %s, resolved_at = %s, "
+                    "resolved_by = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (resolution.strip(), now, actor_id, now, discrepancy_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -759,14 +827,16 @@ class DiscrepancyService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE verification_discrepancies "
-                "SET status = 'ESCALATED', escalated_to = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (escalate_to.strip(), now, discrepancy_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE verification_discrepancies "
+                    "SET status = 'ESCALATED', escalated_to = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (escalate_to.strip(), now, discrepancy_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -799,22 +869,22 @@ class DiscrepancyService:
         cls,
         verification_id: str,
         org_id: str,
-        status: Optional[str] = None,
-    ) -> List[DiscrepancyRead]:
+        status: str | None = None,
+    ) -> list[DiscrepancyRead]:
         conditions = ["verification_id = %s", "org_id = %s"]
         params: list = [verification_id, org_id]
         if status:
             conditions.append("status = %s")
             params.append(status)
         rows = execute_query(
-            f"SELECT * FROM verification_discrepancies WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM verification_discrepancies WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY created_at ASC",
             tuple(params),
         )
         return [DiscrepancyRead(**r) for r in rows]
 
     @classmethod
-    def _require_ver(cls, verification_id: str, org_id: str) -> Dict[str, Any]:
+    def _require_ver(cls, verification_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM final_verifications WHERE id = %s AND org_id = %s",
             (verification_id, org_id),
@@ -826,7 +896,7 @@ class DiscrepancyService:
         return rows[0]
 
     @classmethod
-    def _require_disc(cls, discrepancy_id: str, org_id: str) -> Dict[str, Any]:
+    def _require_disc(cls, discrepancy_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM verification_discrepancies WHERE id = %s AND org_id = %s",
             (discrepancy_id, org_id),

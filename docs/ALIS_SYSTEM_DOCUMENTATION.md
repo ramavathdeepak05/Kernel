@@ -2,9 +2,18 @@
 
 ## Complete System Documentation
 
-> **Version**: 1.1 | **Date**: 2026-04-04 | **Status**: Production-Ready + Performance Hardened
+> **Version**: 1.2 | **Date**: 2026-04-13 | **Status**: Production-Ready + Performance Hardened
 >
 > ALIS is a **policy-driven, AI-augmented Enterprise Resource Planning (ERP) system** purpose-built for universities and higher-education institutions. It runs autonomously — AI agents propose decisions, deterministic rules enforce them, and staff only handle exceptions.
+
+### 📋 New Team Members — Start Here
+
+| Step | Document | Purpose |
+|------|----------|---------|
+| 1 | [CONTRIBUTING.md](../CONTRIBUTING.md) | Branch strategy, PR workflow, code review rules |
+| 2 | [ONBOARDING.md](./ONBOARDING.md) | Dev environment setup, role-specific guides |
+| 3 | [CODEBASE_MAP.md](./CODEBASE_MAP.md) | Every file and folder explained with dependencies |
+| 4 | **This document** | Deep architectural reference (read after the above) |
 
 ---
 

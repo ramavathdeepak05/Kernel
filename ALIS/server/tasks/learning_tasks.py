@@ -4,13 +4,13 @@ Learning Module Celery Tasks — P40
 close_overdue_assignments: Hourly beat task that transitions PUBLISHED
   assignments past their due_date (+ max_late_days grace) to CLOSED.
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import timezone
 
-from server.worker import celery_app
 from server.db_service import execute_system_query
+from server.worker import celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,7 @@ def close_overdue_assignments(self) -> dict:
             try:
                 from server.academics.learning_service import AssignmentService
                 from server.core.security import _current_tenant_id as _tid_var
+
                 token = _tid_var.set(str(row["org_id"]))
                 try:
                     AssignmentService.close_assignment(
@@ -79,7 +80,8 @@ def close_overdue_assignments(self) -> dict:
                     closed_count += 1
                     logger.info(
                         "close_overdue_assignments: closed assignment %s (%s)",
-                        row["id"], row["title"],
+                        row["id"],
+                        row["title"],
                     )
                 finally:
                     _tid_var.reset(token)

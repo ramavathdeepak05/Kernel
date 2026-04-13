@@ -8,6 +8,7 @@ Uses Qwen (via AIGateway) to score each student's default risk based on:
 
 Falls back to rule-based scoring if Ollama is unavailable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -46,11 +47,14 @@ def _rule_based_score(student: dict) -> tuple[float, str]:
 
     score = round(min(score, 1.0), 2)
     label = "HIGH" if score >= 0.6 else ("MEDIUM" if score >= 0.3 else "LOW")
-    return score, label, "; ".join(reasons) if reasons else "No significant risk factors"
+    return (
+        score,
+        label,
+        "; ".join(reasons) if reasons else "No significant risk factors",
+    )
 
 
 class FeeDefaultAnalyticsService:
-
     @classmethod
     def predict_defaults(cls, org_id: str, academic_year: str) -> dict:
         """
@@ -96,39 +100,42 @@ class FeeDefaultAnalyticsService:
         for student in students:
             row = dict(student)
             score, label, reason = _rule_based_score(row)
-            row["risk_score"]  = score
-            row["risk_label"]  = label
+            row["risk_score"] = score
+            row["risk_label"] = label
             row["risk_reason"] = reason
             scored.append(row)
 
         # Sort by risk score desc
         scored.sort(key=lambda x: x["risk_score"], reverse=True)
 
-        high_risk   = [s for s in scored if s["risk_label"] == "HIGH"]
+        high_risk = [s for s in scored if s["risk_label"] == "HIGH"]
         medium_risk = [s for s in scored if s["risk_label"] == "MEDIUM"]
-        low_risk    = [s for s in scored if s["risk_label"] == "LOW"]
+        low_risk = [s for s in scored if s["risk_label"] == "LOW"]
 
         # AI narrative for high-risk cohort
-        ai_narrative = cls._generate_narrative(org_id, academic_year, high_risk, len(scored))
+        ai_narrative = cls._generate_narrative(
+            org_id, academic_year, high_risk, len(scored)
+        )
 
         return {
-            "academic_year":    academic_year,
-            "total_at_risk":    len(scored),
-            "high_risk_count":  len(high_risk),
+            "academic_year": academic_year,
+            "total_at_risk": len(scored),
+            "high_risk_count": len(high_risk),
             "medium_risk_count": len(medium_risk),
-            "low_risk_count":   len(low_risk),
-            "high_risk":        high_risk[:20],      # top 20 for display
-            "ai_narrative":     ai_narrative,
+            "low_risk_count": len(low_risk),
+            "high_risk": high_risk[:20],  # top 20 for display
+            "ai_narrative": ai_narrative,
         }
 
     @classmethod
-    def _generate_narrative(cls, org_id: str, academic_year: str,
-                              high_risk: list, total: int) -> str | None:
+    def _generate_narrative(
+        cls, org_id: str, academic_year: str, high_risk: list, total: int
+    ) -> str | None:
         if not high_risk:
             return None
 
         sample = high_risk[:5]
-        names  = ", ".join(s["name"] for s in sample)
+        names = ", ".join(s["name"] for s in sample)
 
         prompt = f"""You are a financial analytics assistant for an educational institution.
 
@@ -137,7 +144,7 @@ Total students with outstanding fees: {total}
 High-risk students (likely to default): {len(high_risk)}
 
 Top at-risk students: {names}
-Common risk factors: {"; ".join(set(s.get("risk_reason","") for s in sample if s.get("risk_reason")))}
+Common risk factors: {"; ".join(set(s.get("risk_reason", "") for s in sample if s.get("risk_reason")))}
 
 Write a 2-3 sentence advisory for the Finance Officer:
 1. Summarize the default risk situation
@@ -147,6 +154,7 @@ Be direct and professional."""
 
         try:
             from server.core.ai_gateway import AIGateway
+
             result = AIGateway.invoke(
                 org_id=org_id,
                 prompt=prompt,

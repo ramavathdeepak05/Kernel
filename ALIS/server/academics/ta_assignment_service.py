@@ -16,15 +16,16 @@ Authorization hierarchy (checked in order):
   3. User has active session-level TA for this specific session → allow
   4. → 403
 """
+
 from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Optional
 
-from server.db_service import execute_query, execute_transaction
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEventBus
 from server.core.state_registry import StateRegistry
+from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +52,27 @@ def _revoke_ta(table: str, where_col: str, where_val: str, actor_id: str) -> Non
         raise ValueError(result.reason)
     new_status = _TAStatus.REVOKED.value
     from server.db_service import safe_identifier
-    execute_transaction([(
-        f"UPDATE {safe_identifier(table)} SET status=%s, revoked_at=NOW(), revoked_by=%s WHERE {safe_identifier(where_col)}=%s AND status=%s",
-        (new_status, actor_id, where_val, _TAStatus.ACTIVE.value),
-    )])
+
+    execute_transaction(
+        [
+            (
+                f"UPDATE {safe_identifier(table)} SET status=%s, revoked_at=NOW(), revoked_by=%s WHERE {safe_identifier(where_col)}=%s AND status=%s",  # noqa: S608
+                (new_status, actor_id, where_val, _TAStatus.ACTIVE.value),
+            )
+        ]
+    )
+    AuditLog.log(
+        action=AuditAction.UPDATE,
+        actor_id=actor_id,
+        actor_role="faculty",
+        entity_type="ta_assignment",
+        entity_id=where_val,
+        tenant_id="",
+        metadata={"source": "_revoke_ta", "table": table},
+    )
 
 
 class TAAssignmentService:
-
     # ── helpers ──────────────────────────────────────────────────────────────
 
     @staticmethod
@@ -92,9 +106,7 @@ class TAAssignmentService:
 
     @staticmethod
     def _get_faculty_name(faculty_id: str) -> str:
-        rows = execute_query(
-            "SELECT full_name FROM users WHERE id=$1", (faculty_id,)
-        )
+        rows = execute_query("SELECT full_name FROM users WHERE id=$1", (faculty_id,))
         return rows[0]["full_name"] if rows else "Faculty"
 
     # ── course-level TA ──────────────────────────────────────────────────────
@@ -120,7 +132,7 @@ class TAAssignmentService:
         course_id: str,
         faculty_id: str,
         student_identifier: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> dict:
         """
         Assign a student as course-level TA (semester-long, all sessions).
@@ -150,14 +162,27 @@ class TAAssignmentService:
         if already:
             raise ValueError("This student is already an active TA for this course")
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO course_ta_assignments
                 (tenant_id, course_id, faculty_id, student_id, assigned_by, notes)
             VALUES ($1,$2,$3,$4,$5,$6)
             """,
-            (tenant_id, course_id, faculty_id, student_id, faculty_id, notes),
-        )])
+                    (tenant_id, course_id, faculty_id, student_id, faculty_id, notes),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=faculty_id,
+            actor_role="faculty",
+            entity_type="course_ta_assignment",
+            entity_id=student_id,
+            tenant_id=tenant_id,
+            metadata={"source": "assign_course_ta", "course_id": course_id},
+        )
 
         new_row = execute_query(
             """
@@ -189,7 +214,9 @@ class TAAssignmentService:
 
         logger.info(
             "course_ta_assigned course=%s student=%s by_faculty=%s",
-            course_id, student_id, faculty_id,
+            course_id,
+            student_id,
+            faculty_id,
         )
         return {
             "assignment_id": assignment_id,
@@ -302,16 +329,36 @@ class TAAssignmentService:
         if already:
             raise ValueError("This student is already an active TA for this session")
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO session_ta_assignments
                 (tenant_id, course_id, session_ref, session_type,
                  faculty_id, student_id, assigned_by)
             VALUES ($1,$2,$3,$4,$5,$6,$7)
             """,
-            (tenant_id, course_id, session_ref, session_type,
-             faculty_id, student_id, faculty_id),
-        )])
+                    (
+                        tenant_id,
+                        course_id,
+                        session_ref,
+                        session_type,
+                        faculty_id,
+                        student_id,
+                        faculty_id,
+                    ),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=faculty_id,
+            actor_role="faculty",
+            entity_type="session_ta_assignment",
+            entity_id=student_id,
+            tenant_id=tenant_id,
+            metadata={"source": "assign_session_ta", "session_ref": session_ref},
+        )
 
         faculty_name = TAAssignmentService._get_faculty_name(faculty_id)
 
@@ -358,7 +405,7 @@ class TAAssignmentService:
         user_id: str,
         course_id: str,
         tenant_id: str,
-        session_ref: Optional[str] = None,
+        session_ref: str | None = None,
     ) -> bool:
         """
         Check if user is authorized to take attendance for a course/session.

@@ -1,0 +1,10 @@
+repos:
+  - repo: local
+    hooks:
+      - id: alis-lint
+        name: ALIS Architectural Linter
+        entry: python -m scripts.alis_lint.runner
+        language: python
+        types: [python]
+        pass_filenames: true
+        always_run: false

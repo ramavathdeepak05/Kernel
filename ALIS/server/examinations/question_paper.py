@@ -18,19 +18,19 @@ Security:
 - Every encrypt/decrypt operation audit-logged
 - Offline USB bundle uses AES-256-GCM with derived key
 """
+
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
@@ -67,6 +67,7 @@ class QuestionPaperService:
     def _check_feature_flag(cls, org_id: str) -> None:
         """Ensure the question_paper_vault feature flag is enabled."""
         from server.core.feature_flags import is_enabled
+
         if not is_enabled("examinations.question_paper_vault", org_id):
             raise ValueError(
                 "Feature flag 'examinations.question_paper_vault' is not enabled. "
@@ -82,7 +83,7 @@ class QuestionPaperService:
         paper_content: bytes,
         paper_set: str = "A",
         actor_id: str = "system",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Upload a question paper and encrypt it via Vault Transit.
 
@@ -92,6 +93,7 @@ class QuestionPaperService:
         cls._check_feature_flag(org_id)
 
         from server.core.vault_client import get_vault_client
+
         vault = get_vault_client()
 
         paper_id = str(uuid4())
@@ -103,6 +105,7 @@ class QuestionPaperService:
         # Store encrypted paper in MinIO
         try:
             from server.fs_service import FileService
+
             FileService.upload_bytes(
                 org_id=org_id,
                 path=f"exam-papers/{exam_id}/{paper_id}.enc",
@@ -114,22 +117,32 @@ class QuestionPaperService:
             raise
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO question_papers
                     (id, org_id, exam_id, course_code, paper_set, status,
                      content_hash, storage_path, encrypted_at, created_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    paper_id, org_id, exam_id, course_code, paper_set,
-                    PaperStatus.ENCRYPTED.value, content_hash,
-                    f"exam-papers/{exam_id}/{paper_id}.enc",
-                    now, actor_id, now,
-                ),
-            )
-        ], tenant_id=org_id)
+                    (
+                        paper_id,
+                        org_id,
+                        exam_id,
+                        course_code,
+                        paper_set,
+                        PaperStatus.ENCRYPTED.value,
+                        content_hash,
+                        f"exam-papers/{exam_id}/{paper_id}.enc",
+                        now,
+                        actor_id,
+                        now,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -157,17 +170,20 @@ class QuestionPaperService:
         }
 
     @classmethod
-    def approve_paper(cls, org_id: str, paper_id: str, actor_id: str) -> Dict[str, Any]:
+    def approve_paper(cls, org_id: str, paper_id: str, actor_id: str) -> dict[str, Any]:
         """CoE approves an encrypted paper for dispatch."""
         cls._validate_transition(org_id, paper_id, PaperStatus.APPROVED)
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE question_papers SET status = %s, approved_by = %s, approved_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (PaperStatus.APPROVED.value, actor_id, now, paper_id, org_id),
-            )
-        ], tenant_id=org_id)
+        execute_transaction(
+            [
+                (
+                    "UPDATE question_papers SET status = %s, approved_by = %s, approved_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (PaperStatus.APPROVED.value, actor_id, now, paper_id, org_id),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -186,7 +202,7 @@ class QuestionPaperService:
         org_id: str,
         paper_id: str,
         actor_id: str,
-        exam_start_time: Optional[datetime] = None,
+        exam_start_time: datetime | None = None,
     ) -> bytes:
         """
         Decrypt a question paper. Only allowed for COE role.
@@ -202,8 +218,14 @@ class QuestionPaperService:
         if not paper:
             raise ValueError(f"Paper {paper_id} not found")
 
-        if paper["status"] not in (PaperStatus.APPROVED.value, PaperStatus.IN_VAULT.value, PaperStatus.DISPATCHED.value):
-            raise ValueError(f"Paper must be APPROVED or later to decrypt (current: {paper['status']})")
+        if paper["status"] not in (
+            PaperStatus.APPROVED.value,
+            PaperStatus.IN_VAULT.value,
+            PaperStatus.DISPATCHED.value,
+        ):
+            raise ValueError(
+                f"Paper must be APPROVED or later to decrypt (current: {paper['status']})"
+            )
 
         # Time-lock enforcement: only T-30 before exam
         if exam_start_time:
@@ -218,6 +240,7 @@ class QuestionPaperService:
         # Fetch encrypted content from MinIO
         try:
             from server.fs_service import FileService
+
             encrypted_data = FileService.download_bytes(
                 org_id=org_id,
                 path=paper["storage_path"],
@@ -227,9 +250,14 @@ class QuestionPaperService:
 
         # Decrypt via Vault Transit
         from server.core.vault_client import get_vault_client
+
         vault = get_vault_client()
 
-        ciphertext = encrypted_data.decode() if isinstance(encrypted_data, bytes) else encrypted_data
+        ciphertext = (
+            encrypted_data.decode()
+            if isinstance(encrypted_data, bytes)
+            else encrypted_data
+        )
         plaintext = vault.decrypt_exam_paper(org_id, paper_id, ciphertext)
 
         AuditLog.log(
@@ -241,7 +269,9 @@ class QuestionPaperService:
             tenant_id=org_id,
             metadata={
                 "event": "paper_decrypted",
-                "exam_start_time": exam_start_time.isoformat() if exam_start_time else None,
+                "exam_start_time": exam_start_time.isoformat()
+                if exam_start_time
+                else None,
             },
         )
 
@@ -252,9 +282,9 @@ class QuestionPaperService:
         cls,
         org_id: str,
         exam_id: str,
-        paper_ids: List[str],
+        paper_ids: list[str],
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         EC-EXM-01: Generate offline USB fallback bundle.
 
@@ -267,6 +297,7 @@ class QuestionPaperService:
         cls._check_feature_flag(org_id)
 
         from server.core.vault_client import get_vault_client
+
         vault = get_vault_client()
 
         # Generate a random 256-bit bundle key
@@ -285,48 +316,68 @@ class QuestionPaperService:
 
         # Encrypt each paper into the bundle using AES-256-GCM
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
         aesgcm = AESGCM(bundle_key)
 
         bundle_papers = []
         for pid in paper_ids:
             paper = cls.get_paper(org_id, pid)
-            if not paper or paper["status"] not in (PaperStatus.APPROVED.value, PaperStatus.IN_VAULT.value):
+            if not paper or paper["status"] not in (
+                PaperStatus.APPROVED.value,
+                PaperStatus.IN_VAULT.value,
+            ):
                 raise ValueError(f"Paper {pid} not approved for bundling")
 
             # Fetch encrypted content and decrypt via Vault
             from server.fs_service import FileService
-            encrypted_data = FileService.download_bytes(org_id=org_id, path=paper["storage_path"])
-            ciphertext_str = encrypted_data.decode() if isinstance(encrypted_data, bytes) else encrypted_data
+
+            encrypted_data = FileService.download_bytes(
+                org_id=org_id, path=paper["storage_path"]
+            )
+            ciphertext_str = (
+                encrypted_data.decode()
+                if isinstance(encrypted_data, bytes)
+                else encrypted_data
+            )
             plaintext = vault.decrypt_exam_paper(org_id, pid, ciphertext_str)
 
             # Re-encrypt with bundle key
             nonce = os.urandom(12)
             bundle_ct = aesgcm.encrypt(nonce, plaintext, pid.encode())
-            bundle_papers.append({
-                "paper_id": pid,
-                "course_code": paper["course_code"],
-                "paper_set": paper.get("paper_set", "A"),
-                "nonce": nonce.hex(),
-                "ciphertext": bundle_ct.hex(),
-            })
+            bundle_papers.append(
+                {
+                    "paper_id": pid,
+                    "course_code": paper["course_code"],
+                    "paper_set": paper.get("paper_set", "A"),
+                    "nonce": nonce.hex(),
+                    "ciphertext": bundle_ct.hex(),
+                }
+            )
 
         # Store bundle manifest
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO offline_exam_bundles
                     (id, org_id, exam_id, paper_count, envelope_key_hash,
                      status, created_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, 'SEALED', %s, %s)
                 """,
-                (
-                    bundle_id, org_id, exam_id, len(paper_ids),
-                    hashlib.sha256(envelope_half.encode()).hexdigest(),
-                    actor_id, now,
-                ),
-            )
-        ], tenant_id=org_id)
+                    (
+                        bundle_id,
+                        org_id,
+                        exam_id,
+                        len(paper_ids),
+                        hashlib.sha256(envelope_half.encode()).hexdigest(),
+                        actor_id,
+                        now,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -348,7 +399,7 @@ class QuestionPaperService:
             "exam_id": exam_id,
             "paper_count": len(paper_ids),
             "envelope_key_half": envelope_half,  # Print this on sealed envelope
-            "bundle_data": bundle_papers,         # Write to USB
+            "bundle_data": bundle_papers,  # Write to USB
             "status": "SEALED",
         }
 
@@ -359,13 +410,14 @@ class QuestionPaperService:
         bundle_id: str,
         envelope_key_half: str,
         actor_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         EC-EXM-01: Decrypt an offline USB bundle at the exam center.
 
         Requires both halves: Vault half (fetched automatically) + envelope half (entered by incharge).
         """
         from server.core.vault_client import get_vault_client
+
         vault = get_vault_client()
 
         vault_data = vault.read_secret(f"alis/exam/offline_bundle/{bundle_id}")
@@ -392,7 +444,7 @@ class QuestionPaperService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def get_paper(cls, org_id: str, paper_id: str) -> Optional[Dict[str, Any]]:
+    def get_paper(cls, org_id: str, paper_id: str) -> dict[str, Any] | None:
         rows = execute_query(
             "SELECT * FROM question_papers WHERE id = %s AND org_id = %s",
             (paper_id, org_id),
@@ -401,7 +453,7 @@ class QuestionPaperService:
         return dict(rows[0]) if rows else None
 
     @classmethod
-    def list_papers(cls, org_id: str, exam_id: str) -> List[Dict[str, Any]]:
+    def list_papers(cls, org_id: str, exam_id: str) -> list[dict[str, Any]]:
         rows = execute_query(
             "SELECT id, exam_id, course_code, paper_set, status, content_hash, "
             "encrypted_at, approved_by, approved_at, created_at "
@@ -412,7 +464,9 @@ class QuestionPaperService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def _validate_transition(cls, org_id: str, paper_id: str, target: PaperStatus) -> None:
+    def _validate_transition(
+        cls, org_id: str, paper_id: str, target: PaperStatus
+    ) -> None:
         paper = cls.get_paper(org_id, paper_id)
         if not paper:
             raise ValueError(f"Paper {paper_id} not found")

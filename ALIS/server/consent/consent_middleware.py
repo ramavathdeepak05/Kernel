@@ -18,10 +18,10 @@ Only authenticated requests (those that carry a valid session recognised by
 TenantMiddleware) are checked.  Unauthenticated requests pass through here
 and are rejected by the downstream auth guards.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 CONSENT_EXEMPT_PREFIXES = [
     "/api/v1/auth/",
-    "/api/auth/",          # legacy prefix (auth_router uses /api/auth)
+    "/api/auth/",  # legacy prefix (auth_router uses /api/auth)
     "/api/v1/consent/",
     "/health",
     "/ready",
@@ -47,13 +47,13 @@ CONSENT_EXEMPT_PREFIXES = [
 # Map URL path prefix → required consent purpose
 # ---------------------------------------------------------------------------
 PURPOSE_MAP = {
-    "/api/v1/admissions":    "ADMISSIONS",
-    "/api/v1/academics":     "ACADEMICS",
-    "/api/v1/finance":       "FINANCE",
-    "/api/v1/hr":            "HR",
+    "/api/v1/admissions": "ADMISSIONS",
+    "/api/v1/academics": "ACADEMICS",
+    "/api/v1/finance": "FINANCE",
+    "/api/v1/hr": "HR",
     "/api/v1/communication": "COMMUNICATIONS",
-    "/api/v1/reporting":     "ANALYTICS",
-    "/api/v1/alumni":        "ANALYTICS",
+    "/api/v1/reporting": "ANALYTICS",
+    "/api/v1/alumni": "ANALYTICS",
 }
 
 
@@ -89,14 +89,12 @@ class ConsentMiddleware(BaseHTTPMiddleware):
         # --- Resolve user + tenant identities ---
         # TenantMiddleware sets these on request.state (via scope["state"])
         # and also forwards them as custom headers for downstream services.
-        user_id: Optional[str] = (
-            getattr(request.state, "user_id", None)
-            or request.headers.get("X-User-ID")
-        )
-        org_id: Optional[str] = (
-            getattr(request.state, "tenant_id", None)
-            or request.headers.get("X-Tenant-ID")
-        )
+        user_id: str | None = getattr(
+            request.state, "user_id", None
+        ) or request.headers.get("X-User-ID")
+        org_id: str | None = getattr(
+            request.state, "tenant_id", None
+        ) or request.headers.get("X-Tenant-ID")
 
         if not user_id or not org_id:
             # Cannot determine identity — let downstream auth handle it
@@ -105,11 +103,14 @@ class ConsentMiddleware(BaseHTTPMiddleware):
         # --- Consent gate ---
         try:
             from server.consent.consent_service import ConsentService
+
             has_consent = ConsentService.has_consent(org_id, user_id, required_purpose)
         except Exception:
             logger.exception(
                 "ConsentMiddleware: error checking consent for user=%s org=%s purpose=%s — failing open",
-                user_id, org_id, required_purpose,
+                user_id,
+                org_id,
+                required_purpose,
             )
             # Fail open: don't block users if the consent table is temporarily
             # unreachable (e.g., during a rolling DB migration).
@@ -117,8 +118,9 @@ class ConsentMiddleware(BaseHTTPMiddleware):
 
         if not has_consent:
             from fastapi.responses import JSONResponse
+
             return JSONResponse(
-                status_code=451,   # 451 Unavailable For Legal Reasons
+                status_code=451,  # 451 Unavailable For Legal Reasons
                 content={
                     "error": "CONSENT_REQUIRED",
                     "message": (

@@ -15,19 +15,19 @@ Security:
     - API keys encrypted at rest (Vault transit / Fernet)
     - Keys never returned in responses
 """
+
 from __future__ import annotations
+from server.core.rbac import Permission, require_permission
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-
 from server.core.ai_providers import (
-    AIProviderType,
-    AIProviderFactory,
     AIProviderConfig,
+    AIProviderFactory,
+    AIProviderType,
     TenantAIProviderService,
 )
 
@@ -40,15 +40,26 @@ router = APIRouter(prefix="/api/v1/ai/providers", tags=["ai-providers"])
 # Request models
 # =============================================================================
 
+
 class CreateProviderRequest(BaseModel):
-    provider_type: str = Field(..., description="Provider type: openai, azure_openai, anthropic, google, ollama, openai_compat")
+    provider_type: str = Field(
+        ...,
+        description="Provider type: openai, azure_openai, anthropic, google, ollama, openai_compat",
+    )
     display_name: str = Field(..., min_length=1, max_length=128)
     api_key: str = Field(..., min_length=1, description="API key (encrypted at rest)")
-    api_base_url: str = Field(default="", description="Base URL (required for azure_openai, ollama, openai_compat)")
-    model_name: str = Field(..., min_length=1, description="Model name (e.g., gpt-4o, claude-3.5-sonnet)")
+    api_base_url: str = Field(
+        default="",
+        description="Base URL (required for azure_openai, ollama, openai_compat)",
+    )
+    model_name: str = Field(
+        ..., min_length=1, description="Model name (e.g., gpt-4o, claude-3.5-sonnet)"
+    )
     max_tokens: int = Field(default=2048, ge=1, le=32768)
     temperature: float = Field(default=0.2, ge=0.0, le=2.0)
-    azure_deployment: str = Field(default="", description="Azure deployment name (azure_openai only)")
+    azure_deployment: str = Field(
+        default="", description="Azure deployment name (azure_openai only)"
+    )
     azure_api_version: str = Field(default="2024-02-01")
 
 
@@ -65,25 +76,34 @@ class TestProviderRequest(BaseModel):
 # Helpers
 # =============================================================================
 
+
 def _require_admin(request: Request):
     """Extract session and verify ADMIN/SUPER_ADMIN role."""
-    from server.core.security import SessionManager, _get_redis
+    from server.core.security import SessionManager
+
     auth = request.headers.get("authorization", "")
     if not auth.startswith("Bearer "):
-        return None, JSONResponse(status_code=401, content={"error": "Bearer token required"})
+        return None, JSONResponse(
+            status_code=401, content={"error": "Bearer token required"}
+        )
     token = auth[7:].strip()
     session = SessionManager.validate_token(token)
     if not session:
-        return None, JSONResponse(status_code=401, content={"error": "Invalid or expired token"})
+        return None, JSONResponse(
+            status_code=401, content={"error": "Invalid or expired token"}
+        )
     # Check role
     from server.db_service import execute_query
+
     rows = execute_query(
         "SELECT role FROM users WHERE id = %s AND is_deleted = FALSE",
         (session.user_id,),
         tenant_id=session.tenant_id,
     )
     if not rows or rows[0]["role"] not in ("SUPER_ADMIN", "ADMIN"):
-        return None, JSONResponse(status_code=403, content={"error": "ADMIN or SUPER_ADMIN role required"})
+        return None, JSONResponse(
+            status_code=403, content={"error": "ADMIN or SUPER_ADMIN role required"}
+        )
     return session, None
 
 
@@ -91,7 +111,9 @@ def _require_admin(request: Request):
 # Endpoints
 # =============================================================================
 
+
 @router.get("")
+@require_permission(Permission.CONFIG_READ)
 async def list_providers(request: Request) -> JSONResponse:
     """List all AI provider configs for the current tenant (API keys masked)."""
     session, err = _require_admin(request)
@@ -102,7 +124,10 @@ async def list_providers(request: Request) -> JSONResponse:
 
 
 @router.post("")
-async def create_provider(request: Request, body: CreateProviderRequest) -> JSONResponse:
+@require_permission(Permission.CONFIG_WRITE)
+async def create_provider(
+    request: Request, body: CreateProviderRequest
+) -> JSONResponse:
     """Add a new AI provider for the current tenant."""
     session, err = _require_admin(request)
     if err:
@@ -141,6 +166,7 @@ async def create_provider(request: Request, body: CreateProviderRequest) -> JSON
 
 
 @router.delete("/{config_id}")
+@require_permission(Permission.CONFIG_WRITE)
 async def delete_provider(request: Request, config_id: str) -> JSONResponse:
     """Remove an AI provider config."""
     session, err = _require_admin(request)
@@ -156,6 +182,7 @@ async def delete_provider(request: Request, config_id: str) -> JSONResponse:
 
 
 @router.post("/test")
+@require_permission(Permission.CONFIG_WRITE)
 async def test_provider(request: Request, body: TestProviderRequest) -> JSONResponse:
     """Test an AI provider config with a simple prompt (dry run)."""
     session, err = _require_admin(request)

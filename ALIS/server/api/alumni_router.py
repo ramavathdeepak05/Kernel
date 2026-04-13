@@ -40,26 +40,28 @@ Endpoints:
            POST   /alumni/network/mentorship/{id}/respond
            GET    /alumni/network/mentorship/mine
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-
-from server.core.rbac import Permission, require_permission
-
-from server.alumni.profiles import AlumniProfileService
-from server.alumni.placement import PlacementService
+from server.alumni.drives import RecruitmentDriveService
 from server.alumni.job_board import JobBoardService
-from server.alumni.drives    import RecruitmentDriveService
-from server.alumni.network   import AlumniNetworkService
-from server.alumni.models    import (
-    AlumniProfileCreate, AlumniProfileUpdate,
-    PlacementRecordCreate, JobPostingCreate, JobApplicationCreate,
-    DriveCreate, MentorshipRequestCreate,
+from server.alumni.models import (
+    AlumniProfileCreate,
+    AlumniProfileUpdate,
+    DriveCreate,
+    JobApplicationCreate,
+    JobPostingCreate,
+    MentorshipRequestCreate,
+    PlacementRecordCreate,
 )
+from server.alumni.network import AlumniNetworkService
+from server.alumni.placement import PlacementService
+from server.alumni.profiles import AlumniProfileService
+from server.core.rbac import Permission, require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/alumni", tags=["alumni"])
@@ -68,12 +70,17 @@ router = APIRouter(prefix="/api/v1/alumni", tags=["alumni"])
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
 
+
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
+
+
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from datetime import date, datetime
+    from datetime import time as _time
     from decimal import Decimal
-    from datetime import datetime, date, time as _time
+
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -90,6 +97,7 @@ def _jsonify(obj):
 # ══════════════════════════════════════════════════════════════
 # E12-S01 — Alumni Profiles
 # ══════════════════════════════════════════════════════════════
+
 
 @router.post("/profiles", status_code=201)
 @require_permission(Permission.ALUMNI_MANAGE)
@@ -108,9 +116,9 @@ async def alumni_stats(request: Request) -> JSONResponse:
 @require_permission(Permission.ALUMNI_READ)
 async def list_alumni(
     request: Request,
-    program: Optional[str] = Query(None),
-    graduation_year: Optional[int] = Query(None),
-    is_mentor: Optional[bool] = Query(None),
+    program: str | None = Query(None),
+    graduation_year: int | None = Query(None),
+    is_mentor: bool | None = Query(None),
     limit: int = Query(50, le=200),
     offset: int = Query(0),
 ) -> JSONResponse:
@@ -128,8 +136,12 @@ async def get_alumni(request: Request, alumni_id: str) -> JSONResponse:
 
 @router.patch("/profiles/{alumni_id}")
 @require_permission(Permission.ALUMNI_READ)
-async def update_profile(request: Request, alumni_id: str, body: AlumniProfileUpdate) -> JSONResponse:
-    result = AlumniProfileService.update(_org(request), alumni_id, body, _actor(request))
+async def update_profile(
+    request: Request, alumni_id: str, body: AlumniProfileUpdate
+) -> JSONResponse:
+    result = AlumniProfileService.update(
+        _org(request), alumni_id, body, _actor(request)
+    )
     return JSONResponse(content=result)
 
 
@@ -144,9 +156,12 @@ async def verify_alumni(request: Request, alumni_id: str) -> JSONResponse:
 # E12-S02 — Placement Records
 # ══════════════════════════════════════════════════════════════
 
+
 @router.post("/placements", status_code=201)
 @require_permission(Permission.PLACEMENT_MANAGE)
-async def record_placement(request: Request, body: PlacementRecordCreate) -> JSONResponse:
+async def record_placement(
+    request: Request, body: PlacementRecordCreate
+) -> JSONResponse:
     result = PlacementService.record(_org(request), body, _actor(request))
     return JSONResponse(status_code=201, content=result)
 
@@ -156,18 +171,22 @@ async def record_placement(request: Request, body: PlacementRecordCreate) -> JSO
 async def placement_stats(
     request: Request, academic_year: str = Query(...)
 ) -> JSONResponse:
-    return JSONResponse(content=PlacementService.statistics(_org(request), academic_year))
+    return JSONResponse(
+        content=PlacementService.statistics(_org(request), academic_year)
+    )
 
 
 @router.get("/placements")
 @require_permission(Permission.ALUMNI_READ)
 async def list_placements(
     request: Request,
-    academic_year: Optional[str] = Query(None),
-    placement_type: Optional[str] = Query(None),
-    company_name: Optional[str] = Query(None),
+    academic_year: str | None = Query(None),
+    placement_type: str | None = Query(None),
+    company_name: str | None = Query(None),
 ) -> JSONResponse:
-    items = PlacementService.list(_org(request), academic_year, placement_type, company_name)
+    items = PlacementService.list(
+        _org(request), academic_year, placement_type, company_name
+    )
     return JSONResponse(content={"placements": items, "total": len(items)})
 
 
@@ -182,6 +201,7 @@ async def student_placements(request: Request, student_id: str) -> JSONResponse:
 # E12-S03 — Job Board
 # ══════════════════════════════════════════════════════════════
 
+
 @router.post("/jobs", status_code=201)
 @require_permission(Permission.ALUMNI_READ)
 async def create_job(request: Request, body: JobPostingCreate) -> JSONResponse:
@@ -193,12 +213,14 @@ async def create_job(request: Request, body: JobPostingCreate) -> JSONResponse:
 @require_permission(Permission.ALUMNI_READ)
 async def list_jobs(
     request: Request,
-    job_type: Optional[str] = Query(None),
+    job_type: str | None = Query(None),
     active_only: bool = Query(True),
-    search: Optional[str] = Query(None),
+    search: str | None = Query(None),
     limit: int = Query(50, le=200),
 ) -> JSONResponse:
-    items = JobBoardService.list_postings(_org(request), job_type, active_only, search, limit)
+    items = JobBoardService.list_postings(
+        _org(request), job_type, active_only, search, limit
+    )
     return JSONResponse(content={"jobs": items, "total": len(items)})
 
 
@@ -218,12 +240,16 @@ async def get_job(request: Request, job_id: str) -> JSONResponse:
 @router.post("/jobs/{job_id}/close")
 @require_permission(Permission.ALUMNI_MANAGE)
 async def close_job(request: Request, job_id: str) -> JSONResponse:
-    return JSONResponse(content=JobBoardService.close_posting(_org(request), job_id, _actor(request)))
+    return JSONResponse(
+        content=JobBoardService.close_posting(_org(request), job_id, _actor(request))
+    )
 
 
 @router.post("/jobs/{job_id}/apply", status_code=201)
 @require_permission(Permission.ALUMNI_READ)
-async def apply_to_job(request: Request, job_id: str, body: JobApplicationCreate) -> JSONResponse:
+async def apply_to_job(
+    request: Request, job_id: str, body: JobApplicationCreate
+) -> JSONResponse:
     body.job_id = job_id
     result = JobBoardService.apply(_org(request), body, _actor(request))
     return JSONResponse(status_code=201, content=result)
@@ -238,7 +264,9 @@ async def job_applications(request: Request, job_id: str) -> JSONResponse:
 
 @router.patch("/jobs/applications/{application_id}/status")
 @require_permission(Permission.ALUMNI_MANAGE)
-async def update_application(request: Request, application_id: str, body: dict) -> JSONResponse:
+async def update_application(
+    request: Request, application_id: str, body: dict
+) -> JSONResponse:
     result = JobBoardService.update_application_status(
         _org(request), application_id, body["status"], _actor(request)
     )
@@ -248,6 +276,7 @@ async def update_application(request: Request, application_id: str, body: dict) 
 # ══════════════════════════════════════════════════════════════
 # E12-S04 — Recruitment Drives
 # ══════════════════════════════════════════════════════════════
+
 
 @router.post("/drives", status_code=201)
 @require_permission(Permission.PLACEMENT_MANAGE)
@@ -259,7 +288,7 @@ async def create_drive(request: Request, body: DriveCreate) -> JSONResponse:
 @router.get("/drives")
 @require_permission(Permission.ALUMNI_READ)
 async def list_drives(
-    request: Request, status: Optional[str] = Query(None)
+    request: Request, status: str | None = Query(None)
 ) -> JSONResponse:
     items = RecruitmentDriveService.list(_org(request), status)
     return JSONResponse(content={"drives": items, "total": len(items)})
@@ -280,7 +309,9 @@ async def get_drive(request: Request, drive_id: str) -> JSONResponse:
 
 @router.patch("/drives/{drive_id}/status")
 @require_permission(Permission.PLACEMENT_MANAGE)
-async def update_drive_status(request: Request, drive_id: str, body: dict) -> JSONResponse:
+async def update_drive_status(
+    request: Request, drive_id: str, body: dict
+) -> JSONResponse:
     result = RecruitmentDriveService.update_status(
         _org(request), drive_id, body["status"], _actor(request)
     )
@@ -290,13 +321,17 @@ async def update_drive_status(request: Request, drive_id: str, body: dict) -> JS
 @router.post("/drives/{drive_id}/register", status_code=201)
 @require_permission(Permission.ALUMNI_READ)
 async def register_for_drive(request: Request, drive_id: str) -> JSONResponse:
-    result = RecruitmentDriveService.register_student(_org(request), drive_id, _actor(request))
+    result = RecruitmentDriveService.register_student(
+        _org(request), drive_id, _actor(request)
+    )
     return JSONResponse(status_code=201, content=result)
 
 
 @router.patch("/drives/registrations/{registration_id}/status")
 @require_permission(Permission.PLACEMENT_MANAGE)
-async def update_registration(request: Request, registration_id: str, body: dict) -> JSONResponse:
+async def update_registration(
+    request: Request, registration_id: str, body: dict
+) -> JSONResponse:
     result = RecruitmentDriveService.update_registration_status(
         _org(request), registration_id, body["status"], _actor(request)
     )
@@ -314,6 +349,7 @@ async def drive_registrations(request: Request, drive_id: str) -> JSONResponse:
 # E12-S05 — Alumni Network
 # ══════════════════════════════════════════════════════════════
 
+
 @router.post("/network/connect/{target_id}", status_code=201)
 @require_permission(Permission.ALUMNI_READ)
 async def send_connection(request: Request, target_id: str) -> JSONResponse:
@@ -325,7 +361,9 @@ async def send_connection(request: Request, target_id: str) -> JSONResponse:
 
 @router.post("/network/connections/{connection_id}/respond")
 @require_permission(Permission.ALUMNI_READ)
-async def respond_connection(request: Request, connection_id: str, body: dict) -> JSONResponse:
+async def respond_connection(
+    request: Request, connection_id: str, body: dict
+) -> JSONResponse:
     result = AlumniNetworkService.respond_connection(
         _org(request), connection_id, body["accept"], _actor(request)
     )
@@ -349,7 +387,7 @@ async def pending_connections(request: Request) -> JSONResponse:
 @router.get("/network/mentors")
 @require_permission(Permission.ALUMNI_READ)
 async def list_mentors(
-    request: Request, program: Optional[str] = Query(None)
+    request: Request, program: str | None = Query(None)
 ) -> JSONResponse:
     items = AlumniNetworkService.list_mentors(_org(request), program)
     return JSONResponse(content={"mentors": items, "total": len(items)})
@@ -357,16 +395,23 @@ async def list_mentors(
 
 @router.post("/network/mentorship", status_code=201)
 @require_permission(Permission.ALUMNI_READ)
-async def request_mentorship(request: Request, body: MentorshipRequestCreate) -> JSONResponse:
-    result = AlumniNetworkService.request_mentorship(_org(request), body, _actor(request))
+async def request_mentorship(
+    request: Request, body: MentorshipRequestCreate
+) -> JSONResponse:
+    result = AlumniNetworkService.request_mentorship(
+        _org(request), body, _actor(request)
+    )
     return JSONResponse(status_code=201, content=result)
 
 
 @router.post("/network/mentorship/{request_id}/respond")
 @require_permission(Permission.ALUMNI_READ)
-async def respond_mentorship(request: Request, request_id: str, body: dict) -> JSONResponse:
+async def respond_mentorship(
+    request: Request, request_id: str, body: dict
+) -> JSONResponse:
     result = AlumniNetworkService.respond_mentorship(
-        _org(request), request_id,
+        _org(request),
+        request_id,
         accept=body["accept"],
         session_date=body.get("session_date"),
         actor_alumni_id=_actor(request),

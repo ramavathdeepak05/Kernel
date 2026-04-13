@@ -9,14 +9,14 @@ Flow:
 
 E07-S04 — Manual Payment Recording (CASH / CHEQUE / DD / NEFT)
 """
+
 from __future__ import annotations
 
-import hashlib
 import hmac
 import logging
 import uuid
 
-from server.core.audit import AuditAction, AuditLog
+from server.core.audit import AuditAction, AuditLedger
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
@@ -27,14 +27,12 @@ logger = logging.getLogger(__name__)
 
 
 class PaymentService:
-
     # ------------------------------------------------------------------
     # S03 — Razorpay
     # ------------------------------------------------------------------
 
     @classmethod
-    def create_razorpay_order(cls, org_id: str, invoice_id: str,
-                               actor_id: str) -> dict:
+    def create_razorpay_order(cls, org_id: str, invoice_id: str, actor_id: str) -> dict:
         invoice = cls._get_invoice(org_id, invoice_id)
         balance = float(invoice["balance"] or 0)
         if balance <= 0:
@@ -43,47 +41,82 @@ class PaymentService:
         try:
             import razorpay
             from server.core.settings import settings
+
             client = razorpay.Client(
                 auth=(settings.razorpay_key_id, settings.razorpay_key_secret)
             )
-            order = client.order.create({
-                "amount": int(balance * 100),   # paise
-                "currency": invoice.get("currency", "INR"),
-                "receipt": str(invoice["invoice_number"]),
-                "notes": {
-                    "org_id": org_id,
-                    "invoice_id": invoice_id,
-                    "student_id": str(invoice["student_id"]),
-                },
-            })
+            order = client.order.create(
+                {
+                    "amount": int(balance * 100),  # paise
+                    "currency": invoice.get("currency", "INR"),
+                    "receipt": str(invoice["invoice_number"]),
+                    "notes": {
+                        "org_id": org_id,
+                        "invoice_id": invoice_id,
+                        "student_id": str(invoice["student_id"]),
+                    },
+                }
+            )
             order_id = order["id"]
         except ImportError:
             # razorpay SDK not installed — return stub for dev/testing
             order_id = f"order_stub_{uuid.uuid4().hex[:16]}"
-            logger.warning("PaymentService: razorpay not installed, using stub order_id")
+            logger.warning(
+                "PaymentService: razorpay not installed, using stub order_id"
+            )
 
         # Record a PENDING payment row
         pid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO payments
                 (id, org_id, student_id, invoice_id, amount, currency,
                  method, status, razorpay_order_id, recorded_by)
             VALUES (%s, %s, %s, %s, %s, %s, 'RAZORPAY', 'PENDING', %s, %s)
             """,
-            (pid, org_id, str(invoice["student_id"]), invoice_id,
-             balance, invoice.get("currency", "INR"), order_id, actor_id),
-        )])
+                    (
+                        pid,
+                        org_id,
+                        str(invoice["student_id"]),
+                        invoice_id,
+                        balance,
+                        invoice.get("currency", "INR"),
+                        order_id,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        return {"payment_id": pid, "order_id": order_id, "amount": balance,
-                "currency": invoice.get("currency", "INR"),
-                "invoice_number": invoice["invoice_number"]}
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="razorpay_order",
+            entity_id=str(order.get("id", "")),
+            tenant_id=org_id,
+            metadata={"source": "create_razorpay_order"},
+        )
+
+        return {
+            "payment_id": pid,
+            "order_id": order_id,
+            "amount": balance,
+            "currency": invoice.get("currency", "INR"),
+            "invoice_number": invoice["invoice_number"],
+        }
 
     @classmethod
-    def capture_razorpay_payment(cls, org_id: str, invoice_id: str,
-                                  razorpay_order_id: str,
-                                  razorpay_payment_id: str,
-                                  razorpay_signature: str) -> dict:
+    def capture_razorpay_payment(
+        cls,
+        org_id: str,
+        invoice_id: str,
+        razorpay_order_id: str,
+        razorpay_payment_id: str,
+        razorpay_signature: str,
+    ) -> dict:
         """Called by webhook or frontend after successful Razorpay payment."""
         from server.core.settings import settings
 
@@ -109,27 +142,40 @@ class PaymentService:
         if already:
             return {"status": "already_captured"}
 
-        # Update payment row
-        execute_transaction([(
-            """
+        # Extra queries for atomic update
+        extra_queries = [
+            (
+                """
             UPDATE payments
             SET razorpay_payment_id = %s, razorpay_signature = %s, status = 'CAPTURED'
             WHERE razorpay_order_id = %s AND invoice_id = %s
             """,
-            (razorpay_payment_id, razorpay_signature, razorpay_order_id, invoice_id),
-        )])
+                (
+                    razorpay_payment_id,
+                    razorpay_signature,
+                    razorpay_order_id,
+                    invoice_id,
+                ),
+            )
+        ]
 
-        # Fetch the captured amount
+        # Fetch the payment record that was created during order creation
         payment_rows = execute_query(
-            "SELECT amount, student_id FROM payments WHERE razorpay_order_id = %s AND invoice_id = %s",
+            "SELECT * FROM payments WHERE razorpay_order_id = %s AND invoice_id = %s",
             (razorpay_order_id, invoice_id),
         )
         if not payment_rows:
-            return {"status": "not_found"}
+            raise BusinessRuleViolation(
+                message="Payment record not found for this Razorpay order"
+            )
 
         payment = dict(payment_rows[0])
         cls._apply_payment_to_invoice(
-            org_id, invoice_id, float(payment["amount"]), str(payment["student_id"])
+            org_id,
+            invoice_id,
+            float(payment["amount"]),
+            str(payment["student_id"]),
+            extra_queries=extra_queries,
         )
         return {"status": "captured", "invoice_id": invoice_id}
 
@@ -159,7 +205,8 @@ class PaymentService:
         if not already:
             logger.warning(
                 "apply_webhook_capture: payment %s not found for org %s",
-                gateway_payment_id, org_id,
+                gateway_payment_id,
+                org_id,
             )
             return {"status": "not_found"}
 
@@ -168,11 +215,13 @@ class PaymentService:
             return {"status": "already_captured"}
 
         captured_status = "CAPTURED"
-        execute_transaction([(
-            "UPDATE payments SET status=%s, gateway_response=%s "
-            "WHERE gateway_payment_id=%s AND org_id=%s",
-            (captured_status, str(gateway_response), gateway_payment_id, org_id),
-        )])
+        extra_queries = [
+            (
+                "UPDATE payments SET status=%s, gateway_response=%s "
+                "WHERE gateway_payment_id=%s AND org_id=%s",
+                (captured_status, str(gateway_response), gateway_payment_id, org_id),
+            )
+        ]
 
         if row.get("invoice_id"):
             try:
@@ -181,11 +230,13 @@ class PaymentService:
                     str(row["invoice_id"]),
                     float(row["amount"]),
                     str(row["student_id"]),
+                    extra_queries=extra_queries,
                 )
             except Exception as exc:
                 logger.error(
                     "apply_webhook_capture: invoice update failed for payment %s: %s",
-                    gateway_payment_id, exc,
+                    gateway_payment_id,
+                    exc,
                 )
 
         return {"status": "captured", "payment_id": str(row["id"])}
@@ -195,7 +246,9 @@ class PaymentService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def record_manual(cls, org_id: str, req: ManualPaymentRecord, actor_id: str) -> dict:
+    def record_manual(
+        cls, org_id: str, req: ManualPaymentRecord, actor_id: str
+    ) -> dict:
         invoice = cls._get_invoice(org_id, req.invoice_id)
         balance = float(invoice["balance"] or 0)
 
@@ -205,29 +258,54 @@ class PaymentService:
             )
 
         pid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        extra_queries = [
+            (
+                """
             INSERT INTO payments
                 (id, org_id, student_id, invoice_id, amount, currency,
                  method, status, reference_number, bank_name, cheque_date,
                  recorded_by, notes)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'CAPTURED', %s, %s, %s, %s, %s)
             """,
-            (pid, org_id, str(invoice["student_id"]), req.invoice_id,
-             req.amount, invoice.get("currency", "INR"), req.method.value,
-             req.reference_number, req.bank_name, req.cheque_date,
-             actor_id, req.notes),
-        )])
+                (
+                    pid,
+                    org_id,
+                    str(invoice["student_id"]),
+                    req.invoice_id,
+                    req.amount,
+                    invoice.get("currency", "INR"),
+                    req.method.value,
+                    req.reference_number,
+                    req.bank_name,
+                    req.cheque_date,
+                    actor_id,
+                    req.notes,
+                ),
+            )
+        ]
 
         cls._apply_payment_to_invoice(
-            org_id, req.invoice_id, req.amount, str(invoice["student_id"])
+            org_id,
+            req.invoice_id,
+            req.amount,
+            str(invoice["student_id"]),
+            extra_queries=extra_queries,
         )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="payment", entity_id=pid, org_id=org_id,
-                     module="E07-S04",
-                     metadata={"method": req.method.value, "amount": req.amount,
-                               "invoice_id": req.invoice_id})
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="payment",
+            entity_id=pid,
+            org_id=org_id,
+            module="E07-S04",
+            metadata={
+                "method": req.method.value,
+                "amount": req.amount,
+                "invoice_id": req.invoice_id,
+            },
+        )
 
         payment_rows = execute_query("SELECT * FROM payments WHERE id = %s", (pid,))
         return dict(payment_rows[0])
@@ -267,11 +345,19 @@ class PaymentService:
         return dict(rows[0])
 
     @classmethod
-    def _apply_payment_to_invoice(cls, org_id: str, invoice_id: str,
-                                   amount: float, student_id: str) -> None:
+    def _apply_payment_to_invoice(
+        cls,
+        org_id: str,
+        invoice_id: str,
+        amount: float,
+        student_id: str,
+        extra_queries: list = None,
+    ) -> None:
         """Add amount_paid to invoice, update status, fire FeePaymentReceived."""
-        execute_transaction([(
-            """
+        queries = list(extra_queries) if extra_queries else []
+        queries.append(
+            (
+                """
             UPDATE student_invoices
             SET amount_paid = amount_paid + %s,
                 status = CASE
@@ -285,17 +371,39 @@ class PaymentService:
                 END
             WHERE id = %s AND org_id = %s
             """,
-            (amount, amount, amount, amount, invoice_id, org_id),
-        )])
+                (amount, amount, amount, amount, invoice_id, org_id),
+            )
+        )
+        execute_transaction(queries)
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="FeePaymentReceived",
-            entity_type="student_invoice",
-            entity_id=invoice_id,
-            org_id=org_id,
-            payload={"student_id": student_id, "amount": amount, "invoice_id": invoice_id},
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
             actor_id="system",
-        ))
+            actor_role="system",
+            entity_type="_apply_payment_to_invoice",
+            entity_id=str(invoice_id),
+            tenant_id=org_id,
+            metadata={"source": "_apply_payment_to_invoice"},
+        )
 
-        logger.info("Payment applied: invoice=%s amount=%.2f student=%s",
-                    invoice_id, amount, student_id)
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="FeePaymentReceived",
+                entity_type="student_invoice",
+                entity_id=invoice_id,
+                org_id=org_id,
+                payload={
+                    "student_id": student_id,
+                    "amount": amount,
+                    "invoice_id": invoice_id,
+                },
+                actor_id="system",
+            )
+        )
+
+        logger.info(
+            "Payment applied: invoice=%s amount=%.2f student=%s",
+            invoice_id,
+            amount,
+            student_id,
+        )

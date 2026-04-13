@@ -78,6 +78,27 @@ desktop.ini
 # Docker
 docker-compose.override.yml
 
+# Desktop builds
+desktop/release*/
+desktop/dist-renderer/
+
+# Generated analysis
+.code-review-graph/*.db
+.code-review-graph/*.html
+
+# Test virtual environments
+ALIS/.test_venv/
+
+# Debug / scratch files
+b.txt
+bugs.json
+violations.txt
+migration.log
+pytest_errors.txt
+ALIS/pytest_out.txt
+scripts/schema_dump.json
+skills-lock.json
+
 # Temp / one-off scripts (should never be committed)
 *.tmp
 *.bak

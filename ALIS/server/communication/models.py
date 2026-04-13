@@ -1,64 +1,67 @@
 """E10 — Communication Hub Models"""
 
 from __future__ import annotations
+
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class NotifChannel(str, Enum):
-    EMAIL  = "EMAIL"
-    SMS    = "SMS"
+    EMAIL = "EMAIL"
+    SMS = "SMS"
     IN_APP = "IN_APP"
-    ALL    = "ALL"
+    ALL = "ALL"
 
 
 class TargetAudience(str, Enum):
-    ALL     = "ALL"
+    ALL = "ALL"
     STUDENTS = "STUDENTS"
-    STAFF   = "STAFF"
+    STAFF = "STAFF"
     FACULTY = "FACULTY"
     PARENTS = "PARENTS"
 
 
 class Priority(str, Enum):
-    LOW    = "LOW"
+    LOW = "LOW"
     NORMAL = "NORMAL"
-    HIGH   = "HIGH"
+    HIGH = "HIGH"
     URGENT = "URGENT"
 
 
 # --- Request models ---
 
+
 class TemplateCreate(BaseModel):
-    key:     str = Field(..., pattern=r'^[a-z0-9_]+$')
-    name:    str
-    subject: Optional[str] = None
-    body:    str
+    key: str = Field(..., pattern=r"^[a-z0-9_]+$")
+    name: str
+    subject: str | None = None
+    body: str
     channel: NotifChannel = NotifChannel.EMAIL
 
 
 class TemplateUpdate(BaseModel):
-    name:                 Optional[str]  = None
-    subject:              Optional[str]  = None
-    body:                 Optional[str]  = None
-    is_active:            Optional[bool] = None
-    whatsapp_template_id: Optional[str]  = None   # MSG91 DLT registered template ID
+    name: str | None = None
+    subject: str | None = None
+    body: str | None = None
+    is_active: bool | None = None
+    whatsapp_template_id: str | None = None  # MSG91 DLT registered template ID
 
 
 class AnnouncementCreate(BaseModel):
-    title:           str
-    body:            str
+    title: str
+    body: str
     target_audience: TargetAudience = TargetAudience.ALL
-    priority:        Priority = Priority.NORMAL
-    expires_at:      Optional[str] = None  # ISO 8601
+    priority: Priority = Priority.NORMAL
+    expires_at: str | None = None  # ISO 8601
 
 
 class BulkMessageCreate(BaseModel):
-    title:         str
-    message:       str
-    channel:       NotifChannel = NotifChannel.EMAIL
-    target_filter: Dict[str, Any] = Field(default_factory=dict)
+    title: str
+    message: str
+    channel: NotifChannel = NotifChannel.EMAIL
+    target_filter: dict[str, Any] = Field(default_factory=dict)
     # target_filter examples:
     #   {"role": "STUDENT"}
     #   {"role": "STUDENT", "program_id": "uuid"}

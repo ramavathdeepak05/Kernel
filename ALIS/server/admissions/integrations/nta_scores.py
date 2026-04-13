@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,22 +43,22 @@ NTA_EXAM_SLUGS = {
 class NTAScoreCard:
     application_number: str
     candidate_name: str
-    dob: str                    # YYYY-MM-DD
-    exam_type: str              # JEE_MAIN, NEET_UG, etc.
+    dob: str  # YYYY-MM-DD
+    exam_type: str  # JEE_MAIN, NEET_UG, etc.
     roll_number: str
     total_marks: float
-    percentile: Optional[float]
-    rank: Optional[int]
-    category_rank: Optional[int]
-    subject_scores: Dict[str, float] = field(default_factory=dict)
-    raw: Dict[str, Any] = field(default_factory=dict)
+    percentile: float | None
+    rank: int | None
+    category_rank: int | None
+    subject_scores: dict[str, float] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class NTAImportResult:
     success: bool
-    score_card: Optional[NTAScoreCard] = None
-    error: Optional[str] = None
+    score_card: NTAScoreCard | None = None
+    error: str | None = None
 
 
 class NTAScoreClient:
@@ -81,6 +81,7 @@ class NTAScoreClient:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
 
     def is_enabled(self) -> bool:
@@ -104,16 +105,19 @@ class NTAScoreClient:
             NTAImportResult with score_card on success.
         """
         if not self.is_enabled():
-            return NTAImportResult(success=False, error="NTA integration not configured.")
+            return NTAImportResult(
+                success=False, error="NTA integration not configured."
+            )
 
         slug = NTA_EXAM_SLUGS.get(exam_type)
         if not slug:
             return NTAImportResult(
                 success=False,
-                error=f"Unknown exam type '{exam_type}'. Valid: {list(NTA_EXAM_SLUGS.keys())}"
+                error=f"Unknown exam type '{exam_type}'. Valid: {list(NTA_EXAM_SLUGS.keys())}",
             )
 
         import httpx
+
         base_url = self._settings.nta_base_url
         api_key = self._settings.nta_api_key
         timeout = self._settings.nta_timeout_seconds
@@ -131,12 +135,19 @@ class NTAScoreClient:
             score_card = self._parse_score_card(exam_type, application_number, data)
             logger.info(
                 "NTA: score fetched [exam=%s, app=%s, percentile=%s]",
-                exam_type, application_number, score_card.percentile,
+                exam_type,
+                application_number,
+                score_card.percentile,
             )
             return NTAImportResult(success=True, score_card=score_card)
 
         except Exception as exc:
-            logger.error("NTA: score fetch failed [exam=%s, app=%s] — %s", exam_type, application_number, exc)
+            logger.error(
+                "NTA: score fetch failed [exam=%s, app=%s] — %s",
+                exam_type,
+                application_number,
+                exc,
+            )
             return NTAImportResult(success=False, error=str(exc))
 
     def verify_candidate(
@@ -156,10 +167,10 @@ class NTAScoreClient:
         self,
         exam_type: str,
         application_number: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
     ) -> NTAScoreCard:
         """Parse NTA API response into a typed NTAScoreCard."""
-        subject_scores: Dict[str, float] = {}
+        subject_scores: dict[str, float] = {}
         for subj in data.get("subjects", []):
             subject_scores[subj.get("name", "Unknown")] = float(subj.get("marks", 0))
 
@@ -170,9 +181,13 @@ class NTAScoreClient:
             exam_type=exam_type,
             roll_number=data.get("roll_number", ""),
             total_marks=float(data.get("total_marks", 0)),
-            percentile=float(data["percentile"]) if data.get("percentile") is not None else None,
+            percentile=float(data["percentile"])
+            if data.get("percentile") is not None
+            else None,
             rank=int(data["rank"]) if data.get("rank") is not None else None,
-            category_rank=int(data["category_rank"]) if data.get("category_rank") is not None else None,
+            category_rank=int(data["category_rank"])
+            if data.get("category_rank") is not None
+            else None,
             subject_scores=subject_scores,
             raw=data,
         )

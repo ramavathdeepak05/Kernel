@@ -29,12 +29,13 @@ Output data keys:
         "component_count": int
     }
 """
+
 from __future__ import annotations
 
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar
 
-from server.core.tool_registry import BaseTool, ToolOutputSchema
 from server.core.exceptions import ToolSchemaViolationError
+from server.core.tool_registry import BaseTool, ToolOutputSchema
 
 
 class RubricValidatorTool(BaseTool):
@@ -59,7 +60,7 @@ class RubricValidatorTool(BaseTool):
 
     def execute(
         self,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         tenant_id: str,
     ) -> ToolOutputSchema:
         """
@@ -91,13 +92,17 @@ class RubricValidatorTool(BaseTool):
             )
 
         total_marks = input_data.get("total_marks")
-        if total_marks is None or not isinstance(total_marks, (int, float)) or total_marks <= 0:
+        if (
+            total_marks is None
+            or not isinstance(total_marks, (int, float))
+            or total_marks <= 0
+        ):
             raise ToolSchemaViolationError(
                 message="RubricValidatorTool requires 'total_marks' (positive number).",
                 details={"total_marks": total_marks},
             )
 
-        violations: List[str] = []
+        violations: list[str] = []
 
         if len(components) == 0:
             violations.append("Rubric must have at least one component.")

@@ -5,6 +5,7 @@ Provides:
 2. AI narrative insights via Qwen (through AIGateway)
    - Falls back gracefully if Ollama is unavailable
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class GradeAnalyticsService:
-
     @classmethod
     def get_course_statistics(cls, org_id: str, exam_schedule_id: str) -> dict:
         """Grade distribution, pass rate, average marks for one exam schedule."""
@@ -59,7 +59,9 @@ class GradeAnalyticsService:
         return stats
 
     @classmethod
-    def get_semester_statistics(cls, org_id: str, academic_year: str, semester: int) -> dict:
+    def get_semester_statistics(
+        cls, org_id: str, academic_year: str, semester: int
+    ) -> dict:
         """Aggregate SGPA distribution and pass/fail across all courses in a semester."""
         result_rows = execute_query(
             """
@@ -123,7 +125,9 @@ class GradeAnalyticsService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def generate_ai_insights(cls, org_id: str, academic_year: str, semester: int) -> dict:
+    def generate_ai_insights(
+        cls, org_id: str, academic_year: str, semester: int
+    ) -> dict:
         """
         Ask Qwen to narrate grade analytics findings for the semester.
         Falls back to plain summary dict if Ollama is unavailable.
@@ -133,12 +137,12 @@ class GradeAnalyticsService:
         prompt = f"""You are an academic analytics assistant for an educational institution.
 Here are the grade statistics for Academic Year {academic_year}, Semester {semester}:
 
-- Total students: {stats.get('total_students', 0)}
-- Passed: {stats.get('passed', 0)} ({stats.get('pass_rate', 0)}%)
-- Failed: {stats.get('failed', 0)}
-- Average SGPA: {stats.get('avg_sgpa', 'N/A')}
-- Top SGPA: {stats.get('top_sgpa', 'N/A')}
-- SGPA bands: {stats.get('sgpa_bands', {})}
+- Total students: {stats.get("total_students", 0)}
+- Passed: {stats.get("passed", 0)} ({stats.get("pass_rate", 0)}%)
+- Failed: {stats.get("failed", 0)}
+- Average SGPA: {stats.get("avg_sgpa", "N/A")}
+- Top SGPA: {stats.get("top_sgpa", "N/A")}
+- SGPA bands: {stats.get("sgpa_bands", {})}
 
 Write a brief (3-4 sentence) narrative summary for the academic coordinator highlighting:
 1. Overall performance level
@@ -150,6 +154,7 @@ Be concise and professional."""
         ai_narrative = None
         try:
             from server.core.ai_gateway import AIGateway
+
             result = AIGateway.invoke(
                 org_id=org_id,
                 prompt=prompt,
@@ -161,7 +166,9 @@ Be concise and professional."""
                 },
                 actor_id="system",
             )
-            ai_narrative = result.get("narrative") if isinstance(result, dict) else str(result)
+            ai_narrative = (
+                result.get("narrative") if isinstance(result, dict) else str(result)
+            )
         except Exception as exc:
             logger.warning("GradeAnalytics: AI narrative failed (non-fatal): %s", exc)
 

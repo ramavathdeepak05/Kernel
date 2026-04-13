@@ -16,18 +16,19 @@ Acceptance Criteria:
 - [x] Workflow instances are auditable
 - [x] No domain logic inside schema
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+from uuid import uuid4
 
 from .state_registry import WorkflowState
 
-
 # --- Workflow Context ---
+
 
 @dataclass
 class WorkflowContext:
@@ -37,13 +38,14 @@ class WorkflowContext:
     This carries actor information, entity references, and any
     context needed for lock checks and audit logging.
     """
+
     workflow_id: str = field(default_factory=lambda: str(uuid4()))
     workflow_type: str = ""  # e.g., "admissions.applicant", "finance.refund"
 
     # Actor (who triggered this workflow)
     actor_id: str = ""
     actor_type: str = "human"  # human, ai_agent, system
-    actor_role: Optional[str] = None
+    actor_role: str | None = None
 
     # Target Entity
     entity_type: str = ""  # e.g., "student", "payment"
@@ -53,10 +55,10 @@ class WorkflowContext:
     tenant_id: str = ""
 
     # Organization
-    org_id: Optional[str] = None
+    org_id: str | None = None
 
     # Additional data for lock checks and business logic
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
     # Timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
@@ -64,8 +66,10 @@ class WorkflowContext:
 
 # --- Step Result ---
 
+
 class StepOutcome(str, Enum):
     """Possible outcomes of a workflow step."""
+
     SUCCESS = "success"
     FAILURE = "failure"
     BLOCKED = "blocked"  # Blocked by Global Lock
@@ -80,17 +84,20 @@ class StepResult:
     Steps do not determine workflow state directly; the engine
     interprets these results and transitions accordingly.
     """
+
     outcome: StepOutcome
     step_name: str = ""
-    message: Optional[str] = None
-    data: Optional[Dict[str, Any]] = None
-    lock_violations: Optional[List[str]] = None
+    message: str | None = None
+    data: dict[str, Any] | None = None
+    lock_violations: list[str] | None = None
 
 
 # --- Workflow Decision (Layer 2 Mandate) ---
 
+
 class ConfidenceLevel(str, Enum):
     """Confidence levels for AI-assisted decisions."""
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -98,6 +105,7 @@ class ConfidenceLevel(str, Enum):
 
 class AuthorityLevel(str, Enum):
     """Authority required for decision execution."""
+
     AUTO = "auto"  # System can execute automatically
     APPROVE = "approve"  # Requires single human approval
     QUORUM = "quorum"  # Requires multi-signature approval
@@ -111,20 +119,22 @@ class WorkflowDecision:
     Every wizard MUST end in a decision (Layer 2 mandate).
     This decision either advances state, blocks, or enters provisional path.
     """
+
     decision_made: str  # Single sentence institutional truth
-    ai_role: Optional[str] = None  # Infer | Score | Plan | Execute
-    confidence: Optional[ConfidenceLevel] = None
+    ai_role: str | None = None  # Infer | Score | Plan | Execute
+    confidence: ConfidenceLevel | None = None
     authority_required: AuthorityLevel = AuthorityLevel.AUTO
 
     # State transition proposal
-    proposed_state: Optional[WorkflowState] = None
+    proposed_state: WorkflowState | None = None
 
     # Metadata
-    rationale: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None
+    rationale: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 # --- Workflow Instance ---
+
 
 @dataclass
 class WorkflowInstance:
@@ -133,24 +143,25 @@ class WorkflowInstance:
 
     This is the persistent record of a workflow execution.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
     workflow_type: str = ""
     current_state: WorkflowState = WorkflowState.CREATED
 
     # Context
-    context: Optional[WorkflowContext] = None
+    context: WorkflowContext | None = None
 
     # Roles authorised to approve this instance (set by domain subclass)
-    approver_roles: List[str] = field(default_factory=list)
+    approver_roles: list[str] = field(default_factory=list)
 
     # History
-    step_history: List[StepResult] = field(default_factory=list)
-    decision: Optional[WorkflowDecision] = None
+    step_history: list[StepResult] = field(default_factory=list)
+    decision: WorkflowDecision | None = None
 
     # Timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     # Audit
-    audit_trail: List[str] = field(default_factory=list)  # List of audit entry IDs
+    audit_trail: list[str] = field(default_factory=list)  # List of audit entry IDs

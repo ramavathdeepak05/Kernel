@@ -14,10 +14,11 @@ Criteria covered:
 
 Reference: ALIS-skills/references/architecture.md §5, §20
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from server.db_service import execute_query
 
@@ -25,9 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 class NAACService:
-
     @staticmethod
-    def get_dashboard(org_id: str, academic_year: Optional[str] = None) -> Dict[str, Any]:
+    def get_dashboard(org_id: str, academic_year: str | None = None) -> dict[str, Any]:
         """Return a full NAAC metric dashboard aggregated per criterion.
 
         academic_year: optional filter e.g. "2025-26"
@@ -51,19 +51,21 @@ class NAACService:
         )
 
         # Organise by criterion
-        criteria: Dict[str, Dict[str, Any]] = {
+        criteria: dict[str, dict[str, Any]] = {
             f"criterion_{i}": {} for i in range(1, 8)
         }
 
         for row in rows:
-            key: str = row["metric_key"]          # e.g. "naac.criterion_2.pass_percentage"
+            key: str = row["metric_key"]  # e.g. "naac.criterion_2.pass_percentage"
             parts = key.split(".")
             if len(parts) >= 3 and parts[0] == "naac":
-                crit = parts[1]                   # "criterion_2"
-                indicator = ".".join(parts[2:])   # "pass_percentage"
+                crit = parts[1]  # "criterion_2"
+                indicator = ".".join(parts[2:])  # "pass_percentage"
                 if crit in criteria:
                     criteria[crit][indicator] = {
-                        "value": float(row["metric_value"]) if row["metric_value"] is not None else None,
+                        "value": float(row["metric_value"])
+                        if row["metric_value"] is not None
+                        else None,
                         "breakdown": row.get("breakdown") or {},
                         "as_of": str(row["metric_date"]),
                     }
@@ -79,7 +81,7 @@ class NAACService:
     def get_criterion_detail(
         org_id: str,
         criterion: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Return all metric rows for a specific NAAC criterion."""
         prefix = f"naac.criterion_{criterion}."
         rows = execute_query(
@@ -102,10 +104,10 @@ class NAACService:
     @staticmethod
     def get_evidence_list(
         org_id: str,
-        criterion: Optional[int] = None,
-        academic_year: Optional[str] = None,
-        status: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        criterion: int | None = None,
+        academic_year: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return NAAC evidence items, optionally filtered."""
         conditions = ["org_id = %s"]
         params: list = [org_id]
@@ -122,7 +124,7 @@ class NAACService:
 
         where = " AND ".join(conditions)
         rows = execute_query(
-            f"""
+            f"""  # noqa: S608
             SELECT id, criterion, indicator_key, evidence_type, title,
                    file_key, status, academic_year, created_at
             FROM naac_evidence
@@ -142,16 +144,16 @@ class NAACService:
         title: str,
         academic_year: str,
         evidence_type: str = "DOCUMENT",
-        file_key: Optional[str] = None,
-        evidence_data: Optional[Dict[str, Any]] = None,
-        collected_by: Optional[str] = None,
+        file_key: str | None = None,
+        evidence_data: dict[str, Any] | None = None,
+        collected_by: str | None = None,
     ) -> str:
         """Insert a new NAAC evidence record. Returns the new record ID."""
         import json
+
         from server.db_service import execute_transaction
 
-        new_id = None
-        rows = execute_query(
+        rows = execute_transaction(
             """
             INSERT INTO naac_evidence
                 (id, org_id, criterion, indicator_key, title, academic_year,
@@ -160,14 +162,23 @@ class NAACService:
                 (uuid_generate_v4(), %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (org_id, criterion, indicator_key, title, academic_year,
-             evidence_type, file_key, json.dumps(evidence_data or {}), collected_by),
+            (
+                org_id,
+                criterion,
+                indicator_key,
+                title,
+                academic_year,
+                evidence_type,
+                file_key,
+                json.dumps(evidence_data or {}),
+                collected_by,
+            ),
             tenant_id=org_id,
         )
         return str(rows[0]["id"]) if rows else ""
 
     @staticmethod
-    def compute_iqac_score(org_id: str) -> Dict[str, Any]:
+    def compute_iqac_score(org_id: str) -> dict[str, Any]:
         """Compute a weighted IQAC readiness score from live metrics.
 
         Weights are indicative — institutions calibrate via PolicyEngine
@@ -187,7 +198,7 @@ class NAACService:
         metrics = {r["metric_key"]: r["metric_value"] for r in rows}
 
         # Indicative weights — replace with policy_engine.get_value() once DSL seeded
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
 
         pass_pct = metrics.get("naac.criterion_2.pass_percentage")
         if pass_pct is not None:

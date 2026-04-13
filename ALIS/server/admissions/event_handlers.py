@@ -6,6 +6,7 @@ or send auto-notifications at each lifecycle step.
 
 Registered at application startup (server/main.py calls register_all()).
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,10 +20,14 @@ logger = logging.getLogger(__name__)
 # Notification helpers
 # ---------------------------------------------------------------------------
 
-def _send_notification(template_id: str, applicant_id: str, org_id: str, context: dict) -> None:
+
+def _send_notification(
+    template_id: str, applicant_id: str, org_id: str, context: dict
+) -> None:
     """Fire-and-forget notification via Celery."""
     try:
         from server.db_service import execute_query
+
         rows = execute_query(
             "SELECT name, email, phone FROM applicants WHERE id = %s AND org_id = %s",
             (applicant_id, org_id),
@@ -31,6 +36,7 @@ def _send_notification(template_id: str, applicant_id: str, org_id: str, context
             return
         applicant = rows[0]
         from server.tasks.notifications import send_templated
+
         send_templated.delay(
             template_id=template_id,
             recipient_id=applicant_id,
@@ -46,6 +52,7 @@ def _send_notification(template_id: str, applicant_id: str, org_id: str, context
 # ---------------------------------------------------------------------------
 # Handler: ApplicantEligible → notify applicant + advance pipeline
 # ---------------------------------------------------------------------------
+
 
 def on_applicant_eligible(event: DomainEvent) -> None:
     applicant_id = event.entity_id
@@ -65,6 +72,7 @@ def on_applicant_eligible(event: DomainEvent) -> None:
 # Handler: ApplicantFlaggedForReview → notify staff
 # ---------------------------------------------------------------------------
 
+
 def on_applicant_flagged(event: DomainEvent) -> None:
     org_id = event.org_id
 
@@ -72,6 +80,7 @@ def on_applicant_flagged(event: DomainEvent) -> None:
         # Notify all ADMIN users in the org
         from server.db_service import execute_query
         from server.tasks.notifications import send_templated
+
         admins = execute_query(
             "SELECT id, email, name FROM users WHERE org_id = %s AND role IN ('ADMIN','SUPER_ADMIN') AND status = 'ACTIVE'",
             (org_id,),
@@ -98,6 +107,7 @@ def on_applicant_flagged(event: DomainEvent) -> None:
 # Handler: ApplicantRejected → notify applicant
 # ---------------------------------------------------------------------------
 
+
 def on_applicant_rejected(event: DomainEvent) -> None:
     _send_notification(
         template_id="applicant_rejected",
@@ -111,6 +121,7 @@ def on_applicant_rejected(event: DomainEvent) -> None:
 # Handler: OfferLetterIssued → notify applicant with payment instructions
 # ---------------------------------------------------------------------------
 
+
 def on_offer_letter_issued(event: DomainEvent) -> None:
     _send_notification(
         template_id="offer_letter_issued",
@@ -123,6 +134,7 @@ def on_offer_letter_issued(event: DomainEvent) -> None:
 # ---------------------------------------------------------------------------
 # Handler: StudentEnrolled → welcome email + trigger downstream modules
 # ---------------------------------------------------------------------------
+
 
 def on_student_enrolled(event: DomainEvent) -> None:
     applicant_id = event.entity_id
@@ -145,18 +157,32 @@ def on_student_enrolled(event: DomainEvent) -> None:
 # Handler: OfferLetterExpired → notify applicant + mark offer invalid
 # ---------------------------------------------------------------------------
 
+
 def on_offer_expired(event: DomainEvent) -> None:
     applicant_id = event.entity_id
     org_id = event.org_id
 
     try:
+        from server.core.audit import AuditAction, AuditLog
         from server.db_service import execute_transaction
-        execute_transaction([
-            (
-                "UPDATE offer_letters SET is_valid = FALSE WHERE applicant_id = %s AND org_id = %s AND is_valid = TRUE",
-                (applicant_id, org_id),
-            )
-        ])
+
+        execute_transaction(
+            [
+                (
+                    "UPDATE offer_letters SET is_valid = FALSE WHERE applicant_id = %s AND org_id = %s AND is_valid = TRUE",
+                    (applicant_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="offer_letter",
+            entity_id=applicant_id,
+            tenant_id=org_id,
+            metadata={"source": "on_offer_expired"},
+        )
     except Exception as exc:
         logger.error("E04-S16: offer expiry update failed: %s", exc)
 
@@ -172,10 +198,12 @@ def on_offer_expired(event: DomainEvent) -> None:
 # Handler: ReviewDecided → resume pipeline
 # ---------------------------------------------------------------------------
 
+
 def on_review_decided(event: DomainEvent) -> None:
     """After staff decides on a review item, re-queue the pipeline."""
     try:
         from server.tasks.admissions import advance_pipeline
+
         advance_pipeline.delay(
             org_id=event.org_id,
             applicant_id=event.entity_id,
@@ -187,6 +215,7 @@ def on_review_decided(event: DomainEvent) -> None:
 # ---------------------------------------------------------------------------
 # P9 — Offer Letter
 # ---------------------------------------------------------------------------
+
 
 def on_offer_accepted(event: DomainEvent) -> None:
     _send_notification(
@@ -239,6 +268,7 @@ def on_offer_reminder_t1(event: DomainEvent) -> None:
 # P8 — Merit List
 # ---------------------------------------------------------------------------
 
+
 def on_merit_list_published(event: DomainEvent) -> None:
     """Notify staff (broadcast) when merit list is published."""
     org_id = event.org_id
@@ -247,6 +277,7 @@ def on_merit_list_published(event: DomainEvent) -> None:
     try:
         from server.db_service import execute_query
         from server.tasks.notifications import send_templated
+
         admins = execute_query(
             "SELECT id, email, name FROM users "
             "WHERE org_id = %s AND role IN ('ADMIN','SUPER_ADMIN') AND status = 'ACTIVE'",
@@ -302,6 +333,7 @@ def on_waitlisted(event: DomainEvent) -> None:
 # P10 — Payment
 # ---------------------------------------------------------------------------
 
+
 def on_demand_draft_submitted(event: DomainEvent) -> None:
     _send_notification(
         template_id="demand_draft_received",
@@ -354,6 +386,7 @@ def on_refund_processed(event: DomainEvent) -> None:
 # P11 — Final Verification
 # ---------------------------------------------------------------------------
 
+
 def on_verification_initiated(event: DomainEvent) -> None:
     _send_notification(
         template_id="verification_initiated",
@@ -362,7 +395,9 @@ def on_verification_initiated(event: DomainEvent) -> None:
         context={
             "verification_mode": event.payload.get("verification_mode", ""),
             "reporting_date": event.payload.get("reporting_date", "TBD"),
-            "assigned_officer": event.payload.get("assigned_officer", "Admissions Office"),
+            "assigned_officer": event.payload.get(
+                "assigned_officer", "Admissions Office"
+            ),
             "application_id": event.payload.get("application_id", ""),
         },
     )
@@ -405,6 +440,7 @@ def on_verification_rejected(event: DomainEvent) -> None:
 # P12 — Enrollment
 # ---------------------------------------------------------------------------
 
+
 def on_university_email_assigned(event: DomainEvent) -> None:
     _send_notification(
         template_id="university_email_assigned",
@@ -433,49 +469,55 @@ def on_lms_account_created(event: DomainEvent) -> None:
 # Registration — called once at startup
 # ---------------------------------------------------------------------------
 
+
 def register_all() -> None:
     """Register all M1 event handlers with the DomainEventBus."""
     # Existing (E04-S16)
-    register_handler("ApplicantEligible",         on_applicant_eligible)
-    register_handler("ApplicantFlaggedForReview",  on_applicant_flagged)
-    register_handler("ApplicantRejected",          on_applicant_rejected)
-    register_handler("OfferLetterIssued",          on_offer_letter_issued)
-    register_handler("StudentEnrolled",            on_student_enrolled)
-    register_handler("OfferLetterExpired",         on_offer_expired)
-    register_handler("ReviewItemDecided",          on_review_decided)
+    register_handler("ApplicantEligible", on_applicant_eligible)
+    register_handler("ApplicantFlaggedForReview", on_applicant_flagged)
+    register_handler("ApplicantRejected", on_applicant_rejected)
+    register_handler("OfferLetterIssued", on_offer_letter_issued)
+    register_handler("StudentEnrolled", on_student_enrolled)
+    register_handler("OfferLetterExpired", on_offer_expired)
+    register_handler("ReviewItemDecided", on_review_decided)
 
     # P8 — Merit List
-    register_handler("MeritListPublished",         on_merit_list_published)
-    register_handler("ApplicantMeritListed",       on_merit_listed)
-    register_handler("ApplicantWaitlisted",        on_waitlisted)
+    register_handler("MeritListPublished", on_merit_list_published)
+    register_handler("ApplicantMeritListed", on_merit_listed)
+    register_handler("ApplicantWaitlisted", on_waitlisted)
 
     # P9 — Offer Letter
-    register_handler("OfferAccepted",              on_offer_accepted)
-    register_handler("OfferDeclined",              on_offer_declined)
-    register_handler("OfferReminderT3",            on_offer_reminder_t3)
-    register_handler("OfferReminderT1",            on_offer_reminder_t1)
+    register_handler("OfferAccepted", on_offer_accepted)
+    register_handler("OfferDeclined", on_offer_declined)
+    register_handler("OfferReminderT3", on_offer_reminder_t3)
+    register_handler("OfferReminderT1", on_offer_reminder_t1)
 
     # P10 — Payment
-    register_handler("DemandDraftSubmitted",       on_demand_draft_submitted)
-    register_handler("PaymentVerified",            on_payment_verified)
-    register_handler("RefundApproved",             on_refund_approved)
-    register_handler("RefundProcessed",            on_refund_processed)
+    register_handler("DemandDraftSubmitted", on_demand_draft_submitted)
+    register_handler("PaymentVerified", on_payment_verified)
+    register_handler("RefundApproved", on_refund_approved)
+    register_handler("RefundProcessed", on_refund_processed)
 
     # P11 — Verification
-    register_handler("VerificationInitiated",      on_verification_initiated)
-    register_handler("VerificationCleared",        on_verification_cleared)
-    register_handler("VerificationClearedUndertaking", on_verification_cleared_undertaking)
-    register_handler("VerificationRejected",       on_verification_rejected)
+    register_handler("VerificationInitiated", on_verification_initiated)
+    register_handler("VerificationCleared", on_verification_cleared)
+    register_handler(
+        "VerificationClearedUndertaking", on_verification_cleared_undertaking
+    )
+    register_handler("VerificationRejected", on_verification_rejected)
 
     # P12 — Enrollment
-    register_handler("UniversityEmailAssigned",    on_university_email_assigned)
-    register_handler("LMSAccountCreated",          on_lms_account_created)
+    register_handler("UniversityEmailAssigned", on_university_email_assigned)
+    register_handler("LMSAccountCreated", on_lms_account_created)
 
     # Register templates into in-memory TemplateRegistry
     try:
         from server.admissions.admissions_templates import AdmissionsTemplates
+
         AdmissionsTemplates.register_all()
     except Exception as exc:
         logger.warning("P13: template registration failed (non-fatal): %s", exc)
 
-    logger.info("E04-S16 + P13: M1 event handlers registered (24 handlers, 35 templates)")
+    logger.info(
+        "E04-S16 + P13: M1 event handlers registered (24 handlers, 35 templates)"
+    )

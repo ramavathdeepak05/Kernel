@@ -20,11 +20,12 @@ Hard Constraints:
     - Classification is a Draft — Student Welfare Officer reviews before assignment.
     - CRITICAL tier automatically triggers an escalation notification regardless of human review.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -36,16 +37,16 @@ logger = logging.getLogger(__name__)
 
 _ROUTING_MAP = {
     "CRITICAL": "Dean of Students + Student Welfare Officer (immediate)",
-    "HIGH":     "Registrar or HOD (24-hour SLA)",
-    "MEDIUM":   "Student Welfare Officer or relevant Department Head (3-day SLA)",
-    "LOW":      "Student Services Helpdesk (7-day SLA)",
+    "HIGH": "Registrar or HOD (24-hour SLA)",
+    "MEDIUM": "Student Welfare Officer or relevant Department Head (3-day SLA)",
+    "LOW": "Student Services Helpdesk (7-day SLA)",
 }
 
 
 def execute_grievance_classifier(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Grievance Classifier.
@@ -75,11 +76,11 @@ def execute_grievance_classifier(
             prompt_name="student_services.grievance_classification",
             prompt_version=1,
             variables={
-                "grievance_id":     input_data.get("grievance_id", "unknown"),
-                "subject":          input_data.get("subject", ""),
-                "description":      input_data.get("description", ""),
-                "category":         input_data.get("category", ""),
-                "student_id":       input_data.get("student_id", "unknown"),
+                "grievance_id": input_data.get("grievance_id", "unknown"),
+                "subject": input_data.get("subject", ""),
+                "description": input_data.get("description", ""),
+                "category": input_data.get("category", ""),
+                "student_id": input_data.get("student_id", "unknown"),
                 "prior_grievances": input_data.get("prior_grievances", 0),
             },
             validate_schema=True,
@@ -108,28 +109,33 @@ def execute_grievance_classifier(
 
             return AIInvocationResult(
                 success=True,
-                content=json.dumps({
-                    "urgency": urgency,
-                    "confidence_score": round(score, 3),
-                    "routing": routing,
-                    "summary": vo.reasoning or "",
-                    "recommended_action": routing,
-                    "safety_flag": safety_flag,
-                }),
+                content=json.dumps(
+                    {
+                        "urgency": urgency,
+                        "confidence_score": round(score, 3),
+                        "routing": routing,
+                        "summary": vo.reasoning or "",
+                        "recommended_action": routing,
+                        "safety_flag": safety_flag,
+                    }
+                ),
                 request_id=context.request_id,
                 model=model_override or result.model or "qwen2.5",
             )
 
         return AIInvocationResult(
             success=True,
-            content=result.content or json.dumps({
-                "urgency": "MEDIUM",
-                "confidence_score": 0.0,
-                "routing": _ROUTING_MAP["MEDIUM"],
-                "summary": "Insufficient data — defaulting to MEDIUM urgency.",
-                "recommended_action": _ROUTING_MAP["MEDIUM"],
-                "safety_flag": False,
-            }),
+            content=result.content
+            or json.dumps(
+                {
+                    "urgency": "MEDIUM",
+                    "confidence_score": 0.0,
+                    "routing": _ROUTING_MAP["MEDIUM"],
+                    "summary": "Insufficient data — defaulting to MEDIUM urgency.",
+                    "recommended_action": _ROUTING_MAP["MEDIUM"],
+                    "safety_flag": False,
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "qwen2.5",
         )

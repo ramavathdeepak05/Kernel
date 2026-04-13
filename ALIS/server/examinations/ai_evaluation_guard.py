@@ -15,14 +15,13 @@ If confidence < threshold → route to faculty review WITHOUT showing AI score
 If faculty final_score deviates > deviation threshold from AI draft → require
 override_reason. Store policy_version_id on every AnswerEvaluationRecord (R12).
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
 from pydantic import BaseModel
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -38,16 +37,15 @@ class AnswerEvaluationRecord(BaseModel):
     answer_script_id: str
     question_id: str
     max_marks: float
-    ai_draft_score: Optional[float]
-    ai_confidence: Optional[float]
-    faculty_final_score: Optional[float]
-    override_reason: Optional[str]
-    policy_version_id: Optional[str]
+    ai_draft_score: float | None
+    ai_confidence: float | None
+    faculty_final_score: float | None
+    override_reason: str | None
+    policy_version_id: str | None
     status: str  # AI_PENDING | FACULTY_REVIEW | CONFIRMED | OVERRIDE_CONFIRMED
 
 
 class AIEvaluationGuardService:
-
     # ------------------------------------------------------------------
     # Record AI draft
     # ------------------------------------------------------------------
@@ -69,9 +67,9 @@ class AIEvaluationGuardService:
         Above-threshold: save as AI_PENDING (faculty confirms or overrides).
         """
         # R1 — all thresholds from policy engine
-        confidence_threshold = float(policy_engine.get_value(
-            "examinations.ai_confidence_threshold", org_id, 0.6
-        ))
+        confidence_threshold = float(
+            policy_engine.get_value("examinations.ai_confidence_threshold", org_id, 0.6)
+        )
         policy_version = policy_engine.get_version(
             "examinations.ai_confidence_threshold", org_id
         )
@@ -87,7 +85,10 @@ class AIEvaluationGuardService:
             status = "AI_PENDING"
             store_score = ai_draft_score
 
-        execute_transaction([("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO answer_evaluation_records
                 (id, org_id, answer_script_id, question_id, max_marks,
                  ai_draft_score, ai_confidence, status, policy_version_id, created_at)
@@ -97,23 +98,46 @@ class AIEvaluationGuardService:
                 ai_confidence     = EXCLUDED.ai_confidence,
                 status            = EXCLUDED.status,
                 policy_version_id = EXCLUDED.policy_version_id
-        """, (
-            record_id, org_id, answer_script_id, question_id, max_marks,
-            store_score, ai_confidence, status, policy_version,
-        ))])
+        """,
+                    (
+                        record_id,
+                        org_id,
+                        answer_script_id,
+                        question_id,
+                        max_marks,
+                        store_score,
+                        ai_confidence,
+                        status,
+                        policy_version,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="ai_draft",
+            entity_id=record_id,
+            tenant_id=org_id,
+            metadata={"source": "submit_ai_draft"},
+        )
 
         if status == "FACULTY_REVIEW":
-            DomainEventBus.publish(DomainEvent(
-                event_type="examinations.low_confidence_answer_flagged",
-                org_id=org_id,
-                payload={
-                    "record_id": record_id,
-                    "answer_script_id": answer_script_id,
-                    "question_id": question_id,
-                    "reason": "ai_confidence_below_threshold",
-                    # NOTE: ai_draft_score intentionally omitted from event payload
-                },
-            ))
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type="examinations.low_confidence_answer_flagged",
+                    org_id=org_id,
+                    payload={
+                        "record_id": record_id,
+                        "answer_script_id": answer_script_id,
+                        "question_id": question_id,
+                        "reason": "ai_confidence_below_threshold",
+                        # NOTE: ai_draft_score intentionally omitted from event payload
+                    },
+                )
+            )
 
         return {
             "record_id": record_id,
@@ -133,7 +157,7 @@ class AIEvaluationGuardService:
         org_id: str,
         record_id: str,
         faculty_final_score: float,
-        override_reason: Optional[str],
+        override_reason: str | None,
         actor_id: str,
     ) -> dict:
         """Faculty confirms or overrides the AI draft score.
@@ -157,21 +181,25 @@ class AIEvaluationGuardService:
                 f"Score already confirmed (status: {rec['status']})"
             )
 
-        if faculty_final_score < 0 or faculty_final_score > float(rec.get("max_marks", 100)):
+        if faculty_final_score < 0 or faculty_final_score > float(
+            rec.get("max_marks", 100)
+        ):
             raise BusinessRuleViolation(
                 f"faculty_final_score must be between 0 and {rec['max_marks']}"
             )
 
-        deviation_threshold = float(policy_engine.get_value(
-            "examinations.ai_deviation_threshold", org_id, 20.0
-        ))
+        deviation_threshold = float(
+            policy_engine.get_value("examinations.ai_deviation_threshold", org_id, 20.0)
+        )
 
         # Check deviation only when AI draft was actually stored (not suppressed)
         ai_draft = rec["ai_draft_score"]
         if ai_draft is not None:
             max_marks = float(rec.get("max_marks") or 100)
             if max_marks > 0:
-                deviation_pct = abs(faculty_final_score - float(ai_draft)) / max_marks * 100
+                deviation_pct = (
+                    abs(faculty_final_score - float(ai_draft)) / max_marks * 100
+                )
             else:
                 deviation_pct = 0.0
 
@@ -181,9 +209,16 @@ class AIEvaluationGuardService:
                     f"{deviation_threshold}% — override_reason is required"
                 )
 
-        final_status = "OVERRIDE_CONFIRMED" if (ai_draft is not None and override_reason) else "CONFIRMED"
+        final_status = (
+            "OVERRIDE_CONFIRMED"
+            if (ai_draft is not None and override_reason)
+            else "CONFIRMED"
+        )
 
-        execute_transaction([("""
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE answer_evaluation_records
             SET faculty_final_score = %s,
                 override_reason     = %s,
@@ -191,10 +226,18 @@ class AIEvaluationGuardService:
                 confirmed_by        = %s,
                 confirmed_at        = NOW()
             WHERE id = %s AND org_id = %s
-        """, (
-            faculty_final_score, override_reason, final_status,
-            actor_id, record_id, org_id,
-        ))])
+        """,
+                    (
+                        faculty_final_score,
+                        override_reason,
+                        final_status,
+                        actor_id,
+                        record_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -210,15 +253,17 @@ class AIEvaluationGuardService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="examinations.answer_score_confirmed",
-            org_id=org_id,
-            payload={
-                "record_id": record_id,
-                "faculty_final_score": faculty_final_score,
-                "status": final_status,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="examinations.answer_score_confirmed",
+                org_id=org_id,
+                payload={
+                    "record_id": record_id,
+                    "faculty_final_score": faculty_final_score,
+                    "status": final_status,
+                },
+            )
+        )
 
         return {
             "record_id": record_id,
@@ -236,14 +281,17 @@ class AIEvaluationGuardService:
 
         Triggers alert if acceptance rate > rubber_stamp_threshold (R1).
         """
-        rubber_stamp_threshold = float(policy_engine.get_value(
-            "examinations.rubber_stamp_threshold", org_id, 95.0
-        ))
-        min_samples = int(policy_engine.get_value(
-            "examinations.ai_batch_rubber_stamp_alert", org_id, 10
-        ))
+        rubber_stamp_threshold = float(
+            policy_engine.get_value("examinations.rubber_stamp_threshold", org_id, 95.0)
+        )
+        min_samples = int(
+            policy_engine.get_value(
+                "examinations.ai_batch_rubber_stamp_alert", org_id, 10
+            )
+        )
 
-        rows = execute_query("""
+        rows = execute_query(
+            """
             SELECT
                 COUNT(*) AS total,
                 COUNT(*) FILTER (WHERE status = 'CONFIRMED' AND override_reason IS NULL) AS rubber_stamped,
@@ -254,7 +302,9 @@ class AIEvaluationGuardService:
                   SELECT id FROM answer_scripts WHERE batch_id = %s
               )
               AND status IN ('CONFIRMED', 'OVERRIDE_CONFIRMED')
-        """, (org_id, batch_id))
+        """,
+            (org_id, batch_id),
+        )
 
         if not rows or int(rows[0]["total"] or 0) < min_samples:
             return {"anomaly": False, "reason": "insufficient_samples"}
@@ -266,17 +316,19 @@ class AIEvaluationGuardService:
         anomaly = acceptance_rate > rubber_stamp_threshold
 
         if anomaly:
-            DomainEventBus.publish(DomainEvent(
-                event_type="examinations.rubber_stamp_anomaly",
-                org_id=org_id,
-                payload={
-                    "batch_id": batch_id,
-                    "acceptance_rate_pct": round(acceptance_rate, 1),
-                    "threshold_pct": rubber_stamp_threshold,
-                    "total_records": total,
-                    "rubber_stamped": stamped,
-                },
-            ))
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type="examinations.rubber_stamp_anomaly",
+                    org_id=org_id,
+                    payload={
+                        "batch_id": batch_id,
+                        "acceptance_rate_pct": round(acceptance_rate, 1),
+                        "threshold_pct": rubber_stamp_threshold,
+                        "total_records": total,
+                        "rubber_stamped": stamped,
+                    },
+                )
+            )
 
         return {
             "anomaly": anomaly,
@@ -293,7 +345,8 @@ class AIEvaluationGuardService:
     @classmethod
     def get_faculty_review_queue(cls, org_id: str, faculty_id: str) -> list:
         """Return pending evaluation records for faculty to confirm."""
-        return execute_query("""
+        return execute_query(
+            """
             SELECT r.id, r.answer_script_id, r.question_id, r.max_marks,
                    r.ai_confidence, r.status,
                    -- Only show AI score if status = AI_PENDING (not FACULTY_REVIEW)
@@ -304,4 +357,6 @@ class AIEvaluationGuardService:
               AND s.assigned_evaluator = %s
               AND r.status IN ('AI_PENDING', 'FACULTY_REVIEW')
             ORDER BY r.created_at ASC
-        """, (org_id, faculty_id))
+        """,
+            (org_id, faculty_id),
+        )

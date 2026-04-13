@@ -16,15 +16,16 @@ Roles:
 - Registrar/CoE: approve eligibility lists, approve condonations
 - Faculty: submit attendance, request condonation for students
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.policy_engine import policy_engine
 from server.db_service import execute_query, execute_transaction
 
@@ -66,7 +67,7 @@ class ExamEligibilityService:
         student_id: str,
         exam_id: str,
         course_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Run all eligibility checks for a student-course-exam combination."""
         checks = {}
         eligible = True
@@ -83,12 +84,12 @@ class ExamEligibilityService:
             eligible = False
 
         # 2. Attendance gate
-        attendance_threshold = float(policy_engine.get_value(
-            "examinations.attendance_threshold", org_id, 75.0
-        ))
-        condonation_floor = float(policy_engine.get_value(
-            "examinations.condonation_floor", org_id, 65.0
-        ))
+        attendance_threshold = float(
+            policy_engine.get_value("examinations.attendance_threshold", org_id, 75.0)
+        )
+        condonation_floor = float(
+            policy_engine.get_value("examinations.condonation_floor", org_id, 65.0)
+        )
 
         attendance_rows = execute_query(
             """
@@ -102,12 +103,18 @@ class ExamEligibilityService:
             tenant_id=org_id,
         )
         if attendance_rows and attendance_rows[0]["total"] > 0:
-            att_pct = (attendance_rows[0]["present"] / attendance_rows[0]["total"]) * 100
+            att_pct = (
+                attendance_rows[0]["present"] / attendance_rows[0]["total"]
+            ) * 100
         else:
             att_pct = 0.0
 
         if att_pct >= attendance_threshold:
-            checks["attendance"] = {"passed": True, "percentage": round(att_pct, 1), "threshold": attendance_threshold}
+            checks["attendance"] = {
+                "passed": True,
+                "percentage": round(att_pct, 1),
+                "threshold": attendance_threshold,
+            }
         elif att_pct >= condonation_floor:
             # Check for approved condonation
             condonation = execute_query(
@@ -117,21 +124,29 @@ class ExamEligibilityService:
                 (student_id, course_id, exam_id, org_id),
                 tenant_id=org_id,
             )
-            if condonation and condonation[0]["status"] == CondonationStatus.APPROVED.value:
+            if (
+                condonation
+                and condonation[0]["status"] == CondonationStatus.APPROVED.value
+            ):
                 checks["attendance"] = {
-                    "passed": True, "percentage": round(att_pct, 1),
+                    "passed": True,
+                    "percentage": round(att_pct, 1),
                     "condonation": "APPROVED",
                 }
             else:
                 checks["attendance"] = {
-                    "passed": False, "percentage": round(att_pct, 1),
-                    "condonation": condonation[0]["status"] if condonation else "NOT_APPLIED",
+                    "passed": False,
+                    "percentage": round(att_pct, 1),
+                    "condonation": condonation[0]["status"]
+                    if condonation
+                    else "NOT_APPLIED",
                     "reason": f"Attendance {att_pct:.1f}% below {attendance_threshold}% (condonation possible)",
                 }
                 eligible = False
         else:
             checks["attendance"] = {
-                "passed": False, "percentage": round(att_pct, 1),
+                "passed": False,
+                "percentage": round(att_pct, 1),
                 "reason": f"Attendance {att_pct:.1f}% below condonation floor {condonation_floor}%",
             }
             eligible = False
@@ -168,7 +183,9 @@ class ExamEligibilityService:
             "exam_id": exam_id,
             "course_id": course_id,
             "eligible": eligible,
-            "status": EligibilityStatus.ELIGIBLE.value if eligible else EligibilityStatus.NOT_ELIGIBLE.value,
+            "status": EligibilityStatus.ELIGIBLE.value
+            if eligible
+            else EligibilityStatus.NOT_ELIGIBLE.value,
             "checks": checks,
         }
 
@@ -181,23 +198,35 @@ class ExamEligibilityService:
         course_id: str,
         reason: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Student or faculty requests attendance condonation."""
         condonation_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO exam_condonations
                     (id, org_id, student_id, exam_id, course_id, reason, status,
                      requested_by, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (condonation_id, org_id, student_id, exam_id, course_id,
-                 reason, CondonationStatus.PENDING.value, actor_id, now),
-            )
-        ], tenant_id=org_id)
+                    (
+                        condonation_id,
+                        org_id,
+                        student_id,
+                        exam_id,
+                        course_id,
+                        reason,
+                        CondonationStatus.PENDING.value,
+                        actor_id,
+                        now,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         return {"id": condonation_id, "status": CondonationStatus.PENDING.value}
 
@@ -209,11 +238,17 @@ class ExamEligibilityService:
         decision: str,
         actor_id: str,
         actor_role: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """HOD recommends or Registrar/CoE approves/rejects condonation."""
         valid_decisions = {
-            "HOD": {CondonationStatus.HOD_RECOMMENDED.value, CondonationStatus.REJECTED.value},
-            "REGISTRAR": {CondonationStatus.APPROVED.value, CondonationStatus.REJECTED.value},
+            "HOD": {
+                CondonationStatus.HOD_RECOMMENDED.value,
+                CondonationStatus.REJECTED.value,
+            },
+            "REGISTRAR": {
+                CondonationStatus.APPROVED.value,
+                CondonationStatus.REJECTED.value,
+            },
             "COE": {CondonationStatus.APPROVED.value, CondonationStatus.REJECTED.value},
         }
 
@@ -221,13 +256,16 @@ class ExamEligibilityService:
         if decision not in allowed:
             raise ValueError(f"Role {actor_role} cannot set decision to {decision}")
 
-        execute_transaction([
-            (
-                "UPDATE exam_condonations SET status = %s, decided_by = %s, decided_at = NOW() "
-                "WHERE id = %s AND org_id = %s",
-                (decision, actor_id, condonation_id, org_id),
-            )
-        ], tenant_id=org_id)
+        execute_transaction(
+            [
+                (
+                    "UPDATE exam_condonations SET status = %s, decided_by = %s, decided_at = NOW() "
+                    "WHERE id = %s AND org_id = %s",
+                    (decision, actor_id, condonation_id, org_id),
+                )
+            ],
+            tenant_id=org_id,
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,

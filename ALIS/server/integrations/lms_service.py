@@ -17,19 +17,19 @@ Settings-gated globally via:  settings.lms_base_url + settings.lms_api_token
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Moodle function name constants
 # ---------------------------------------------------------------------------
-_FN_CREATE_USERS   = "core_user_create_users"
-_FN_UPDATE_USERS   = "core_user_update_users"
-_FN_ENROL_USERS    = "core_enrol_manual_enrol_users"
-_FN_GET_USERS      = "core_user_get_users"
-_FN_GET_COURSES    = "core_course_get_courses"
-_FN_GET_GRADES     = "gradereport_user_get_grade_items"
+_FN_CREATE_USERS = "core_user_create_users"
+_FN_UPDATE_USERS = "core_user_update_users"
+_FN_ENROL_USERS = "core_enrol_manual_enrol_users"
+_FN_GET_USERS = "core_user_get_users"
+_FN_GET_COURSES = "core_course_get_courses"
+_FN_GET_GRADES = "gradereport_user_get_grade_items"
 
 _SKIPPED = {"status": "skipped", "reason": "LMS not configured"}
 
@@ -44,6 +44,7 @@ class MoodleLMSService:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
 
     # -------------------------------------------------------------------------
@@ -59,7 +60,7 @@ class MoodleLMSService:
         org_id: str,
         student_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Create or update a student account in Moodle.
 
@@ -78,12 +79,16 @@ class MoodleLMSService:
 
         student = self._fetch_student(org_id, student_id)
         if not student:
-            logger.error("lms_service.provision_student: student %s not found in org %s", student_id, org_id)
+            logger.error(
+                "lms_service.provision_student: student %s not found in org %s",
+                student_id,
+                org_id,
+            )
             return {"status": "error", "reason": "student not found"}
 
         username = self._moodle_username(student)
-        email    = student.get("email", "")
-        fullname = f"{student.get('first_name', '')} {student.get('last_name', '')}".strip()
+        email = student.get("email", "")
+        (f"{student.get('first_name', '')} {student.get('last_name', '')}".strip())
 
         # --- Check whether account already exists in Moodle ---
         existing = self._get_moodle_user(username)
@@ -92,10 +97,10 @@ class MoodleLMSService:
             self._call_moodle(
                 _FN_UPDATE_USERS,
                 {
-                    "users[0][id]":        moodle_user_id,
-                    "users[0][email]":     email,
+                    "users[0][id]": moodle_user_id,
+                    "users[0][email]": email,
                     "users[0][firstname]": student.get("first_name", ""),
-                    "users[0][lastname]":  student.get("last_name", ""),
+                    "users[0][lastname]": student.get("last_name", ""),
                 },
             )
             action = "updated"
@@ -103,14 +108,16 @@ class MoodleLMSService:
             resp = self._call_moodle(
                 _FN_CREATE_USERS,
                 {
-                    "users[0][username]":  username,
-                    "users[0][password]":  self._temp_password(student),
+                    "users[0][username]": username,
+                    "users[0][password]": self._temp_password(student),
                     "users[0][firstname]": student.get("first_name", ""),
-                    "users[0][lastname]":  student.get("last_name", ""),
-                    "users[0][email]":     email,
+                    "users[0][lastname]": student.get("last_name", ""),
+                    "users[0][email]": email,
                 },
             )
-            moodle_user_id = resp[0].get("id") if isinstance(resp, list) and resp else None
+            moodle_user_id = (
+                resp[0].get("id") if isinstance(resp, list) and resp else None
+            )
             action = "created"
 
         # --- Audit entry ---
@@ -138,7 +145,9 @@ class MoodleLMSService:
 
         logger.info(
             "lms_service.provision_student: student=%s moodle_id=%s action=%s",
-            student_id, moodle_user_id, action,
+            student_id,
+            moodle_user_id,
+            action,
         )
         return {
             "status": "ok",
@@ -152,9 +161,9 @@ class MoodleLMSService:
         self,
         org_id: str,
         student_id: str,
-        course_ids: List[str],
+        course_ids: list[str],
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Enrol the student in the given Moodle course IDs.
 
@@ -172,13 +181,16 @@ class MoodleLMSService:
         username = self._moodle_username(student)
         moodle_user = self._get_moodle_user(username)
         if not moodle_user:
-            return {"status": "error", "reason": "moodle account not provisioned yet; call provision_student first"}
+            return {
+                "status": "error",
+                "reason": "moodle account not provisioned yet; call provision_student first",
+            }
 
         moodle_user_id = moodle_user["id"]
-        params: Dict[str, Any] = {}
+        params: dict[str, Any] = {}
         for idx, course_id in enumerate(course_ids):
-            params[f"enrolments[{idx}][roleid]"]   = 5   # student role (Moodle default)
-            params[f"enrolments[{idx}][userid]"]   = moodle_user_id
+            params[f"enrolments[{idx}][roleid]"] = 5  # student role (Moodle default)
+            params[f"enrolments[{idx}][userid]"] = moodle_user_id
             params[f"enrolments[{idx}][courseid]"] = int(course_id)
 
         self._call_moodle(_FN_ENROL_USERS, params)
@@ -194,7 +206,8 @@ class MoodleLMSService:
 
         logger.info(
             "lms_service.enrol_in_courses: student=%s courses=%s",
-            student_id, course_ids,
+            student_id,
+            course_ids,
         )
         return {
             "status": "ok",
@@ -207,7 +220,7 @@ class MoodleLMSService:
         self,
         org_id: str,
         student_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Fetch grade data from Moodle for a student and persist it in the
         lms_grade_sync table in ALIS.
@@ -235,26 +248,31 @@ class MoodleLMSService:
             {"userid": moodle_user_id},
         )
 
-        grades: List[Dict[str, Any]] = []
+        grades: list[dict[str, Any]] = []
         if isinstance(grade_data, dict):
             for item in grade_data.get("usergrades", []):
                 for grade_item in item.get("gradeitems", []):
-                    grades.append({
-                        "course_id":   item.get("courseid"),
-                        "course_name": item.get("coursefullname"),
-                        "item_name":   grade_item.get("itemname"),
-                        "grade":       grade_item.get("graderaw"),
-                        "grade_max":   grade_item.get("grademax"),
-                        "grade_min":   grade_item.get("grademin"),
-                        "percentage":  grade_item.get("percentageformatted"),
-                    })
+                    grades.append(
+                        {
+                            "course_id": item.get("courseid"),
+                            "course_name": item.get("coursefullname"),
+                            "item_name": grade_item.get("itemname"),
+                            "grade": grade_item.get("graderaw"),
+                            "grade_max": grade_item.get("grademax"),
+                            "grade_min": grade_item.get("grademin"),
+                            "percentage": grade_item.get("percentageformatted"),
+                        }
+                    )
 
         # Upsert into ALIS (lms_grade_sync table created by migration 0014+)
-        from server.db_service import execute_transaction
         import json as _json
-        execute_transaction([
-            (
-                """
+
+        from server.db_service import execute_transaction
+
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO lms_grade_sync (org_id, student_id, moodle_user_id, grades, synced_at)
                 VALUES (%s, %s, %s, %s, NOW())
                 ON CONFLICT (org_id, student_id) DO UPDATE
@@ -262,13 +280,15 @@ class MoodleLMSService:
                         grades         = EXCLUDED.grades,
                         synced_at      = EXCLUDED.synced_at
                 """,
-                (org_id, student_id, moodle_user_id, _json.dumps(grades)),
-            )
-        ])
+                    (org_id, student_id, moodle_user_id, _json.dumps(grades)),
+                )
+            ]
+        )
 
         logger.info(
             "lms_service.sync_grades_to_alis: student=%s grade_items=%d",
-            student_id, len(grades),
+            student_id,
+            len(grades),
         )
         return {
             "status": "ok",
@@ -282,7 +302,7 @@ class MoodleLMSService:
         org_id: str,
         student_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Suspend the student's Moodle account on graduation or withdrawal.
 
@@ -305,8 +325,8 @@ class MoodleLMSService:
         self._call_moodle(
             _FN_UPDATE_USERS,
             {
-                "users[0][id]":       moodle_user_id,
-                "users[0][suspended]": 1,   # 1 = suspended, 0 = active
+                "users[0][id]": moodle_user_id,
+                "users[0][suspended]": 1,  # 1 = suspended, 0 = active
             },
         )
 
@@ -327,7 +347,11 @@ class MoodleLMSService:
             payload={"moodle_user_id": moodle_user_id},
         )
 
-        logger.info("lms_service.deprovision_student: student=%s moodle_id=%s suspended", student_id, moodle_user_id)
+        logger.info(
+            "lms_service.deprovision_student: student=%s moodle_id=%s suspended",
+            student_id,
+            moodle_user_id,
+        )
         return {
             "status": "ok",
             "action": "suspended",
@@ -342,20 +366,25 @@ class MoodleLMSService:
     def _check_enabled(self, org_id: str) -> bool:
         """Return False (and log a warning) when LMS is not configured or feature-flagged off."""
         if not self.is_enabled():
-            logger.warning("lms_service: LMS not configured (LMS_BASE_URL / LMS_API_TOKEN missing)")
+            logger.warning(
+                "lms_service: LMS not configured (LMS_BASE_URL / LMS_API_TOKEN missing)"
+            )
             return False
         # Per-tenant feature flag check
         try:
             from server.core.feature_flags import feature_flags
+
             if not feature_flags.is_enabled("integrations.lms_enabled", org_id):
                 logger.info("lms_service: LMS feature flag disabled for org=%s", org_id)
                 return False
         except Exception:
             # Feature flags unavailable (e.g. test environment) — allow through
-            pass
+            pass  # noqa: S110 — intentionally suppressed
         return True
 
-    def _call_moodle(self, wsfunction: str, extra_params: Optional[Dict[str, Any]] = None) -> Any:
+    def _call_moodle(
+        self, wsfunction: str, extra_params: dict[str, Any] | None = None
+    ) -> Any:
         """
         POST to the Moodle web service endpoint.
 
@@ -366,10 +395,10 @@ class MoodleLMSService:
         import httpx
 
         url = f"{self._settings.lms_base_url.rstrip('/')}/webservice/rest/server.php"
-        params: Dict[str, Any] = {
-            "wstoken":             self._settings.lms_api_token,
-            "moodlewsrestformat":  "json",
-            "wsfunction":          wsfunction,
+        params: dict[str, Any] = {
+            "wstoken": self._settings.lms_api_token,
+            "moodlewsrestformat": "json",
+            "wsfunction": wsfunction,
         }
         if extra_params:
             params.update(extra_params)
@@ -380,35 +409,46 @@ class MoodleLMSService:
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:
-            logger.error("lms_service._call_moodle: wsfunction=%s error=%s", wsfunction, exc)
+            logger.error(
+                "lms_service._call_moodle: wsfunction=%s error=%s", wsfunction, exc
+            )
             raise
 
         # Moodle returns {"exception": "...", "message": "..."} on errors
         if isinstance(data, dict) and "exception" in data:
             logger.error(
                 "lms_service._call_moodle: Moodle exception for %s — %s: %s",
-                wsfunction, data.get("exception"), data.get("message"),
+                wsfunction,
+                data.get("exception"),
+                data.get("message"),
             )
             raise RuntimeError(f"Moodle error [{wsfunction}]: {data.get('message')}")
 
         return data
 
-    def _get_moodle_user(self, username: str) -> Optional[Dict[str, Any]]:
+    def _get_moodle_user(self, username: str) -> dict[str, Any] | None:
         """Look up a Moodle user by username. Returns the user dict or None."""
         try:
             resp = self._call_moodle(
                 _FN_GET_USERS,
                 {"criteria[0][key]": "username", "criteria[0][value]": username},
             )
-            users: List[Dict[str, Any]] = resp.get("users", []) if isinstance(resp, dict) else []
+            users: list[dict[str, Any]] = (
+                resp.get("users", []) if isinstance(resp, dict) else []
+            )
             return users[0] if users else None
         except Exception as exc:
-            logger.warning("lms_service._get_moodle_user: failed for username=%s — %s", username, exc)
+            logger.warning(
+                "lms_service._get_moodle_user: failed for username=%s — %s",
+                username,
+                exc,
+            )
             return None
 
-    def _fetch_student(self, org_id: str, student_id: str) -> Optional[Dict[str, Any]]:
+    def _fetch_student(self, org_id: str, student_id: str) -> dict[str, Any] | None:
         """Fetch student row from ALIS DB."""
         from server.db_service import execute_query
+
         rows = execute_query(
             """
             SELECT id, org_id, roll_number, email, first_name, last_name, status
@@ -420,13 +460,13 @@ class MoodleLMSService:
         return dict(rows[0]) if rows else None
 
     @staticmethod
-    def _moodle_username(student: Dict[str, Any]) -> str:
+    def _moodle_username(student: dict[str, Any]) -> str:
         """Derive the canonical Moodle username from the student record."""
         roll = student.get("roll_number") or student.get("id", "")
         return f"student_{str(roll).lower()}"
 
     @staticmethod
-    def _temp_password(student: Dict[str, Any]) -> str:
+    def _temp_password(student: dict[str, Any]) -> str:
         """
         Generate an initial password for new Moodle accounts.
 
@@ -445,22 +485,44 @@ class MoodleLMSService:
         action: str,
         entity_type: str,
         entity_id: str,
-        detail: Dict[str, Any],
+        detail: dict[str, Any],
     ) -> None:
         """Append an immutable record to audit_ledger."""
         import json as _json
+
         from server.db_service import execute_transaction
+
         try:
-            execute_transaction([
-                (
-                    """
+            execute_transaction(
+                [
+                    (
+                        """
                     INSERT INTO audit_ledger
                         (org_id, actor_id, action, entity_type, entity_id, detail, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, NOW())
                     """,
-                    (org_id, actor_id, action, entity_type, entity_id, _json.dumps(detail)),
-                )
-            ])
+                        (
+                            org_id,
+                            actor_id,
+                            action,
+                            entity_type,
+                            entity_id,
+                            _json.dumps(detail),
+                        ),
+                    )
+                ]
+            )
+            from server.core.audit import AuditAction, AuditLog
+
+            AuditLog.log(
+                action=AuditAction.CREATE,
+                actor_id=actor_id,
+                actor_role="system",
+                entity_type="audit_ledger",
+                entity_id=entity_id,
+                tenant_id=org_id,
+                metadata={"source": "lms_write_audit", "lms_action": action},
+            )
         except Exception as exc:
             # Audit failures must never abort the main flow
             logger.error("lms_service._write_audit: failed — %s", exc)
@@ -471,19 +533,24 @@ class MoodleLMSService:
         event_type: str,
         entity_id: str,
         actor_id: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
     ) -> None:
         """Fire a domain event via the event bus."""
         try:
             from server.core.domain_events import DomainEvent, DomainEventBus
-            DomainEventBus.publish(DomainEvent(
-                event_type=event_type,
-                entity_type="student",
-                entity_id=entity_id,
-                org_id=org_id,
-                payload=payload,
-                actor_id=actor_id,
-            ))
+
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type=event_type,
+                    entity_type="student",
+                    entity_id=entity_id,
+                    org_id=org_id,
+                    payload=payload,
+                    actor_id=actor_id,
+                )
+            )
         except Exception as exc:
             # Event publish failures must not abort provisioning
-            logger.error("lms_service._publish_event: failed to publish %s — %s", event_type, exc)
+            logger.error(
+                "lms_service._publish_event: failed to publish %s — %s", event_type, exc
+            )

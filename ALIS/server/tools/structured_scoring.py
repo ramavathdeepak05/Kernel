@@ -46,12 +46,13 @@ Output data keys:
         "scoring_complete": bool
     }
 """
+
 from __future__ import annotations
 
-from typing import Any, ClassVar, Dict, List
+from typing import Any, ClassVar
 
-from server.core.tool_registry import BaseTool, ToolOutputSchema
 from server.core.exceptions import ToolSchemaViolationError
+from server.core.tool_registry import BaseTool, ToolOutputSchema
 
 
 class StructuredScoringTool(BaseTool):
@@ -72,7 +73,7 @@ class StructuredScoringTool(BaseTool):
 
     def execute(
         self,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         tenant_id: str,
     ) -> ToolOutputSchema:
         """
@@ -109,7 +110,7 @@ class StructuredScoringTool(BaseTool):
             )
 
         # Build weight lookup from rubric
-        weight_map: Dict[str, float] = {}
+        weight_map: dict[str, float] = {}
         for comp in components:
             name = comp.get("name")
             weight = comp.get("weight")
@@ -117,14 +118,19 @@ class StructuredScoringTool(BaseTool):
                 weight_map[str(name)] = float(weight)
 
         # Build score lookup from input
-        score_map: Dict[str, Dict[str, float]] = {}
+        score_map: dict[str, dict[str, float]] = {}
         for entry in scores:
             if not isinstance(entry, dict):
                 continue
             comp_name = entry.get("component")
             raw = entry.get("raw_score")
             max_s = entry.get("max_score")
-            if comp_name and isinstance(raw, (int, float)) and isinstance(max_s, (int, float)) and max_s > 0:
+            if (
+                comp_name
+                and isinstance(raw, (int, float))
+                and isinstance(max_s, (int, float))
+                and max_s > 0
+            ):
                 score_map[str(comp_name)] = {
                     "raw_score": float(raw),
                     "max_score": float(max_s),
@@ -133,7 +139,7 @@ class StructuredScoringTool(BaseTool):
         # Compute weighted contributions
         component_scores = []
         aggregate = 0.0
-        missing: List[str] = []
+        missing: list[str] = []
 
         for comp_name, weight in weight_map.items():
             if comp_name not in score_map:
@@ -146,14 +152,16 @@ class StructuredScoringTool(BaseTool):
             weighted_contribution = (percentage * weight) / 100.0
 
             aggregate += weighted_contribution
-            component_scores.append({
-                "component": comp_name,
-                "raw_score": raw_score,
-                "max_score": max_score,
-                "percentage": round(percentage, 4),
-                "weight": weight,
-                "weighted_contribution": round(weighted_contribution, 4),
-            })
+            component_scores.append(
+                {
+                    "component": comp_name,
+                    "raw_score": raw_score,
+                    "max_score": max_score,
+                    "percentage": round(percentage, 4),
+                    "weight": weight,
+                    "weighted_contribution": round(weighted_contribution, 4),
+                }
+            )
 
         return ToolOutputSchema(
             tool_id=self.tool_id,

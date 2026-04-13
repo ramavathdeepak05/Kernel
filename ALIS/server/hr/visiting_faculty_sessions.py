@@ -12,6 +12,7 @@ Flow:
 
 Only sessions where faculty_confirmed=TRUE AND status='DELIVERED' are payable.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -19,11 +20,9 @@ import logging
 import random
 import string
 import uuid
-from datetime import date, datetime, timezone
-from typing import Optional
+from datetime import date
 
 from pydantic import BaseModel, field_validator
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -36,13 +35,14 @@ logger = logging.getLogger(__name__)
 # Models
 # ---------------------------------------------------------------------------
 
+
 class SessionCreate(BaseModel):
     faculty_id: str
     session_date: date
-    start_time: str        # HH:MM
-    end_time: str          # HH:MM
+    start_time: str  # HH:MM
+    end_time: str  # HH:MM
     session_type: str = "lecture"
-    timetable_slot_id: Optional[str] = None
+    timetable_slot_id: str | None = None
     rate_per_session: float
     status: str = "SCHEDULED"
 
@@ -71,8 +71,8 @@ class SessionOTPConfirm(BaseModel):
 # Service
 # ---------------------------------------------------------------------------
 
-class VisitingFacultySessionService:
 
+class VisitingFacultySessionService:
     @classmethod
     def create_session(
         cls,
@@ -96,24 +96,42 @@ class VisitingFacultySessionService:
             raise BusinessRuleViolation("rate_per_session must be positive")
 
         sid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO visiting_faculty_session_log
                 (id, org_id, faculty_id, timetable_slot_id, session_date,
                  start_time, end_time, session_type, status, rate_per_session)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (sid, org_id, req.faculty_id, req.timetable_slot_id,
-             req.session_date, req.start_time, req.end_time,
-             req.session_type, req.status, req.rate_per_session),
-        )])
+                    (
+                        sid,
+                        org_id,
+                        req.faculty_id,
+                        req.timetable_slot_id,
+                        req.session_date,
+                        req.start_time,
+                        req.end_time,
+                        req.session_type,
+                        req.status,
+                        req.rate_per_session,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
-            org_id=org_id, actor_id=actor_id, actor_type="human",
+            org_id=org_id,
+            actor_id=actor_id,
+            actor_type="human",
             action=AuditAction.CREATE,
             resource_type="visiting_faculty_session",
             resource_id=sid,
-            detail={"faculty_id": req.faculty_id, "session_date": str(req.session_date)},
+            detail={
+                "faculty_id": req.faculty_id,
+                "session_date": str(req.session_date),
+            },
         )
         return cls.get(org_id, sid)
 
@@ -132,7 +150,7 @@ class VisitingFacultySessionService:
         cls,
         org_id: str,
         faculty_id: str,
-        month: Optional[date] = None,
+        month: date | None = None,
         payable_only: bool = False,
     ) -> list[dict]:
         sql = """
@@ -143,7 +161,9 @@ class VisitingFacultySessionService:
         params: list = [org_id, faculty_id]
 
         if month:
-            sql += " AND DATE_TRUNC('month', session_date) = DATE_TRUNC('month', %s::date)"
+            sql += (
+                " AND DATE_TRUNC('month', session_date) = DATE_TRUNC('month', %s::date)"
+            )
             params.append(str(month))
 
         if payable_only:
@@ -167,14 +187,30 @@ class VisitingFacultySessionService:
                 f"Session is {session['status']} — OTP only valid for SCHEDULED sessions"
             )
 
-        execute_transaction([(
-            """UPDATE visiting_faculty_session_log
+        execute_transaction(
+            [
+                (
+                    """UPDATE visiting_faculty_session_log
                SET faculty_otp_hash = %s, updated_at = NOW()
                WHERE id = %s AND org_id = %s""",
-            (otp_hash, session_id, org_id),
-        )])
+                    (otp_hash, session_id, org_id),
+                )
+            ]
+        )
 
-        logger.info("OTP generated for session=%s faculty=%s", session_id, session["faculty_id"])
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="generate_otp",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "generate_otp"},
+        )
+
+        logger.info(
+            "OTP generated for session=%s faculty=%s", session_id, session["faculty_id"]
+        )
         return otp  # caller sends this via SMS
 
     @classmethod
@@ -198,18 +234,24 @@ class VisitingFacultySessionService:
         if provided_hash != session["faculty_otp_hash"]:
             raise BusinessRuleViolation("Invalid OTP")
 
-        execute_transaction([(
-            """UPDATE visiting_faculty_session_log
+        execute_transaction(
+            [
+                (
+                    """UPDATE visiting_faculty_session_log
                SET faculty_confirmed = TRUE,
                    confirmed_at = NOW(),
                    status = 'DELIVERED',
                    updated_at = NOW()
                WHERE id = %s AND org_id = %s""",
-            (session_id, org_id),
-        )])
+                    (session_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
-            org_id=org_id, actor_id=actor_id, actor_type="human",
+            org_id=org_id,
+            actor_id=actor_id,
+            actor_type="human",
             action=AuditAction.UPDATE,
             resource_type="visiting_faculty_session",
             resource_id=session_id,
@@ -218,7 +260,9 @@ class VisitingFacultySessionService:
 
         logger.info(
             "Session confirmed: id=%s faculty=%s date=%s",
-            session_id, session["faculty_id"], session["session_date"],
+            session_id,
+            session["faculty_id"],
+            session["session_date"],
         )
         return cls.get(org_id, session_id)
 
@@ -232,17 +276,33 @@ class VisitingFacultySessionService:
         """HOD verifies an UNSCHEDULED_ADDED session before it becomes payable."""
         session = cls.get(org_id, session_id)
         if session["status"] != "UNSCHEDULED_ADDED":
-            raise BusinessRuleViolation("HOD verification only applies to UNSCHEDULED_ADDED sessions")
+            raise BusinessRuleViolation(
+                "HOD verification only applies to UNSCHEDULED_ADDED sessions"
+            )
 
-        execute_transaction([(
-            """UPDATE visiting_faculty_session_log
+        execute_transaction(
+            [
+                (
+                    """UPDATE visiting_faculty_session_log
                SET hod_verified = TRUE,
                    hod_verified_at = NOW(),
                    hod_verified_by = %s,
                    updated_at = NOW()
                WHERE id = %s AND org_id = %s""",
-            (actor_id, session_id, org_id),
-        )])
+                    (actor_id, session_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="hod_verify_unscheduled",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "hod_verify_unscheduled"},
+        )
 
         return cls.get(org_id, session_id)
 
@@ -260,15 +320,21 @@ class VisitingFacultySessionService:
                 "Cannot cancel an already-confirmed session. Create a reversal entry instead."
             )
 
-        execute_transaction([(
-            """UPDATE visiting_faculty_session_log
+        execute_transaction(
+            [
+                (
+                    """UPDATE visiting_faculty_session_log
                SET status = 'CANCELLED', updated_at = NOW()
                WHERE id = %s AND org_id = %s""",
-            (session_id, org_id),
-        )])
+                    (session_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
-            org_id=org_id, actor_id=actor_id, actor_type="human",
+            org_id=org_id,
+            actor_id=actor_id,
+            actor_type="human",
             action=AuditAction.UPDATE,
             resource_type="visiting_faculty_session",
             resource_id=session_id,
@@ -313,28 +379,36 @@ class VisitingFacultySessionService:
 
         if session_ids:
             placeholders = ", ".join(["%s"] * len(session_ids))
-            execute_transaction([(
-                f"""UPDATE visiting_faculty_session_log
+            execute_transaction(
+                [
+                    (
+                        f"""UPDATE visiting_faculty_session_log  # noqa: S608
                     SET included_in_payroll = TRUE, payroll_month = %s
                     WHERE id IN ({placeholders}) AND org_id = %s""",
-                (str(payroll_month), *session_ids, org_id),
-            )])
+                        (str(payroll_month), *session_ids, org_id),
+                    )
+                ]
+            )
 
         # Emit domain event for FM-5
-        DomainEventBus.publish(DomainEvent(
-            event_type="payroll.visiting_faculty_inputs_ready",
-            org_id=org_id,
-            payload={
-                "faculty_id": faculty_id,
-                "payroll_month": str(payroll_month),
-                "total_sessions": total_sessions,
-                "payable_amount": payable_amount,
-                "session_ids": session_ids,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="payroll.visiting_faculty_inputs_ready",
+                org_id=org_id,
+                payload={
+                    "faculty_id": faculty_id,
+                    "payroll_month": str(payroll_month),
+                    "total_sessions": total_sessions,
+                    "payable_amount": payable_amount,
+                    "session_ids": session_ids,
+                },
+            )
+        )
 
         AuditLog.log(
-            org_id=org_id, actor_id=actor_id, actor_type="human",
+            org_id=org_id,
+            actor_id=actor_id,
+            actor_type="human",
             action=AuditAction.UPDATED,
             resource_type="visiting_faculty_payroll",
             resource_id=faculty_id,
@@ -347,7 +421,10 @@ class VisitingFacultySessionService:
 
         logger.info(
             "Payroll input: faculty=%s month=%s sessions=%d amount=%.2f",
-            faculty_id, payroll_month, total_sessions, payable_amount,
+            faculty_id,
+            payroll_month,
+            total_sessions,
+            payable_amount,
         )
 
         return {

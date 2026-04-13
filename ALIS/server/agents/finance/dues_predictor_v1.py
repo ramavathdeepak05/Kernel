@@ -18,11 +18,12 @@ Hard Constraints:
     - Read-only. Never mutates state.
     - Risk tier is a Draft — Finance Officer confirms before intervention.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -38,8 +39,8 @@ _HIGH_TIER_DEFAULT = 3 / 4
 
 def execute_dues_predictor(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Dues Predictor.
@@ -69,14 +70,14 @@ def execute_dues_predictor(
             prompt_name="finance.dues_prediction",
             prompt_version=1,
             variables={
-                "student_id":         input_data.get("student_id", "unknown"),
-                "total_dues":         input_data.get("total_dues", 0),
-                "overdue_days":       input_data.get("overdue_days", 0),
+                "student_id": input_data.get("student_id", "unknown"),
+                "total_dues": input_data.get("total_dues", 0),
+                "overdue_days": input_data.get("overdue_days", 0),
                 "missed_instalments": input_data.get("missed_instalments", 0),
-                "prior_defaults":     input_data.get("prior_defaults", 0),
+                "prior_defaults": input_data.get("prior_defaults", 0),
                 "scholarship_active": input_data.get("scholarship_active", False),
-                "waiver_applied":     input_data.get("waiver_applied", False),
-                "course_name":        input_data.get("course_name", ""),
+                "waiver_applied": input_data.get("waiver_applied", False),
+                "course_name": input_data.get("course_name", ""),
             },
             validate_schema=True,
         )
@@ -85,7 +86,9 @@ def execute_dues_predictor(
             vo = result.validated_output
             score = vo.confidence_score
             high_threshold = float(
-                PolicyStore.get(context.org_id or "", "ai.finance.dues_high_risk_threshold")
+                PolicyStore.get(
+                    context.org_id or "", "ai.finance.dues_high_risk_threshold"
+                )
                 or _HIGH_TIER_DEFAULT
             )
             if score >= high_threshold:
@@ -100,24 +103,29 @@ def execute_dues_predictor(
 
             return AIInvocationResult(
                 success=True,
-                content=json.dumps({
-                    "risk_tier": tier,
-                    "risk_score": round(score, 3),
-                    "rationale": vo.reasoning or result.content or "",
-                    "recommended_action": action,
-                }),
+                content=json.dumps(
+                    {
+                        "risk_tier": tier,
+                        "risk_score": round(score, 3),
+                        "rationale": vo.reasoning or result.content or "",
+                        "recommended_action": action,
+                    }
+                ),
                 request_id=context.request_id,
                 model=model_override or result.model or "qwen2.5",
             )
 
         return AIInvocationResult(
             success=True,
-            content=result.content or json.dumps({
-                "risk_tier": "LOW",
-                "risk_score": 0.0,
-                "rationale": "Insufficient payment data.",
-                "recommended_action": "Monitor.",
-            }),
+            content=result.content
+            or json.dumps(
+                {
+                    "risk_tier": "LOW",
+                    "risk_score": 0.0,
+                    "rationale": "Insufficient payment data.",
+                    "recommended_action": "Monitor.",
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "qwen2.5",
         )

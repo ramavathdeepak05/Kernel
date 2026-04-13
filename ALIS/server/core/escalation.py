@@ -28,22 +28,22 @@ Acceptance Criteria (E00-S04):
 - [x] TTL policy-configurable with max cap
 - [x] Critical operations extensible via config
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+from uuid import uuid4
 
-from .rbac import Role, Permission, check_role_permission
-from .audit import AuditLog, AuditAction
+from .approvals import ApprovalConfig, ApprovalMode, ApprovalService, ApprovalState
+from .audit import AuditAction, AuditLog
 from .config import ConfigRegistry
-from .approvals import ApprovalService, ApprovalConfig, ApprovalMode, ApprovalState
-from .exceptions import EscalationDeniedError, DualControlRequiredError
-
+from .exceptions import DualControlRequiredError, EscalationDeniedError
+from .rbac import Permission, Role, check_role_permission
 
 # --- Escalation State Machine ---
+
 
 class EscalationState(str, Enum):
     """
@@ -53,6 +53,7 @@ class EscalationState(str, Enum):
         REQUESTED → GRANTED → ACTIVE → EXPIRED | REVOKED
         REQUESTED → DENIED
     """
+
     REQUESTED = "REQUESTED"
     GRANTED = "GRANTED"
     ACTIVE = "ACTIVE"
@@ -74,6 +75,7 @@ _ESCALATION_TRANSITIONS = {
 
 
 # --- Elevated Access Token ---
+
 
 @dataclass
 class ElevatedAccessToken:
@@ -99,22 +101,23 @@ class ElevatedAccessToken:
         revoked_by: Who revoked (if revoked)
         revoked_at: When revoked (if revoked)
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
     user_id: str = ""
-    tenant_id: Optional[str] = None
-    granted_permissions: List[Permission] = field(default_factory=list)
-    scope: Optional[str] = None
+    tenant_id: str | None = None
+    granted_permissions: list[Permission] = field(default_factory=list)
+    scope: str | None = None
     reason: str = ""
     ttl_minutes: int = 30
 
     # Lifecycle
     state: EscalationState = EscalationState.REQUESTED
     requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    granted_by: Optional[str] = None
-    granted_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
-    revoked_by: Optional[str] = None
-    revoked_at: Optional[datetime] = None
+    granted_by: str | None = None
+    granted_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_by: str | None = None
+    revoked_at: datetime | None = None
 
     def is_expired(self) -> bool:
         """Check if the token has expired (TTL exceeded)."""
@@ -139,6 +142,7 @@ class ElevatedAccessToken:
 
 # --- Critical Operation Definition ---
 
+
 @dataclass
 class CriticalOperation:
     """
@@ -154,14 +158,16 @@ class CriticalOperation:
         required_roles: Which roles must approve (dual = 2 different roles)
         approval_config_id: Auto-generated link to ApprovalService config
     """
+
     operation_id: str = ""
     name: str = ""
     description: str = ""
-    required_roles: List[Role] = field(default_factory=list)
+    required_roles: list[Role] = field(default_factory=list)
     approval_config_id: str = ""
 
 
 # --- Escalation Service ---
+
 
 class EscalationService:
     """
@@ -175,17 +181,17 @@ class EscalationService:
     """
 
     # In-memory storage (production: DB-backed)
-    _tokens: Dict[str, ElevatedAccessToken] = {}
+    _tokens: dict[str, ElevatedAccessToken] = {}
 
     @classmethod
     def request_escalation(
         cls,
         user_id: str,
-        requested_permissions: List[Permission],
+        requested_permissions: list[Permission],
         reason: str,
-        scope: Optional[str] = None,
-        ttl_minutes: Optional[int] = None,
-        tenant_id: Optional[str] = None
+        scope: str | None = None,
+        ttl_minutes: int | None = None,
+        tenant_id: str | None = None,
     ) -> ElevatedAccessToken:
         """
         Request a privilege escalation.
@@ -208,23 +214,16 @@ class EscalationService:
             EscalationDeniedError: If requested TTL exceeds maximum
         """
         # Resolve TTL
-        default_ttl = ConfigRegistry.get(
-            ConfigRegistry.ESCALATION_DEFAULT_TTL, 30
-        )
-        max_ttl = ConfigRegistry.get(
-            ConfigRegistry.ESCALATION_MAX_TTL, 120
-        )
+        default_ttl = ConfigRegistry.get(ConfigRegistry.ESCALATION_DEFAULT_TTL, 30)
+        max_ttl = ConfigRegistry.get(ConfigRegistry.ESCALATION_MAX_TTL, 120)
 
         effective_ttl = ttl_minutes if ttl_minutes is not None else default_ttl
 
         if effective_ttl > max_ttl:
             raise EscalationDeniedError(
                 message=f"Requested TTL ({effective_ttl} min) exceeds maximum "
-                        f"allowed ({max_ttl} min)",
-                details={
-                    "requested_ttl": effective_ttl,
-                    "max_ttl": max_ttl
-                }
+                f"allowed ({max_ttl} min)",
+                details={"requested_ttl": effective_ttl, "max_ttl": max_ttl},
             )
 
         token = ElevatedAccessToken(
@@ -235,7 +234,7 @@ class EscalationService:
             reason=reason,
             ttl_minutes=effective_ttl,
             state=EscalationState.REQUESTED,
-            requested_at=datetime.now(timezone.utc)
+            requested_at=datetime.now(timezone.utc),
         )
 
         cls._tokens[token.id] = token
@@ -252,19 +251,16 @@ class EscalationService:
                 "permissions": [p.value for p in requested_permissions],
                 "scope": scope,
                 "ttl_minutes": effective_ttl,
-                "reason": reason
+                "reason": reason,
             },
-            org_id=tenant_id
+            org_id=tenant_id,
         )
 
         return token
 
     @classmethod
     def grant_escalation(
-        cls,
-        token_id: str,
-        grantor_id: str,
-        grantor_role: Role
+        cls, token_id: str, grantor_id: str, grantor_role: Role
     ) -> ElevatedAccessToken:
         """
         Grant a privilege escalation request.
@@ -293,8 +289,8 @@ class EscalationService:
                 message=f"Role '{grantor_role.value}' lacks ESCALATION_GRANT permission",
                 details={
                     "grantor_role": grantor_role.value,
-                    "required_permission": Permission.ESCALATION_GRANT.value
-                }
+                    "required_permission": Permission.ESCALATION_GRANT.value,
+                },
             )
 
         # Check: self-grant prevention (configurable)
@@ -312,14 +308,11 @@ class EscalationService:
                 success=False,
                 failure_reason="Self-grant denied",
                 action_detail="Attempted self-grant of escalation",
-                org_id=token.tenant_id
+                org_id=token.tenant_id,
             )
             raise EscalationDeniedError(
                 message="Self-grant denied: grantor must differ from requestor",
-                details={
-                    "user_id": token.user_id,
-                    "grantor_id": grantor_id
-                }
+                details={"user_id": token.user_id, "grantor_id": grantor_id},
             )
 
         # Transition: REQUESTED → GRANTED → ACTIVE
@@ -328,7 +321,9 @@ class EscalationService:
         token.granted_at = datetime.now(timezone.utc)
 
         # Set expiry and activate
-        token.expires_at = datetime.now(timezone.utc) + timedelta(minutes=token.ttl_minutes)
+        token.expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=token.ttl_minutes
+        )
         token._transition_to(EscalationState.ACTIVE)
 
         # Audit log
@@ -344,19 +339,16 @@ class EscalationService:
                 "user_id": token.user_id,
                 "permissions": [p.value for p in token.granted_permissions],
                 "ttl_minutes": token.ttl_minutes,
-                "expires_at": token.expires_at.isoformat()
+                "expires_at": token.expires_at.isoformat(),
             },
-            org_id=token.tenant_id
+            org_id=token.tenant_id,
         )
 
         return token
 
     @classmethod
     def deny_escalation(
-        cls,
-        token_id: str,
-        denier_id: str,
-        reason: str = ""
+        cls, token_id: str, denier_id: str, reason: str = ""
     ) -> ElevatedAccessToken:
         """
         Deny a privilege escalation request.
@@ -383,17 +375,14 @@ class EscalationService:
             entity_type="escalation_token",
             entity_id=token_id,
             action_detail=f"Denied escalation for {token.user_id}: {reason}",
-            org_id=token.tenant_id
+            org_id=token.tenant_id,
         )
 
         return token
 
     @classmethod
     def revoke_escalation(
-        cls,
-        token_id: str,
-        actor_id: str,
-        reason: str = ""
+        cls, token_id: str, actor_id: str, reason: str = ""
     ) -> ElevatedAccessToken:
         """
         Revoke an active escalation token.
@@ -430,17 +419,15 @@ class EscalationService:
             entity_id=token_id,
             action_detail=f"Revoked escalation for {token.user_id}: {reason}",
             metadata={"reason": reason},
-            org_id=token.tenant_id
+            org_id=token.tenant_id,
         )
 
         return token
 
     @classmethod
     def check_escalation(
-        cls,
-        user_id: str,
-        permission: Permission
-    ) -> Optional[ElevatedAccessToken]:
+        cls, user_id: str, permission: Permission
+    ) -> ElevatedAccessToken | None:
         """
         Check if a user has an active elevated token for a permission.
 
@@ -476,16 +463,18 @@ class EscalationService:
                     metadata={
                         "permission": permission.value,
                         "scope": token.scope,
-                        "expires_at": token.expires_at.isoformat() if token.expires_at else None
+                        "expires_at": token.expires_at.isoformat()
+                        if token.expires_at
+                        else None,
                     },
-                    org_id=token.tenant_id
+                    org_id=token.tenant_id,
                 )
                 return token
 
         return None
 
     @classmethod
-    def get_active_tokens(cls, user_id: str) -> List[ElevatedAccessToken]:
+    def get_active_tokens(cls, user_id: str) -> list[ElevatedAccessToken]:
         """Get all active (non-expired) tokens for a user."""
         active = []
         for token in cls._tokens.values():
@@ -500,7 +489,7 @@ class EscalationService:
         return active
 
     @classmethod
-    def get_token(cls, token_id: str) -> Optional[ElevatedAccessToken]:
+    def get_token(cls, token_id: str) -> ElevatedAccessToken | None:
         """Get a token by ID."""
         return cls._tokens.get(token_id)
 
@@ -519,13 +508,14 @@ class EscalationService:
             metadata={
                 "user_id": token.user_id,
                 "ttl_minutes": token.ttl_minutes,
-                "expired_at": datetime.now(timezone.utc).isoformat()
+                "expired_at": datetime.now(timezone.utc).isoformat(),
             },
-            org_id=token.tenant_id
+            org_id=token.tenant_id,
         )
 
 
 # --- Dual Control Guard ---
+
 
 class DualControlGuard:
     """
@@ -542,7 +532,7 @@ class DualControlGuard:
     The list is extensible via ConfigRegistry.
     """
 
-    _operations: Dict[str, CriticalOperation] = {}
+    _operations: dict[str, CriticalOperation] = {}
     _initialized: bool = False
 
     @classmethod
@@ -557,19 +547,19 @@ class DualControlGuard:
                 operation_id="result_publish",
                 name="Result Publication",
                 description="Publish examination results",
-                required_roles=[Role.DEAN, Role.REGISTRAR]
+                required_roles=[Role.DEAN, Role.REGISTRAR],
             ),
             CriticalOperation(
                 operation_id="payroll_release",
                 name="Payroll Release",
                 description="Release payroll payments",
-                required_roles=[Role.HR_ADMIN, Role.FINANCE_OFFICER]
+                required_roles=[Role.HR_ADMIN, Role.FINANCE_OFFICER],
             ),
             CriticalOperation(
                 operation_id="transcript_seal",
                 name="Transcript Seal",
                 description="Seal academic transcripts",
-                required_roles=[Role.DEAN, Role.REGISTRAR]
+                required_roles=[Role.DEAN, Role.REGISTRAR],
             ),
         ]
 
@@ -594,7 +584,7 @@ class DualControlGuard:
             config_id=config_id,
             allowed_roles=operation.required_roles,
             mode=ApprovalMode.ALL,  # ALL required roles must approve
-            description=f"Dual control for {operation.name}"
+            description=f"Dual control for {operation.name}",
         )
 
         ApprovalService.register_config(config)
@@ -607,7 +597,7 @@ class DualControlGuard:
         actor_id: str,
         entity_type: str,
         entity_id: str,
-        tenant_id: Optional[str] = None
+        tenant_id: str | None = None,
     ) -> str:
         """
         Initiate a dual control request for a critical operation.
@@ -633,7 +623,7 @@ class DualControlGuard:
         if operation is None:
             raise DualControlRequiredError(
                 operation_id=operation_id,
-                message=f"Unknown critical operation: {operation_id}"
+                message=f"Unknown critical operation: {operation_id}",
             )
 
         # Create approval request via ApprovalService
@@ -642,7 +632,7 @@ class DualControlGuard:
             entity_id=entity_id,
             action_type=operation_id,
             config_id=operation.approval_config_id,
-            requested_by=actor_id
+            requested_by=actor_id,
         )
 
         # Audit log
@@ -656,19 +646,16 @@ class DualControlGuard:
             metadata={
                 "operation_id": operation_id,
                 "approval_request_id": request.id,
-                "required_roles": [r.value for r in operation.required_roles]
+                "required_roles": [r.value for r in operation.required_roles],
             },
-            org_id=tenant_id
+            org_id=tenant_id,
         )
 
         return request.id
 
     @classmethod
     def verify_dual_control(
-        cls,
-        operation_id: str,
-        entity_type: str,
-        entity_id: str
+        cls, operation_id: str, entity_type: str, entity_id: str
     ) -> bool:
         """
         Verify that dual approval exists for a critical operation.
@@ -694,11 +681,12 @@ class DualControlGuard:
         try:
             # Search through ApprovalService for matching approved request
             for req_id, req in ApprovalService._requests.items():
-                if (req.config_id == operation.approval_config_id and
-                        req.entity_type == entity_type and
-                        req.entity_id == entity_id and
-                        req.status == ApprovalState.APPROVED):
-
+                if (
+                    req.config_id == operation.approval_config_id
+                    and req.entity_type == entity_type
+                    and req.entity_id == entity_id
+                    and req.status == ApprovalState.APPROVED
+                ):
                     # Log verification
                     AuditLog.log(
                         action=AuditAction.DUAL_CONTROL_COMPLETED,
@@ -709,21 +697,18 @@ class DualControlGuard:
                         action_detail=f"Dual control verified: {operation.name}",
                         metadata={
                             "operation_id": operation_id,
-                            "approval_request_id": req.id
-                        }
+                            "approval_request_id": req.id,
+                        },
                     )
                     return True
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         return False
 
     @classmethod
     def enforce_dual_control(
-        cls,
-        operation_id: str,
-        entity_type: str,
-        entity_id: str
+        cls, operation_id: str, entity_type: str, entity_id: str
     ) -> None:
         """
         Enforce dual control — raises if not approved.
@@ -747,10 +732,7 @@ class DualControlGuard:
             raise DualControlRequiredError(
                 operation_id=operation_id,
                 message=f"Dual control approval required before executing: {operation_id}",
-                details={
-                    "entity_type": entity_type,
-                    "entity_id": entity_id
-                }
+                details={"entity_type": entity_type, "entity_id": entity_id},
             )
 
     @classmethod
@@ -760,13 +742,13 @@ class DualControlGuard:
         return operation_id in cls._operations
 
     @classmethod
-    def get_operation(cls, operation_id: str) -> Optional[CriticalOperation]:
+    def get_operation(cls, operation_id: str) -> CriticalOperation | None:
         """Get a registered critical operation."""
         cls._ensure_initialized()
         return cls._operations.get(operation_id)
 
     @classmethod
-    def list_operations(cls) -> List[CriticalOperation]:
+    def list_operations(cls) -> list[CriticalOperation]:
         """List all registered critical operations."""
         cls._ensure_initialized()
         return list(cls._operations.values())

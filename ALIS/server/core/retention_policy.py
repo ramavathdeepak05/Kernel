@@ -30,22 +30,21 @@ Acceptance Criteria (E00-S07)
   • [x] Deletion requires superadmin + log
   • [x] Retention audit report
 """
+
 from __future__ import annotations
 
 import logging
-from enum import Enum
-from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from typing import Any
 
+from .audit import AuditAction, AuditLedger
 from .data_classification import (
     EntityClassificationRegistry,
     RetentionClass,
-    RegulatedDataType,
 )
-from .audit import AuditLedger, AuditAction
-from .rbac import Role, Permission, check_role_permission
-from .locks import check_global_locks, LockType
+from .rbac import Role
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +53,10 @@ logger = logging.getLogger(__name__)
 # ARCHIVAL STATUS
 # ============================================================================
 
+
 class ArchivalStatus(str, Enum):
     """Status of an archival operation."""
+
     PENDING = "PENDING"
     ARCHIVED = "ARCHIVED"
     FAILED = "FAILED"
@@ -64,6 +65,7 @@ class ArchivalStatus(str, Enum):
 
 class DeletionStatus(str, Enum):
     """Status of a hard-delete request."""
+
     REQUESTED = "REQUESTED"
     APPROVED = "APPROVED"
     EXECUTED = "EXECUTED"
@@ -74,20 +76,20 @@ class DeletionStatus(str, Enum):
 # ARCHIVAL RECORD (value object per entity processed)
 # ============================================================================
 
+
 @dataclass
 class ArchivalRecord:
     """
     Immutable record of an archival action on a single entity.
     """
+
     entity_type: str
     entity_id: str
     tenant_id: str
     retention_class: RetentionClass
-    retention_days: Optional[int]
-    created_at: datetime              # When the entity was originally created
-    archived_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    retention_days: int | None
+    created_at: datetime  # When the entity was originally created
+    archived_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     status: ArchivalStatus = ArchivalStatus.PENDING
     reason: str = ""
 
@@ -96,6 +98,7 @@ class ArchivalRecord:
 # DELETION REQUEST (value object)
 # ============================================================================
 
+
 @dataclass
 class DeletionRequest:
     """
@@ -103,23 +106,23 @@ class DeletionRequest:
 
     Lifecycle: REQUESTED → APPROVED → EXECUTED (or REJECTED)
     """
+
     entity_type: str
     entity_id: str
     tenant_id: str
-    requested_by: str               # Actor ID who initiated
+    requested_by: str  # Actor ID who initiated
     actor_role: str
     justification: str
     status: DeletionStatus = DeletionStatus.REQUESTED
-    requested_at: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-    executed_at: Optional[datetime] = None
-    rejection_reason: Optional[str] = None
+    requested_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    executed_at: datetime | None = None
+    rejection_reason: str | None = None
 
 
 # ============================================================================
 # RETENTION MATRIX HELPER
 # ============================================================================
+
 
 class RetentionMatrix:
     """
@@ -130,7 +133,7 @@ class RetentionMatrix:
     """
 
     @staticmethod
-    def get_retention_info(entity_type: str) -> Dict[str, Any]:
+    def get_retention_info(entity_type: str) -> dict[str, Any]:
         """
         Get retention policy information for an entity type.
 
@@ -148,7 +151,7 @@ class RetentionMatrix:
         }
 
     @staticmethod
-    def get_full_matrix() -> List[Dict[str, Any]]:
+    def get_full_matrix() -> list[dict[str, Any]]:
         """
         Return the full retention matrix for all registered entity types.
 
@@ -163,6 +166,7 @@ class RetentionMatrix:
 # ============================================================================
 # ARCHIVAL SERVICE
 # ============================================================================
+
 
 class ArchivalService:
     """
@@ -180,15 +184,15 @@ class ArchivalService:
     """
 
     # In-memory store for archival records (testing / in-process usage)
-    _archival_log: List[ArchivalRecord] = []
+    _archival_log: list[ArchivalRecord] = []
 
     @classmethod
     def run_archival_job(
         cls,
         tenant_id: str,
-        records: List[Dict[str, Any]],
+        records: list[dict[str, Any]],
         dry_run: bool = False,
-    ) -> List[ArchivalRecord]:
+    ) -> list[ArchivalRecord]:
         """
         Execute archival evaluation for a batch of records.
 
@@ -203,7 +207,7 @@ class ArchivalService:
             archived.
         """
         now = datetime.now(timezone.utc)
-        results: List[ArchivalRecord] = []
+        results: list[ArchivalRecord] = []
 
         for record in records:
             entity_type = record.get("entity_type", "")
@@ -218,7 +222,8 @@ class ArchivalService:
             else:
                 logger.warning(
                     "Skipping record %s/%s: invalid created_at",
-                    entity_type, entity_id,
+                    entity_type,
+                    entity_id,
                 )
                 continue
 
@@ -236,16 +241,18 @@ class ArchivalService:
 
             # Permanent records are never auto-archived
             if ec.is_permanent:
-                results.append(ArchivalRecord(
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    tenant_id=tenant_id,
-                    retention_class=ec.retention_class,
-                    retention_days=ec.effective_retention_days,
-                    created_at=created_at,
-                    status=ArchivalStatus.SKIPPED_PERMANENT,
-                    reason="Permanent retention — not eligible for archival",
-                ))
+                results.append(
+                    ArchivalRecord(
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        tenant_id=tenant_id,
+                        retention_class=ec.retention_class,
+                        retention_days=ec.effective_retention_days,
+                        created_at=created_at,
+                        status=ArchivalStatus.SKIPPED_PERMANENT,
+                        reason="Permanent retention — not eligible for archival",
+                    )
+                )
                 continue
 
             # Check if retention period has elapsed
@@ -264,7 +271,9 @@ class ArchivalService:
                 retention_class=ec.retention_class,
                 retention_days=retention_days,
                 created_at=created_at,
-                status=ArchivalStatus.ARCHIVED if not dry_run else ArchivalStatus.PENDING,
+                status=ArchivalStatus.ARCHIVED
+                if not dry_run
+                else ArchivalStatus.PENDING,
                 reason=f"Retention period of {retention_days} days exceeded",
             )
 
@@ -290,7 +299,9 @@ class ArchivalService:
                 except Exception as exc:
                     logger.exception(
                         "Failed to archive %s/%s: %s",
-                        entity_type, entity_id, exc,
+                        entity_type,
+                        entity_id,
+                        exc,
                     )
                     archival_record.status = ArchivalStatus.FAILED
                     archival_record.reason = f"Archival failed: {exc}"
@@ -319,6 +330,7 @@ class ArchivalService:
 # RETENTION SERVICE (LEGAL DELETION WORKFLOW)
 # ============================================================================
 
+
 class RetentionService:
     """
     Legal deletion workflow for regulated data — E00-S07.
@@ -334,7 +346,7 @@ class RetentionService:
     """
 
     # In-memory deletion request log (testing / in-process usage)
-    _deletion_requests: List[DeletionRequest] = []
+    _deletion_requests: list[DeletionRequest] = []
 
     @classmethod
     def request_hard_delete(
@@ -345,7 +357,7 @@ class RetentionService:
         actor_id: str,
         actor_role: str,
         justification: str,
-        entity_snapshot: Optional[Dict[str, Any]] = None,
+        entity_snapshot: dict[str, Any] | None = None,
     ) -> DeletionRequest:
         """
         Request hard deletion of a regulated record.
@@ -376,9 +388,7 @@ class RetentionService:
         try:
             role = Role(actor_role) if isinstance(actor_role, str) else actor_role
         except ValueError:
-            raise PermissionError(
-                f"Unknown role '{actor_role}' — hard delete denied"
-            )
+            raise PermissionError(f"Unknown role '{actor_role}' — hard delete denied")
 
         if role != Role.SUPER_ADMIN:
             # Log the denied attempt
@@ -395,7 +405,7 @@ class RetentionService:
                         "reason": "Insufficient privileges — SUPER_ADMIN required",
                     },
                 )
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Audit failure must not mask the security denial
             raise PermissionError(
                 "Hard deletion of regulated data requires SUPER_ADMIN role (E00-S07)"
@@ -439,13 +449,13 @@ class RetentionService:
                         "justification": justification,
                     },
                 )
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Audit failure should not block the rejection
 
             return req
 
         # --- Gate 4: Log pre-deletion snapshot ---
-        deletion_metadata: Dict[str, Any] = {
+        deletion_metadata: dict[str, Any] = {
             "status": "EXECUTED",
             "justification": justification,
             "retention_class": ec.retention_class.value,
@@ -487,7 +497,11 @@ class RetentionService:
 
         logger.info(
             "Hard delete executed for %s/%s by %s [tenant=%s]: %s",
-            entity_type, entity_id, actor_id, tenant_id, justification,
+            entity_type,
+            entity_id,
+            actor_id,
+            tenant_id,
+            justification,
         )
 
         return req
@@ -502,6 +516,7 @@ class RetentionService:
 # RETENTION AUDIT REPORT
 # ============================================================================
 
+
 class RetentionAuditReport:
     """
     Generate a retention audit report summarising:
@@ -512,8 +527,8 @@ class RetentionAuditReport:
 
     @staticmethod
     def generate(
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Generate a retention audit report.
 
@@ -529,23 +544,20 @@ class RetentionAuditReport:
         # Archival summary
         archival_records = ArchivalService._archival_log
         if tenant_id:
-            archival_records = [
-                r for r in archival_records if r.tenant_id == tenant_id
-            ]
+            archival_records = [r for r in archival_records if r.tenant_id == tenant_id]
 
         archival_summary = {
             "total_evaluated": len(archival_records),
             "archived": sum(
-                1 for r in archival_records
-                if r.status == ArchivalStatus.ARCHIVED
+                1 for r in archival_records if r.status == ArchivalStatus.ARCHIVED
             ),
             "skipped_permanent": sum(
-                1 for r in archival_records
+                1
+                for r in archival_records
                 if r.status == ArchivalStatus.SKIPPED_PERMANENT
             ),
             "failed": sum(
-                1 for r in archival_records
-                if r.status == ArchivalStatus.FAILED
+                1 for r in archival_records if r.status == ArchivalStatus.FAILED
             ),
         }
 
@@ -559,12 +571,10 @@ class RetentionAuditReport:
         deletion_summary = {
             "total_requests": len(deletion_requests),
             "executed": sum(
-                1 for r in deletion_requests
-                if r.status == DeletionStatus.EXECUTED
+                1 for r in deletion_requests if r.status == DeletionStatus.EXECUTED
             ),
             "rejected": sum(
-                1 for r in deletion_requests
-                if r.status == DeletionStatus.REJECTED
+                1 for r in deletion_requests if r.status == DeletionStatus.REJECTED
             ),
         }
 

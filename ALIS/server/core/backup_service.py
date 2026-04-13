@@ -4,6 +4,7 @@ Orchestrates pg_dump, MinIO backup verification, and alerting.
 Fires platform.backup_failed domain event on failure.
 Beat schedule: daily at 03:00 UTC (add to worker.py separately).
 """
+
 from __future__ import annotations
 
 import logging
@@ -121,6 +122,17 @@ class BackupService:
                     )
                 ]
             )
+            from server.core.audit import AuditAction, AuditLog
+
+            AuditLog.log(
+                action=AuditAction.CREATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="backup_log",
+                entity_id=record_id,
+                tenant_id="",
+                metadata={"source": "run_daily_backup", "filename": dump_filename},
+            )
         except Exception as e:
             logger.warning("Could not record backup in backup_log: %s", e)
 
@@ -155,7 +167,10 @@ class BackupService:
             event = DomainEvent(
                 event_type="platform.backup_stale",
                 org_id=org_id,
-                payload={"reason": "no_backup_record", "timestamp": now_utc.isoformat()},
+                payload={
+                    "reason": "no_backup_record",
+                    "timestamp": now_utc.isoformat(),
+                },
             )
             DomainEventBus.publish(event)
             return {"last_backup": None, "filename": None, "hours_ago": None}

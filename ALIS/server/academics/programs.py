@@ -1,4 +1,5 @@
 """E05-S01 — Program Management"""
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class ProgramService:
-
     @classmethod
     def create(cls, org_id: str, req: ProgramCreate, actor_id: str) -> dict:
         existing = execute_query(
@@ -23,21 +23,42 @@ class ProgramService:
             (org_id, req.code),
         )
         if existing:
-            raise BusinessRuleViolation(message=f"Program code '{req.code}' already exists")
+            raise BusinessRuleViolation(
+                message=f"Program code '{req.code}' already exists"
+            )
 
         pid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO programs (id, org_id, name, code, degree_type, duration_years, total_credits, metadata)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (pid, org_id, req.name, req.code, req.degree_type.value,
-             req.duration_years, req.total_credits, json.dumps(req.metadata)),
-        )])
+                    (
+                        pid,
+                        org_id,
+                        req.name,
+                        req.code,
+                        req.degree_type.value,
+                        req.duration_years,
+                        req.total_credits,
+                        json.dumps(req.metadata),
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="program", entity_id=pid, org_id=org_id, module="E05-S01",
-                     metadata={"name": req.name, "code": req.code})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="program",
+            entity_id=pid,
+            org_id=org_id,
+            module="E05-S01",
+            metadata={"name": req.name, "code": req.code},
+        )
 
         return cls.get(org_id, pid)
 
@@ -68,12 +89,23 @@ class ProgramService:
 
         set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in fields)
         values = list(fields.values()) + [program_id, org_id]
-        execute_transaction([(
-            f"UPDATE programs SET {set_clause}, updated_at = NOW() WHERE id = %s AND org_id = %s",
-            values,
-        )])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE programs SET {set_clause}, updated_at = NOW() WHERE id = %s AND org_id = %s",  # noqa: S608
+                    values,
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.UPDATE, actor_id=actor_id, actor_type="human",
-                     entity_type="program", entity_id=program_id, org_id=org_id,
-                     module="E05-S01", metadata={"updated_fields": list(fields.keys())})
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="program",
+            entity_id=program_id,
+            org_id=org_id,
+            module="E05-S01",
+            metadata={"updated_fields": list(fields.keys())},
+        )
         return cls.get(org_id, program_id)

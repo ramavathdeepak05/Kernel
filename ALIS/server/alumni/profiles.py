@@ -1,4 +1,5 @@
 """E12-S01 — Alumni Profile Management"""
+
 from __future__ import annotations
 
 import logging
@@ -6,7 +7,7 @@ import uuid
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
-from server.db_service import execute_query, execute_transaction, safe_identifier
+from server.db_service import execute_query, execute_transaction
 
 from .models import AlumniProfileCreate, AlumniProfileUpdate
 
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class AlumniProfileService:
-
     @classmethod
     def create(cls, org_id: str, req: AlumniProfileCreate, actor_id: str) -> dict:
         existing = execute_query(
@@ -22,35 +22,62 @@ class AlumniProfileService:
             (org_id, req.email),
         )
         if existing:
-            raise BusinessRuleViolation(message=f"Alumni profile with email {req.email} already exists")
+            raise BusinessRuleViolation(
+                message=f"Alumni profile with email {req.email} already exists"
+            )
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO alumni_profiles
                 (id, org_id, name, email, phone, program, graduation_year,
                  roll_number, cgpa, current_employer, current_designation,
                  current_location, linkedin_url, bio, is_mentor)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (
-                aid, org_id, req.name, req.email, req.phone, req.program,
-                req.graduation_year, req.roll_number, req.cgpa,
-                req.current_employer, req.current_designation, req.current_location,
-                req.linkedin_url, req.bio, req.is_mentor,
-            ),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        req.name,
+                        req.email,
+                        req.phone,
+                        req.program,
+                        req.graduation_year,
+                        req.roll_number,
+                        req.cgpa,
+                        req.current_employer,
+                        req.current_designation,
+                        req.current_location,
+                        req.linkedin_url,
+                        req.bio,
+                        req.is_mentor,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-            entity_type="alumni_profile", entity_id=aid, org_id=org_id,
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="alumni_profile",
+            entity_id=aid,
+            org_id=org_id,
             module="E12-S01",
-            metadata={"name": req.name, "program": req.program, "year": req.graduation_year},
+            metadata={
+                "name": req.name,
+                "program": req.program,
+                "year": req.graduation_year,
+            },
         )
         return cls.get(org_id, aid)
 
     @classmethod
-    def create_from_student(cls, org_id: str, student_id: str, actor_id: str = "system") -> dict:
+    def create_from_student(
+        cls, org_id: str, student_id: str, actor_id: str = "system"
+    ) -> dict:
         """
         Auto-creates an alumni profile when StudentGraduated event fires.
         Pulls data from the students table.
@@ -72,6 +99,7 @@ class AlumniProfileService:
 
         # Derive graduation year from latest academic year
         from datetime import date
+
         grad_year = date.today().year
 
         existing = execute_query(
@@ -82,20 +110,40 @@ class AlumniProfileService:
             return cls.get(org_id, str(existing[0]["id"]))
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO alumni_profiles
                 (id, org_id, student_id, name, email, phone, program, graduation_year,
                  roll_number, cgpa, is_verified)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)
             """,
-            (
-                aid, org_id, student_id,
-                student.get("name", ""), student.get("email", ""),
-                student.get("phone"), student.get("program", ""),
-                grad_year, student.get("roll_number"), cgpa,
-            ),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        student_id,
+                        student.get("name", ""),
+                        student.get("email", ""),
+                        student.get("phone"),
+                        student.get("program", ""),
+                        grad_year,
+                        student.get("roll_number"),
+                        cgpa,
+                    ),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="from_student",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "create_from_student"},
+        )
 
         logger.info("Alumni profile auto-created for student %s", student_id)
         return cls.get(org_id, aid)
@@ -123,50 +171,90 @@ class AlumniProfileService:
         sql = "SELECT * FROM alumni_profiles WHERE org_id = %s AND status = 'ACTIVE'"
         params: list = [org_id]
         if program:
-            sql += " AND program = %s"; params.append(program)
+            sql += " AND program = %s"
+            params.append(program)
         if graduation_year:
-            sql += " AND graduation_year = %s"; params.append(graduation_year)
+            sql += " AND graduation_year = %s"
+            params.append(graduation_year)
         if is_mentor is not None:
-            sql += " AND is_mentor = %s"; params.append(is_mentor)
+            sql += " AND is_mentor = %s"
+            params.append(is_mentor)
         sql += " ORDER BY graduation_year DESC, name LIMIT %s OFFSET %s"
         params += [limit, offset]
         return [dict(r) for r in execute_query(sql, params)]
 
     @classmethod
-    def update(cls, org_id: str, alumni_id: str, req: AlumniProfileUpdate, actor_id: str) -> dict:
+    def update(
+        cls, org_id: str, alumni_id: str, req: AlumniProfileUpdate, actor_id: str
+    ) -> dict:
         cls.get(org_id, alumni_id)
         fields, params = [], []
         if req.current_employer is not None:
-            fields.append("current_employer = %s"); params.append(req.current_employer)
+            fields.append("current_employer = %s")
+            params.append(req.current_employer)
         if req.current_designation is not None:
-            fields.append("current_designation = %s"); params.append(req.current_designation)
+            fields.append("current_designation = %s")
+            params.append(req.current_designation)
         if req.current_location is not None:
-            fields.append("current_location = %s"); params.append(req.current_location)
+            fields.append("current_location = %s")
+            params.append(req.current_location)
         if req.linkedin_url is not None:
-            fields.append("linkedin_url = %s"); params.append(req.linkedin_url)
+            fields.append("linkedin_url = %s")
+            params.append(req.linkedin_url)
         if req.bio is not None:
-            fields.append("bio = %s"); params.append(req.bio)
+            fields.append("bio = %s")
+            params.append(req.bio)
         if req.is_mentor is not None:
-            fields.append("is_mentor = %s"); params.append(req.is_mentor)
+            fields.append("is_mentor = %s")
+            params.append(req.is_mentor)
         if req.phone is not None:
-            fields.append("phone = %s"); params.append(req.phone)
+            fields.append("phone = %s")
+            params.append(req.phone)
         if not fields:
             return cls.get(org_id, alumni_id)
         fields.append("updated_at = NOW()")
         params += [alumni_id, org_id]
-        execute_transaction([(
-            f"UPDATE alumni_profiles SET {', '.join(fields)} WHERE id = %s AND org_id = %s",
-            params,
-        )])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE alumni_profiles SET {', '.join(fields)} WHERE id = %s AND org_id = %s",  # noqa: S608
+                    params,
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="update",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "update"},
+        )
         return cls.get(org_id, alumni_id)
 
     @classmethod
     def verify(cls, org_id: str, alumni_id: str, actor_id: str) -> dict:
         cls.get(org_id, alumni_id)
-        execute_transaction([(
-            "UPDATE alumni_profiles SET is_verified = TRUE, updated_at = NOW() WHERE id = %s AND org_id = %s",
-            (alumni_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE alumni_profiles SET is_verified = TRUE, updated_at = NOW() WHERE id = %s AND org_id = %s",
+                    (alumni_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="verify",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "verify"},
+        )
         return cls.get(org_id, alumni_id)
 
     @classmethod

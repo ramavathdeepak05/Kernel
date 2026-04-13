@@ -8,17 +8,24 @@ Sections
 2.  Data Migration       POST/GET  /admin/migrations/*
 3.  Outbound Webhooks    POST/GET/DELETE /admin/webhooks/*
 """
+
 from __future__ import annotations
 
 import io
 import logging
-import uuid
-from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-
 from server.core.rbac import require_permission
 from server.core.shadow_mode import ShadowModeConfig, ShadowModeService
 
@@ -31,6 +38,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 # Permission dependency
 # ---------------------------------------------------------------------------
 
+
 async def super_admin(user=Depends(require_permission("SUPER_ADMIN_ACCESS"))):
     return user
 
@@ -38,6 +46,7 @@ async def super_admin(user=Depends(require_permission("SUPER_ADMIN_ACCESS"))):
 # ===========================================================================
 # 1.  SHADOW MODE
 # ===========================================================================
+
 
 class EnableShadowModeRequest(BaseModel):
     max_attendance_divergence_pct: float = 2.0
@@ -102,8 +111,13 @@ async def shadow_mode_divergence(
 # ===========================================================================
 
 SUPPORTED_ENTITIES = [
-    "students", "faculty", "courses", "fee_records",
-    "historical_attendance", "exam_results", "alumni",
+    "students",
+    "faculty",
+    "courses",
+    "fee_records",
+    "historical_attendance",
+    "exam_results",
+    "alumni",
 ]
 
 
@@ -116,15 +130,15 @@ async def migration_validate(
     """Parse CSV and return full error report — no DB writes."""
     _check_entity(entity_type)
     from server.migration.migration_pipeline import MigrationPipeline
+
     content = await file.read()
-    result = await MigrationPipeline.run(
+    return await MigrationPipeline.run(
         entity_type=entity_type,
         csv_bytes=content,
         org_id=user["org_id"],
         mode="validate",
         actor_id=user["user_id"],
     )
-    return result
 
 
 @router.post("/migrations/{entity_type}/dry-run")
@@ -136,15 +150,15 @@ async def migration_dry_run(
     """Show what would be inserted/skipped — no DB writes."""
     _check_entity(entity_type)
     from server.migration.migration_pipeline import MigrationPipeline
+
     content = await file.read()
-    result = await MigrationPipeline.run(
+    return await MigrationPipeline.run(
         entity_type=entity_type,
         csv_bytes=content,
         org_id=user["org_id"],
         mode="dry_run",
         actor_id=user["user_id"],
     )
-    return result
 
 
 @router.post("/migrations/{entity_type}/commit")
@@ -156,24 +170,25 @@ async def migration_commit(
     """Commit migration — atomic INSERT with duplicate detection + full audit."""
     _check_entity(entity_type)
     from server.migration.migration_pipeline import MigrationPipeline
+
     content = await file.read()
-    result = await MigrationPipeline.run(
+    return await MigrationPipeline.run(
         entity_type=entity_type,
         csv_bytes=content,
         org_id=user["org_id"],
         mode="commit",
         actor_id=user["user_id"],
     )
-    return result
 
 
 @router.get("/migrations")
 async def list_migrations(
-    status: Optional[str] = Query(None),
+    status: str | None = Query(None),
     user=Depends(super_admin),
 ):
     """List migration jobs for this institution."""
     from server.db_service import execute_query
+
     sql = """
         SELECT id, entity_type, mode, status, total_rows, processed_rows,
                error_count, started_at, completed_at
@@ -195,7 +210,7 @@ async def get_migration(
 ):
     """Job status + error rows."""
     from server.db_service import execute_query
-    from server.core.exceptions import NotFoundError
+
     rows = execute_query(
         "SELECT * FROM data_migration_jobs WHERE id = %s AND org_id = %s",
         (job_id, user["org_id"]),
@@ -220,6 +235,7 @@ async def download_template(
     """Download the CSV template for an entity type."""
     _check_entity(entity_type)
     import os
+
     template_dir = os.path.join(
         os.path.dirname(__file__), "..", "migration", "templates"
     )
@@ -231,7 +247,9 @@ async def download_template(
     return StreamingResponse(
         io.BytesIO(content),
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{entity_type}_template.csv"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{entity_type}_template.csv"'
+        },
     )
 
 
@@ -247,6 +265,7 @@ def _check_entity(entity_type: str):
 # 3.  OUTBOUND WEBHOOKS
 # ===========================================================================
 
+
 class WebhookSubscriptionRequest(BaseModel):
     event_type: str
     url: str
@@ -260,6 +279,7 @@ async def register_webhook(
 ):
     """Register an outbound webhook endpoint."""
     from server.core.webhook_dispatcher import WebhookDispatcher
+
     subscription_id = await WebhookDispatcher.register(
         org_id=user["org_id"],
         event_type=body.event_type,
@@ -274,12 +294,16 @@ async def register_webhook(
 async def list_webhooks(user=Depends(super_admin)):
     """List active webhook subscriptions."""
     from server.db_service import execute_query
-    return execute_query("""
+
+    return execute_query(
+        """
         SELECT id, event_type, url, active, created_at
         FROM outbound_webhook_subscriptions
         WHERE org_id = %s
         ORDER BY created_at DESC
-    """, (user["org_id"],))
+    """,
+        (user["org_id"],),
+    )
 
 
 @router.delete("/webhooks/subscriptions/{subscription_id}")
@@ -289,6 +313,7 @@ async def deactivate_webhook(
 ):
     """Deactivate a webhook subscription."""
     from server.core.webhook_dispatcher import WebhookDispatcher
+
     await WebhookDispatcher.deactivate(
         subscription_id=subscription_id,
         org_id=user["org_id"],
@@ -299,13 +324,14 @@ async def deactivate_webhook(
 
 @router.get("/webhooks/deliveries")
 async def list_deliveries(
-    status: Optional[str] = Query(None),
-    event_type: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    event_type: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     user=Depends(super_admin),
 ):
     """Delivery log with optional filters."""
     from server.db_service import execute_query
+
     sql = """
         SELECT d.id, d.subscription_id, s.event_type, s.url,
                d.status, d.attempt_count, d.next_retry_at, d.last_error, d.created_at
@@ -332,6 +358,7 @@ async def replay_delivery(
 ):
     """Manually replay a failed or dead delivery."""
     from server.core.webhook_dispatcher import WebhookDispatcher
+
     await WebhookDispatcher.replay(delivery_id=delivery_id, org_id=user["org_id"])
     return {"status": "queued"}
 
@@ -339,6 +366,7 @@ async def replay_delivery(
 # ---------------------------------------------------------------------------
 # PAA — Policy Authoring Agent Routes (P22)
 # ---------------------------------------------------------------------------
+
 
 @router.post("/policies/draft-with-ai")
 async def draft_policy_with_ai(
@@ -348,6 +376,7 @@ async def draft_policy_with_ai(
 ) -> JSONResponse:
     """Use LLM to generate a policy DSL draft (always DRAFT status — human must approve)."""
     from server.core.policy_authoring_agent import PolicyAuthoringAgent
+
     result = PolicyAuthoringAgent.draft_policy(
         org_id=user["org_id"],
         policy_key=body["policy_key"],
@@ -363,6 +392,7 @@ async def list_policy_drafts(
 ) -> JSONResponse:
     """List all pending AI-generated policy drafts."""
     from server.core.policy_authoring_agent import PolicyAuthoringAgent
+
     result = PolicyAuthoringAgent.list_drafts(user["org_id"])
     return JSONResponse(content={"drafts": result, "total": len(result)})
 
@@ -375,7 +405,10 @@ async def approve_policy_draft(
 ) -> JSONResponse:
     """Approve a policy draft (activates it by setting status=APPROVED)."""
     from server.core.policy_authoring_agent import PolicyAuthoringAgent
-    result = PolicyAuthoringAgent.approve_draft(draft_id, user["org_id"], user["user_id"], body.get("justification", ""))
+
+    result = PolicyAuthoringAgent.approve_draft(
+        draft_id, user["org_id"], user["user_id"], body.get("justification", "")
+    )
     return JSONResponse(content=result)
 
 
@@ -387,13 +420,17 @@ async def reject_policy_draft(
 ) -> JSONResponse:
     """Reject a policy draft."""
     from server.core.policy_authoring_agent import PolicyAuthoringAgent
-    result = PolicyAuthoringAgent.reject_draft(draft_id, user["org_id"], user["user_id"], body.get("reason", ""))
+
+    result = PolicyAuthoringAgent.reject_draft(
+        draft_id, user["org_id"], user["user_id"], body.get("reason", "")
+    )
     return JSONResponse(content=result)
 
 
 # ---------------------------------------------------------------------------
 # Multi-campus Routes (P22)
 # ---------------------------------------------------------------------------
+
 
 @router.post("/campuses/provision")
 async def provision_campus(
@@ -403,6 +440,7 @@ async def provision_campus(
 ) -> JSONResponse:
     """Provision a new campus under a GROUP organization."""
     from server.core.campus_service import CampusService
+
     result = CampusService.provision_campus(
         group_org_id=body["group_org_id"],
         campus_code=body["campus_code"],
@@ -425,6 +463,7 @@ async def get_group_summary(
 ) -> JSONResponse:
     """Get group-level aggregate summary across all campuses."""
     from server.core.campus_service import CampusService
+
     result = CampusService.get_group_summary(group_org_id, user["user_id"])
     return JSONResponse(content=result)
 
@@ -436,6 +475,7 @@ async def list_campuses(
 ) -> JSONResponse:
     """List all campuses under a GROUP organization."""
     from server.core.campus_service import CampusService
+
     result = CampusService.list_campuses(group_org_id)
     return JSONResponse(content={"campuses": result, "total": len(result)})
 
@@ -444,16 +484,18 @@ async def list_campuses(
 # 4.  DEAD-LETTER QUEUE — Failed Task Log
 # ===========================================================================
 
+
 @router.get("/failed-tasks")
 async def list_failed_tasks(
-    task_name: Optional[str] = Query(None),
-    retried: Optional[bool] = Query(None),
+    task_name: str | None = Query(None),
+    retried: bool | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user=Depends(super_admin),
 ):
     """List Celery tasks that exhausted all retries and landed in the DLQ."""
     from server.db_service import execute_query
+
     sql = "SELECT id, task_id, task_name, args, kwargs, error, failed_at, tenant_id, retried, retried_at FROM failed_task_log WHERE TRUE"
     params: list = []
     if task_name:
@@ -465,10 +507,14 @@ async def list_failed_tasks(
     sql += " ORDER BY failed_at DESC LIMIT %s OFFSET %s"
     params.extend([limit, offset])
     rows = execute_query(sql, tuple(params))
-    count_row = execute_query("SELECT COUNT(*) AS n FROM failed_task_log WHERE TRUE" + (
-        (" AND task_name ILIKE %s" if task_name else "") +
-        (" AND retried = %s" if retried is not None else "")
-    ), tuple(params[:-2]) if params[:-2] else ())
+    count_row = execute_query(
+        "SELECT COUNT(*) AS n FROM failed_task_log WHERE TRUE"  # noqa: S608
+        + (
+            (" AND task_name ILIKE %s" if task_name else "")
+            + (" AND retried = %s" if retried is not None else "")
+        ),
+        tuple(params[:-2]) if params[:-2] else (),
+    )
     total = count_row[0]["n"] if count_row else 0
     return {"tasks": rows, "total": total, "limit": limit, "offset": offset}
 
@@ -480,6 +526,7 @@ async def retry_failed_task(
 ):
     """Re-enqueue a failed task by its dead-letter log ID."""
     from server.db_service import execute_query, execute_transaction
+
     rows = execute_query("SELECT * FROM failed_task_log WHERE id = %s", (task_log_id,))
     if not rows:
         raise HTTPException(status_code=404, detail="Task not found in dead-letter log")
@@ -488,15 +535,31 @@ async def retry_failed_task(
         raise HTTPException(status_code=409, detail="Task already retried")
     # Re-enqueue via Celery send_task
     from server.worker import celery_app
+
     celery_app.send_task(
         row["task_name"],
         args=row["args"] or [],
         kwargs=row["kwargs"] or {},
     )
-    execute_transaction([(
-        "UPDATE failed_task_log SET retried = TRUE, retried_at = NOW() WHERE id = %s",
-        (task_log_id,),
-    )])
+    execute_transaction(
+        [
+            (
+                "UPDATE failed_task_log SET retried = TRUE, retried_at = NOW() WHERE id = %s",
+                (task_log_id,),
+            )
+        ]
+    )
+    from server.core.audit import AuditAction, AuditLog
+
+    AuditLog.log(
+        action=AuditAction.UPDATE,
+        actor_id=user["user_id"],
+        actor_role="super_admin",
+        entity_type="failed_task_log",
+        entity_id=str(task_log_id),
+        tenant_id=user.get("org_id", ""),
+        metadata={"source": "retry_failed_task", "task_name": row["task_name"]},
+    )
     return {"status": "requeued", "task_name": row["task_name"]}
 
 
@@ -507,5 +570,6 @@ async def promote_org_to_group(
 ) -> JSONResponse:
     """Promote a STANDALONE organization to GROUP entity type."""
     from server.core.campus_service import CampusService
+
     result = CampusService.promote_to_group(org_id, user["user_id"])
     return JSONResponse(content=result)

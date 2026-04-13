@@ -3,6 +3,7 @@
 Beat tasks:
   - check_invoice_overdue: daily — marks unpaid past-due invoices as OVERDUE
 """
+
 from __future__ import annotations
 
 import logging
@@ -20,6 +21,7 @@ def check_invoice_overdue() -> dict:
     and fires domain events for each organisation.
     """
     try:
+        from server.core.audit import AuditAction, AuditLog
         from server.db_service import execute_query, execute_transaction
 
         # Get all distinct org_ids with outstanding invoices
@@ -31,29 +33,46 @@ def check_invoice_overdue() -> dict:
         total_marked = 0
         for row in orgs:
             org_id = row["org_id"]
-            marked = execute_query(
-                """
+            marked = execute_transaction(
+                [
+                    (
+                        """
                 UPDATE student_invoices
                 SET status = 'OVERDUE'
                 WHERE org_id = %s AND status = 'UNPAID' AND due_date < CURRENT_DATE
                 RETURNING id, student_id
                 """,
-                (org_id,),
+                        (org_id,),
+                    )
+                ],
+                tenant_id=org_id,
+            )
+            AuditLog.log(
+                action=AuditAction.UPDATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="student_invoice",
+                entity_id="",
+                tenant_id="",
+                metadata={"source": "check_invoice_overdue"},
             )
             total_marked += len(marked)
 
             # Notify each affected student
             from server.core.domain_events import DomainEvent, DomainEventBus
+
             for inv in marked:
                 try:
-                    DomainEventBus.publish(DomainEvent(
-                        event_type="InvoiceOverdue",
-                        entity_type="student_invoice",
-                        entity_id=str(inv["id"]),
-                        org_id=org_id,
-                        payload={"student_id": str(inv["student_id"])},
-                        actor_id="system",
-                    ))
+                    DomainEventBus.publish(
+                        DomainEvent(
+                            event_type="InvoiceOverdue",
+                            entity_type="student_invoice",
+                            entity_id=str(inv["id"]),
+                            org_id=org_id,
+                            payload={"student_id": str(inv["student_id"])},
+                            actor_id="system",
+                        )
+                    )
                 except Exception as exc:
                     logger.warning("finance: InvoiceOverdue event failed: %s", exc)
 

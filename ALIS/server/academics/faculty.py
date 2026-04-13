@@ -1,4 +1,5 @@
 """E05-S04 — Faculty Assignment"""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class FacultyAssignmentService:
-
     @classmethod
     def assign(cls, org_id: str, req: FacultyAssignRequest, actor_id: str) -> dict:
         # Validate faculty exists and has FACULTY role
@@ -37,7 +37,10 @@ class FacultyAssignmentService:
 
         # Workload check — configurable via PolicyStore
         from server.core.policy_store import PolicyStore
-        max_load = int(PolicyStore.get(org_id, "academics.faculty.max_courses_per_year") or 6)
+
+        max_load = int(
+            PolicyStore.get(org_id, "academics.faculty.max_courses_per_year") or 6
+        )
         current_load = execute_query(
             "SELECT COUNT(*) AS n FROM faculty_assignments WHERE faculty_id = %s AND academic_year = %s",
             (req.faculty_id, req.academic_year),
@@ -48,19 +51,37 @@ class FacultyAssignmentService:
             )
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO faculty_assignments
                 (id, org_id, faculty_id, course_id, academic_year, semester, assigned_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (aid, org_id, req.faculty_id, req.course_id, req.academic_year, req.semester, actor_id),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        req.faculty_id,
+                        req.course_id,
+                        req.academic_year,
+                        req.semester,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="faculty_assignment", entity_id=aid, org_id=org_id,
-                     module="E05-S04",
-                     metadata={"faculty_id": req.faculty_id, "course_id": req.course_id})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="faculty_assignment",
+            entity_id=aid,
+            org_id=org_id,
+            module="E05-S04",
+            metadata={"faculty_id": req.faculty_id, "course_id": req.course_id},
+        )
 
         return cls.get(org_id, aid)
 
@@ -81,7 +102,9 @@ class FacultyAssignmentService:
         return dict(rows[0])
 
     @classmethod
-    def list_for_faculty(cls, org_id: str, faculty_id: str, academic_year: str) -> list[dict]:
+    def list_for_faculty(
+        cls, org_id: str, faculty_id: str, academic_year: str
+    ) -> list[dict]:
         rows = execute_query(
             """
             SELECT fa.*, c.name AS course_name, c.code, c.semester, c.credits
@@ -95,7 +118,9 @@ class FacultyAssignmentService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def list_for_course(cls, org_id: str, course_id: str, academic_year: str) -> list[dict]:
+    def list_for_course(
+        cls, org_id: str, course_id: str, academic_year: str
+    ) -> list[dict]:
         rows = execute_query(
             """
             SELECT fa.*, u.display_name AS faculty_name, u.email
@@ -110,10 +135,21 @@ class FacultyAssignmentService:
     @classmethod
     def unassign(cls, org_id: str, assignment_id: str, actor_id: str) -> None:
         cls.get(org_id, assignment_id)
-        execute_transaction([(
-            "DELETE FROM faculty_assignments WHERE id = %s AND org_id = %s",
-            (assignment_id, org_id),
-        )])
-        AuditLog.log(action=AuditAction.DELETE, actor_id=actor_id, actor_type="human",
-                     entity_type="faculty_assignment", entity_id=assignment_id,
-                     org_id=org_id, module="E05-S04", metadata={})
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM faculty_assignments WHERE id = %s AND org_id = %s",
+                    (assignment_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.DELETE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="faculty_assignment",
+            entity_id=assignment_id,
+            org_id=org_id,
+            module="E05-S04",
+            metadata={},
+        )

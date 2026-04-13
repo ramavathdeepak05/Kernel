@@ -35,14 +35,13 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.core.state_registry import StudentState
 from server.db_service import execute_query, execute_transaction
@@ -57,10 +56,10 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 _DEFAULT_REFUND_SLABS = [
-    {"label": "BEFORE_15_DAYS_100PCT",  "max_days": 15,  "pct": 100.0},
-    {"label": "DAY_15_TO_30_80PCT",     "max_days": 30,  "pct": 80.0},
-    {"label": "DAY_30_TO_45_50PCT",     "max_days": 45,  "pct": 50.0},
-    {"label": "AFTER_45_DAYS_0PCT",     "max_days": None, "pct": 0.0},
+    {"label": "BEFORE_15_DAYS_100PCT", "max_days": 15, "pct": 100.0},
+    {"label": "DAY_15_TO_30_80PCT", "max_days": 30, "pct": 80.0},
+    {"label": "DAY_30_TO_45_50PCT", "max_days": 45, "pct": 50.0},
+    {"label": "AFTER_45_DAYS_0PCT", "max_days": None, "pct": 0.0},
 ]
 
 _DD_STATUSES = {"PENDING", "VERIFIED", "REJECTED"}
@@ -71,16 +70,17 @@ _REFUND_STATUSES = {"REQUESTED", "UNDER_REVIEW", "APPROVED", "REJECTED", "PROCES
 # Pydantic Models
 # =============================================================================
 
+
 class DemandDraftCreate(BaseModel):
     applicant_id: str
     dd_number: str = Field(..., min_length=3, max_length=50)
     bank_name: str = Field(..., min_length=2, max_length=200)
-    branch_name: Optional[str] = None
+    branch_name: str | None = None
     amount: float = Field(..., gt=0)
     dd_date: str = Field(..., description="ISO date: YYYY-MM-DD")
-    scan_file_path: Optional[str] = Field(
+    scan_file_path: str | None = Field(
         default=None,
-        description="Path in MinIO after file upload (optional at submission)"
+        description="Path in MinIO after file upload (optional at submission)",
     )
 
 
@@ -90,22 +90,22 @@ class DemandDraftRead(BaseModel):
     applicant_id: str
     dd_number: str
     bank_name: str
-    branch_name: Optional[str] = None
+    branch_name: str | None = None
     amount: float
     dd_date: str
-    scan_file_path: Optional[str] = None
+    scan_file_path: str | None = None
     verification_status: str  # PENDING | VERIFIED | REJECTED
-    verified_by: Optional[str] = None
-    verified_at: Optional[datetime] = None
-    rejection_reason: Optional[str] = None
+    verified_by: str | None = None
+    verified_at: datetime | None = None
+    rejection_reason: str | None = None
     created_at: datetime
 
 
 class RefundRequestCreate(BaseModel):
     applicant_id: str
-    payment_id: Optional[str] = Field(
+    payment_id: str | None = Field(
         default=None,
-        description="Finance payment record ID (if linked to a payments row)"
+        description="Finance payment record ID (if linked to a payments row)",
     )
     amount_paid: float = Field(..., gt=0, description="Total amount paid by applicant")
     reason: str = Field(..., min_length=10, max_length=2000)
@@ -115,25 +115,26 @@ class RefundRequestRead(BaseModel):
     id: str
     org_id: str
     applicant_id: str
-    payment_id: Optional[str] = None
+    payment_id: str | None = None
     amount_paid: float
     refund_amount: float
-    refund_policy_slab: Optional[str] = None
+    refund_policy_slab: str | None = None
     reason: str
     status: str  # REQUESTED | UNDER_REVIEW | APPROVED | REJECTED | PROCESSED
     requested_by: str
-    reviewed_by: Optional[str] = None
-    reviewed_at: Optional[datetime] = None
-    review_notes: Optional[str] = None
-    processed_at: Optional[datetime] = None
-    gateway_refund_id: Optional[str] = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+    review_notes: str | None = None
+    processed_at: datetime | None = None
+    gateway_refund_id: str | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 # =============================================================================
 # DEMAND DRAFT SERVICE
 # =============================================================================
+
 
 class DemandDraftService:
     """
@@ -192,29 +193,32 @@ class DemandDraftService:
         dd_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO demand_draft_uploads (
                     id, org_id, applicant_id, dd_number, bank_name,
                     branch_name, amount, dd_date, scan_file_path,
                     verification_status, created_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    dd_id, org_id,
-                    request.applicant_id,
-                    request.dd_number,
-                    request.bank_name,
-                    request.branch_name,
-                    request.amount,
-                    request.dd_date,
-                    request.scan_file_path,
-                    "PENDING",
-                    now,
-                ),
-            )
-        ])
+                    (
+                        dd_id,
+                        org_id,
+                        request.applicant_id,
+                        request.dd_number,
+                        request.bank_name,
+                        request.branch_name,
+                        request.amount,
+                        request.dd_date,
+                        request.scan_file_path,
+                        "PENDING",
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -234,7 +238,9 @@ class DemandDraftService:
 
         logger.info(
             "P10: DD submitted [id=%s, applicant=%s, amount=%.2f]",
-            dd_id, request.applicant_id, request.amount,
+            dd_id,
+            request.applicant_id,
+            request.amount,
         )
         return cls.get(dd_id, org_id)
 
@@ -264,14 +270,16 @@ class DemandDraftService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE demand_draft_uploads "
-                "SET verification_status = 'VERIFIED', verified_by = %s, verified_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (actor_id, now, dd_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE demand_draft_uploads "
+                    "SET verification_status = 'VERIFIED', verified_by = %s, verified_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (actor_id, now, dd_id, org_id),
+                )
+            ]
+        )
 
         # Transition applicant → VERIFICATION_PENDING
         ApplicantService.transition_state(
@@ -280,7 +288,11 @@ class DemandDraftService:
             to_state=StudentState.VERIFICATION_PENDING,
             actor_id=actor_id,
             reason=f"DD {dd['dd_number']} verified by {actor_id}",
-            metadata={"dd_id": dd_id, "dd_number": dd["dd_number"], "amount": float(dd["amount"])},
+            metadata={
+                "dd_id": dd_id,
+                "dd_number": dd["dd_number"],
+                "amount": float(dd["amount"]),
+            },
         )
 
         AuditLog.log(
@@ -313,7 +325,9 @@ class DemandDraftService:
         remains SEAT_CONFIRMED.
         """
         if not reason or len(reason.strip()) < 5:
-            raise BusinessRuleViolation(message="Rejection reason must be at least 5 characters.")
+            raise BusinessRuleViolation(
+                message="Rejection reason must be at least 5 characters."
+            )
 
         dd = cls._require_dd(dd_id, org_id)
 
@@ -324,14 +338,16 @@ class DemandDraftService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE demand_draft_uploads "
-                "SET verification_status = 'REJECTED', verified_by = %s, verified_at = %s, "
-                "rejection_reason = %s WHERE id = %s AND org_id = %s",
-                (actor_id, now, reason.strip(), dd_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE demand_draft_uploads "
+                    "SET verification_status = 'REJECTED', verified_by = %s, verified_at = %s, "
+                    "rejection_reason = %s WHERE id = %s AND org_id = %s",
+                    (actor_id, now, reason.strip(), dd_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -367,22 +383,22 @@ class DemandDraftService:
         cls,
         applicant_id: str,
         org_id: str,
-        status: Optional[str] = None,
-    ) -> List[DemandDraftRead]:
+        status: str | None = None,
+    ) -> list[DemandDraftRead]:
         conditions = ["applicant_id = %s", "org_id = %s"]
         params: list = [applicant_id, org_id]
         if status:
             conditions.append("verification_status = %s")
             params.append(status)
         rows = execute_query(
-            f"SELECT * FROM demand_draft_uploads WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM demand_draft_uploads WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY created_at DESC",
             tuple(params),
         )
         return [cls._row_to_read(r) for r in rows]
 
     @classmethod
-    def _require_dd(cls, dd_id: str, org_id: str) -> Dict[str, Any]:
+    def _require_dd(cls, dd_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM demand_draft_uploads WHERE id = %s AND org_id = %s",
             (dd_id, org_id),
@@ -392,7 +408,7 @@ class DemandDraftService:
         return rows[0]
 
     @classmethod
-    def _row_to_read(cls, row: Dict[str, Any]) -> DemandDraftRead:
+    def _row_to_read(cls, row: dict[str, Any]) -> DemandDraftRead:
         data = dict(row)
         # Coerce Decimal → float for Pydantic
         if isinstance(data.get("amount"), Decimal):
@@ -406,6 +422,7 @@ class DemandDraftService:
 # =============================================================================
 # REFUND REQUEST SERVICE
 # =============================================================================
+
 
 class RefundRequestService:
     """
@@ -450,8 +467,10 @@ class RefundRequestService:
             )
         status = app_rows[0]["status"]
         allowed = {
-            StudentState.SEAT_CONFIRMED.value, "SEAT_CONFIRMED",
-            StudentState.VERIFICATION_PENDING.value, "VERIFICATION_PENDING",
+            StudentState.SEAT_CONFIRMED.value,
+            "SEAT_CONFIRMED",
+            StudentState.VERIFICATION_PENDING.value,
+            "VERIFICATION_PENDING",
         }
         if status not in allowed:
             raise BusinessRuleViolation(
@@ -475,7 +494,9 @@ class RefundRequestService:
             )
 
         # --- Calculate refund amount from policy slabs ---
-        confirmation_date = app_rows[0].get("status_updated_at") or datetime.now(timezone.utc)
+        confirmation_date = app_rows[0].get("status_updated_at") or datetime.now(
+            timezone.utc
+        )
         days_since = (datetime.now(timezone.utc) - confirmation_date).days
         slabs = cls._load_slabs(org_id)
         slab_label, refund_pct = cls._calculate_slab(days_since, slabs)
@@ -484,29 +505,33 @@ class RefundRequestService:
         request_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO refund_requests (
                     id, org_id, applicant_id, payment_id, amount_paid,
                     refund_amount, refund_policy_slab, reason, status,
                     requested_by, created_at, updated_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    request_id, org_id,
-                    request.applicant_id,
-                    request.payment_id,
-                    request.amount_paid,
-                    refund_amount,
-                    slab_label,
-                    request.reason,
-                    "REQUESTED",
-                    actor_id,
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        request_id,
+                        org_id,
+                        request.applicant_id,
+                        request.payment_id,
+                        request.amount_paid,
+                        refund_amount,
+                        slab_label,
+                        request.reason,
+                        "REQUESTED",
+                        actor_id,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -528,7 +553,10 @@ class RefundRequestService:
 
         logger.info(
             "P10: Refund request submitted [id=%s, applicant=%s, amount=%.2f, slab=%s]",
-            request_id, request.applicant_id, refund_amount, slab_label,
+            request_id,
+            request.applicant_id,
+            refund_amount,
+            slab_label,
         )
         return cls.get(request_id, org_id)
 
@@ -539,7 +567,7 @@ class RefundRequestService:
         org_id: str,
         actor_id: str,
         decision: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> RefundRequestRead:
         """
         Staff reviews a refund request (APPROVED or REJECTED).
@@ -566,15 +594,17 @@ class RefundRequestService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE refund_requests "
-                "SET status = %s, reviewed_by = %s, reviewed_at = %s, "
-                "review_notes = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (decision, actor_id, now, notes, now, request_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE refund_requests "
+                    "SET status = %s, reviewed_by = %s, reviewed_at = %s, "
+                    "review_notes = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (decision, actor_id, now, notes, now, request_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -608,7 +638,9 @@ class RefundRequestService:
         Moves status → PROCESSED.
         """
         if not gateway_refund_id or not gateway_refund_id.strip():
-            raise BusinessRuleViolation(message="gateway_refund_id is required to process a refund.")
+            raise BusinessRuleViolation(
+                message="gateway_refund_id is required to process a refund."
+            )
 
         req_row = cls._require_request(request_id, org_id)
 
@@ -619,15 +651,17 @@ class RefundRequestService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE refund_requests "
-                "SET status = 'PROCESSED', gateway_refund_id = %s, "
-                "processed_at = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (gateway_refund_id.strip(), now, now, request_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE refund_requests "
+                    "SET status = 'PROCESSED', gateway_refund_id = %s, "
+                    "processed_at = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (gateway_refund_id.strip(), now, now, request_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -645,7 +679,9 @@ class RefundRequestService:
             },
         )
 
-        logger.info("P10: Refund processed [id=%s, gateway=%s]", request_id, gateway_refund_id)
+        logger.info(
+            "P10: Refund processed [id=%s, gateway=%s]", request_id, gateway_refund_id
+        )
         return cls.get(request_id, org_id)
 
     @classmethod
@@ -655,7 +691,9 @@ class RefundRequestService:
             (request_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Refund request '{request_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Refund request '{request_id}' not found."
+            )
         return cls._row_to_read(rows[0])
 
     @classmethod
@@ -663,7 +701,7 @@ class RefundRequestService:
         cls,
         applicant_id: str,
         org_id: str,
-    ) -> List[RefundRequestRead]:
+    ) -> list[RefundRequestRead]:
         rows = execute_query(
             "SELECT * FROM refund_requests WHERE applicant_id = %s AND org_id = %s "
             "ORDER BY created_at DESC",
@@ -672,7 +710,7 @@ class RefundRequestService:
         return [cls._row_to_read(r) for r in rows]
 
     @classmethod
-    def list_pending_review(cls, org_id: str) -> List[RefundRequestRead]:
+    def list_pending_review(cls, org_id: str) -> list[RefundRequestRead]:
         """Return all REQUESTED or UNDER_REVIEW requests for staff dashboard."""
         rows = execute_query(
             "SELECT * FROM refund_requests "
@@ -714,17 +752,19 @@ class RefundRequestService:
         return "NO_REFUND", 0.0
 
     @classmethod
-    def _require_request(cls, request_id: str, org_id: str) -> Dict[str, Any]:
+    def _require_request(cls, request_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM refund_requests WHERE id = %s AND org_id = %s",
             (request_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Refund request '{request_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Refund request '{request_id}' not found."
+            )
         return rows[0]
 
     @classmethod
-    def _row_to_read(cls, row: Dict[str, Any]) -> RefundRequestRead:
+    def _row_to_read(cls, row: dict[str, Any]) -> RefundRequestRead:
         data = dict(row)
         for key in ("amount_paid", "refund_amount"):
             if isinstance(data.get(key), Decimal):

@@ -34,10 +34,11 @@ Usage in task code:
         priority="default",   # or "high"
     )
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +49,13 @@ PriorityType = Literal["default", "high"]
 # Queue naming
 # ---------------------------------------------------------------------------
 
+
 def tenant_queue(tenant_id: str, priority: PriorityType = "default") -> str:
     """Return the queue name for a tenant + priority combination."""
     return f"{priority}:{tenant_id}"
 
 
-def parse_tenant_from_queue(queue_name: str) -> Optional[str]:
+def parse_tenant_from_queue(queue_name: str) -> str | None:
     """Extract tenant_id from a queue name, or None if not a tenant queue."""
     parts = queue_name.split(":", 1)
     if len(parts) == 2 and parts[0] in ("default", "high"):
@@ -64,6 +66,7 @@ def parse_tenant_from_queue(queue_name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Celery router
 # ---------------------------------------------------------------------------
+
 
 class TenantTaskRouter:
     """
@@ -78,21 +81,23 @@ class TenantTaskRouter:
     """
 
     # Tasks that should always run on the shared queue (tenant-agnostic)
-    SYSTEM_TASKS = frozenset({
-        "server.tasks.calendar",
-        "server.tasks.shadow_divergence",
-        "server.tasks.backup",
-        "server.tasks.reporting",
-    })
+    SYSTEM_TASKS = frozenset(
+        {
+            "server.tasks.calendar",
+            "server.tasks.shadow_divergence",
+            "server.tasks.backup",
+            "server.tasks.reporting",
+        }
+    )
 
     def route_for_task(
         self,
         task: str,
         args: tuple = (),
-        kwargs: Dict[str, Any] = {},
-        options: Dict[str, Any] = {},
-        **kw: Any,
-    ) -> Optional[Dict[str, Any]]:
+        kwargs: dict[str, Any] = {},
+        options: dict[str, Any] = {},
+        **_kwargs: Any,
+    ) -> dict[str, Any] | None:
         """
         Return routing dict or None (fall back to task_default_queue).
 
@@ -110,7 +115,9 @@ class TenantTaskRouter:
         tenant_id = kwargs.get("tenant_id") or kwargs.get("org_id")
         if not tenant_id and args:
             # Convention: first positional arg is org_id for most tasks
-            tenant_id = args[0] if isinstance(args[0], str) and len(args[0]) == 36 else None
+            tenant_id = (
+                args[0] if isinstance(args[0], str) and len(args[0]) == 36 else None
+            )
 
         if not tenant_id:
             return None  # no tenant context → shared queue
@@ -120,10 +127,12 @@ class TenantTaskRouter:
 
         return {"queue": tenant_queue(tenant_id, priority)}
 
-    HIGH_PRIORITY_PREFIXES = frozenset({
-        "server.tasks.notifications",   # user-facing notifications → fast delivery
-        "server.tasks.admissions.send_offer",
-    })
+    HIGH_PRIORITY_PREFIXES = frozenset(
+        {
+            "server.tasks.notifications",  # user-facing notifications → fast delivery
+            "server.tasks.admissions.send_offer",
+        }
+    )
 
     def _is_high_priority(self, task_name: str) -> bool:
         for prefix in self.HIGH_PRIORITY_PREFIXES:
@@ -136,14 +145,15 @@ class TenantTaskRouter:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def apply_tenant_task(
     task_name: str,
     tenant_id: str,
-    args: Optional[list] = None,
-    kwargs: Optional[dict] = None,
+    args: list | None = None,
+    kwargs: dict | None = None,
     priority: PriorityType = "default",
-    countdown: Optional[int] = None,
-    eta: Optional[Any] = None,
+    countdown: int | None = None,
+    eta: Any | None = None,
     retries: int = 3,
 ) -> Any:
     """
@@ -165,14 +175,14 @@ def apply_tenant_task(
     Returns:
         AsyncResult from celery_app.send_task()
     """
-    from server.worker import celery_app
+    from celery import current_app
 
     task_kwargs = dict(kwargs or {})
     task_kwargs.setdefault("tenant_id", tenant_id)
 
     queue = tenant_queue(tenant_id, priority)
 
-    send_kwargs: Dict[str, Any] = {
+    send_kwargs: dict[str, Any] = {
         "queue": queue,
         "kwargs": task_kwargs,
         "retries": retries,
@@ -184,10 +194,8 @@ def apply_tenant_task(
     if eta is not None:
         send_kwargs["eta"] = eta
 
-    logger.debug(
-        "Dispatching task=%s tenant=%s queue=%s", task_name, tenant_id, queue
-    )
-    return celery_app.send_task(task_name, **send_kwargs)
+    logger.debug("Dispatching task=%s tenant=%s queue=%s", task_name, tenant_id, queue)
+    return current_app.send_task(task_name, **send_kwargs)
 
 
 def ensure_tenant_queues(tenant_id: str) -> list[str]:

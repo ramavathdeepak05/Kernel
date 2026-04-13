@@ -3,10 +3,10 @@
 Identifies at-risk students and generates narrative insights using the
 AI Gateway (Qwen via Ollama). All AI output is advisory only.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from server.core.ai_gateway import AIGateway, AIGatewayContext
 from server.core.rbac import Role
@@ -16,15 +16,16 @@ logger = logging.getLogger(__name__)
 
 
 class AttendanceAnalyticsService:
-
     @classmethod
-    def get_at_risk_students(cls, org_id: str, academic_year: str,
-                              course_id: Optional[str] = None) -> list[dict]:
+    def get_at_risk_students(
+        cls, org_id: str, academic_year: str, course_id: str | None = None
+    ) -> list[dict]:
         """
         Return all students below the minimum attendance threshold.
         Pure DB query — no AI needed for the list itself.
         """
         from server.core.policy_store import PolicyKey, PolicyStore
+
         min_pct = float(PolicyStore.get(org_id, PolicyKey.MIN_ATTENDANCE_PCT) or 75.0)
 
         sql = """
@@ -61,9 +62,13 @@ class AttendanceAnalyticsService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def generate_ai_insights(cls, org_id: str, academic_year: str,
-                              course_id: Optional[str] = None,
-                              actor_id: str = "system") -> dict:
+    def generate_ai_insights(
+        cls,
+        org_id: str,
+        academic_year: str,
+        course_id: str | None = None,
+        actor_id: str = "system",
+    ) -> dict:
         """
         Use the AI Gateway to generate a narrative attendance analysis.
 
@@ -92,13 +97,15 @@ class AttendanceAnalyticsService:
         )
         total_n = int(total_students[0]["n"]) if total_students else len(at_risk)
 
-        avg_pct = round(sum(float(r["percentage"] or 0) for r in at_risk) / len(at_risk), 1)
+        avg_pct = round(
+            sum(float(r["percentage"] or 0) for r in at_risk) / len(at_risk), 1
+        )
         lowest = at_risk[0] if at_risk else {}
 
         context = (
             f"Academic year: {academic_year}. "
             f"Total enrolled students: {total_n}. "
-            f"Students below attendance threshold: {len(at_risk)} ({round(len(at_risk)/total_n*100, 1)}%). "
+            f"Students below attendance threshold: {len(at_risk)} ({round(len(at_risk) / total_n * 100, 1)}%). "
             f"Average attendance among at-risk students: {avg_pct}%. "
             f"Lowest attendance recorded: {lowest.get('percentage', 'N/A')}%. "
         )
@@ -111,7 +118,7 @@ class AttendanceAnalyticsService:
             "1. A 2-3 sentence narrative insight about attendance patterns.\n"
             "2. 2-3 specific, actionable recommendations for the academic coordinator.\n\n"
             f"Data: {context}\n\n"
-            "Respond in JSON: {\"insight\": \"...\", \"recommendations\": [\"...\", \"...\"]}"
+            'Respond in JSON: {"insight": "...", "recommendations": ["...", "..."]}'
         )
 
         ctx = AIGatewayContext(
@@ -130,7 +137,10 @@ class AttendanceAnalyticsService:
                     "required": ["insight", "recommendations"],
                     "properties": {
                         "insight": {"type": "string"},
-                        "recommendations": {"type": "array", "items": {"type": "string"}},
+                        "recommendations": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                     },
                 },
             )

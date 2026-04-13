@@ -1,11 +1,12 @@
 """E12-S04 — Recruitment Drives"""
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
 
-from server.core.audit import AuditAction, AuditLog
+from server.core.audit import AuditAction, AuditLedger
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
 
@@ -15,27 +16,40 @@ logger = logging.getLogger(__name__)
 
 
 class RecruitmentDriveService:
-
     @classmethod
     def create(cls, org_id: str, req: DriveCreate, actor_id: str) -> dict:
         did = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO recruitment_drives
                 (id, org_id, company_name, drive_date, venue, roles_offered,
                  eligibility, description, created_by)
             VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s)
             """,
-            (
-                did, org_id, req.company_name, req.drive_date, req.venue,
-                json.dumps(req.roles_offered), json.dumps(req.eligibility),
-                req.description, actor_id,
-            ),
-        )])
+                    (
+                        did,
+                        org_id,
+                        req.company_name,
+                        req.drive_date,
+                        req.venue,
+                        json.dumps(req.roles_offered),
+                        json.dumps(req.eligibility),
+                        req.description,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-            entity_type="recruitment_drive", entity_id=did, org_id=org_id,
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="recruitment_drive",
+            entity_id=did,
+            org_id=org_id,
             module="E12-S04",
             metadata={"company": req.company_name, "date": req.drive_date},
         )
@@ -56,26 +70,45 @@ class RecruitmentDriveService:
         sql = "SELECT * FROM recruitment_drives WHERE org_id = %s"
         params: list = [org_id]
         if status:
-            sql += " AND status = %s"; params.append(status)
+            sql += " AND status = %s"
+            params.append(status)
         sql += " ORDER BY drive_date DESC"
         return [dict(r) for r in execute_query(sql, params)]
 
     @classmethod
-    def update_status(cls, org_id: str, drive_id: str, status: str, actor_id: str) -> dict:
+    def update_status(
+        cls, org_id: str, drive_id: str, status: str, actor_id: str
+    ) -> dict:
         if status not in ("SCHEDULED", "ONGOING", "COMPLETED", "CANCELLED"):
             raise BusinessRuleViolation(message=f"Invalid drive status: {status}")
         cls.get(org_id, drive_id)
-        execute_transaction([(
-            "UPDATE recruitment_drives SET status = %s WHERE id = %s AND org_id = %s",
-            (status, drive_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE recruitment_drives SET status = %s WHERE id = %s AND org_id = %s",
+                    (status, drive_id, org_id),
+                )
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="status",
+            entity_id=drive_id,
+            tenant_id=org_id,
+            metadata={"source": "update_status"},
+        )
         return cls.get(org_id, drive_id)
 
     @classmethod
     def register_student(cls, org_id: str, drive_id: str, student_id: str) -> dict:
         drive = cls.get(org_id, drive_id)
         if drive["status"] not in ("SCHEDULED", "ONGOING"):
-            raise BusinessRuleViolation(message="Registrations are closed for this drive")
+            raise BusinessRuleViolation(
+                message="Registrations are closed for this drive"
+            )
 
         # Check eligibility
         eligibility = drive.get("eligibility") or {}
@@ -100,43 +133,81 @@ class RecruitmentDriveService:
             raise BusinessRuleViolation(message="Already registered for this drive")
 
         reg_id = str(uuid.uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO drive_registrations (id, org_id, drive_id, student_id)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (reg_id, org_id, drive_id, student_id),
-            ),
-            (
-                "UPDATE recruitment_drives SET registered_count = registered_count + 1 WHERE id = %s",
-                (drive_id,),
-            ),
-        ])
-        return {"id": reg_id, "drive_id": drive_id, "student_id": student_id, "status": "REGISTERED"}
+                    (reg_id, org_id, drive_id, student_id),
+                ),
+                (
+                    "UPDATE recruitment_drives SET registered_count = registered_count + 1 WHERE id = %s",
+                    (drive_id,),
+                ),
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="student",
+            entity_id=student_id,
+            tenant_id=org_id,
+            metadata={"source": "register_student"},
+        )
+        return {
+            "id": reg_id,
+            "drive_id": drive_id,
+            "student_id": student_id,
+            "status": "REGISTERED",
+        }
 
     @classmethod
     def update_registration_status(
         cls, org_id: str, registration_id: str, status: str, actor_id: str
     ) -> dict:
         if status not in ("REGISTERED", "APPEARED", "SELECTED", "REJECTED"):
-            raise BusinessRuleViolation(message=f"Invalid registration status: {status}")
+            raise BusinessRuleViolation(
+                message=f"Invalid registration status: {status}"
+            )
 
-        execute_transaction([(
-            "UPDATE drive_registrations SET status = %s WHERE id = %s AND org_id = %s",
-            (status, registration_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE drive_registrations SET status = %s WHERE id = %s AND org_id = %s",
+                    (status, registration_id, org_id),
+                )
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="registration_status",
+            entity_id=registration_id,
+            tenant_id=org_id,
+            metadata={"source": "update_registration_status"},
+        )
 
         # Update drive selected count
         if status == "SELECTED":
             rows = execute_query(
-                "SELECT drive_id FROM drive_registrations WHERE id = %s", (registration_id,)
+                "SELECT drive_id FROM drive_registrations WHERE id = %s",
+                (registration_id,),
             )
             if rows:
-                execute_transaction([(
-                    "UPDATE recruitment_drives SET selected_count = selected_count + 1 WHERE id = %s",
-                    (str(rows[0]["drive_id"]),),
-                )])
+                execute_transaction(
+                    [
+                        (
+                            "UPDATE recruitment_drives SET selected_count = selected_count + 1 WHERE id = %s",
+                            (str(rows[0]["drive_id"]),),
+                        )
+                    ]
+                )
 
         rows = execute_query(
             "SELECT * FROM drive_registrations WHERE id = %s AND org_id = %s",

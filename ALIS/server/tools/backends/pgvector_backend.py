@@ -35,7 +35,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from server.core.audit import AuditAction, AuditLedger
+from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +104,7 @@ class PGVectorBackend:
         top_k: int,
         score_threshold: float,
         tenant_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Perform cosine-similarity search against the vector store.
 
@@ -140,7 +143,7 @@ class PGVectorBackend:
 
     def upsert_chunks(
         self,
-        chunks: List[Dict[str, Any]],
+        chunks: list[dict[str, Any]],
         index_name: str,
         tenant_id: str,
     ) -> int:
@@ -154,16 +157,13 @@ class PGVectorBackend:
             Number of chunks successfully inserted/updated.
         """
         self._ensure_schema()
-        from server.db_service import execute_query
 
         upserted = 0
         for chunk in chunks:
             chunk_id = chunk.get("chunk_id")
             text = chunk.get("text")
             if not chunk_id or not text:
-                logger.warning(
-                    "E03-S06: Skipping chunk with missing chunk_id or text"
-                )
+                logger.warning("E03-S06: Skipping chunk with missing chunk_id or text")
                 continue
 
             embedding = self._embed(text)
@@ -177,8 +177,10 @@ class PGVectorBackend:
             vector_literal = self._to_pg_vector(embedding)
 
             try:
-                execute_query(
-                    """
+                execute_transaction(
+                    [
+                        (
+                            """
                     INSERT INTO vector_store_chunks
                         (org_id, index_name, chunk_id, text, metadata, embedding)
                     VALUES (%s, %s, %s, %s, %s, %s::vector)
@@ -188,25 +190,37 @@ class PGVectorBackend:
                         metadata  = EXCLUDED.metadata,
                         embedding = EXCLUDED.embedding
                     """,
-                    (
-                        tenant_id,
-                        index_name,
-                        chunk_id,
-                        text,
-                        json.dumps(meta),
-                        vector_literal,
-                    ),
+                            (
+                                tenant_id,
+                                index_name,
+                                chunk_id,
+                                text,
+                                json.dumps(meta),
+                                vector_literal,
+                            ),
+                        )
+                    ],
+                    tenant_id=self.org_id,
+                )
+                AuditLedger.log(
+                    action=AuditAction.CREATE,
+                    actor_id="system",
+                    actor_role="system",
+                    entity_type="vector_chunk",
+                    entity_id="",
+                    tenant_id="",
+                    metadata={"source": "upsert_chunks"},
                 )
                 upserted += 1
             except Exception as e:
-                logger.error(
-                    "E03-S06: Failed to upsert chunk_id=%s: %s", chunk_id, e
-                )
+                logger.error("E03-S06: Failed to upsert chunk_id=%s: %s", chunk_id, e)
 
         if upserted:
             logger.info(
                 "E03-S06: Upserted %d chunks into index '%s' (tenant=%s)",
-                upserted, index_name, tenant_id,
+                upserted,
+                index_name,
+                tenant_id,
             )
 
         return upserted
@@ -222,7 +236,6 @@ class PGVectorBackend:
         Safe to call on live data — PostgreSQL rebuilds the index
         concurrently (non-blocking reads during rebuild).
         """
-        from server.db_service import execute_query
 
         idx_name = self._index_name(tenant_id, index_name)
         try:
@@ -239,7 +252,9 @@ class PGVectorBackend:
             )
             logger.info(
                 "E03-S06: Rebuilt IVFFlat index '%s' for tenant=%s index=%s",
-                idx_name, tenant_id, index_name,
+                idx_name,
+                tenant_id,
+                index_name,
             )
         except Exception as e:
             logger.error("E03-S06: Index rebuild failed: %s", e)
@@ -250,7 +265,7 @@ class PGVectorBackend:
 
     def _ensure_schema(self) -> None:
         """Create the vector_store_chunks table if it doesn't exist."""
-        from server.db_service import execute_query
+
         try:
             execute_query("CREATE EXTENSION IF NOT EXISTS vector")
             execute_query(
@@ -271,7 +286,7 @@ class PGVectorBackend:
         except Exception as e:
             logger.warning("E03-S06: Schema init warning (may already exist): %s", e)
 
-    def _embed(self, text: str) -> Optional[List[float]]:
+    def _embed(self, text: str) -> list[float] | None:
         """
         Generate an embedding vector via the local Ollama API.
 
@@ -279,10 +294,12 @@ class PGVectorBackend:
         """
         import urllib.request
 
-        payload = json.dumps({
-            "model": self._embedding_model,
-            "prompt": text,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "model": self._embedding_model,
+                "prompt": text,
+            }
+        ).encode("utf-8")
 
         try:
             req = urllib.request.Request(
@@ -295,21 +312,18 @@ class PGVectorBackend:
                 body = json.loads(resp.read().decode("utf-8"))
                 return body.get("embedding")
         except Exception as e:
-            logger.error(
-                "E03-S06: Ollama embedding request failed: %s", e
-            )
+            logger.error("E03-S06: Ollama embedding request failed: %s", e)
             return None
 
     def _similarity_search(
         self,
-        query_vector: List[float],
+        query_vector: list[float],
         index_name: str,
         top_k: int,
         score_threshold: float,
         tenant_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Run cosine similarity search using pgvector <=> operator."""
-        from server.db_service import execute_query
 
         vector_literal = self._to_pg_vector(query_vector)
 
@@ -320,7 +334,7 @@ class PGVectorBackend:
 
         try:
             rows = execute_query(
-                f"""
+                f"""  # noqa: S608
                 SET LOCAL ivfflat.probes = {_IVFFLAT_PROBES};
                 SELECT
                     chunk_id,
@@ -359,7 +373,7 @@ class PGVectorBackend:
         ]
 
     @staticmethod
-    def _to_pg_vector(embedding: List[float]) -> str:
+    def _to_pg_vector(embedding: list[float]) -> str:
         """Convert a Python float list to pgvector literal string '[0.1,0.2,...]'."""
         return "[" + ",".join(str(x) for x in embedding) + "]"
 

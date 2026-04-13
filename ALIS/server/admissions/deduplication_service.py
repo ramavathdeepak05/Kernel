@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Optional
 from uuid import uuid4
 
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
@@ -26,6 +26,7 @@ _RESTRICTED_STATUSES = {"GRADUATED", "EXPELLED"}
 # ---------------------------------------------------------------------------
 # Jaro-Winkler implementation (no external deps)
 # ---------------------------------------------------------------------------
+
 
 def _jaro(s1: str, s2: str) -> float:
     """Compute the Jaro similarity between two strings."""
@@ -68,8 +69,9 @@ def _jaro(s1: str, s2: str) -> float:
             transpositions += 1
         k += 1
 
-    jaro = (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3.0
-    return jaro
+    return (
+        matches / len1 + matches / len2 + (matches - transpositions / 2) / matches
+    ) / 3.0
 
 
 def _jaro_winkler(s1: str, s2: str, prefix_weight: float = 0.1) -> float:
@@ -97,8 +99,7 @@ def _normalize_name(name: str) -> str:
     """Lowercase, strip extra whitespace, remove punctuation."""
     name = name.lower().strip()
     name = re.sub(r"[^a-z0-9\s]", "", name)
-    name = re.sub(r"\s+", " ", name)
-    return name
+    return re.sub(r"\s+", " ", name)
 
 
 def _normalize_phone(phone: str) -> str:
@@ -110,8 +111,8 @@ def _normalize_phone(phone: str) -> str:
 # Service
 # ---------------------------------------------------------------------------
 
-class StudentDeduplicationService:
 
+class StudentDeduplicationService:
     @classmethod
     def find_duplicates(
         cls,
@@ -168,19 +169,23 @@ class StudentDeduplicationService:
 
                 phone_a = _normalize_phone(a["phone"] or "")
                 phone_b = _normalize_phone(b["phone"] or "")
-                phone_score = _jaro_winkler(phone_a, phone_b) if phone_a and phone_b else 0.0
+                phone_score = (
+                    _jaro_winkler(phone_a, phone_b) if phone_a and phone_b else 0.0
+                )
 
                 composite = 0.50 * name_score + 0.30 * dob_score + 0.20 * phone_score
 
                 if composite >= threshold:
-                    pairs.append({
-                        "student_a_id": a["id"],
-                        "student_b_id": b["id"],
-                        "composite_score": round(composite, 4),
-                        "name_score": round(name_score, 4),
-                        "dob_score": round(dob_score, 4),
-                        "phone_score": round(phone_score, 4),
-                    })
+                    pairs.append(
+                        {
+                            "student_a_id": a["id"],
+                            "student_b_id": b["id"],
+                            "composite_score": round(composite, 4),
+                            "name_score": round(name_score, 4),
+                            "dob_score": round(dob_score, 4),
+                            "phone_score": round(phone_score, 4),
+                        }
+                    )
 
         # Sort by highest confidence first
         pairs.sort(key=lambda x: x["composite_score"], reverse=True)
@@ -205,14 +210,18 @@ class StudentDeduplicationService:
             (primary_id, org_id),
         )
         if not primary_rows:
-            raise NotFoundError(f"Primary student {primary_id} not found", code="STUDENT_NOT_FOUND")
+            raise NotFoundError(
+                f"Primary student {primary_id} not found", code="STUDENT_NOT_FOUND"
+            )
 
         duplicate_rows = execute_query(
             "SELECT id, full_name, status FROM students WHERE id = %s AND org_id = %s",
             (duplicate_id, org_id),
         )
         if not duplicate_rows:
-            raise NotFoundError(f"Duplicate student {duplicate_id} not found", code="STUDENT_NOT_FOUND")
+            raise NotFoundError(
+                f"Duplicate student {duplicate_id} not found", code="STUDENT_NOT_FOUND"
+            )
 
         primary = primary_rows[0]
         duplicate = duplicate_rows[0]
@@ -225,29 +234,51 @@ class StudentDeduplicationService:
                 )
 
         import json
+
         task_id = str(uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO workflow_tasks
                     (id, org_id, task_type, payload, status,
                      requires_roles, created_by, created_at)
                 VALUES (%s, %s, 'STUDENT_MERGE', %s, 'PENDING',
                         %s, %s, NOW())
                 """,
-                (
-                    task_id,
-                    org_id,
-                    json.dumps({"primary_id": primary_id, "duplicate_id": duplicate_id}),
-                    json.dumps(["REGISTRAR", "SUPER_ADMIN"]),
-                    initiator_id,
-                ),
-            )
-        ])
+                    (
+                        task_id,
+                        org_id,
+                        json.dumps(
+                            {"primary_id": primary_id, "duplicate_id": duplicate_id}
+                        ),
+                        json.dumps(["REGISTRAR", "SUPER_ADMIN"]),
+                        initiator_id,
+                    ),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=initiator_id,
+            actor_role="registrar",
+            entity_type="student_merge_request",
+            entity_id=task_id,
+            tenant_id=org_id,
+            metadata={
+                "source": "initiate_merge",
+                "primary_id": primary_id,
+                "duplicate_id": duplicate_id,
+            },
+        )
 
         logger.info(
             "merge_initiated | org=%s primary=%s duplicate=%s task=%s initiator=%s",
-            org_id, primary_id, duplicate_id, task_id, initiator_id,
+            org_id,
+            primary_id,
+            duplicate_id,
+            task_id,
+            initiator_id,
         )
 
         return {
@@ -278,17 +309,21 @@ class StudentDeduplicationService:
             (primary_id, org_id),
         )
         if not primary_rows:
-            raise NotFoundError(f"Primary student {primary_id} not found", code="STUDENT_NOT_FOUND")
+            raise NotFoundError(
+                f"Primary student {primary_id} not found", code="STUDENT_NOT_FOUND"
+            )
 
         duplicate_rows = execute_query(
             "SELECT id, status FROM students WHERE id = %s AND org_id = %s",
             (duplicate_id, org_id),
         )
         if not duplicate_rows:
-            raise NotFoundError(f"Duplicate student {duplicate_id} not found", code="STUDENT_NOT_FOUND")
+            raise NotFoundError(
+                f"Duplicate student {duplicate_id} not found", code="STUDENT_NOT_FOUND"
+            )
 
         primary = primary_rows[0]
-        duplicate = duplicate_rows[0]
+        duplicate_rows[0]
 
         # Guard: neither should already be merged/archived in an incompatible way
         if str(primary["status"]).upper() == "ARCHIVED":
@@ -346,6 +381,15 @@ class StudentDeduplicationService:
         ]
 
         execute_transaction(ops)
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=approver_id,
+            actor_role="registrar",
+            entity_type="student_merge",
+            entity_id=primary_id,
+            tenant_id=org_id,
+            metadata={"source": "execute_merge", "archived_id": duplicate_id},
+        )
 
         # Fire domain event
         DomainEventBus.publish(
@@ -365,7 +409,10 @@ class StudentDeduplicationService:
 
         logger.info(
             "merge_executed | org=%s primary=%s archived=%s approver=%s",
-            org_id, primary_id, duplicate_id, approver_id,
+            org_id,
+            primary_id,
+            duplicate_id,
+            approver_id,
         )
 
         return {

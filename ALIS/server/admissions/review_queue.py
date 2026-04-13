@@ -7,12 +7,12 @@ to the staff dashboard. Staff approves or rejects → pipeline resumes.
 Table: review_items
   status: PENDING → APPROVED | REJECTED
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from typing import Optional
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReviewStatus:
-    PENDING  = "PENDING"
+    PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
@@ -72,27 +72,29 @@ class ReviewQueue:
             return dict(rows[0])
 
         item_id = str(uuid.uuid4())
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO review_items
                     (id, org_id, entity_type, entity_id, reason, flags,
                      policy_key, policy_value, actual_value)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    item_id,
-                    org_id,
-                    entity_type,
-                    entity_id,
-                    decision.reason,
-                    json.dumps(decision.flags),
-                    decision.trigger_key,
-                    json.dumps(decision.trigger_value),
-                    json.dumps(decision.actual_value),
-                ),
-            )
-        ])
+                    (
+                        item_id,
+                        org_id,
+                        entity_type,
+                        entity_id,
+                        decision.reason,
+                        json.dumps(decision.flags),
+                        decision.trigger_key,
+                        json.dumps(decision.trigger_value),
+                        json.dumps(decision.actual_value),
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -110,7 +112,9 @@ class ReviewQueue:
             },
         )
 
-        logger.info("ReviewQueue: enqueued %s %s — %s", entity_type, entity_id, decision.reason)
+        logger.info(
+            "ReviewQueue: enqueued %s %s — %s", entity_type, entity_id, decision.reason
+        )
         return {"id": item_id, "status": ReviewStatus.PENDING, "entity_id": entity_id}
 
     # ------------------------------------------------------------------
@@ -118,7 +122,7 @@ class ReviewQueue:
     # ------------------------------------------------------------------
 
     @classmethod
-    def list_pending(cls, org_id: str, entity_type: Optional[str] = None) -> list[dict]:
+    def list_pending(cls, org_id: str, entity_type: str | None = None) -> list[dict]:
         """List all pending review items for an org."""
         if entity_type:
             rows = execute_query(
@@ -151,9 +155,9 @@ class ReviewQueue:
         cls,
         org_id: str,
         item_id: str,
-        decision: str,      # "APPROVED" | "REJECTED"
+        decision: str,  # "APPROVED" | "REJECTED"
         decided_by: str,
-        note: Optional[str] = None,
+        note: str | None = None,
     ) -> dict:
         """
         Record a staff decision on a review item.
@@ -165,7 +169,9 @@ class ReviewQueue:
             note: Optional reasoning
         """
         if decision not in (ReviewStatus.APPROVED, ReviewStatus.REJECTED):
-            raise BusinessRuleViolation(message=f"Invalid decision: {decision}. Must be APPROVED or REJECTED")
+            raise BusinessRuleViolation(
+                message=f"Invalid decision: {decision}. Must be APPROVED or REJECTED"
+            )
 
         item = cls.get(org_id, item_id)
         if item["status"] != ReviewStatus.PENDING:
@@ -173,19 +179,23 @@ class ReviewQueue:
                 message=f"Review item {item_id} is already {item['status']}"
             )
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE review_items
                 SET status = %s, decision = %s, decided_by = %s, decided_at = NOW(), decision_note = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (decision, decision, decided_by, note, item_id, org_id),
-            )
-        ])
+                    (decision, decision, decided_by, note, item_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
-            action=AuditAction.OVERRIDE_APPROVED if decision == ReviewStatus.APPROVED else AuditAction.OVERRIDE_REJECTED,
+            action=AuditAction.OVERRIDE_APPROVED
+            if decision == ReviewStatus.APPROVED
+            else AuditAction.OVERRIDE_REJECTED,
             actor_id=decided_by,
             actor_type="human",
             entity_type="review_item",
@@ -202,7 +212,10 @@ class ReviewQueue:
 
         logger.info(
             "ReviewQueue: %s decided %s on %s %s",
-            decided_by, decision, item["entity_type"], item["entity_id"],
+            decided_by,
+            decision,
+            item["entity_type"],
+            item["entity_id"],
         )
 
         updated = cls.get(org_id, item_id)

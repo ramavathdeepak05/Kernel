@@ -1,4 +1,5 @@
 """E05-S05 — Academic Timetable"""
+
 from __future__ import annotations
 
 import logging
@@ -12,12 +13,18 @@ from .models import TimetableSlotCreate
 
 logger = logging.getLogger(__name__)
 
-_DAY_NAMES = {1: "Monday", 2: "Tuesday", 3: "Wednesday",
-              4: "Thursday", 5: "Friday", 6: "Saturday", 7: "Sunday"}
+_DAY_NAMES = {
+    1: "Monday",
+    2: "Tuesday",
+    3: "Wednesday",
+    4: "Thursday",
+    5: "Friday",
+    6: "Saturday",
+    7: "Sunday",
+}
 
 
 class TimetableService:
-
     @classmethod
     def add_slot(cls, org_id: str, req: TimetableSlotCreate, actor_id: str) -> dict:
         # Conflict check: same faculty, same day+time
@@ -29,8 +36,14 @@ class TimetableService:
                   AND org_id = %s
                   AND (start_time, end_time) OVERLAPS (%s::time, %s::time)
                 """,
-                (req.faculty_id, req.academic_year, req.day_of_week, org_id,
-                 req.start_time, req.end_time),
+                (
+                    req.faculty_id,
+                    req.academic_year,
+                    req.day_of_week,
+                    org_id,
+                    req.start_time,
+                    req.end_time,
+                ),
             )
             if conflict:
                 raise BusinessRuleViolation(
@@ -38,22 +51,45 @@ class TimetableService:
                 )
 
         sid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO timetable_slots
                 (id, org_id, course_id, faculty_id, academic_year, day_of_week,
                  start_time, end_time, room, slot_type)
             VALUES (%s, %s, %s, %s, %s, %s, %s::time, %s::time, %s, %s)
             """,
-            (sid, org_id, req.course_id, req.faculty_id, req.academic_year,
-             req.day_of_week, req.start_time, req.end_time, req.room, req.slot_type),
-        )])
+                    (
+                        sid,
+                        org_id,
+                        req.course_id,
+                        req.faculty_id,
+                        req.academic_year,
+                        req.day_of_week,
+                        req.start_time,
+                        req.end_time,
+                        req.room,
+                        req.slot_type,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="timetable_slot", entity_id=sid, org_id=org_id,
-                     module="E05-S05",
-                     metadata={"course_id": req.course_id, "day": req.day_of_week,
-                               "time": f"{req.start_time}-{req.end_time}"})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="timetable_slot",
+            entity_id=sid,
+            org_id=org_id,
+            module="E05-S05",
+            metadata={
+                "course_id": req.course_id,
+                "day": req.day_of_week,
+                "time": f"{req.start_time}-{req.end_time}",
+            },
+        )
         return cls.get(org_id, sid)
 
     @classmethod
@@ -74,8 +110,13 @@ class TimetableService:
         return dict(rows[0])
 
     @classmethod
-    def get_weekly(cls, org_id: str, academic_year: str,
-                   course_id: str | None = None, faculty_id: str | None = None) -> list[dict]:
+    def get_weekly(
+        cls,
+        org_id: str,
+        academic_year: str,
+        course_id: str | None = None,
+        faculty_id: str | None = None,
+    ) -> list[dict]:
         """Return full weekly timetable, optionally filtered by course or faculty."""
         sql = """
             SELECT ts.*, c.name AS course_name, c.code, u.display_name AS faculty_name
@@ -97,9 +138,21 @@ class TimetableService:
     @classmethod
     def delete_slot(cls, org_id: str, slot_id: str, actor_id: str) -> None:
         cls.get(org_id, slot_id)
-        execute_transaction([(
-            "DELETE FROM timetable_slots WHERE id = %s AND org_id = %s", (slot_id, org_id)
-        )])
-        AuditLog.log(action=AuditAction.DELETE, actor_id=actor_id, actor_type="human",
-                     entity_type="timetable_slot", entity_id=slot_id, org_id=org_id,
-                     module="E05-S05", metadata={})
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM timetable_slots WHERE id = %s AND org_id = %s",
+                    (slot_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.DELETE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="timetable_slot",
+            entity_id=slot_id,
+            org_id=org_id,
+            module="E05-S05",
+            metadata={},
+        )

@@ -45,12 +45,13 @@ Must Align With
 - architecture.md §10 (Policy Engine — Rules-as-Data)
 - SKILL.md invariant 2 (Configuration is data, not code)
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from server.core.settings import settings
 from server.db_service import execute_query
@@ -65,18 +66,20 @@ _POLICY_CACHE_TTL = 300  # 5 minutes
 # Result type
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PolicyResult:
     """The outcome of a PolicyEngine.evaluate() call.
 
     Always persist policy_version in the audit log for regulatory traceability.
     """
-    verdict: str                       # "ELIGIBLE" | "INELIGIBLE" | outcome codes
-    reason_code: Optional[str] = None  # machine-readable reason (for UI / audit)
-    rule_id: Optional[str] = None      # which rule produced this verdict
-    policy_id: Optional[str] = None
-    policy_version: Optional[int] = None
-    detail: Dict[str, Any] = field(default_factory=dict)
+
+    verdict: str  # "ELIGIBLE" | "INELIGIBLE" | outcome codes
+    reason_code: str | None = None  # machine-readable reason (for UI / audit)
+    rule_id: str | None = None  # which rule produced this verdict
+    policy_id: str | None = None
+    policy_version: int | None = None
+    detail: dict[str, Any] = field(default_factory=dict)
 
     @property
     def formatted_reason(self) -> str:
@@ -89,7 +92,11 @@ class PolicyResult:
         parts = [f"Decision: {self.verdict}"]
         if self.reason_code:
             rule_ref = f"Rule {self.rule_id}" if self.rule_id else "default"
-            policy_ref = f"Policy v{self.policy_version}" if self.policy_version else "unversioned"
+            policy_ref = (
+                f"Policy v{self.policy_version}"
+                if self.policy_version
+                else "unversioned"
+            )
             parts.append(f"Reason: {self.reason_code} ({policy_ref}, {rule_ref})")
         return "\n".join(parts)
 
@@ -98,10 +105,11 @@ class PolicyResult:
 # Safe expression evaluator
 # ---------------------------------------------------------------------------
 
+
 def _build_evaluator_namespace(
-    context: Dict[str, Any],
-    rule_params: Dict[str, Any],
-) -> Dict[str, Any]:
+    context: dict[str, Any],
+    rule_params: dict[str, Any],
+) -> dict[str, Any]:
     """Merge rule-level params and context into a flat namespace for asteval.
 
     Nested dict access (e.g. student.attendance_pct) is flattened by
@@ -113,7 +121,7 @@ def _build_evaluator_namespace(
     """
     from types import SimpleNamespace
 
-    ns: Dict[str, Any] = {}
+    ns: dict[str, Any] = {}
 
     # 1. Inject rule-level params at the top level
     #    e.g. threshold=75, relaxed_categories=["SC","ST"]
@@ -132,7 +140,7 @@ def _build_evaluator_namespace(
     return ns
 
 
-def _safe_eval(expression: str, namespace: Dict[str, Any]) -> bool:
+def _safe_eval(expression: str, namespace: dict[str, Any]) -> bool:
     """Evaluate a DSL boolean expression using asteval.
 
     Falls back to False (safe deny) if asteval is unavailable or the
@@ -151,11 +159,16 @@ def _safe_eval(expression: str, namespace: Dict[str, Any]) -> bool:
 
     try:
         from asteval import Interpreter
+
         aeval = Interpreter(usersyms=namespace, minimal=False, no_print=True)
         result = aeval(expr)
         if aeval.error:
             for err in aeval.error:
-                logger.warning("policy_engine: asteval error in %r — %s", expression, err.get_error())
+                logger.warning(
+                    "policy_engine: asteval error in %r — %s",
+                    expression,
+                    err.get_error(),
+                )
             return False
         return bool(result)
     except ImportError:
@@ -173,6 +186,7 @@ def _safe_eval(expression: str, namespace: Dict[str, Any]) -> bool:
 # Core engine
 # ---------------------------------------------------------------------------
 
+
 class PolicyEngine:
     """Evaluates tenant-specific policy rules stored in `tenant_policies`."""
 
@@ -187,9 +201,10 @@ class PolicyEngine:
     @staticmethod
     def _get_redis():
         import redis as _redis_lib
+
         return _redis_lib.Redis.from_url(settings.redis_url, decode_responses=True)
 
-    def _load_policy(self, policy_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def _load_policy(self, policy_id: str, tenant_id: str) -> dict[str, Any] | None:
         """Load the active (APPROVED, currently effective) policy from cache or DB.
 
         Returns None if no active policy exists for this key.
@@ -237,6 +252,7 @@ class PolicyEngine:
             if hasattr(obj, "hex"):  # UUID
                 return str(obj)
             raise TypeError(f"Cannot serialise type: {type(obj)}")
+
         try:
             r = self._get_redis()
             r.setex(
@@ -245,7 +261,7 @@ class PolicyEngine:
                 json.dumps(policy, default=_json_serial),
             )
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         return policy
 
@@ -256,11 +272,11 @@ class PolicyEngine:
     def evaluate(
         self,
         policy_id: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
         tenant_id: str,
         default_verdict: str = "INELIGIBLE",
         actor_id: str = "system",
-        entity_id: Optional[str] = None,
+        entity_id: str | None = None,
     ) -> PolicyResult:
         """Evaluate a policy against the provided context.
 
@@ -289,9 +305,9 @@ class PolicyEngine:
             and a formatted_reason property for human-readable display.
         """
         # Local import avoids circular dependency (audit → policy_engine)
-        from server.core.audit import AuditLog, AuditAction
+        from server.core.audit import AuditAction, AuditLog
 
-        def _trace(result: PolicyResult, condition: Optional[str] = None) -> None:
+        def _trace(result: PolicyResult, condition: str | None = None) -> None:
             """Persist a decision trace to the immutable audit ledger."""
             try:
                 AuditLog.log(
@@ -317,14 +333,17 @@ class PolicyEngine:
                 # Trace failure must never block the evaluation result
                 logger.error(
                     "policy_engine: audit trace failed for policy '%s' — %s",
-                    policy_id, exc,
+                    policy_id,
+                    exc,
                 )
 
         policy = self._load_policy(policy_id, tenant_id)
         if policy is None:
             logger.warning(
                 "policy_engine: no APPROVED policy '%s' for tenant %s — returning default '%s'",
-                policy_id, tenant_id, default_verdict,
+                policy_id,
+                tenant_id,
+                default_verdict,
             )
             result = PolicyResult(
                 verdict=default_verdict,
@@ -334,7 +353,7 @@ class PolicyEngine:
             _trace(result)
             return result
 
-        rules: List[Dict[str, Any]] = policy.get("rules", [])
+        rules: list[dict[str, Any]] = policy.get("rules", [])
         version: int = policy.get("version", 0)
 
         for rule in rules:
@@ -347,8 +366,17 @@ class PolicyEngine:
             # Build namespace: rule-level params + context variables
             # Exclude known structural keys; auto_execute_if is reserved for Phase D
             rule_params = {
-                k: v for k, v in rule.items()
-                if k not in {"id", "condition", "on_pass", "on_fail", "reason_code", "auto_execute_if"}
+                k: v
+                for k, v in rule.items()
+                if k
+                not in {
+                    "id",
+                    "condition",
+                    "on_pass",
+                    "on_fail",
+                    "reason_code",
+                    "auto_execute_if",
+                }
             }
             namespace = _build_evaluator_namespace(context, rule_params)
 
@@ -365,7 +393,9 @@ class PolicyEngine:
                 # Phase D: evaluate auto_execute_if if policy master switch is on
                 if policy.get("allow_auto_execute", False):
                     auto_cond = rule.get("auto_execute_if", "")
-                    if auto_cond and _safe_eval(auto_cond, _build_evaluator_namespace(context, {})):
+                    if auto_cond and _safe_eval(
+                        auto_cond, _build_evaluator_namespace(context, {})
+                    ):
                         result.detail["auto_execute"] = True
                 _trace(result, condition)
                 return result
@@ -423,7 +453,7 @@ class PolicyEngine:
             if cached is not None:
                 return json.loads(cached)
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         # DB: tenant_config is a flat key-value store with JSONB values
         rows = execute_query(
@@ -441,7 +471,7 @@ class PolicyEngine:
             r = self._get_redis()
             r.setex(cache_key, _POLICY_CACHE_TTL, json.dumps(value, default=str))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         return value
 
@@ -454,14 +484,14 @@ class PolicyEngine:
         try:
             self._get_redis().delete(self._cache_key(tenant_id, policy_id))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
     def invalidate_config(self, key: str, tenant_id: str) -> None:
         """Invalidate a cached tenant_config value."""
         try:
             self._get_redis().delete(f"alis:config:{tenant_id}:{key}")
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
 
 # Module-level singleton

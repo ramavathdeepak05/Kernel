@@ -5,10 +5,17 @@ Centralises all application-level Prometheus metric objects.
 Imported by main.py (for /metrics endpoint) and domain_events.py / tasks.
 Safe to import anywhere — fails open if prometheus_client is not installed.
 """
+
 from __future__ import annotations
 
 try:
-    from prometheus_client import Counter, Gauge, Histogram, generate_latest, CONTENT_TYPE_LATEST  # noqa: F401
+    from prometheus_client import (
+        CONTENT_TYPE_LATEST,
+        Counter,
+        Gauge,
+        Histogram,
+        generate_latest,
+    )  # noqa: F401
 
     HTTP_REQUESTS_TOTAL = Counter(
         "alis_http_requests_total",

@@ -11,19 +11,17 @@ Routes:
   POST   /convocation/{convocation_id}/generate-seating — generate seating plan
   GET    /convocation/{convocation_id}/seating      — get seating records
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import date
-from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
+from server.convocation.convocation_service import ConvocationService
 from server.core.rbac import Permission, require_permission
 from server.db_service import execute_query
-from server.convocation.convocation_service import ConvocationService
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +31,7 @@ router = APIRouter(prefix="/api/v1/convocation", tags=["Convocation"])
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
@@ -44,8 +43,9 @@ def _actor(r: Request) -> str:
 
 def _jsonify(obj):
     """Recursively convert date/datetime/Decimal to JSON-safe types."""
+    from datetime import date as _date
+    from datetime import datetime
     from decimal import Decimal
-    from datetime import datetime, date as _date
 
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
@@ -62,22 +62,26 @@ def _jsonify(obj):
 # Request bodies
 # ---------------------------------------------------------------------------
 
+
 class CreateConvocationBody(BaseModel):
     title: str
-    ceremony_date: str          # ISO date string e.g. "2026-11-15"
-    academic_year: str          # e.g. "2025-26"
-    batch_year: int             # e.g. 2022
-    venue: Optional[str] = None
-    chief_guest: Optional[str] = None
+    ceremony_date: str  # ISO date string e.g. "2026-11-15"
+    academic_year: str  # e.g. "2025-26"
+    batch_year: int  # e.g. 2022
+    venue: str | None = None
+    chief_guest: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Routes — Convocation CRUD
 # ---------------------------------------------------------------------------
 
+
 @router.post("", status_code=201)
 @require_permission(Permission.CONVOCATION_MANAGE)
-async def create_convocation(request: Request, body: CreateConvocationBody) -> JSONResponse:
+async def create_convocation(
+    request: Request, body: CreateConvocationBody
+) -> JSONResponse:
     """Create a new convocation event."""
     result = ConvocationService.create_convocation(
         org_id=_org(request),
@@ -115,6 +119,7 @@ async def get_convocation(request: Request, convocation_id: str) -> JSONResponse
 # Routes — Degree Audit
 # ---------------------------------------------------------------------------
 
+
 @router.post("/{convocation_id}/audit", status_code=202)
 @require_permission(Permission.CONVOCATION_MANAGE)
 async def run_degree_audit(request: Request, convocation_id: str) -> JSONResponse:
@@ -129,7 +134,9 @@ async def run_degree_audit(request: Request, convocation_id: str) -> JSONRespons
 
 @router.get("/{convocation_id}/audit")
 @require_permission(Permission.CONVOCATION_READ)
-async def get_degree_audit_records(request: Request, convocation_id: str) -> JSONResponse:
+async def get_degree_audit_records(
+    request: Request, convocation_id: str
+) -> JSONResponse:
     """Retrieve all degree audit records for a convocation."""
     org_id = _org(request)
 
@@ -140,6 +147,7 @@ async def get_degree_audit_records(request: Request, convocation_id: str) -> JSO
     )
     if not convocation_rows:
         from server.core.exceptions import NotFoundError
+
         raise NotFoundError(f"Convocation {convocation_id} not found")
 
     records = execute_query(
@@ -163,6 +171,7 @@ async def get_degree_audit_records(request: Request, convocation_id: str) -> JSO
 # Routes — Gold Medals
 # ---------------------------------------------------------------------------
 
+
 @router.post("/{convocation_id}/gold-medals", status_code=201)
 @require_permission(Permission.CONVOCATION_MANAGE)
 async def compute_gold_medals(request: Request, convocation_id: str) -> JSONResponse:
@@ -172,7 +181,9 @@ async def compute_gold_medals(request: Request, convocation_id: str) -> JSONResp
         org_id=_org(request),
         actor_id=_actor(request),
     )
-    return JSONResponse(status_code=201, content={"gold_medals": _jsonify(medals), "total": len(medals)})
+    return JSONResponse(
+        status_code=201, content={"gold_medals": _jsonify(medals), "total": len(medals)}
+    )
 
 
 @router.get("/{convocation_id}/gold-medals")
@@ -187,6 +198,7 @@ async def get_gold_medals(request: Request, convocation_id: str) -> JSONResponse
     )
     if not convocation_rows:
         from server.core.exceptions import NotFoundError
+
         raise NotFoundError(f"Convocation {convocation_id} not found")
 
     medals = execute_query(
@@ -209,6 +221,7 @@ async def get_gold_medals(request: Request, convocation_id: str) -> JSONResponse
 # ---------------------------------------------------------------------------
 # Routes — Seating
 # ---------------------------------------------------------------------------
+
 
 @router.post("/{convocation_id}/generate-seating", status_code=201)
 @require_permission(Permission.CONVOCATION_MANAGE)
@@ -234,6 +247,7 @@ async def get_seating(request: Request, convocation_id: str) -> JSONResponse:
     )
     if not convocation_rows:
         from server.core.exceptions import NotFoundError
+
         raise NotFoundError(f"Convocation {convocation_id} not found")
 
     seats = execute_query(

@@ -1,3 +1,6 @@
+from __future__ import annotations
+from server.core.rbac import Permission, require_permission  # noqa: E402
+
 """
 ALIS User Management Router — E01-S01 & E01-S03
 
@@ -35,24 +38,23 @@ Invariants:
     - Soft-delete only — no hard deletes
     - Status state machine: ACTIVE ↔ SUSPENDED → ARCHIVED (irreversible)
 """
-from __future__ import annotations
 
-import logging
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Request, Header, Query
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+import logging  # noqa: E402
+from datetime import datetime, timezone  # noqa: E402
+from typing import Any  # noqa: E402
+from uuid import uuid4  # noqa: E402
 
-from server.core.security import (
-    SessionManager,
+from fastapi import APIRouter, Header, Query, Request  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from server.core.audit import AuditAction, AuditLedger  # noqa: E402
+from server.core.rbac import Role, is_manager_role  # noqa: E402
+from server.core.security import (  # noqa: E402
     InputValidator,
+    SessionManager,
 )
-from server.core.rbac import Role, is_manager_role
-from server.core.audit import AuditLedger, AuditAction
-from server.db_service import execute_query, execute_transaction, safe_identifier
+from server.db_service import execute_query, execute_transaction  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +65,23 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 # REQUEST MODELS
 # =============================================================================
 
+
 class UserUpdateRequest(BaseModel):
     """Fields that any user may update on their own profile, or ADMIN on others."""
-    email: Optional[str] = None
-    display_name: Optional[str] = None
+
+    email: str | None = None
+    display_name: str | None = None
 
 
 class RoleChangeRequest(BaseModel):
     """SUPER_ADMIN only — change a user's RBAC role."""
+
     role: Role = Field(..., description="New role to assign")
 
 
 class AssignCustomRoleRequest(BaseModel):
     """Assign a custom role to a user."""
+
     role_id: str = Field(..., description="ID of the custom role to assign")
 
 
@@ -83,7 +89,8 @@ class AssignCustomRoleRequest(BaseModel):
 # INTERNAL HELPERS
 # =============================================================================
 
-def _extract_token(authorization: Optional[str]) -> Optional[str]:
+
+def _extract_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split(" ", 1)
@@ -92,7 +99,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip()
 
 
-def _require_session(authorization: Optional[str]):
+def _require_session(authorization: str | None):
     token = _extract_token(authorization)
     if not token:
         return None, "Missing or malformed Authorization header"
@@ -102,7 +109,7 @@ def _require_session(authorization: Optional[str]):
     return session, None
 
 
-def _fetch_user(user_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+def _fetch_user(user_id: str, tenant_id: str) -> dict[str, Any] | None:
     """Fetch a non-deleted user by ID within a tenant."""
     rows = execute_query(
         "SELECT id, tenant_id, username, email, display_name, role, status, "
@@ -114,18 +121,18 @@ def _fetch_user(user_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     return rows[0] if rows else None
 
 
-def _fetch_caller(session) -> Optional[Dict[str, Any]]:
+def _fetch_caller(session) -> dict[str, Any] | None:
     """Fetch the session owner's user row."""
     return _fetch_user(session.user_id, session.tenant_id)
 
 
 def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
-    body: Dict[str, Any] = {"error": message, "code": code}
+    body: dict[str, Any] = {"error": message, "code": code}
     body.update(extra)
     return JSONResponse(status_code=status, content=body)
 
 
-def _serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
+def _serialize_user(user: dict[str, Any]) -> dict[str, Any]:
     """Serialize a DB user row to a safe API response dict."""
     return {
         "id": str(user["id"]),
@@ -136,8 +143,12 @@ def _serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
         "status": user["status"],
         "actor_type": user["actor_type"],
         "tenant_id": str(user["tenant_id"]),
-        "created_at": user["created_at"].isoformat() if user.get("created_at") else None,
-        "updated_at": user["updated_at"].isoformat() if user.get("updated_at") else None,
+        "created_at": user["created_at"].isoformat()
+        if user.get("created_at")
+        else None,
+        "updated_at": user["updated_at"].isoformat()
+        if user.get("updated_at")
+        else None,
     }
 
 
@@ -145,12 +156,14 @@ def _serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
 # GET /api/users  — List users
 # =============================================================================
 
+
 @router.get("")
+@require_permission(Permission.USER_READ)
 async def list_users(
     request: Request,
-    authorization: Optional[str] = Header(default=None),
-    role: Optional[str] = None,
-    status: Optional[str] = None,
+    authorization: str | None = Header(default=None),
+    role: str | None = None,
+    status: str | None = None,
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> JSONResponse:
@@ -196,7 +209,7 @@ async def list_users(
 
     # Count total for pagination metadata
     count_rows = execute_query(
-        f"SELECT COUNT(*) AS total FROM users WHERE {where}",
+        f"SELECT COUNT(*) AS total FROM users WHERE {where}",  # noqa: S608
         tuple(params) if params else None,
         tenant_id=session.tenant_id,
     )
@@ -205,7 +218,7 @@ async def list_users(
     # Fetch page
     params.extend([limit, offset])
     rows = execute_query(
-        f"SELECT id, tenant_id, username, email, display_name, role, status, "
+        f"SELECT id, tenant_id, username, email, display_name, role, status, "  # noqa: S608
         f"actor_type, is_deleted, created_at, updated_at "
         f"FROM users WHERE {where} "
         f"ORDER BY created_at DESC "
@@ -229,10 +242,12 @@ async def list_users(
 # GET /api/users/{user_id}  — Get single user
 # =============================================================================
 
+
 @router.get("/{user_id}")
+@require_permission(Permission.USER_READ)
 async def get_user(
     user_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Get a single user's profile.
@@ -269,11 +284,13 @@ async def get_user(
 # PATCH /api/users/{user_id}  — Update profile
 # =============================================================================
 
+
 @router.patch("/{user_id}")
+@require_permission(Permission.USER_UPDATE)
 async def update_user(
     user_id: str,
     body: UserUpdateRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Update a user's profile fields (email, display_name).
@@ -300,7 +317,9 @@ async def update_user(
         except ValueError:
             return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
         if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN):
-            return _err(403, "You may only update your own profile", "ERR_LAYER5_ACCESS")
+            return _err(
+                403, "You may only update your own profile", "ERR_LAYER5_ACCESS"
+            )
 
     target = _fetch_user(user_id, session.tenant_id)
     if not target:
@@ -329,7 +348,7 @@ async def update_user(
     values.append(user_id)
 
     execute_transaction(
-        [(f"UPDATE users SET {', '.join(fields)} WHERE id = %s", tuple(values))],
+        [(f"UPDATE users SET {', '.join(fields)} WHERE id = %s", tuple(values))],  # noqa: S608
         tenant_id=session.tenant_id,
     )
 
@@ -355,10 +374,12 @@ async def update_user(
 # DELETE /api/users/{user_id}  — Soft-delete
 # =============================================================================
 
+
 @router.delete("/{user_id}")
+@require_permission(Permission.USER_DELETE)
 async def delete_user(
     user_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Soft-delete a user (status → ARCHIVED, is_deleted = TRUE).
@@ -397,7 +418,9 @@ async def delete_user(
 
     # ADMIN cannot delete SUPER_ADMIN
     if target["role"] == Role.SUPER_ADMIN.value and caller_role != Role.SUPER_ADMIN:
-        return _err(403, "Only SUPER_ADMIN may delete SUPER_ADMIN accounts", "ERR_LAYER5_ACCESS")
+        return _err(
+            403, "Only SUPER_ADMIN may delete SUPER_ADMIN accounts", "ERR_LAYER5_ACCESS"
+        )
 
     now = datetime.now(timezone.utc)
     execute_transaction(
@@ -435,11 +458,13 @@ async def delete_user(
 # PATCH /api/users/{user_id}/role  — Change role (SUPER_ADMIN only)
 # =============================================================================
 
+
 @router.patch("/{user_id}/role")
+@require_permission(Permission.USER_UPDATE)
 async def change_user_role(
     user_id: str,
     body: RoleChangeRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Change a user's RBAC role.
@@ -526,10 +551,12 @@ async def change_user_role(
 # POST /api/users/{user_id}/suspend  — Suspend user
 # =============================================================================
 
+
 @router.post("/{user_id}/suspend")
+@require_permission(Permission.USER_UPDATE)
 async def suspend_user(
     user_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Suspend a user (ACTIVE → SUSPENDED).
@@ -567,7 +594,11 @@ async def suspend_user(
 
     # ADMIN cannot suspend SUPER_ADMIN
     if target["role"] == Role.SUPER_ADMIN.value and caller_role != Role.SUPER_ADMIN:
-        return _err(403, "Only SUPER_ADMIN may suspend SUPER_ADMIN accounts", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "Only SUPER_ADMIN may suspend SUPER_ADMIN accounts",
+            "ERR_LAYER5_ACCESS",
+        )
 
     if target["status"] != "ACTIVE":
         return _err(
@@ -611,10 +642,12 @@ async def suspend_user(
 # POST /api/users/{user_id}/activate  — Reactivate user
 # =============================================================================
 
+
 @router.post("/{user_id}/activate")
+@require_permission(Permission.USER_UPDATE)
 async def activate_user(
     user_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Reactivate a suspended user (SUSPENDED → ACTIVE).
@@ -645,10 +678,16 @@ async def activate_user(
 
     # ADMIN cannot activate SUPER_ADMIN
     if target["role"] == Role.SUPER_ADMIN.value and caller_role != Role.SUPER_ADMIN:
-        return _err(403, "Only SUPER_ADMIN may reactivate SUPER_ADMIN accounts", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "Only SUPER_ADMIN may reactivate SUPER_ADMIN accounts",
+            "ERR_LAYER5_ACCESS",
+        )
 
     if target["status"] == "ARCHIVED":
-        return _err(409, "Archived users cannot be reactivated", "ERR_INVALID_STATE_TRANSITION")
+        return _err(
+            409, "Archived users cannot be reactivated", "ERR_INVALID_STATE_TRANSITION"
+        )
 
     if target["status"] == "ACTIVE":
         return _err(409, "User is already active", "ERR_INVALID_STATE_TRANSITION")
@@ -688,10 +727,12 @@ async def activate_user(
 # GET /api/users/{user_id}/roles  — List user's custom roles
 # =============================================================================
 
+
 @router.get("/{user_id}/roles")
+@require_permission(Permission.USER_READ)
 async def list_user_custom_roles(
     user_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     List all custom roles currently assigned to a user.
@@ -713,8 +754,14 @@ async def list_user_custom_roles(
             caller_role = Role(caller["role"])
         except ValueError:
             return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
-        if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN) and not is_manager_role(caller_role):
-            return _err(403, "Insufficient authority to view this user's roles", "ERR_LAYER5_ACCESS")
+        if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN) and not is_manager_role(
+            caller_role
+        ):
+            return _err(
+                403,
+                "Insufficient authority to view this user's roles",
+                "ERR_LAYER5_ACCESS",
+            )
 
     target = _fetch_user(user_id, session.tenant_id)
     if not target:
@@ -743,7 +790,9 @@ async def list_user_custom_roles(
                     "module": r["module"],
                     "role_status": r["role_status"],
                     "assigned_by": r["assigned_by"],
-                    "assigned_at": r["assigned_at"].isoformat() if r.get("assigned_at") else None,
+                    "assigned_at": r["assigned_at"].isoformat()
+                    if r.get("assigned_at")
+                    else None,
                 }
                 for r in rows
             ],
@@ -755,11 +804,13 @@ async def list_user_custom_roles(
 # POST /api/users/{user_id}/roles  — Assign custom role
 # =============================================================================
 
+
 @router.post("/{user_id}/roles")
+@require_permission(Permission.ROLE_MANAGE)
 async def assign_custom_role(
     user_id: str,
     body: AssignCustomRoleRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Assign a custom role to a user.
@@ -828,14 +879,26 @@ async def assign_custom_role(
                     "INSERT INTO user_custom_roles "
                     "(id, tenant_id, user_id, role_id, assigned_by, assigned_at) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (assignment_id, session.tenant_id, user_id, body.role_id, session.user_id, now),
+                    (
+                        assignment_id,
+                        session.tenant_id,
+                        user_id,
+                        body.role_id,
+                        session.user_id,
+                        now,
+                    ),
                 )
             ],
             tenant_id=session.tenant_id,
         )
+
     except Exception as e:
         if "uq_user_custom_role" in str(e):
-            return _err(409, "This custom role is already assigned to the user", "ERR_DUPLICATE_ASSIGNMENT")
+            return _err(
+                409,
+                "This custom role is already assigned to the user",
+                "ERR_DUPLICATE_ASSIGNMENT",
+            )
         logger.error(f"Failed to assign custom role: {e}")
         return _err(500, "Internal error assigning role", "ERR_INTERNAL")
 
@@ -867,11 +930,13 @@ async def assign_custom_role(
 # DELETE /api/users/{user_id}/roles/{role_id}  — Revoke custom role
 # =============================================================================
 
+
 @router.delete("/{user_id}/roles/{role_id}")
+@require_permission(Permission.ROLE_MANAGE)
 async def revoke_custom_role(
     user_id: str,
     role_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Revoke a custom role from a user.
@@ -905,12 +970,21 @@ async def revoke_custom_role(
         tenant_id=session.tenant_id,
     )
     if not assignment_rows:
-        return _err(404, "This custom role is not assigned to the user", "ERR_ASSIGNMENT_NOT_FOUND")
+        return _err(
+            404,
+            "This custom role is not assigned to the user",
+            "ERR_ASSIGNMENT_NOT_FOUND",
+        )
 
     assignment_id = str(assignment_rows[0]["id"])
 
     execute_transaction(
-        [("DELETE FROM user_custom_roles WHERE user_id = %s AND role_id = %s", (user_id, role_id))],
+        [
+            (
+                "DELETE FROM user_custom_roles WHERE user_id = %s AND role_id = %s",
+                (user_id, role_id),
+            )
+        ],
         tenant_id=session.tenant_id,
     )
 

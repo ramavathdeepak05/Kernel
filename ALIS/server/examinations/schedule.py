@@ -1,4 +1,5 @@
 """E06-S01 — Exam Schedule"""
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 
 class ExamScheduleService:
-
     @classmethod
     def create(cls, org_id: str, req: ExamScheduleCreate, actor_id: str) -> dict:
         existing = execute_query(
@@ -22,24 +22,48 @@ class ExamScheduleService:
             (req.course_id, req.academic_year, req.exam_type.value, org_id),
         )
         if existing:
-            raise BusinessRuleViolation(message=f"Exam schedule already exists for this course/{req.exam_type.value}/{req.academic_year}")
+            raise BusinessRuleViolation(
+                message=f"Exam schedule already exists for this course/{req.exam_type.value}/{req.academic_year}"
+            )
 
         sid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO exam_schedules
                 (id, org_id, course_id, academic_year, semester, exam_type,
                  exam_date, start_time, end_time, venue, max_marks, pass_marks)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s::time, %s::time, %s, %s, %s)
             """,
-            (sid, org_id, req.course_id, req.academic_year, req.semester,
-             req.exam_type.value, req.exam_date, req.start_time, req.end_time,
-             req.venue, req.max_marks, req.pass_marks),
-        )])
+                    (
+                        sid,
+                        org_id,
+                        req.course_id,
+                        req.academic_year,
+                        req.semester,
+                        req.exam_type.value,
+                        req.exam_date,
+                        req.start_time,
+                        req.end_time,
+                        req.venue,
+                        req.max_marks,
+                        req.pass_marks,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="exam_schedule", entity_id=sid, org_id=org_id,
-                     module="E06-S01", metadata={"course_id": req.course_id, "date": req.exam_date})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="exam_schedule",
+            entity_id=sid,
+            org_id=org_id,
+            module="E06-S01",
+            metadata={"course_id": req.course_id, "date": req.exam_date},
+        )
         return cls.get(org_id, sid)
 
     @classmethod
@@ -58,8 +82,13 @@ class ExamScheduleService:
         return dict(rows[0])
 
     @classmethod
-    def list(cls, org_id: str, academic_year: str, semester: int | None = None,
-             exam_type: str | None = None) -> list[dict]:
+    def list(
+        cls,
+        org_id: str,
+        academic_year: str,
+        semester: int | None = None,
+        exam_type: str | None = None,
+    ) -> list[dict]:
         sql = """
             SELECT es.*, c.name AS course_name, c.code AS course_code
             FROM exam_schedules es
@@ -77,10 +106,26 @@ class ExamScheduleService:
         return [dict(r) for r in execute_query(sql, params)]
 
     @classmethod
-    def update_status(cls, org_id: str, schedule_id: str, status: str, actor_id: str) -> dict:
+    def update_status(
+        cls, org_id: str, schedule_id: str, status: str, actor_id: str
+    ) -> dict:
         cls.get(org_id, schedule_id)
-        execute_transaction([(
-            "UPDATE exam_schedules SET status = %s WHERE id = %s AND org_id = %s",
-            (status, schedule_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE exam_schedules SET status = %s WHERE id = %s AND org_id = %s",
+                    (status, schedule_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="status",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "update_status"},
+        )
         return cls.get(org_id, schedule_id)

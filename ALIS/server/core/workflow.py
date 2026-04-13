@@ -25,30 +25,23 @@ Acceptance Criteria:
 Blueprint: This is a Rule Engine (Blueprint A) wrapper that orchestrates
 domain-specific logic. The engine itself contains NO domain logic.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
-from .state_registry import StateRegistry, WorkflowState, TransitionResult
-from .audit import AuditLog, AuditAction
-from .locks import check_global_locks, LockCheckResult, LockType
+from .audit import AuditAction, AuditLog
+from .exceptions import ALISError, GlobalLockViolationError, IllegalStateTransitionError
+from .locks import LockCheckResult, LockType, check_global_locks
+from .state_registry import StateRegistry, TransitionResult, WorkflowState
 from .workflow_schema import (
-    WorkflowContext,
-    WorkflowInstance,
-    StepResult,
     StepOutcome,
+    StepResult,
+    WorkflowContext,
     WorkflowDecision,
-    AuthorityLevel,
+    WorkflowInstance,
 )
-from .exceptions import (
-    ALISError,
-    IllegalStateTransitionError,
-    GlobalLockViolationError,
-    DecisionError
-)
-
 
 # Alias for backward compatibility if needed, or just use ALISError
 WorkflowError = ALISError
@@ -79,9 +72,9 @@ class BaseWorkflow(ABC):
     # --- Declarative Configuration (Override in Subclasses) ---
 
     workflow_type: str = "base.workflow"  # Must be overridden
-    required_locks: List[LockType] = []  # Locks to check before execution
+    required_locks: list[LockType] = []  # Locks to check before execution
     requires_approval: bool = False  # If True, enters AWAITING_APPROVAL
-    approval_roles: List[str] = []  # Roles allowed to approve this workflow type
+    approval_roles: list[str] = []  # Roles allowed to approve this workflow type
 
     # --- Instance State ---
 
@@ -99,12 +92,11 @@ class BaseWorkflow(ABC):
             current_state=WorkflowState.CREATED,
             approver_roles=list(self.approval_roles),
         )
-        self._decision: Optional[WorkflowDecision] = None
+        self._decision: WorkflowDecision | None = None
 
         # Audit: Log creation
         self._log_audit(
-            action=AuditAction.CREATE,
-            detail=f"Workflow created: {self.workflow_type}"
+            action=AuditAction.CREATE, detail=f"Workflow created: {self.workflow_type}"
         )
 
         # Persist initial state
@@ -150,7 +142,7 @@ class BaseWorkflow(ABC):
             self._log_audit(
                 action=AuditAction.STATE_TRANSITION,
                 detail=f"Workflow failed: {str(e)}",
-                success=False
+                success=False,
             )
             raise
 
@@ -159,7 +151,10 @@ class BaseWorkflow(ABC):
             self._transition_to(WorkflowState.FAILED)
             return self.instance
 
-        if step_result.outcome == StepOutcome.REQUIRES_APPROVAL or self.requires_approval:
+        if (
+            step_result.outcome == StepOutcome.REQUIRES_APPROVAL
+            or self.requires_approval
+        ):
             self._transition_to(WorkflowState.AWAITING_APPROVAL)
             return self.instance
 
@@ -192,14 +187,16 @@ class BaseWorkflow(ABC):
         # Log approval
         self._log_audit(
             action=AuditAction.OVERRIDE_APPROVED,
-            detail=f"Approved by {approver_role}:{approver_id}"
+            detail=f"Approved by {approver_role}:{approver_id}",
         )
 
         # Continue to completion
         self._transition_to(WorkflowState.COMPLETED)
         return self.instance
 
-    def reject(self, rejector_id: str, rejector_role: str, reason: str) -> WorkflowInstance:
+    def reject(
+        self, rejector_id: str, rejector_role: str, reason: str
+    ) -> WorkflowInstance:
         """
         Reject a workflow that is AWAITING_APPROVAL.
 
@@ -221,14 +218,14 @@ class BaseWorkflow(ABC):
         # Log rejection
         self._log_audit(
             action=AuditAction.OVERRIDE_REJECTED,
-            detail=f"Rejected by {rejector_role}:{rejector_id}: {reason}"
+            detail=f"Rejected by {rejector_role}:{rejector_id}: {reason}",
         )
 
         # Close workflow
         self._transition_to(WorkflowState.CLOSED)
         return self.instance
 
-    def get_decision(self) -> Optional[WorkflowDecision]:
+    def get_decision(self) -> WorkflowDecision | None:
         """Get the decision made by this workflow (if any)."""
         return self._decision
 
@@ -266,7 +263,7 @@ class BaseWorkflow(ABC):
         return check_global_locks(
             entity_id=self.context.entity_id,
             context=self.context.data,
-            required_locks=self.required_locks if self.required_locks else None
+            required_locks=self.required_locks if self.required_locks else None,
         )
 
     def _transition_to(self, new_state: WorkflowState) -> None:
@@ -277,9 +274,7 @@ class BaseWorkflow(ABC):
         """
         current = self.instance.current_state
         result: TransitionResult = StateRegistry.validate_transition(
-            entity_type="workflow",
-            from_state=current,
-            to_state=new_state
+            entity_type="workflow", from_state=current, to_state=new_state
         )
 
         if not result.allowed:
@@ -290,7 +285,11 @@ class BaseWorkflow(ABC):
         self.instance.current_state = new_state
         self.instance.updated_at = datetime.now(timezone.utc)
 
-        if new_state in (WorkflowState.COMPLETED, WorkflowState.FAILED, WorkflowState.CLOSED):
+        if new_state in (
+            WorkflowState.COMPLETED,
+            WorkflowState.FAILED,
+            WorkflowState.CLOSED,
+        ):
             self.instance.completed_at = datetime.now(timezone.utc)
 
         # Audit: Log state transition
@@ -298,7 +297,7 @@ class BaseWorkflow(ABC):
             action=AuditAction.STATE_TRANSITION,
             detail=f"State: {previous_state} → {new_state.value}",
             previous_state=previous_state,
-            new_state=new_state.value
+            new_state=new_state.value,
         )
 
     def _log_audit(
@@ -306,8 +305,8 @@ class BaseWorkflow(ABC):
         action: AuditAction,
         detail: str,
         success: bool = True,
-        previous_state: Optional[str] = None,
-        new_state: Optional[str] = None
+        previous_state: str | None = None,
+        new_state: str | None = None,
     ) -> None:
         """Log an audit entry for this workflow."""
         entry = AuditLog.log(
@@ -323,10 +322,10 @@ class BaseWorkflow(ABC):
             wizard=self.workflow_type,
             previous_state=previous_state,
             new_state=new_state,
-            metadata={"workflow_type": self.workflow_type}
+            metadata={"workflow_type": self.workflow_type},
         )
         self.instance.audit_trail.append(entry.id)
-        
+
         # Persist state transition
         self._persist()
 
@@ -341,7 +340,7 @@ class BaseWorkflow(ABC):
 
         self._log_audit(
             action=AuditAction.AGENT_DECISION,
-            detail=f"Decision: {decision.decision_made}"
+            detail=f"Decision: {decision.decision_made}",
         )
 
         # Persist decision
@@ -350,16 +349,17 @@ class BaseWorkflow(ABC):
     def _persist(self) -> None:
         """Persist workflow instance to database."""
         try:
-            from server.db_service import execute_system_transaction
             import json
-            
+
+            from server.db_service import execute_system_transaction
+
             def default_serializer(obj):
                 if hasattr(obj, "isoformat"):
                     return obj.isoformat()
                 if hasattr(obj, "value"):
                     return obj.value
                 return str(obj)
-            
+
             ctx_data = {}
             if self.context:
                 ctx_data = {
@@ -372,9 +372,9 @@ class BaseWorkflow(ABC):
                     "entity_id": getattr(self.context, "entity_id", ""),
                     "tenant_id": getattr(self.context, "tenant_id", ""),
                     "org_id": getattr(self.context, "org_id", ""),
-                    "data": getattr(self.context, "data", {})
+                    "data": getattr(self.context, "data", {}),
                 }
-                
+
             dec_data = None
             if hasattr(self.instance, "decision") and self.instance.decision:
                 d = self.instance.decision
@@ -385,9 +385,9 @@ class BaseWorkflow(ABC):
                     "authority_required": getattr(d, "authority_required", None),
                     "proposed_state": getattr(d, "proposed_state", None),
                     "rationale": getattr(d, "rationale", ""),
-                    "metadata": getattr(d, "metadata", {})
+                    "metadata": getattr(d, "metadata", {}),
                 }
-                
+
             tenant_id = getattr(self.context, "tenant_id", "system")
             if not tenant_id:
                 tenant_id = "system"
@@ -405,58 +405,67 @@ class BaseWorkflow(ABC):
                 updated_at = EXCLUDED.updated_at,
                 completed_at = EXCLUDED.completed_at
             """
-            
+
             params = (
                 self.instance.id,
                 tenant_id,
                 self.instance.workflow_type,
-                getattr(self.instance.current_state, "value", str(self.instance.current_state)),
+                getattr(
+                    self.instance.current_state,
+                    "value",
+                    str(self.instance.current_state),
+                ),
                 json.dumps(ctx_data, default=default_serializer),
                 json.dumps(dec_data, default=default_serializer) if dec_data else None,
                 json.dumps(self.instance.approver_roles, default=default_serializer),
                 self.instance.created_at,
                 self.instance.updated_at,
-                self.instance.completed_at
+                self.instance.completed_at,
             )
 
             execute_system_transaction([(query, params)])
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"Failed to persist workflow: {e}")
 
     def _persist_step(self, step_result) -> None:
         """Persist workflow step to database."""
         try:
-            from server.db_service import execute_system_transaction
             import json
-            
+
+            from server.db_service import execute_system_transaction
+
             def default_serializer(obj):
                 if hasattr(obj, "isoformat"):
                     return obj.isoformat()
                 if hasattr(obj, "value"):
                     return obj.value
                 return str(obj)
-                
+
             tenant_id = getattr(self.context, "tenant_id", "system")
             if not tenant_id:
                 tenant_id = "system"
-                
+
             query = """
             INSERT INTO workflow_steps (
                 tenant_id, workflow_id, step_name, outcome, message, data
             ) VALUES (%s, %s, %s, %s, %s, %s)
             """
-            
+
             params = (
                 tenant_id,
                 self.instance.id,
                 getattr(step_result, "step_name", "unknown"),
                 getattr(step_result.outcome, "value", str(step_result.outcome)),
                 getattr(step_result, "message", None),
-                json.dumps(getattr(step_result, "data", {}), default=default_serializer)
+                json.dumps(
+                    getattr(step_result, "data", {}), default=default_serializer
+                ),
             )
-            
+
             execute_system_transaction([(query, params)])
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"Failed to persist workflow step: {e}")

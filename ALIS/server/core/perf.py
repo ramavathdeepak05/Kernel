@@ -23,6 +23,7 @@ Hard Constraints Preserved:
   - Global locks: checked before DB write (just in parallel with RBAC)
   - RBAC: cache is deny-only (allowed=True is NEVER cached to prevent stale grants)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,8 +32,7 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ def _get_redis():
         try:
             import redis as redis_lib
             from server.core.settings import settings
+
             client = redis_lib.from_url(
                 settings.redis_url,
                 socket_connect_timeout=2,
@@ -93,6 +94,7 @@ def _get_redis():
 # 1. PARALLEL PRE-CHECKS — Run RBAC + locks concurrently
 # =============================================================================
 
+
 class PreCheckResult:
     """Aggregated result of parallel pre-flight checks."""
 
@@ -100,7 +102,7 @@ class PreCheckResult:
         self.allowed: bool = True
         self.rbac_ok: bool = True
         self.locks_ok: bool = True
-        self.reasons: List[str] = []
+        self.reasons: list[str] = []
         self._lock = threading.Lock()
 
     def deny(self, source: str, reason: str) -> None:
@@ -118,9 +120,9 @@ async def parallel_pre_checks(
     *,
     actor_role: str,
     required_permission: str,
-    org_id: Optional[str] = None,
-    entity_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    org_id: str | None = None,
+    entity_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> PreCheckResult:
     """
     Run RBAC and global lock checks concurrently via asyncio.gather.
@@ -147,12 +149,15 @@ async def parallel_pre_checks(
                 if cached is not None:
                     data = json.loads(cached)
                     # Only denials are cached — if we find a cached entry it's a deny
-                    result.deny("rbac", data.get("reason", "Permission denied (cached)"))
+                    result.deny(
+                        "rbac", data.get("reason", "Permission denied (cached)")
+                    )
                     return
             except Exception:
-                pass
+                pass  # noqa: S110 — intentionally suppressed
 
-        from server.core.rbac import verify_access, Role, Permission
+        from server.core.rbac import Permission, Role, verify_access
+
         try:
             role_enum = Role(actor_role)
         except ValueError:
@@ -174,17 +179,19 @@ async def parallel_pre_checks(
             if r is not None:
                 try:
                     r.setex(
-                        f"alis:cache:{cache_key}", 30,
+                        f"alis:cache:{cache_key}",
+                        30,
                         json.dumps({"reason": access.reason or "Permission denied"}),
                     )
                 except Exception:
-                    pass
+                    pass  # noqa: S110 — intentionally suppressed
         # If allowed: do NOT cache — avoids stale grants after permission revocation
 
     def _check_locks_sync() -> None:
         if not org_id or not entity_id:
             return
         from server.core.locks import GlobalLockRegistry
+
         lock_result = GlobalLockRegistry.check_all_locks(entity_id, {"org_id": org_id})
         if lock_result.is_locked:
             for reason in lock_result.reasons:
@@ -206,131 +213,9 @@ async def parallel_pre_checks(
 
 
 # =============================================================================
-# 2. ASYNC AUDIT WRITER — Move NON-CRITICAL audit off the request latency path
-# =============================================================================
-
-# Actions that MUST be written synchronously (immediate durability required)
-_CRITICAL_AUDIT_ACTIONS = frozenset({
-    "state_transition", "login", "logout", "session_revoked",
-    "override_requested", "override_approved", "override_rejected", "override_executed",
-    "lockdown_activated", "lockdown_deactivated",
-    "escalation_requested", "escalation_granted",
-    "dual_control_requested", "dual_control_completed",
-    "hard_delete", "password_changed", "password_reset_completed",
-    "policy_approved", "policy_activated",
-})
-
-
-class AsyncAuditWriter:
-    """
-    Two-phase audit for NON-CRITICAL actions only.
-
-    Phase A (in request — <1ms): LPUSH to Redis list `alis:audit:pending`
-    Phase B (Celery worker — every 2s): RPOP → AuditLedger.log() with hash chain
-
-    CRITICAL actions (state transitions, login, overrides, lockdown) are ALWAYS
-    written synchronously via AuditLedger.log() — never deferred.
-
-    Fallback: If Redis is unavailable, enqueue returns False and the caller
-    should use AuditLedger.log() directly.
-    """
-
-    @staticmethod
-    def is_critical(action: str) -> bool:
-        """Check if an audit action requires immediate synchronous persistence."""
-        return action in _CRITICAL_AUDIT_ACTIONS
-
-    @staticmethod
-    def enqueue_sync(
-        action: str,
-        actor_id: str,
-        actor_role: str = "unknown",
-        entity_type: str = "",
-        entity_id: str = "",
-        tenant_id: str = "SYSTEM",
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """
-        Enqueue a NON-CRITICAL audit entry for async persistence.
-        Returns True if enqueued to Redis, False if Redis unavailable or action is critical.
-        """
-        if AsyncAuditWriter.is_critical(action):
-            return False  # Caller must use synchronous AuditLedger.log()
-
-        entry = {
-            "action": action,
-            "actor_id": actor_id,
-            "actor_role": actor_role,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "tenant_id": tenant_id,
-            "metadata": metadata or {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        try:
-            r = _get_redis()
-            if r is None:
-                return False
-            r.lpush("alis:audit:pending", json.dumps(entry))
-            return True
-        except Exception as e:
-            logger.warning("AsyncAuditWriter: Redis enqueue failed: %s", e)
-            return False
-
-    @staticmethod
-    def drain_batch(batch_size: int = 100) -> int:
-        """
-        Drain pending audit entries from Redis and persist to DB.
-        Called by Celery beat task (every 2 seconds).
-        Returns number of entries persisted.
-        """
-        from server.core.audit import AuditLedger, AuditAction
-
-        r = _get_redis()
-        if r is None:
-            return 0
-
-        persisted = 0
-        for _ in range(batch_size):
-            raw = r.rpop("alis:audit:pending")
-            if raw is None:
-                break
-
-            try:
-                entry = json.loads(raw)
-                action_str = entry.get("action", "create")
-                try:
-                    action_enum = AuditAction(action_str)
-                except ValueError:
-                    logger.warning("AsyncAuditWriter: unknown action '%s', recording as CREATE", action_str)
-                    action_enum = AuditAction.CREATE
-
-                AuditLedger.log(
-                    action=action_enum,
-                    actor_id=entry.get("actor_id", "unknown"),
-                    actor_role=entry.get("actor_role"),
-                    entity_type=entry.get("entity_type", ""),
-                    entity_id=entry.get("entity_id", ""),
-                    tenant_id=entry.get("tenant_id"),
-                    metadata=entry.get("metadata"),
-                )
-                persisted += 1
-            except Exception as e:
-                logger.error(
-                    "AsyncAuditWriter: failed to persist entry: %s (data: %s)",
-                    e, str(raw)[:200],
-                )
-                try:
-                    r.lpush("alis:audit:retry", raw)
-                except Exception:
-                    pass
-
-        return persisted
-
-
-# =============================================================================
 # 3. REDIS CACHE — Read acceleration (sync, thread-safe via redis-py)
 # =============================================================================
+
 
 class RedisCache:
     """
@@ -340,7 +225,7 @@ class RedisCache:
     """
 
     @staticmethod
-    def get(key: str) -> Optional[Dict[str, Any]]:
+    def get(key: str) -> dict[str, Any] | None:
         try:
             r = _get_redis()
             if r is None:
@@ -353,7 +238,7 @@ class RedisCache:
             return None
 
     @staticmethod
-    def set(key: str, value: Dict[str, Any], ttl: int = 60) -> bool:
+    def set(key: str, value: dict[str, Any], ttl: int = 60) -> bool:
         try:
             r = _get_redis()
             if r is None:
@@ -379,6 +264,7 @@ class RedisCache:
 # 4. AI RESULT CACHE — Deduplicate deterministic AI calls
 # =============================================================================
 
+
 class AIResultCache:
     """
     Cache deterministic AI outputs to avoid redundant LLM calls.
@@ -390,25 +276,44 @@ class AIResultCache:
     _CACHEABLE_TASKS = frozenset({"extraction", "classification", "verification"})
 
     @classmethod
-    def get_cached(cls, tenant_id: str, task_class: str, input_data: str, model_version: str) -> Optional[Dict[str, Any]]:
+    def get_cached(
+        cls, tenant_id: str, task_class: str, input_data: str, model_version: str
+    ) -> dict[str, Any] | None:
         if task_class not in cls._CACHEABLE_TASKS:
             return None
-        return RedisCache.get(f"ai:{cls._make_key(tenant_id, task_class, input_data, model_version)}")
+        return RedisCache.get(
+            f"ai:{cls._make_key(tenant_id, task_class, input_data, model_version)}"
+        )
 
     @classmethod
-    def set_cached(cls, tenant_id: str, task_class: str, input_data: str, model_version: str, result: Dict[str, Any], ttl: int = 300) -> bool:
+    def set_cached(
+        cls,
+        tenant_id: str,
+        task_class: str,
+        input_data: str,
+        model_version: str,
+        result: dict[str, Any],
+        ttl: int = 300,
+    ) -> bool:
         if task_class not in cls._CACHEABLE_TASKS:
             return False
-        return RedisCache.set(f"ai:{cls._make_key(tenant_id, task_class, input_data, model_version)}", result, ttl=ttl)
+        return RedisCache.set(
+            f"ai:{cls._make_key(tenant_id, task_class, input_data, model_version)}",
+            result,
+            ttl=ttl,
+        )
 
     @staticmethod
-    def _make_key(tenant_id: str, task_class: str, input_data: str, model_version: str) -> str:
+    def _make_key(
+        tenant_id: str, task_class: str, input_data: str, model_version: str
+    ) -> str:
         return f"{tenant_id}:{task_class}:{hashlib.sha256(input_data.encode()).hexdigest()[:16]}:{model_version}"
 
 
 # =============================================================================
 # 5. DOMAIN EVENT DECOUPLING — Write-only in request path
 # =============================================================================
+
 
 class DeferredEventPublisher:
     """
@@ -420,30 +325,55 @@ class DeferredEventPublisher:
     def publish_deferred(event) -> str:
         """Persist event to DB without Celery dispatch. Returns event ID."""
         from server.db_service import execute_transaction
-        execute_transaction([
-            (
-                """
+
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO domain_events
                     (id, org_id, event_type, entity_type, entity_id,
                      payload, actor_id, correlation_id, status, published_at,
                      retry_count)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'PENDING', %s, 0)
                 """,
-                (
-                    event.id, event.org_id, event.event_type, event.entity_type,
-                    event.entity_id, json.dumps(event.payload), event.actor_id,
-                    event.correlation_id, event.published_at,
-                ),
-            )
-        ])
-        logger.info("DeferredEventPublisher: persisted %s [%s/%s]",
-                     event.event_type, event.entity_type, event.entity_id)
+                    (
+                        event.id,
+                        event.org_id,
+                        event.event_type,
+                        event.entity_type,
+                        event.entity_id,
+                        json.dumps(event.payload),
+                        event.actor_id,
+                        event.correlation_id,
+                        event.published_at,
+                    ),
+                )
+            ]
+        )
+        from server.core.audit import AuditAction, AuditLog
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=event.actor_id,
+            actor_role="system",
+            entity_type="domain_event",
+            entity_id=event.id,
+            tenant_id=event.org_id,
+            metadata={"source": "publish_deferred", "event_type": event.event_type},
+        )
+        logger.info(
+            "DeferredEventPublisher: persisted %s [%s/%s]",
+            event.event_type,
+            event.entity_type,
+            event.entity_id,
+        )
         return event.id
 
 
 # =============================================================================
 # 6. VAULT WARM-UP — Prefetch tenant secrets at startup
 # =============================================================================
+
 
 async def warm_vault_cache() -> int:
     """
@@ -455,17 +385,22 @@ async def warm_vault_cache() -> int:
     def _warm_sync() -> int:
         try:
             from server.core.vault_client import get_vault_client
+
             vault = get_vault_client()
             if not vault._is_available():
                 logger.info("Vault warm-up skipped — Vault unavailable.")
                 return 0
             cached = 0
-            for path in ["alis/razorpay_webhook", "alis/msg91_key", "alis/smtp_password"]:
+            for path in [
+                "alis/razorpay_webhook",
+                "alis/msg91_key",
+                "alis/smtp_password",
+            ]:
                 try:
                     vault.get_secret(path)
                     cached += 1
                 except Exception:
-                    pass
+                    pass  # noqa: S110 — intentionally suppressed
             logger.info("Vault warm-up: %d secrets prefetched.", cached)
             return cached
         except Exception as e:
@@ -479,7 +414,9 @@ async def warm_vault_cache() -> int:
 # 7. MIDDLEWARE SHORT-CIRCUIT
 # =============================================================================
 
-_READ_ONLY_PATHS = frozenset({"/health", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json"})
+_READ_ONLY_PATHS = frozenset(
+    {"/health", "/ready", "/metrics", "/docs", "/redoc", "/openapi.json"}
+)
 
 
 def is_lightweight_request(method: str, path: str) -> bool:

@@ -22,21 +22,23 @@ Acceptance Criteria:
 - [x] Read-only to non-admins
 - [x] No runtime mutation of invariants
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+from uuid import uuid4
 
-from .audit import AuditLog, AuditAction
-
+from .audit import AuditAction, AuditLog
 
 # --- Config Categories ---
 
+
 class ConfigCategory(str, Enum):
     """Categories of configuration."""
+
     ATTENDANCE = "attendance"
     FINANCE = "finance"
     EXAMINATION = "examination"
@@ -50,25 +52,29 @@ class ConfigCategory(str, Enum):
 
 # --- Config Version ---
 
+
 @dataclass
 class ConfigVersion:
     """A versioned configuration entry."""
+
     version: int
     value: Any
     effective_from: datetime
-    effective_until: Optional[datetime] = None
+    effective_until: datetime | None = None
     created_by: str = ""
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    change_reason: Optional[str] = None
+    change_reason: str | None = None
 
 
 # --- Config Entry ---
+
 
 @dataclass
 class ConfigEntry:
     """
     Configuration entry with version history.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
     key: str = ""
     category: ConfigCategory = ConfigCategory.SYSTEM
@@ -79,19 +85,19 @@ class ConfigEntry:
     current_value: Any = None
 
     # Version history
-    versions: List[ConfigVersion] = field(default_factory=list)
+    versions: list[ConfigVersion] = field(default_factory=list)
 
     # Metadata
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     # Constraints
     value_type: str = "string"  # string, int, float, bool, json
-    min_value: Optional[float] = None
-    max_value: Optional[float] = None
-    allowed_values: Optional[List[Any]] = None
+    min_value: float | None = None
+    max_value: float | None = None
+    allowed_values: list[Any] | None = None
 
-    def get_value(self, as_of: Optional[datetime] = None) -> Any:
+    def get_value(self, as_of: datetime | None = None) -> Any:
         """Get the effective value at a point in time."""
         if as_of is None:
             return self.current_value
@@ -107,8 +113,8 @@ class ConfigEntry:
         self,
         new_value: Any,
         changed_by: str,
-        reason: Optional[str] = None,
-        effective_from: Optional[datetime] = None
+        reason: str | None = None,
+        effective_from: datetime | None = None,
     ) -> ConfigVersion:
         """Update the configuration value (creates new version)."""
         # Validate value
@@ -120,7 +126,7 @@ class ConfigEntry:
             value=new_value,
             effective_from=effective_from or datetime.now(timezone.utc),
             created_by=changed_by,
-            change_reason=reason
+            change_reason=reason,
         )
 
         # Close current version
@@ -137,11 +143,11 @@ class ConfigEntry:
     def _validate_value(self, value: Any) -> None:
         """Validate value against constraints."""
         if self.value_type == "int" and not isinstance(value, int):
-            raise ValueError(f"Value must be an integer")
+            raise ValueError("Value must be an integer")
         if self.value_type == "float" and not isinstance(value, (int, float)):
-            raise ValueError(f"Value must be a number")
+            raise ValueError("Value must be a number")
         if self.value_type == "bool" and not isinstance(value, bool):
-            raise ValueError(f"Value must be a boolean")
+            raise ValueError("Value must be a boolean")
 
         if self.min_value is not None and value < self.min_value:
             raise ValueError(f"Value must be >= {self.min_value}")
@@ -153,6 +159,7 @@ class ConfigEntry:
 
 # --- Config Registry ---
 
+
 class ConfigRegistry:
     """
     Central configuration registry.
@@ -160,7 +167,7 @@ class ConfigRegistry:
     Manages all policy parameters with versioning and audit trails.
     """
 
-    _configs: Dict[str, ConfigEntry] = {}
+    _configs: dict[str, ConfigEntry] = {}
 
     # Pre-defined policy keys (from Master Handbook)
     ATTENDANCE_THRESHOLD = "attendance.minimum_percentage"
@@ -199,7 +206,7 @@ class ConfigRegistry:
                 current_value=75,
                 value_type="int",
                 min_value=0,
-                max_value=100
+                max_value=100,
             ),
             ConfigEntry(
                 key=cls.EXAM_ELIGIBILITY_ATTENDANCE,
@@ -208,7 +215,7 @@ class ConfigRegistry:
                 current_value=75,
                 value_type="int",
                 min_value=0,
-                max_value=100
+                max_value=100,
             ),
             ConfigEntry(
                 key=cls.FEE_LATE_PENALTY_PERCENT,
@@ -217,7 +224,7 @@ class ConfigRegistry:
                 current_value=5,
                 value_type="float",
                 min_value=0,
-                max_value=50
+                max_value=50,
             ),
             ConfigEntry(
                 key=cls.SCHOLARSHIP_INCOME_LIMIT,
@@ -225,7 +232,7 @@ class ConfigRegistry:
                 description="Maximum family income for scholarship eligibility",
                 current_value=500000,
                 value_type="int",
-                min_value=0
+                min_value=0,
             ),
             ConfigEntry(
                 key=cls.MARKS_ENTRY_WINDOW_DAYS,
@@ -234,7 +241,7 @@ class ConfigRegistry:
                 current_value=14,
                 value_type="int",
                 min_value=1,
-                max_value=60
+                max_value=60,
             ),
             # E02-S03: Notification Defaults
             ConfigEntry(
@@ -242,28 +249,28 @@ class ConfigRegistry:
                 category=ConfigCategory.NOTIFICATION,
                 description="Enable email notifications",
                 current_value=True,
-                value_type="bool"
+                value_type="bool",
             ),
             ConfigEntry(
                 key=cls.NOTIFICATION_SMS_ENABLED,
                 category=ConfigCategory.NOTIFICATION,
                 description="Enable SMS notifications",
                 current_value=False,
-                value_type="bool"
+                value_type="bool",
             ),
             ConfigEntry(
                 key=cls.NOTIFICATION_WHATSAPP_ENABLED,
                 category=ConfigCategory.NOTIFICATION,
                 description="Enable WhatsApp notifications",
                 current_value=False,
-                value_type="bool"
+                value_type="bool",
             ),
             ConfigEntry(
                 key=cls.NOTIFICATION_EMAIL_SMTP_HOST,
                 category=ConfigCategory.NOTIFICATION,
                 description="SMTP host for email",
                 current_value="localhost",
-                value_type="string"
+                value_type="string",
             ),
             ConfigEntry(
                 key=cls.NOTIFICATION_EMAIL_SMTP_PORT,
@@ -272,7 +279,7 @@ class ConfigRegistry:
                 current_value=25,
                 value_type="int",
                 min_value=1,
-                max_value=65535
+                max_value=65535,
             ),
             ConfigEntry(
                 key=cls.NOTIFICATION_MAX_RETRIES,
@@ -281,7 +288,7 @@ class ConfigRegistry:
                 current_value=3,
                 value_type="int",
                 min_value=0,
-                max_value=10
+                max_value=10,
             ),
             # E03-S01: AI Gateway Defaults
             ConfigEntry(
@@ -289,21 +296,21 @@ class ConfigRegistry:
                 category=ConfigCategory.SYSTEM,
                 description="Base URL for local LLM (Ollama)",
                 current_value="http://localhost:11434",
-                value_type="string"
+                value_type="string",
             ),
             ConfigEntry(
                 key=cls.LLM_MODEL_NAME,
                 category=ConfigCategory.SYSTEM,
                 description="Default LLM model name",
                 current_value="qwen2.5:1.5b-instruct-q8_0",
-                value_type="string"
+                value_type="string",
             ),
             ConfigEntry(
                 key=cls.LLM_EMBED_MODEL,
                 category=ConfigCategory.SYSTEM,
                 description="Embedding model name (for PGVector/RAG)",
                 current_value="nomic-embed-text",
-                value_type="string"
+                value_type="string",
             ),
             # E00-S04: Escalation & Dual Control Defaults
             ConfigEntry(
@@ -313,7 +320,7 @@ class ConfigRegistry:
                 current_value=30,
                 value_type="int",
                 min_value=5,
-                max_value=480
+                max_value=480,
             ),
             ConfigEntry(
                 key=cls.ESCALATION_MAX_TTL,
@@ -322,32 +329,34 @@ class ConfigRegistry:
                 current_value=120,
                 value_type="int",
                 min_value=5,
-                max_value=480
+                max_value=480,
             ),
             ConfigEntry(
                 key=cls.ESCALATION_REQUIRE_DIFFERENT_GRANTOR,
                 category=ConfigCategory.SECURITY,
                 description="Require grantor to differ from requestor",
                 current_value=True,
-                value_type="bool"
+                value_type="bool",
             ),
             ConfigEntry(
                 key=cls.ESCALATION_CRITICAL_OPERATIONS,
                 category=ConfigCategory.SECURITY,
                 description="List of operation IDs requiring dual control",
                 current_value=["result_publish", "payroll_release", "transcript_seal"],
-                value_type="json"
+                value_type="json",
             ),
         ]
 
         for config in defaults:
             if config.key not in cls._configs:
-                config.versions.append(ConfigVersion(
-                    version=1,
-                    value=config.current_value,
-                    effective_from=datetime.now(timezone.utc),
-                    created_by="system"
-                ))
+                config.versions.append(
+                    ConfigVersion(
+                        version=1,
+                        value=config.current_value,
+                        effective_from=datetime.now(timezone.utc),
+                        created_by="system",
+                    )
+                )
                 cls._configs[config.key] = config
 
     @classmethod
@@ -359,17 +368,13 @@ class ConfigRegistry:
         return config.current_value
 
     @classmethod
-    def get_entry(cls, key: str) -> Optional[ConfigEntry]:
+    def get_entry(cls, key: str) -> ConfigEntry | None:
         """Get the full configuration entry."""
         return cls._configs.get(key)
 
     @classmethod
     def set(
-        cls,
-        key: str,
-        value: Any,
-        changed_by: str,
-        reason: Optional[str] = None
+        cls, key: str, value: Any, changed_by: str, reason: str | None = None
     ) -> ConfigVersion:
         """
         Update a configuration value.
@@ -396,19 +401,19 @@ class ConfigRegistry:
                 "old_value": old_value,
                 "new_value": value,
                 "reason": reason,
-                "version": new_version.version
-            }
+                "version": new_version.version,
+            },
         )
 
         return new_version
 
     @classmethod
-    def get_by_category(cls, category: ConfigCategory) -> List[ConfigEntry]:
+    def get_by_category(cls, category: ConfigCategory) -> list[ConfigEntry]:
         """Get all configs in a category."""
         return [c for c in cls._configs.values() if c.category == category]
 
     @classmethod
-    def get_history(cls, key: str) -> List[ConfigVersion]:
+    def get_history(cls, key: str) -> list[ConfigVersion]:
         """Get version history for a config."""
         config = cls._configs.get(key)
         if config is None:

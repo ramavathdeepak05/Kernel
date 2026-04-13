@@ -13,16 +13,16 @@ Rules (R1 — no hardcoded thresholds):
   - Dual auth (CoE + Registrar) required to flag forgery
   - forgery_flags stored as JSONB array on document record
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from enum import Enum
-from typing import Optional
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
-from server.core.exceptions import BusinessRuleViolation, NotFoundError
+from server.core.exceptions import NotFoundError
 from server.core.policy_engine import policy_engine
 from server.db_service import execute_query, execute_transaction
 
@@ -40,6 +40,7 @@ _ACADEMIC_DOC_TYPES = {
 
 class DocumentVerificationMethodV2(str, Enum):
     """Extended verification methods for 3-tier detection (EC-ADM-04)."""
+
     OCR_FORMAT_ONLY = "OCR_FORMAT_ONLY"
     DIGILOCKER_API = "DIGILOCKER_API"
     BOARD_API = "BOARD_API"
@@ -48,7 +49,6 @@ class DocumentVerificationMethodV2(str, Enum):
 
 
 class ForgeryDetectionService:
-
     @classmethod
     def evaluate_document(
         cls,
@@ -67,9 +67,11 @@ class ForgeryDetectionService:
         Returns the assigned verification_method and next action.
         """
         # R1 — threshold from policy, not literal
-        ocr_threshold = float(policy_engine.get_value(
-            "admissions.forgery_ocr_confidence_threshold", org_id, 0.5
-        ))
+        ocr_threshold = float(
+            policy_engine.get_value(
+                "admissions.forgery_ocr_confidence_threshold", org_id, 0.5
+            )
+        )
 
         rows = execute_query(
             "SELECT id, doc_type, status FROM application_documents WHERE id = %s AND org_id = %s",
@@ -78,7 +80,7 @@ class ForgeryDetectionService:
         if not rows:
             raise NotFoundError(f"Document {document_id} not found")
 
-        doc = rows[0]
+        rows[0]
 
         # Determine required method
         if doc_type in _ACADEMIC_DOC_TYPES:
@@ -93,8 +95,10 @@ class ForgeryDetectionService:
             required_method = DocumentVerificationMethodV2.MANUAL_OFFICER
             queue = "officer_review"
 
-        import json
-        execute_transaction([("""
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE application_documents
             SET verification_method = %s,
                 confidence_score    = %s,
@@ -102,10 +106,17 @@ class ForgeryDetectionService:
                 status              = 'UNDER_REVIEW',
                 updated_at          = NOW()
             WHERE id = %s AND org_id = %s
-        """, (
-            required_method.value, ocr_confidence, queue,
-            document_id, org_id,
-        ))])
+        """,
+                    (
+                        required_method.value,
+                        ocr_confidence,
+                        queue,
+                        document_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -122,7 +133,10 @@ class ForgeryDetectionService:
 
         logger.info(
             "Document %s routed to %s (confidence=%.2f, doc_type=%s)",
-            document_id, required_method.value, ocr_confidence, doc_type,
+            document_id,
+            required_method.value,
+            ocr_confidence,
+            doc_type,
         )
 
         return {
@@ -140,7 +154,7 @@ class ForgeryDetectionService:
         forgery_flags: list[str],
         notes: str,
         coe_actor_id: str,
-        registrar_actor_id: Optional[str],
+        registrar_actor_id: str | None,
     ) -> dict:
         """Flag a document as forged (dual auth: CoE + Registrar required).
 
@@ -150,20 +164,33 @@ class ForgeryDetectionService:
             # Create pending dual-auth approval task
             task_id = str(uuid.uuid4())
             import json
-            execute_transaction([("""
+
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO workflow_tasks
                     (id, org_id, workflow_type, resource_id, status,
                      created_by, payload, created_at)
                 VALUES (%s, %s, 'FORGERY_FLAG_DUAL_AUTH', %s, 'PENDING_APPROVAL',
                         %s, %s, NOW())
-            """, (
-                task_id, org_id, document_id, coe_actor_id,
-                json.dumps({
-                    "forgery_flags": forgery_flags,
-                    "notes": notes,
-                    "coe_actor_id": coe_actor_id,
-                }),
-            ))])
+            """,
+                        (
+                            task_id,
+                            org_id,
+                            document_id,
+                            coe_actor_id,
+                            json.dumps(
+                                {
+                                    "forgery_flags": forgery_flags,
+                                    "notes": notes,
+                                    "coe_actor_id": coe_actor_id,
+                                }
+                            ),
+                        ),
+                    )
+                ]
+            )
             return {
                 "status": "pending_dual_auth",
                 "task_id": task_id,
@@ -171,7 +198,11 @@ class ForgeryDetectionService:
             }
 
         import json
-        execute_transaction([("""
+
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE application_documents
             SET forgery_flags = %s,
                 forgery_notes = %s,
@@ -179,11 +210,17 @@ class ForgeryDetectionService:
                 verified_by   = %s,
                 updated_at    = NOW()
             WHERE id = %s AND org_id = %s
-        """, (
-            json.dumps(forgery_flags), notes,
-            coe_actor_id,
-            document_id, org_id,
-        ))])
+        """,
+                    (
+                        json.dumps(forgery_flags),
+                        notes,
+                        coe_actor_id,
+                        document_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -198,16 +235,18 @@ class ForgeryDetectionService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.document_forgery_flagged",
-            org_id=org_id,
-            payload={
-                "document_id": document_id,
-                "forgery_flags": forgery_flags,
-                "coe_actor_id": coe_actor_id,
-                "registrar_actor_id": registrar_actor_id,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.document_forgery_flagged",
+                org_id=org_id,
+                payload={
+                    "document_id": document_id,
+                    "forgery_flags": forgery_flags,
+                    "coe_actor_id": coe_actor_id,
+                    "registrar_actor_id": registrar_actor_id,
+                },
+            )
+        )
 
         return {
             "status": "flagged",

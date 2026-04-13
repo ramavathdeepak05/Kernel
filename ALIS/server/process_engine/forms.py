@@ -7,15 +7,14 @@ render it without any hardcoded knowledge of the field structure.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from server.db_service import execute_query
 
 
 class FormRenderer:
-
     @staticmethod
-    def get_pending_form(org_id: str, instance_id: str) -> Optional[Dict[str, Any]]:
+    def get_pending_form(org_id: str, instance_id: str) -> dict[str, Any] | None:
         """Return form schema for the current pending FORM step, or None."""
         rows = execute_query(
             """
@@ -36,7 +35,11 @@ class FormRenderer:
             return None
 
         row = rows[0]
-        config = row["config"] if isinstance(row["config"], dict) else json.loads(row["config"] or "{}")
+        config = (
+            row["config"]
+            if isinstance(row["config"], dict)
+            else json.loads(row["config"] or "{}")
+        )
 
         return {
             "step_id": str(row["step_id"]),
@@ -45,9 +48,11 @@ class FormRenderer:
         }
 
     @staticmethod
-    def validate_submission(fields: List[Dict[str, Any]], form_data: Dict[str, Any]) -> List[str]:
+    def validate_submission(
+        fields: list[dict[str, Any]], form_data: dict[str, Any]
+    ) -> list[str]:
         """Validate form_data against declared field schema. Returns list of error messages."""
-        errors: List[str] = []
+        errors: list[str] = []
         for field in fields:
             name = field.get("name", "")
             required = field.get("required", True)
@@ -79,12 +84,23 @@ class FormRenderer:
                     errors.append(f"Field '{name}' must be one of {options}")
 
             elif field_type == "text":
-                if "min_length" in validation and len(str(value)) < validation["min_length"]:
-                    errors.append(f"Field '{name}' must be at least {validation['min_length']} characters")
-                if "max_length" in validation and len(str(value)) > validation["max_length"]:
-                    errors.append(f"Field '{name}' must be at most {validation['max_length']} characters")
+                if (
+                    "min_length" in validation
+                    and len(str(value)) < validation["min_length"]
+                ):
+                    errors.append(
+                        f"Field '{name}' must be at least {validation['min_length']} characters"
+                    )
+                if (
+                    "max_length" in validation
+                    and len(str(value)) > validation["max_length"]
+                ):
+                    errors.append(
+                        f"Field '{name}' must be at most {validation['max_length']} characters"
+                    )
                 if "pattern" in validation:
                     import re
+
                     if not re.match(validation["pattern"], str(value)):
                         errors.append(f"Field '{name}' does not match required pattern")
 

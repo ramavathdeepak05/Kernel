@@ -12,11 +12,11 @@ lms_status='DONE' without any external API call.
 This module is retained as a tombstone to preserve import stability.
 Superseded by: server.academics.learning_service
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +33,8 @@ class LMSUser:
 @dataclass
 class LMSSyncResult:
     success: bool
-    user: Optional[LMSUser] = None
-    error: Optional[str] = None
+    user: LMSUser | None = None
+    error: str | None = None
     is_stub: bool = True
 
 
@@ -44,8 +44,12 @@ class LMSSyncClient:
     def is_enabled(self) -> bool:
         return False
 
-    def create_student(self, roll_number: str, email: str, full_name: str, program: str) -> LMSSyncResult:
-        logger.info("LMSSyncClient: in-house LMS active — no external account provisioning needed")
+    def create_student(
+        self, roll_number: str, email: str, full_name: str, program: str
+    ) -> LMSSyncResult:
+        logger.info(
+            "LMSSyncClient: in-house LMS active — no external account provisioning needed"
+        )
         return LMSSyncResult(success=True, is_stub=True)
 
     def deactivate_student(self, lms_account_id: str) -> bool:

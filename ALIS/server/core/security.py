@@ -25,24 +25,23 @@ Acceptance Criteria (E01-S11):
 - [x] No sensitive error leakage
 - [x] Default deny posture
 """
+
 from __future__ import annotations
 
-import hashlib
-import secrets
 import contextvars
-import logging
-from uuid import uuid4
-from datetime import datetime, timedelta, timezone
-from typing import Optional, Any
-from dataclasses import dataclass, field
-from enum import Enum
-
+import hashlib
 import json
+import logging
+import secrets
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from enum import Enum
+from uuid import uuid4
 
 import bcrypt as _bcrypt
 import redis as _redis_lib
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 
 # --- Global constants ---
 # Single source of truth for default session expiry.
@@ -54,6 +53,7 @@ logger = logging.getLogger(__name__)
 
 # --- Token Types ---
 
+
 class TokenType(str, Enum):
     ACCESS = "access"
     REFRESH = "refresh"
@@ -62,11 +62,13 @@ class TokenType(str, Enum):
 
 # --- Session Entity ---
 
+
 @dataclass
 class Session:
     """
     User session entity.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
     user_id: str = ""
     token_hash: str = ""
@@ -76,19 +78,23 @@ class Session:
     tenant_id: str = ""  # MANDATORY — set at login from User.org_id
 
     # Device info
-    device_id: Optional[str] = None
-    user_agent: Optional[str] = None
-    ip_address: Optional[str] = None
+    device_id: str | None = None
+    user_agent: str | None = None
+    ip_address: str | None = None
 
     # Timestamps
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc) + timedelta(hours=SESSION_EXPIRY_HOURS))
+    expires_at: datetime = field(
+        default_factory=lambda: (
+            datetime.now(timezone.utc) + timedelta(hours=SESSION_EXPIRY_HOURS)
+        )
+    )
     last_activity: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Status
     is_active: bool = True
-    revoked_at: Optional[datetime] = None
-    revoke_reason: Optional[str] = None
+    revoked_at: datetime | None = None
+    revoke_reason: str | None = None
 
     @property
     def is_expired(self) -> bool:
@@ -108,6 +114,7 @@ class Session:
 
 # --- Password Hashing ---
 
+
 class PasswordHasher:
     """
     Password hashing utility using bcrypt (rounds=12).
@@ -123,7 +130,8 @@ class PasswordHasher:
     def hash(password: str) -> str:
         """Hash a password with bcrypt. Returns a bcrypt hash string."""
         return _bcrypt.hashpw(
-            password.encode("utf-8"), _bcrypt.gensalt(rounds=PasswordHasher.BCRYPT_ROUNDS)
+            password.encode("utf-8"),
+            _bcrypt.gensalt(rounds=PasswordHasher.BCRYPT_ROUNDS),
         ).decode("utf-8")
 
     @staticmethod
@@ -136,7 +144,9 @@ class PasswordHasher:
         try:
             if stored_hash.startswith("$2"):
                 # bcrypt format
-                return _bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+                return _bcrypt.checkpw(
+                    password.encode("utf-8"), stored_hash.encode("utf-8")
+                )
             # Legacy PBKDF2-HMAC-SHA256 format: "salt:hex_hash"
             salt, hash_value = stored_hash.split(":", 1)
             new_hash = hashlib.pbkdf2_hmac(
@@ -151,6 +161,7 @@ class PasswordHasher:
 
 
 # --- Token Generation ---
+
 
 class TokenGenerator:
     """Token generation utility."""
@@ -168,32 +179,34 @@ class TokenGenerator:
 
 # --- Redis Helpers ---
 
-_SESS_PREFIX      = "alis:sess:"
-_TOK_PREFIX       = "alis:tok:"
-_USER_SESS_PFX    = "alis:user_sess:"
-_FAIL_PREFIX      = "alis:fail:"
-_LOCKOUT_PREFIX   = "alis:lockout:"
-_RATE_PREFIX      = "alis:rate:"
-_PWRESET_PREFIX   = "alis:pwreset:"
+_SESS_PREFIX = "alis:sess:"
+_TOK_PREFIX = "alis:tok:"
+_USER_SESS_PFX = "alis:user_sess:"
+_FAIL_PREFIX = "alis:fail:"
+_LOCKOUT_PREFIX = "alis:lockout:"
+_RATE_PREFIX = "alis:rate:"
+_PWRESET_PREFIX = "alis:pwreset:"
 _GUARDIAN_OTP_PFX = "alis:gotp:"
 
 # Cached Redis client — created once, reused across all security calls.
 # Avoids re-parsing the URL (and potential DNS lookups) on every request.
-_redis_client: Optional["_redis_lib.Redis"] = None
+_redis_client: _redis_lib.Redis | None = None
 
 
-def _get_redis() -> "_redis_lib.Redis":
+def _get_redis() -> _redis_lib.Redis:
     """Return a cached Redis client. Initialised lazily on first call."""
     global _redis_client
     if _redis_client is None:
         from server.core.settings import settings
+
         _redis_client = _redis_lib.from_url(settings.redis_url, decode_responses=True)
     return _redis_client
 
 
-def _session_to_dict(session: "Session") -> dict:
-    def _fmt(dt: Optional[datetime]) -> Optional[str]:
+def _session_to_dict(session: Session) -> dict:
+    def _fmt(dt: datetime | None) -> str | None:
         return dt.isoformat() if dt else None
+
     return {
         "id": session.id,
         "user_id": session.user_id,
@@ -212,9 +225,10 @@ def _session_to_dict(session: "Session") -> dict:
     }
 
 
-def _dict_to_session(d: dict) -> "Session":
-    def _parse(s: Optional[str]) -> Optional[datetime]:
+def _dict_to_session(d: dict) -> Session:
+    def _parse(s: str | None) -> datetime | None:
         return datetime.fromisoformat(s) if s else None
+
     return Session(
         id=d["id"],
         user_id=d["user_id"],
@@ -235,6 +249,7 @@ def _dict_to_session(d: dict) -> "Session":
 
 # --- Failed Login Tracker ---
 
+
 class FailedLoginTracker:
     """
     Track failed login attempts for account lockout.
@@ -254,7 +269,7 @@ class FailedLoginTracker:
         cls,
         identifier: str,
         success: bool,
-        ip_address: Optional[str] = None,
+        ip_address: str | None = None,
     ) -> None:
         try:
             r = _get_redis()
@@ -284,7 +299,7 @@ class FailedLoginTracker:
             return True  # fail closed — deny unknown lockout state
 
     @classmethod
-    def get_lockout_remaining(cls, identifier: str) -> Optional[timedelta]:
+    def get_lockout_remaining(cls, identifier: str) -> timedelta | None:
         try:
             ttl = _get_redis().ttl(_LOCKOUT_PREFIX + identifier)
             return timedelta(seconds=ttl) if ttl > 0 else None
@@ -294,6 +309,7 @@ class FailedLoginTracker:
 
 
 # --- Session Manager ---
+
 
 class SessionManager:
     """
@@ -307,7 +323,7 @@ class SessionManager:
     """
 
     @classmethod
-    def _save(cls, r: "_redis_lib.Redis", session: Session) -> None:
+    def _save(cls, r: _redis_lib.Redis, session: Session) -> None:
         """Persist a session to Redis with TTL derived from expiry."""
         ttl = int((session.expires_at - datetime.now(timezone.utc)).total_seconds())
         if ttl <= 0:
@@ -318,7 +334,7 @@ class SessionManager:
         r.sadd(_USER_SESS_PFX + session.user_id, session.id)
 
     @classmethod
-    def _load(cls, r: "_redis_lib.Redis", session_id: str) -> Optional[Session]:
+    def _load(cls, r: _redis_lib.Redis, session_id: str) -> Session | None:
         """Load a session from Redis. Returns None if not found."""
         data = r.get(_SESS_PREFIX + session_id)
         return _dict_to_session(json.loads(data)) if data else None
@@ -328,11 +344,11 @@ class SessionManager:
         cls,
         user_id: str,
         tenant_id: str = "",
-        device_id: Optional[str] = None,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
+        device_id: str | None = None,
+        user_agent: str | None = None,
+        ip_address: str | None = None,
         expiry_hours: int = 24,
-    ) -> "tuple[Session, str]":
+    ) -> tuple[Session, str]:
         """
         Create a new session.
 
@@ -346,13 +362,14 @@ class SessionManager:
             device_id=device_id,
             user_agent=user_agent,
             ip_address=ip_address,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=expiry_hours or SESSION_EXPIRY_HOURS),
+            expires_at=datetime.now(timezone.utc)
+            + timedelta(hours=expiry_hours or SESSION_EXPIRY_HOURS),
         )
         cls._save(_get_redis(), session)
         return session, token
 
     @classmethod
-    def validate_token(cls, token: str) -> Optional[Session]:
+    def validate_token(cls, token: str) -> Session | None:
         """
         Validate a token and return the associated session.
 
@@ -375,7 +392,7 @@ class SessionManager:
             return None  # fail safe — deny access if Redis is unreachable
 
     @classmethod
-    def get_session(cls, session_id: str) -> Optional[Session]:
+    def get_session(cls, session_id: str) -> Session | None:
         """Load a session by ID from Redis. Returns None if not found or expired."""
         try:
             return cls._load(_get_redis(), session_id)
@@ -384,7 +401,7 @@ class SessionManager:
             return None
 
     @classmethod
-    def _delete_session_keys(cls, r: "_redis_lib.Redis", session: "Session") -> None:
+    def _delete_session_keys(cls, r: _redis_lib.Redis, session: Session) -> None:
         """
         Immediately remove all Redis keys associated with a session.
 
@@ -416,7 +433,9 @@ class SessionManager:
             return False
 
     @classmethod
-    def revoke_all_user_sessions(cls, user_id: str, reason: str = "User logout all") -> int:
+    def revoke_all_user_sessions(
+        cls, user_id: str, reason: str = "User logout all"
+    ) -> int:
         """Revoke all active sessions for a user and delete all their Redis keys."""
         try:
             r = _get_redis()
@@ -480,17 +499,25 @@ class SessionManager:
                 session = cls._load(r, sid)
                 if session is None:
                     continue
-                result.append({
-                    "session_id": session.id,
-                    "ip_address": session.ip_address,
-                    "user_agent": session.user_agent,
-                    "device_id": session.device_id,
-                    "created_at": session.created_at.isoformat() if session.created_at else None,
-                    "last_activity": session.last_activity.isoformat() if session.last_activity else None,
-                    "expires_at": session.expires_at.isoformat() if session.expires_at else None,
-                    "is_active": session.is_active,
-                    "is_expired": session.is_expired,
-                })
+                result.append(
+                    {
+                        "session_id": session.id,
+                        "ip_address": session.ip_address,
+                        "user_agent": session.user_agent,
+                        "device_id": session.device_id,
+                        "created_at": session.created_at.isoformat()
+                        if session.created_at
+                        else None,
+                        "last_activity": session.last_activity.isoformat()
+                        if session.last_activity
+                        else None,
+                        "expires_at": session.expires_at.isoformat()
+                        if session.expires_at
+                        else None,
+                        "is_active": session.is_active,
+                        "is_expired": session.is_expired,
+                    }
+                )
             return sorted(result, key=lambda s: s["last_activity"] or "", reverse=True)
         except Exception:
             logger.exception("SessionManager.list_user_sessions Redis error")
@@ -498,6 +525,7 @@ class SessionManager:
 
 
 # --- Rate Limiter ---
+
 
 class RateLimiter:
     """
@@ -540,6 +568,7 @@ class RateLimiter:
 
 # --- Password Reset ---
 
+
 class PasswordResetManager:
     """
     Redis-backed password reset token management.
@@ -576,7 +605,7 @@ class PasswordResetManager:
     _GETDEL_LUA = "local v = redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]) end; return v"
 
     @classmethod
-    def validate_and_consume(cls, token: str) -> Optional[dict]:
+    def validate_and_consume(cls, token: str) -> dict | None:
         """
         Validate a reset token and atomically consume it (single-use).
 
@@ -600,6 +629,7 @@ class PasswordResetManager:
 
 
 # --- Guardian OTP ---
+
 
 class GuardianOTPManager:
     """
@@ -627,7 +657,9 @@ class GuardianOTPManager:
             r.setex(
                 cls._key(phone),
                 cls._TTL,
-                json.dumps({"otp": otp, "student_id": student_id, "tenant_id": tenant_id}),
+                json.dumps(
+                    {"otp": otp, "student_id": student_id, "tenant_id": tenant_id}
+                ),
             )
         except Exception:
             logger.exception("GuardianOTPManager.generate Redis error")
@@ -638,7 +670,7 @@ class GuardianOTPManager:
     _GETDEL_LUA = "local v = redis.call('GET', KEYS[1]); if v then redis.call('DEL', KEYS[1]) end; return v"
 
     @classmethod
-    def verify_and_consume(cls, phone: str, otp: str) -> Optional[dict]:
+    def verify_and_consume(cls, phone: str, otp: str) -> dict | None:
         """
         Verify OTP and consume it (single-use).
 
@@ -657,13 +689,17 @@ class GuardianOTPManager:
             record = json.loads(data)
             if record.get("otp") != otp:
                 return None
-            return {"student_id": record["student_id"], "tenant_id": record["tenant_id"]}
+            return {
+                "student_id": record["student_id"],
+                "tenant_id": record["tenant_id"],
+            }
         except Exception:
             logger.exception("GuardianOTPManager.verify_and_consume Redis error")
             return None
 
 
 # --- Input Validation ---
+
 
 class InputValidator:
     """
@@ -680,25 +716,28 @@ class InputValidator:
         # Truncate
         value = value[:max_length]
         # Remove null bytes
-        value = value.replace('\x00', '')
+        value = value.replace("\x00", "")
         return value.strip()
 
     @staticmethod
     def validate_email(email: str) -> bool:
         """Basic email validation."""
         import re
-        pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+
+        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
         return bool(re.match(pattern, email))
 
     @staticmethod
     def validate_uuid(value: str) -> bool:
         """Validate UUID format."""
         import re
-        pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+        pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         return bool(re.match(pattern, value.lower()))
 
 
 # --- Security Exception (No Sensitive Leakage) ---
+
 
 class SecurityException(Exception):
     """
@@ -709,9 +748,7 @@ class SecurityException(Exception):
     """
 
     def __init__(
-        self,
-        public_message: str = "Access denied",
-        internal_message: Optional[str] = None
+        self, public_message: str = "Access denied", internal_message: str | None = None
     ):
         self.public_message = public_message
         self.internal_message = internal_message or public_message
@@ -732,8 +769,8 @@ class SecurityException(Exception):
 # --- Request-Scoped Tenant ContextVar ---
 # This variable is set once per request by the TenantMiddleware
 # and read by db_service.py, rbac.py, and all downstream code.
-_current_tenant_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    'current_tenant_id', default=None
+_current_tenant_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_tenant_id", default=None
 )
 
 
@@ -744,9 +781,10 @@ class TenantContext:
 
     Set by TenantMiddleware. Read by db_service, rbac, agents.
     """
+
     tenant_id: str
-    tenant_name: Optional[str] = None
-    encryption_key_id: Optional[str] = None  # For optional per-tenant encryption
+    tenant_name: str | None = None
+    encryption_key_id: str | None = None  # For optional per-tenant encryption
 
 
 def set_tenant_context(tenant_id: str) -> None:
@@ -773,11 +811,12 @@ def get_current_tenant_id() -> str:
         TenantIsolationError: If tenant context is not set.
     """
     from .exceptions import TenantIsolationError
+
     tenant_id = _current_tenant_id.get()
     if tenant_id is None:
         raise TenantIsolationError(
             message="Tenant context not set — all operations require tenant_id (Layer 4 Invariant)",
-            details={"hint": "Ensure TenantMiddleware is applied to all routes"}
+            details={"hint": "Ensure TenantMiddleware is applied to all routes"},
         )
     return tenant_id
 
@@ -812,11 +851,11 @@ class TenantMiddleware:
         "/health",
         "/api/auth/login",
         "/api/auth/bootstrap",
-        "/api/auth/mfa/verify",   # carries mfa_token, not a session Bearer token
+        "/api/auth/mfa/verify",  # carries mfa_token, not a session Bearer token
         "/docs",
         "/redoc",
         "/openapi.json",
-        "/api/v1/ai/health",      # AI subsystem health — unauthenticated probe
+        "/api/v1/ai/health",  # AI subsystem health — unauthenticated probe
     }
 
     def __init__(self, app):
@@ -843,7 +882,9 @@ class TenantMiddleware:
         headers = dict(scope.get("headers", []))
 
         # Primary: validate Bearer token → get tenant_id from Redis session
-        auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="ignore")
+        auth_header = headers.get(b"authorization", b"").decode(
+            "utf-8", errors="ignore"
+        )
         if auth_header.startswith("Bearer "):
             raw_token = auth_header[7:].strip()
             session = SessionManager.validate_token(raw_token)
@@ -856,19 +897,28 @@ class TenantMiddleware:
         # X-Tenant-ID header from an external client could tenant-spoof.
         if not tenant_id:
             from server.core.settings import settings
-            internal_secret = headers.get(b"x-internal-secret", b"").decode("utf-8", errors="ignore")
-            tenant_header   = headers.get(b"x-tenant-id",      b"").decode("utf-8", errors="ignore")
-            if tenant_header and internal_secret and internal_secret == settings.internal_service_secret:
+
+            internal_secret = headers.get(b"x-internal-secret", b"").decode(
+                "utf-8", errors="ignore"
+            )
+            tenant_header = headers.get(b"x-tenant-id", b"").decode(
+                "utf-8", errors="ignore"
+            )
+            if (
+                tenant_header
+                and internal_secret
+                and internal_secret == settings.internal_service_secret
+            ):
                 tenant_id = tenant_header
             elif tenant_header and not internal_secret:
                 logger.warning(
                     "TenantMiddleware: X-Tenant-ID header received without X-Internal-Secret — "
-                    "ignoring (possible tenant-spoof attempt, path=%s)", path
+                    "ignoring (possible tenant-spoof attempt, path=%s)",
+                    path,
                 )
 
         if not tenant_id:
             # Layer 4 Invariant Violation: REJECT
-            from .exceptions import TenantIsolationError
 
             AuditLog.log(
                 action=AuditAction.ACCESS_DENIED,
@@ -878,23 +928,29 @@ class TenantMiddleware:
                 entity_id="",
                 success=False,
                 failure_reason="Missing tenant_id — Layer 4 Invariant",
-                metadata={"path": path}
+                metadata={"path": path},
             )
 
             # Return 403 Forbidden
-            response_body = b'{"error": "Tenant context required", "code": "ERR_LAYER4_TENANT"}'
-            await send({
-                "type": "http.response.start",
-                "status": 403,
-                "headers": [
-                    [b"content-type", b"application/json"],
-                    [b"content-length", str(len(response_body)).encode()],
-                ],
-            })
-            await send({
-                "type": "http.response.body",
-                "body": response_body,
-            })
+            response_body = (
+                b'{"error": "Tenant context required", "code": "ERR_LAYER4_TENANT"}'
+            )
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 403,
+                    "headers": [
+                        [b"content-type", b"application/json"],
+                        [b"content-length", str(len(response_body)).encode()],
+                    ],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": response_body,
+                }
+            )
             return
 
         # Set the ContextVar for the duration of this request
@@ -930,6 +986,7 @@ class TenantMiddleware:
 # carries a different tenant_id, the request is rejected (403).
 # ============================================================================
 
+
 class SubdomainTenantMiddleware:
     """
     FastAPI/Starlette ASGI middleware — SaaS subdomain-aware tenant resolution.
@@ -947,7 +1004,7 @@ class SubdomainTenantMiddleware:
         self.app = app
 
     @staticmethod
-    def _extract_subdomain(host: str) -> Optional[str]:
+    def _extract_subdomain(host: str) -> str | None:
         """
         Extract subdomain slug from the Host header.
 
@@ -958,10 +1015,14 @@ class SubdomainTenantMiddleware:
         alis.app             → None   (apex domain — no tenant subdomain)
         """
         from server.core.settings import settings
-        suffix = settings.saas_domain_suffix  # e.g., "alis.app"
-        host = host.split(":")[0].lower()     # strip port
 
-        if host in ("localhost", "127.0.0.1", "0.0.0.0") or host.replace(".", "").isdigit():
+        suffix = settings.saas_domain_suffix  # e.g., "alis.app"
+        host = host.split(":")[0].lower()  # strip port
+
+        if (
+            host in ("localhost", "127.0.0.1", "0.0.0.0")
+            or host.replace(".", "").isdigit()
+        ):
             return None  # loopback / IP — single-tenant dev mode
 
         if not host.endswith(suffix):
@@ -990,25 +1051,27 @@ class SubdomainTenantMiddleware:
             return
 
         headers = dict(scope.get("headers", []))
-        tenant_id: Optional[str] = None
+        tenant_id: str | None = None
 
         # ------------------------------------------------------------------
         # Priority 1: STATIC_TENANT_ID (Tier 2 dedicated-stack mode)
         # ------------------------------------------------------------------
         from server.core.settings import settings
+
         if settings.static_tenant_id:
             tenant_id = settings.static_tenant_id
 
         # ------------------------------------------------------------------
         # Priority 2: Host header subdomain → TenantRegistry
         # ------------------------------------------------------------------
-        subdomain_tenant_id: Optional[str] = None
+        subdomain_tenant_id: str | None = None
         if not tenant_id:
             host = headers.get(b"host", b"").decode("utf-8", errors="ignore")
             slug = self._extract_subdomain(host)
             if slug:
                 try:
                     from server.core.tenant_registry import TenantRegistry
+
                     record = await TenantRegistry.get_by_subdomain(slug)
                     if record and record.status == "active":
                         subdomain_tenant_id = record.tenant_id
@@ -1019,14 +1082,19 @@ class SubdomainTenantMiddleware:
                         return
                     # If record is None: unknown subdomain — fall through to JWT check.
                 except Exception as exc:
-                    logger.warning("SubdomainTenantMiddleware: TenantRegistry lookup failed: %s", exc)
+                    logger.warning(
+                        "SubdomainTenantMiddleware: TenantRegistry lookup failed: %s",
+                        exc,
+                    )
                     # Non-fatal — fall through to JWT resolution.
 
         # ------------------------------------------------------------------
         # Priority 3: Bearer JWT → session.tenant_id
         # ------------------------------------------------------------------
-        session_tenant_id: Optional[str] = None
-        auth_header = headers.get(b"authorization", b"").decode("utf-8", errors="ignore")
+        session_tenant_id: str | None = None
+        auth_header = headers.get(b"authorization", b"").decode(
+            "utf-8", errors="ignore"
+        )
         if auth_header.startswith("Bearer "):
             raw_token = auth_header[7:].strip()
             session = SessionManager.validate_token(raw_token)
@@ -1036,7 +1104,11 @@ class SubdomainTenantMiddleware:
                     tenant_id = session_tenant_id
 
         # Cross-tenant guard: subdomain and JWT session must agree.
-        if subdomain_tenant_id and session_tenant_id and subdomain_tenant_id != session_tenant_id:
+        if (
+            subdomain_tenant_id
+            and session_tenant_id
+            and subdomain_tenant_id != session_tenant_id
+        ):
             AuditLog.log(
                 action=AuditAction.ACCESS_DENIED,
                 actor_id=session_tenant_id,
@@ -1062,14 +1134,24 @@ class SubdomainTenantMiddleware:
         # ------------------------------------------------------------------
         if not tenant_id:
             from server.core.settings import settings
-            internal_secret = headers.get(b"x-internal-secret", b"").decode("utf-8", errors="ignore")
-            tenant_header   = headers.get(b"x-tenant-id",      b"").decode("utf-8", errors="ignore")
-            if tenant_header and internal_secret and internal_secret == settings.internal_service_secret:
+
+            internal_secret = headers.get(b"x-internal-secret", b"").decode(
+                "utf-8", errors="ignore"
+            )
+            tenant_header = headers.get(b"x-tenant-id", b"").decode(
+                "utf-8", errors="ignore"
+            )
+            if (
+                tenant_header
+                and internal_secret
+                and internal_secret == settings.internal_service_secret
+            ):
                 tenant_id = tenant_header
             elif tenant_header and not internal_secret:
                 logger.warning(
                     "SubdomainTenantMiddleware: X-Tenant-ID header received without "
-                    "X-Internal-Secret — ignoring (possible tenant-spoof attempt, path=%s)", path
+                    "X-Internal-Secret — ignoring (possible tenant-spoof attempt, path=%s)",
+                    path,
                 )
 
         # ------------------------------------------------------------------
@@ -1105,14 +1187,16 @@ class SubdomainTenantMiddleware:
 
 async def _send_403(send, body: bytes) -> None:
     """Send a plain 403 JSON response (shared by both tenant middlewares)."""
-    await send({
-        "type": "http.response.start",
-        "status": 403,
-        "headers": [
-            [b"content-type", b"application/json"],
-            [b"content-length", str(len(body)).encode()],
-        ],
-    })
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 403,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        }
+    )
     await send({"type": "http.response.body", "body": body})
 
 
@@ -1122,6 +1206,7 @@ async def _send_403(send, body: bytes) -> None:
 # Epic Constraint: "All modules inherit audit middleware"
 # All state-mutating requests (POST, PUT, PATCH, DELETE) are logged.
 # ============================================================================
+
 
 class AuditMiddleware:
     """
@@ -1143,19 +1228,19 @@ class AuditMiddleware:
         # (Read actions are too voluminous, specific reads like PII are logged manually)
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             path = scope.get("path", "")
-            
+
             # Extract basic actor details from auth state if present
             actor_id = "unknown"
             actor_role = "unknown"
-            if hasattr(scope, 'state') and getattr(scope.state, 'session', None):
+            if hasattr(scope, "state") and getattr(scope.state, "session", None):
                 actor_id = scope.state.session.user_id
-                
+
                 # Role usually lives on the user or token, but middleware might just
                 # have the session. We use "api_user" as a fallback until the actual
                 # RBAC decorator resolves the true role.
-                actor_role = getattr(scope.state, 'user_role', "api_user")
+                actor_role = getattr(scope.state, "user_role", "api_user")
 
-            # Try to get tenant_id (might not be set if TenantMiddleware runs after, 
+            # Try to get tenant_id (might not be set if TenantMiddleware runs after,
             # ideally AuditMiddleware runs AFTER TenantMiddleware).
             try:
                 tenant_id = get_current_tenant_id()
@@ -1177,7 +1262,7 @@ class AuditMiddleware:
                 entity_type="api_route",
                 entity_id=path,
                 tenant_id=tenant_id,
-                metadata={"http_method": method, "trigger": "audit_middleware"}
+                metadata={"http_method": method, "trigger": "audit_middleware"},
             )
 
         # Proceed with the request

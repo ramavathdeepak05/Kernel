@@ -10,8 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
+from server.core.audit import AuditAction, AuditLedger
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
@@ -21,19 +22,29 @@ logger = logging.getLogger(__name__)
 # Safe expression evaluator (CONDITION steps)
 # ---------------------------------------------------------------------------
 
-_SAFE_NAMES: Dict[str, Any] = {
-    "True": True, "False": False, "None": None,
-    "abs": abs, "min": min, "max": max, "len": len, "round": round,
-    "int": int, "float": float, "str": str, "bool": bool,
+_SAFE_NAMES: dict[str, Any] = {
+    "True": True,
+    "False": False,
+    "None": None,
+    "abs": abs,
+    "min": min,
+    "max": max,
+    "len": len,
+    "round": round,
+    "int": int,
+    "float": float,
+    "str": str,
+    "bool": bool,
 }
 
 
-def _safe_eval(expression: str, context: Dict[str, Any]) -> bool:
+def _safe_eval(expression: str, context: dict[str, Any]) -> bool:
     """Evaluate a simple boolean expression against a context dict.
 
     Only dot-access paths like ``context.cgpa >= 7.0`` are supported.
     No builtins other than the whitelist above are exposed.
     """
+
     # Replace context.x.y.z references with nested dict access
     def _resolve(match: re.Match) -> str:
         path = match.group(1).split(".")
@@ -58,6 +69,7 @@ def _safe_eval(expression: str, context: Dict[str, Any]) -> bool:
 # Step executor
 # ---------------------------------------------------------------------------
 
+
 class StepExecutor:
     """Execute a single step within a process instance."""
 
@@ -69,7 +81,7 @@ class StepExecutor:
     # Public entry point
     # ------------------------------------------------------------------
 
-    def execute_current_step(self) -> Dict[str, Any]:
+    def execute_current_step(self) -> dict[str, Any]:
         """Load the current instance + step, execute, return result dict."""
         instance = self._load_instance()
         if not instance:
@@ -81,7 +93,7 @@ class StepExecutor:
         step = self._load_step(instance["process_id"], instance["current_step"])
         if not step:
             # No more steps — process is complete
-            self._complete_instance(instance)
+            execute_transaction(self._build_complete_instance_queries(instance))
             return {"status": "COMPLETED", "message": "All steps executed"}
 
         return self._dispatch(instance, step)
@@ -90,25 +102,27 @@ class StepExecutor:
     # Step dispatch
     # ------------------------------------------------------------------
 
-    def _dispatch(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _dispatch(self, instance: dict, step: dict) -> dict[str, Any]:
         step_type = step["step_type"]
         log_id = self._start_step_log(instance, step)
 
         try:
             handler = {
-                "FORM":          self._handle_form,
-                "APPROVAL":      self._handle_approval,
-                "CONDITION":     self._handle_condition,
-                "NOTIFICATION":  self._handle_notification,
+                "FORM": self._handle_form,
+                "APPROVAL": self._handle_approval,
+                "CONDITION": self._handle_condition,
+                "NOTIFICATION": self._handle_notification,
                 "AI_EVALUATION": self._handle_ai_evaluation,
-                "AUTO_ACTION":   self._handle_auto_action,
+                "AUTO_ACTION": self._handle_auto_action,
             }.get(step_type)
 
             if not handler:
                 raise ValueError(f"Unknown step type: {step_type}")
 
             result = handler(instance, step)
-            self._finish_step_log(log_id, result["status"], output=result.get("output", {}))
+            self._finish_step_log(
+                log_id, result["status"], output=result.get("output", {})
+            )
 
             if result["status"] == "PASSED":
                 self._advance(instance, step, passed=True)
@@ -120,7 +134,11 @@ class StepExecutor:
             # PENDING means step is waiting for external input (e.g. FORM or APPROVAL)
 
         except Exception as exc:
-            logger.exception("StepExecutor error on instance %s step %s", self.instance_id, step["step_order"])
+            logger.exception(
+                "StepExecutor error on instance %s step %s",
+                self.instance_id,
+                step["step_order"],
+            )
             self._finish_step_log(log_id, "FAILED", error=str(exc))
             self._fail_instance(instance, str(exc))
             return {"status": "FAILED", "message": str(exc)}
@@ -131,7 +149,7 @@ class StepExecutor:
     # Step handlers
     # ------------------------------------------------------------------
 
-    def _handle_form(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _handle_form(self, instance: dict, step: dict) -> dict[str, Any]:
         """FORM steps pause execution and wait for user submission."""
         # Check if form was already submitted (submission stored in process_form_submissions)
         rows = execute_query(
@@ -141,12 +159,20 @@ class StepExecutor:
         if rows:
             # Already submitted — merge form_data into context and pass
             submission = rows[0]
-            form_data = submission["form_data"] if isinstance(submission["form_data"], dict) else json.loads(submission["form_data"])
+            form_data = (
+                submission["form_data"]
+                if isinstance(submission["form_data"], dict)
+                else json.loads(submission["form_data"])
+            )
             self._merge_context(instance, form_data)
             return {"status": "PASSED", "output": {"form_data": form_data}}
 
         # Not yet submitted — mark step as PENDING, return form schema
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step["config"])
+        config = (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step["config"])
+        )
         return {
             "status": "PENDING",
             "action_required": "FORM_SUBMISSION",
@@ -154,11 +180,14 @@ class StepExecutor:
             "step_id": str(step["id"]),
         }
 
-    def _handle_approval(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _handle_approval(self, instance: dict, step: dict) -> dict[str, Any]:
         """APPROVAL steps check the approval_requests table for a quorum decision."""
-        from server.approvals.service import ApprovalService  # type: ignore
 
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step["config"])
+        config = (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step["config"])
+        )
         quorum = config.get("quorum", 1)
 
         # Query approval requests linked to this step via entity_id = instance_id, entity_type = step_id
@@ -187,11 +216,19 @@ class StepExecutor:
             "step_id": str(step["id"]),
         }
 
-    def _handle_condition(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _handle_condition(self, instance: dict, step: dict) -> dict[str, Any]:
         """CONDITION steps evaluate an expression against the runtime context."""
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step["config"])
+        config = (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step["config"])
+        )
         expression = config.get("expression", "True")
-        context = instance["context"] if isinstance(instance["context"], dict) else json.loads(instance["context"])
+        context = (
+            instance["context"]
+            if isinstance(instance["context"], dict)
+            else json.loads(instance["context"])
+        )
 
         passed = _safe_eval(expression, context)
         label = config.get("pass_label" if passed else "fail_label", "")
@@ -200,10 +237,18 @@ class StepExecutor:
             "output": {"result": passed, "label": label, "expression": expression},
         }
 
-    def _handle_notification(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _handle_notification(self, instance: dict, step: dict) -> dict[str, Any]:
         """NOTIFICATION steps dispatch a notification and continue."""
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step["config"])
-        context = instance["context"] if isinstance(instance["context"], dict) else json.loads(instance["context"])
+        config = (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step["config"])
+        )
+        context = (
+            instance["context"]
+            if isinstance(instance["context"], dict)
+            else json.loads(instance["context"])
+        )
 
         template_key = config.get("template_key", "")
         recipient_field = config.get("recipient_field", "")
@@ -219,6 +264,7 @@ class StepExecutor:
 
         try:
             from server.core.notifications.service import NotificationDispatcher
+
             NotificationDispatcher.dispatch(
                 template_key=template_key,
                 recipient_id=str(instance.get("triggered_by", "system")),
@@ -230,12 +276,23 @@ class StepExecutor:
         except Exception as exc:
             logger.warning("NOTIFICATION step dispatch failed: %s", exc)
 
-        return {"status": "PASSED", "output": {"template_key": template_key, "recipient": recipient}}
+        return {
+            "status": "PASSED",
+            "output": {"template_key": template_key, "recipient": recipient},
+        }
 
-    def _handle_ai_evaluation(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _handle_ai_evaluation(self, instance: dict, step: dict) -> dict[str, Any]:
         """AI_EVALUATION steps call the AI Gateway and write result to context."""
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step["config"])
-        context = instance["context"] if isinstance(instance["context"], dict) else json.loads(instance["context"])
+        config = (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step["config"])
+        )
+        context = (
+            instance["context"]
+            if isinstance(instance["context"], dict)
+            else json.loads(instance["context"])
+        )
 
         prompt_template = config.get("prompt_template", "")
         output_field = config.get("output_field", "ai_result")
@@ -251,6 +308,7 @@ class StepExecutor:
         try:
             from server.core.ai_gateway import AIGateway
             from server.core.model_registry import ModelRegistry
+
             gateway = AIGateway(ModelRegistry())
             response = gateway.generate(
                 prompt=prompt,
@@ -279,10 +337,18 @@ class StepExecutor:
             logger.exception("AI_EVALUATION step failed: %s", exc)
             return {"status": "FAILED", "message": str(exc)}
 
-    def _handle_auto_action(self, instance: Dict, step: Dict) -> Dict[str, Any]:
+    def _handle_auto_action(self, instance: dict, step: dict) -> dict[str, Any]:
         """AUTO_ACTION steps invoke a registered action function."""
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step["config"])
-        context = instance["context"] if isinstance(instance["context"], dict) else json.loads(instance["context"])
+        config = (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step["config"])
+        )
+        context = (
+            instance["context"]
+            if isinstance(instance["context"], dict)
+            else json.loads(instance["context"])
+        )
 
         action_name = config.get("action", "")
         static_params = config.get("params", {})
@@ -290,6 +356,7 @@ class StepExecutor:
 
         try:
             from server.process_engine.actions import ActionRegistry
+
             result = ActionRegistry.execute(action_name, merged_params, self.org_id)
             return {"status": "PASSED", "output": result or {}}
         except Exception as exc:
@@ -300,39 +367,63 @@ class StepExecutor:
     # Instance / step management helpers
     # ------------------------------------------------------------------
 
-    def _load_instance(self) -> Optional[Dict]:
+    def _load_instance(self) -> dict | None:
         rows = execute_query(
             "SELECT * FROM process_instances WHERE id = %s AND org_id = %s",
             (self.instance_id, self.org_id),
         )
         return dict(rows[0]) if rows else None
 
-    def _load_step(self, process_id: str, step_order: int) -> Optional[Dict]:
+    def _load_step(self, process_id: str, step_order: int) -> dict | None:
         rows = execute_query(
             "SELECT * FROM process_steps WHERE process_id = %s AND step_order = %s AND org_id = %s",
             (process_id, step_order, self.org_id),
         )
         return dict(rows[0]) if rows else None
 
-    def _start_step_log(self, instance: Dict, step: Dict) -> str:
-        rows = execute_query(
-            """
+    def _start_step_log(self, instance: dict, step: dict) -> str:
+        rows = execute_transaction(
+            [
+                (
+                    """
             INSERT INTO process_step_logs
                 (org_id, instance_id, step_id, step_order, step_type, status)
             VALUES (%s, %s, %s, %s, %s, 'RUNNING')
             RETURNING id
             """,
-            (self.org_id, self.instance_id, step["id"], step["step_order"], step["step_type"]),
+                    (
+                        self.org_id,
+                        self.instance_id,
+                        step["id"],
+                        step["step_order"],
+                        step["step_type"],
+                    ),
+                )
+            ],
+            tenant_id=self.tenant_id,
+        )
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="step_log",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_start_step_log"},
         )
         return str(rows[0]["id"])
 
     def _finish_step_log(
-        self, log_id: str, status: str,
-        output: Optional[Dict] = None,
-        error: Optional[str] = None,
+        self,
+        log_id: str,
+        status: str,
+        output: dict | None = None,
+        error: str | None = None,
     ) -> None:
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE process_step_logs
                SET status = %s,
                    output_data = %s::jsonb,
@@ -340,15 +431,30 @@ class StepExecutor:
                    completed_at = NOW()
              WHERE id = %s
             """,
-            (status, json.dumps(output or {}), error, log_id),
-        )])
+                    (status, json.dumps(output or {}), error, log_id),
+                )
+            ]
+        )
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="step_log",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_finish_step_log"},
+        )
 
-    def _advance(self, instance: Dict, step: Dict, passed: bool) -> None:
-        config = step["config"] if isinstance(step["config"], dict) else json.loads(step.get("config", "{}"))
+    def _advance(self, instance: dict, step: dict, passed: bool) -> None:
+        (
+            step["config"]
+            if isinstance(step["config"], dict)
+            else json.loads(step.get("config", "{}"))
+        )
         on_pass = step.get("on_pass_step")
         on_fail = step.get("on_fail_step")
 
-        next_step: Optional[int] = on_pass if passed else on_fail
+        next_step: int | None = on_pass if passed else on_fail
 
         if next_step is None:
             # No explicit routing — just increment
@@ -360,38 +466,83 @@ class StepExecutor:
             (instance["process_id"], next_step, self.org_id),
         )
         if rows:
-            execute_transaction([(
-                "UPDATE process_instances SET current_step = %s WHERE id = %s",
-                (next_step, self.instance_id),
-            )])
+            execute_transaction(
+                [
+                    (
+                        "UPDATE process_instances SET current_step = %s WHERE id = %s",
+                        (next_step, self.instance_id),
+                    )
+                ]
+            )
+            AuditLedger.log(
+                action=AuditAction.UPDATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="process_instance",
+                entity_id="",
+                tenant_id="",
+                metadata={"source": "_advance"},
+            )
         else:
-            self._complete_instance(instance)
+            execute_transaction(self._build_complete_instance_queries(instance))
 
-    def _complete_instance(self, instance: Dict) -> None:
-        execute_transaction([(
-            """
+    def _build_complete_instance_queries(self, instance: dict) -> list[tuple]:
+        return [
+            (
+                """
             UPDATE process_instances
                SET status = 'COMPLETED', completed_at = NOW()
              WHERE id = %s
             """,
-            (self.instance_id,),
-        )])
+                (self.instance_id,),
+            )
+        ]
 
-    def _fail_instance(self, instance: Dict, message: str) -> None:
-        execute_transaction([(
-            """
+    def _fail_instance(self, instance: dict, message: str) -> None:
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE process_instances
                SET status = 'FAILED', error_message = %s, completed_at = NOW()
              WHERE id = %s
             """,
-            (message, self.instance_id),
-        )])
+                    (message, self.instance_id),
+                )
+            ]
+        )
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="process_instance",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_fail_instance"},
+        )
 
-    def _merge_context(self, instance: Dict, new_data: Dict[str, Any]) -> None:
-        current = instance["context"] if isinstance(instance["context"], dict) else json.loads(instance.get("context", "{}"))
+    def _merge_context(self, instance: dict, new_data: dict[str, Any]) -> None:
+        current = (
+            instance["context"]
+            if isinstance(instance["context"], dict)
+            else json.loads(instance.get("context", "{}"))
+        )
         current.update(new_data)
-        execute_transaction([(
-            "UPDATE process_instances SET context = %s::jsonb WHERE id = %s",
-            (json.dumps(current), self.instance_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE process_instances SET context = %s::jsonb WHERE id = %s",
+                    (json.dumps(current), self.instance_id),
+                )
+            ]
+        )
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="process_instance",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_merge_context"},
+        )
         instance["context"] = current

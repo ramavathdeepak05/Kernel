@@ -26,22 +26,24 @@ Acceptance Criteria (E01-S04):
 - [x] Default deny
 - [x] Explicit failure reasons
 """
+
 from __future__ import annotations
 
 import inspect
-from enum import Enum
-from typing import Dict, List, Optional
 from dataclasses import dataclass
+from enum import Enum
+
 from .exceptions import PermissionDeniedError
 
-
 # --- Role Definitions ---
+
 
 class Role(str, Enum):
     """
     Canonical role definitions for ALIS.
     These roles are declarative and not hard-coded into business logic.
     """
+
     # Human Roles
     STUDENT = "student"
     FACULTY = "faculty"
@@ -72,11 +74,13 @@ class Role(str, Enum):
 
 # --- Permission Definitions ---
 
+
 class Permission(str, Enum):
     """
     Granular permissions for ALIS resources.
     Follows the pattern: <resource>:<action>
     """
+
     # User Management
     USER_READ = "user:read"
     USER_CREATE = "user:create"
@@ -90,7 +94,7 @@ class Permission(str, Enum):
     STUDENT_READ_PII = "student:read_pii"
 
     # Academics
-    ACADEMICS_READ   = "academics:read"
+    ACADEMICS_READ = "academics:read"
     ACADEMICS_MANAGE = "academics:manage"
     COURSE_READ = "course:read"
     COURSE_CREATE = "course:create"
@@ -159,13 +163,13 @@ class Permission(str, Enum):
     BULK_MESSAGE = "bulk_message:send"
 
     # M8 — Reporting & Analytics (E11)
-    REPORT_READ   = "report:read"
+    REPORT_READ = "report:read"
     REPORT_CREATE = "report:create"
     REPORT_EXPORT = "report:export"
 
     # M9 — Alumni & Placement (E12)
-    ALUMNI_READ     = "alumni:read"
-    ALUMNI_MANAGE   = "alumni:manage"
+    ALUMNI_READ = "alumni:read"
+    ALUMNI_MANAGE = "alumni:manage"
     PLACEMENT_MANAGE = "placement:manage"
 
     # M10 — Regulatory & Quality
@@ -179,11 +183,11 @@ class Permission(str, Enum):
     RESEARCH_SUBMIT = "research:submit"
 
     # E13 — Dynamic Process Engine
-    PROCESS_READ   = "process:read"
+    PROCESS_READ = "process:read"
     PROCESS_MANAGE = "process:manage"
 
     # E15 — PhD / Doctoral
-    PHD_READ   = "phd:read"
+    PHD_READ = "phd:read"
     PHD_MANAGE = "phd:manage"
 
     # Dynamic Role Management
@@ -195,30 +199,30 @@ class Permission(str, Enum):
     SYSTEM_READ = "system:read"
 
     # Feature Flags — institutional feature toggle management (§12)
-    FEATURE_FLAG_READ   = "feature_flag:read"
+    FEATURE_FLAG_READ = "feature_flag:read"
     FEATURE_FLAG_MANAGE = "feature_flag:manage"
 
     # E18 — Convocation Management
-    CONVOCATION_READ   = "convocation:read"
+    CONVOCATION_READ = "convocation:read"
     CONVOCATION_MANAGE = "convocation:manage"
 
     # In-house Learning (replaces Moodle stub)
-    LEARNING_READ   = "learning:read"    # students: browse materials, submit assignments
+    LEARNING_READ = "learning:read"  # students: browse materials, submit assignments
     LEARNING_MANAGE = "learning:manage"  # faculty/HOD: create, publish, grade
 
 
 # --- Role-Permission Mapping ---
 
-ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
+ROLE_PERMISSIONS: dict[Role, list[Permission]] = {
     Role.STUDENT: [
         Permission.STUDENT_READ,
         Permission.COURSE_READ,
         Permission.MARKS_READ,
         Permission.FEE_READ,
         Permission.NOTIFICATION_READ,  # E10
-        Permission.SERVICE_READ,       # E09
-        Permission.ALUMNI_READ,        # E12 — students can browse job board & drives
-        Permission.LEARNING_READ,      # in-house LMS
+        Permission.SERVICE_READ,  # E09
+        Permission.ALUMNI_READ,  # E12 — students can browse job board & drives
+        Permission.LEARNING_READ,  # in-house LMS
     ],
     Role.FACULTY: [
         Permission.STUDENT_READ,
@@ -226,8 +230,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.MARKS_READ,
         Permission.MARKS_ENTRY,
         Permission.NOTIFICATION_READ,  # E10
-        Permission.LEARNING_READ,      # in-house LMS
-        Permission.LEARNING_MANAGE,    # create/publish/grade
+        Permission.LEARNING_READ,  # in-house LMS
+        Permission.LEARNING_MANAGE,  # create/publish/grade
     ],
     Role.HOD: [
         Permission.STUDENT_READ,
@@ -253,14 +257,14 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.RESULT_PUBLISH,
         Permission.OVERRIDE_REQUEST,
         Permission.OVERRIDE_APPROVE,
-        Permission.ESCALATION_REQUEST,   # E00-S04
-        Permission.DUAL_CONTROL_APPROVE, # E00-S04
-        Permission.POLICY_READ,          # E00-S09
-        Permission.SYSTEM_READ,          # E02-S01
-        Permission.REPORT_READ,          # E11
-        Permission.REPORT_EXPORT,        # E11
-        Permission.PROCESS_READ,         # E13
-        Permission.PROCESS_MANAGE,       # E13
+        Permission.ESCALATION_REQUEST,  # E00-S04
+        Permission.DUAL_CONTROL_APPROVE,  # E00-S04
+        Permission.POLICY_READ,  # E00-S09
+        Permission.SYSTEM_READ,  # E02-S01
+        Permission.REPORT_READ,  # E11
+        Permission.REPORT_EXPORT,  # E11
+        Permission.PROCESS_READ,  # E13
+        Permission.PROCESS_MANAGE,  # E13
     ],
     Role.FINANCE_OFFICER: [
         Permission.FEE_READ,
@@ -268,8 +272,8 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.PAYMENT_PROCESS,
         Permission.LEDGER_READ,
         Permission.OVERRIDE_REQUEST,
-        Permission.ESCALATION_REQUEST,   # E00-S04
-        Permission.DUAL_CONTROL_APPROVE, # E00-S04
+        Permission.ESCALATION_REQUEST,  # E00-S04
+        Permission.DUAL_CONTROL_APPROVE,  # E00-S04
     ],
     Role.ADMIN: [
         Permission.USER_READ,
@@ -279,18 +283,18 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         Permission.AUDIT_LOG_READ,
         Permission.OVERRIDE_REQUEST,
         Permission.OVERRIDE_APPROVE,
-        Permission.ESCALATION_REQUEST,   # E00-S04
-        Permission.ESCALATION_GRANT,     # E00-S04
-        Permission.ESCALATION_REVOKE,    # E00-S04
-        Permission.DUAL_CONTROL_APPROVE, # E00-S04
-        Permission.POLICY_DRAFT,    # E00-S09
-        Permission.POLICY_SUBMIT,   # E00-S09
+        Permission.ESCALATION_REQUEST,  # E00-S04
+        Permission.ESCALATION_GRANT,  # E00-S04
+        Permission.ESCALATION_REVOKE,  # E00-S04
+        Permission.DUAL_CONTROL_APPROVE,  # E00-S04
+        Permission.POLICY_DRAFT,  # E00-S09
+        Permission.POLICY_SUBMIT,  # E00-S09
         Permission.POLICY_APPROVE,  # E00-S09
-        Permission.POLICY_READ,     # E00-S09
-        Permission.SYSTEM_READ,     # E02-S01
-        Permission.PROCESS_READ,    # E13
+        Permission.POLICY_READ,  # E00-S09
+        Permission.SYSTEM_READ,  # E02-S01
+        Permission.PROCESS_READ,  # E13
         Permission.PROCESS_MANAGE,  # E13
-        Permission.FEATURE_FLAG_READ,    # §12 — view institutional feature flags
+        Permission.FEATURE_FLAG_READ,  # §12 — view institutional feature flags
         Permission.FEATURE_FLAG_MANAGE,  # §12 — enable/disable flags per tenant
     ],
     Role.SUPER_ADMIN: [
@@ -310,84 +314,149 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
         # System has all permissions for internal operations
         *[p for p in Permission]
     ],
-
     # --- Module Manager Roles ---
     # Each manager owns their module's permissions + cross-cutting management rights.
     # SUPER_ADMIN assigns manager roles; managers create dynamic roles within their scope.
-
     Role.M1_MANAGER: [
-        Permission.STUDENT_READ, Permission.STUDENT_CREATE,
-        Permission.STUDENT_UPDATE, Permission.STUDENT_READ_PII,
-        Permission.USER_READ, Permission.OVERRIDE_REQUEST,
-        Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
-        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
-        Permission.PROCESS_READ, Permission.PROCESS_MANAGE,  # E13
+        Permission.STUDENT_READ,
+        Permission.STUDENT_CREATE,
+        Permission.STUDENT_UPDATE,
+        Permission.STUDENT_READ_PII,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
+        Permission.PROCESS_READ,
+        Permission.PROCESS_MANAGE,  # E13
     ],
     Role.M2_MANAGER: [
-        Permission.COURSE_READ, Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
-        Permission.MARKS_READ, Permission.MARKS_ENTRY, Permission.MARKS_FINALIZE,
-        Permission.STUDENT_READ, Permission.USER_READ,
-        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
-        Permission.POLICY_READ, Permission.AI_INVOKE,
-        Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.COURSE_READ,
+        Permission.COURSE_CREATE,
+        Permission.COURSE_UPDATE,
+        Permission.MARKS_READ,
+        Permission.MARKS_ENTRY,
+        Permission.MARKS_FINALIZE,
+        Permission.STUDENT_READ,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M3_MANAGER: [
-        Permission.EXAM_PAPER_READ, Permission.EXAM_PAPER_CREATE,
-        Permission.HALL_TICKET_GENERATE, Permission.RESULT_PUBLISH,
-        Permission.STUDENT_READ, Permission.USER_READ,
-        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
-        Permission.DUAL_CONTROL_APPROVE, Permission.POLICY_READ,
-        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.EXAM_PAPER_READ,
+        Permission.EXAM_PAPER_CREATE,
+        Permission.HALL_TICKET_GENERATE,
+        Permission.RESULT_PUBLISH,
+        Permission.STUDENT_READ,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.DUAL_CONTROL_APPROVE,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M4_MANAGER: [
-        Permission.FEE_READ, Permission.FEE_CREATE,
-        Permission.PAYMENT_PROCESS, Permission.LEDGER_READ,
-        Permission.STUDENT_READ, Permission.USER_READ,
-        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
-        Permission.DUAL_CONTROL_APPROVE, Permission.POLICY_READ,
-        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.FEE_READ,
+        Permission.FEE_CREATE,
+        Permission.PAYMENT_PROCESS,
+        Permission.LEDGER_READ,
+        Permission.STUDENT_READ,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.DUAL_CONTROL_APPROVE,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M5_MANAGER: [
-        Permission.STAFF_READ, Permission.STAFF_CREATE, Permission.STAFF_UPDATE,
-        Permission.LEAVE_APPROVE, Permission.PAYROLL_READ, Permission.PAYROLL_PROCESS,
-        Permission.USER_READ, Permission.USER_CREATE, Permission.USER_UPDATE,
-        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
-        Permission.DUAL_CONTROL_APPROVE, Permission.POLICY_READ,
-        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.STAFF_READ,
+        Permission.STAFF_CREATE,
+        Permission.STAFF_UPDATE,
+        Permission.LEAVE_APPROVE,
+        Permission.PAYROLL_READ,
+        Permission.PAYROLL_PROCESS,
+        Permission.USER_READ,
+        Permission.USER_CREATE,
+        Permission.USER_UPDATE,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.DUAL_CONTROL_APPROVE,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M6_MANAGER: [
-        Permission.SERVICE_READ, Permission.SERVICE_MANAGE,
-        Permission.HOSTEL_MANAGE, Permission.TRANSPORT_MANAGE,
-        Permission.STUDENT_READ, Permission.USER_READ,
-        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
-        Permission.POLICY_READ, Permission.AI_INVOKE,
-        Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.SERVICE_READ,
+        Permission.SERVICE_MANAGE,
+        Permission.HOSTEL_MANAGE,
+        Permission.TRANSPORT_MANAGE,
+        Permission.STUDENT_READ,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M7_MANAGER: [
         # M7 = Communication Hub (E10)
-        Permission.NOTIFICATION_READ, Permission.NOTIFICATION_MANAGE,
-        Permission.ANNOUNCEMENT_CREATE, Permission.BULK_MESSAGE,
-        Permission.COMPLIANCE_READ, Permission.COMPLIANCE_SUBMIT,
-        Permission.GRIEVANCE_MANAGE, Permission.AUDIT_LOG_READ,
-        Permission.USER_READ, Permission.OVERRIDE_REQUEST,
-        Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
-        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.NOTIFICATION_READ,
+        Permission.NOTIFICATION_MANAGE,
+        Permission.ANNOUNCEMENT_CREATE,
+        Permission.BULK_MESSAGE,
+        Permission.COMPLIANCE_READ,
+        Permission.COMPLIANCE_SUBMIT,
+        Permission.GRIEVANCE_MANAGE,
+        Permission.AUDIT_LOG_READ,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M9_MANAGER: [
         # M9 = Alumni & Placement (E12)
-        Permission.ALUMNI_READ, Permission.ALUMNI_MANAGE, Permission.PLACEMENT_MANAGE,
-        Permission.STUDENT_READ, Permission.USER_READ,
-        Permission.OVERRIDE_REQUEST, Permission.ESCALATION_REQUEST,
-        Permission.POLICY_READ, Permission.AI_INVOKE,
-        Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.ALUMNI_READ,
+        Permission.ALUMNI_MANAGE,
+        Permission.PLACEMENT_MANAGE,
+        Permission.STUDENT_READ,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
     Role.M8_MANAGER: [
         # M8 = Reporting & Analytics (E11)
-        Permission.REPORT_READ, Permission.REPORT_CREATE, Permission.REPORT_EXPORT,
-        Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
-        Permission.USER_READ, Permission.OVERRIDE_REQUEST,
-        Permission.ESCALATION_REQUEST, Permission.POLICY_READ,
-        Permission.AI_INVOKE, Permission.ROLE_CREATE, Permission.ROLE_MANAGE,
+        Permission.REPORT_READ,
+        Permission.REPORT_CREATE,
+        Permission.REPORT_EXPORT,
+        Permission.RESEARCH_READ,
+        Permission.RESEARCH_CREATE,
+        Permission.RESEARCH_SUBMIT,
+        Permission.USER_READ,
+        Permission.OVERRIDE_REQUEST,
+        Permission.ESCALATION_REQUEST,
+        Permission.POLICY_READ,
+        Permission.AI_INVOKE,
+        Permission.ROLE_CREATE,
+        Permission.ROLE_MANAGE,
     ],
 }
 
@@ -399,59 +468,80 @@ ROLE_PERMISSIONS: Dict[Role, List[Permission]] = {
 # Module Managers can ONLY grant permissions within their module's scope.
 # Cross-module permission requests require the owning module manager's approval.
 
-MODULE_PERMISSIONS: Dict[str, List[Permission]] = {
+MODULE_PERMISSIONS: dict[str, list[Permission]] = {
     "M1": [
-        Permission.STUDENT_READ, Permission.STUDENT_CREATE,
-        Permission.STUDENT_UPDATE, Permission.STUDENT_READ_PII,
+        Permission.STUDENT_READ,
+        Permission.STUDENT_CREATE,
+        Permission.STUDENT_UPDATE,
+        Permission.STUDENT_READ_PII,
     ],
     "M2": [
-        Permission.COURSE_READ, Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
-        Permission.MARKS_READ, Permission.MARKS_ENTRY, Permission.MARKS_FINALIZE,
+        Permission.COURSE_READ,
+        Permission.COURSE_CREATE,
+        Permission.COURSE_UPDATE,
+        Permission.MARKS_READ,
+        Permission.MARKS_ENTRY,
+        Permission.MARKS_FINALIZE,
     ],
     "M3": [
-        Permission.EXAM_PAPER_READ, Permission.EXAM_PAPER_CREATE,
-        Permission.HALL_TICKET_GENERATE, Permission.RESULT_PUBLISH,
+        Permission.EXAM_PAPER_READ,
+        Permission.EXAM_PAPER_CREATE,
+        Permission.HALL_TICKET_GENERATE,
+        Permission.RESULT_PUBLISH,
     ],
     "M4": [
-        Permission.FEE_READ, Permission.FEE_CREATE,
-        Permission.PAYMENT_PROCESS, Permission.LEDGER_READ,
+        Permission.FEE_READ,
+        Permission.FEE_CREATE,
+        Permission.PAYMENT_PROCESS,
+        Permission.LEDGER_READ,
     ],
     "M5": [
-        Permission.STAFF_READ, Permission.STAFF_CREATE, Permission.STAFF_UPDATE,
-        Permission.LEAVE_APPROVE, Permission.PAYROLL_READ, Permission.PAYROLL_PROCESS,
+        Permission.STAFF_READ,
+        Permission.STAFF_CREATE,
+        Permission.STAFF_UPDATE,
+        Permission.LEAVE_APPROVE,
+        Permission.PAYROLL_READ,
+        Permission.PAYROLL_PROCESS,
     ],
     "M6": [
-        Permission.SERVICE_READ, Permission.SERVICE_MANAGE,
-        Permission.HOSTEL_MANAGE, Permission.TRANSPORT_MANAGE,
+        Permission.SERVICE_READ,
+        Permission.SERVICE_MANAGE,
+        Permission.HOSTEL_MANAGE,
+        Permission.TRANSPORT_MANAGE,
     ],
     "M7": [
-        Permission.COMPLIANCE_READ, Permission.COMPLIANCE_SUBMIT,
-        Permission.GRIEVANCE_MANAGE, Permission.AUDIT_LOG_READ,
+        Permission.COMPLIANCE_READ,
+        Permission.COMPLIANCE_SUBMIT,
+        Permission.GRIEVANCE_MANAGE,
+        Permission.AUDIT_LOG_READ,
     ],
     "M8": [
-        Permission.RESEARCH_READ, Permission.RESEARCH_CREATE, Permission.RESEARCH_SUBMIT,
+        Permission.RESEARCH_READ,
+        Permission.RESEARCH_CREATE,
+        Permission.RESEARCH_SUBMIT,
     ],
     # M9 — Alumni & Placement (E12)
     # Previously missing from this map, which caused get_module_for_permission()
     # to return None for alumni permissions and silently treat them as
     # unowned platform permissions in cross-module approval flows.
     "M9": [
-        Permission.ALUMNI_READ, Permission.ALUMNI_MANAGE, Permission.PLACEMENT_MANAGE,
+        Permission.ALUMNI_READ,
+        Permission.ALUMNI_MANAGE,
+        Permission.PLACEMENT_MANAGE,
     ],
     "M10": [
-        Permission.PROCESS_READ, Permission.PROCESS_MANAGE,  # E13 — Dynamic Process Engine
+        Permission.PROCESS_READ,
+        Permission.PROCESS_MANAGE,  # E13 — Dynamic Process Engine
     ],
 }
 
 # Reverse map: permission → owning module
-PERMISSION_TO_MODULE: Dict[Permission, str] = {
-    perm: module
-    for module, perms in MODULE_PERMISSIONS.items()
-    for perm in perms
+PERMISSION_TO_MODULE: dict[Permission, str] = {
+    perm: module for module, perms in MODULE_PERMISSIONS.items() for perm in perms
 }
 
 # Manager role → module it manages
-MANAGER_MODULE: Dict[Role, str] = {
+MANAGER_MODULE: dict[Role, str] = {
     Role.M1_MANAGER: "M1",
     Role.M2_MANAGER: "M2",
     Role.M3_MANAGER: "M3",
@@ -464,13 +554,13 @@ MANAGER_MODULE: Dict[Role, str] = {
 }
 
 # Module → manager role (reverse of above)
-MODULE_MANAGER_ROLE: Dict[str, Role] = {v: k for k, v in MANAGER_MODULE.items()}
+MODULE_MANAGER_ROLE: dict[str, Role] = {v: k for k, v in MANAGER_MODULE.items()}
 
 # All manager roles as a set — for quick membership checks
 ALL_MANAGER_ROLES = set(MANAGER_MODULE.keys())
 
 
-def get_manager_module(role: Role) -> Optional[str]:
+def get_manager_module(role: Role) -> str | None:
     """Return the module a manager role owns, or None if not a manager."""
     return MANAGER_MODULE.get(role)
 
@@ -480,22 +570,25 @@ def is_manager_role(role: Role) -> bool:
     return role in ALL_MANAGER_ROLES
 
 
-def get_module_for_permission(permission: Permission) -> Optional[str]:
+def get_module_for_permission(permission: Permission) -> str | None:
     """Return which module owns a permission, or None if it's a platform permission."""
     return PERMISSION_TO_MODULE.get(permission)
 
 
 # --- Access Check Results ---
 
+
 @dataclass
 class AccessResult:
     """Result of an access check."""
+
     allowed: bool
-    reason: Optional[str] = None
-    context_violations: Optional[List[str]] = None
+    reason: str | None = None
+    context_violations: list[str] | None = None
 
 
 # --- RBAC Basic Check ---
+
 
 def check_role_permission(role: Role, permission: Permission) -> bool:
     """
@@ -514,10 +607,9 @@ def check_role_permission(role: Role, permission: Permission) -> bool:
 
 # --- RBAC+ Context-Aware Check (ABAC Extension) ---
 
+
 def verify_access(
-    actor_role: Role,
-    permission: Permission,
-    context: Optional[Dict] = None
+    actor_role: Role, permission: Permission, context: dict | None = None
 ) -> AccessResult:
     """
     RBAC+ Access verification with context awareness.
@@ -548,7 +640,7 @@ def verify_access(
     if not check_role_permission(actor_role, permission):
         return AccessResult(
             allowed=False,
-            reason=f"Role '{actor_role.value}' does not have permission '{permission.value}'"
+            reason=f"Role '{actor_role.value}' does not have permission '{permission.value}'",
         )
 
     # --- Step 2: Tenant Isolation Check (E00-S03 — Layer 4) ---
@@ -559,8 +651,9 @@ def verify_access(
             # Try to get from ContextVar (set by TenantMiddleware)
             try:
                 from .security import get_current_tenant_id
+
                 tenant_id = get_current_tenant_id()
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Will be caught by the check below
 
         if not tenant_id:
@@ -621,13 +714,14 @@ def verify_access(
         return AccessResult(
             allowed=False,
             reason="Context-based access denied",
-            context_violations=violations
+            context_violations=violations,
         )
 
     return AccessResult(allowed=True)
 
 
 # --- Middleware Decorator (For FastAPI/Starlette) ---
+
 
 def require_permission(permission: Permission):
     """
@@ -682,20 +776,30 @@ def require_permission(permission: Permission):
                 # remains as defense-in-depth.
                 try:
                     from server.core.lockdown import LockdownManager
+
                     if LockdownManager.is_active():
                         # For write permissions, block immediately.
                         # Read permissions are allowed during lockdown.
                         _write_perms = {
-                            Permission.USER_CREATE, Permission.USER_UPDATE, Permission.USER_DELETE,
-                            Permission.STUDENT_CREATE, Permission.STUDENT_UPDATE,
-                            Permission.FEE_CREATE, Permission.PAYMENT_PROCESS,
-                            Permission.COURSE_CREATE, Permission.COURSE_UPDATE,
-                            Permission.MARKS_ENTRY, Permission.MARKS_FINALIZE,
-                            Permission.RESULT_PUBLISH, Permission.ANNOUNCEMENT_CREATE,
-                            Permission.BULK_MESSAGE, Permission.AI_INVOKE,
+                            Permission.USER_CREATE,
+                            Permission.USER_UPDATE,
+                            Permission.USER_DELETE,
+                            Permission.STUDENT_CREATE,
+                            Permission.STUDENT_UPDATE,
+                            Permission.FEE_CREATE,
+                            Permission.PAYMENT_PROCESS,
+                            Permission.COURSE_CREATE,
+                            Permission.COURSE_UPDATE,
+                            Permission.MARKS_ENTRY,
+                            Permission.MARKS_FINALIZE,
+                            Permission.RESULT_PUBLISH,
+                            Permission.ANNOUNCEMENT_CREATE,
+                            Permission.BULK_MESSAGE,
+                            Permission.AI_INVOKE,
                         }
                         if permission in _write_perms:
                             from server.core.exceptions import ALISError
+
                             raise ALISError(
                                 message="System is in lockdown mode — write operations blocked.",
                                 details={"permission": permission.value},
@@ -708,19 +812,23 @@ def require_permission(permission: Permission):
                 if not result.allowed:
                     raise PermissionDeniedError(
                         message=result.reason,
-                        details={"violations": result.context_violations}
+                        details={"violations": result.context_violations},
                     )
 
                 # --- Setup: Request context for read/write routing ---
                 try:
-                    from server.core.request_context import RequestContext, set_request_context
+                    from server.core.request_context import (
+                        RequestContext,
+                        set_request_context,
+                    )
+
                     tenant_id = getattr(request.state, "tenant_id", "")
                     ctx = RequestContext(
                         tenant_id=tenant_id,
                         consistency_mode="strong",
                     )
                     set_request_context(ctx)
-                except Exception:
+                except Exception:  # noqa: S110
                     pass  # request_context module not available — no-op
             else:
                 raise PermissionDeniedError(
@@ -729,6 +837,8 @@ def require_permission(permission: Permission):
                 )
 
             return await func(*args, **kwargs)
+
         wrapper.__signature__ = inspect.signature(func)
         return wrapper
+
     return decorator

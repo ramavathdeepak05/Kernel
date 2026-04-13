@@ -12,19 +12,17 @@ Routes:
   POST   /phd/plagiarism/submit                 — submit plagiarism check
   POST   /phd/plagiarism/{report_id}/result     — record plagiarism result
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-
 from server.core.exceptions import (
     ALISError,
     BusinessRuleViolation,
     NotFoundError,
-    PermissionDeniedError,
 )
 from server.core.rbac import Permission, require_permission
 from server.phd.phd_service import PhDService
@@ -47,6 +45,7 @@ def _actor(r: Request) -> str:
 # Scholar Registration
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/register", status_code=201)
 @require_permission(Permission.PHD_MANAGE)
 async def register_scholar(request: Request, body: dict) -> JSONResponse:
@@ -64,7 +63,9 @@ async def register_scholar(request: Request, body: dict) -> JSONResponse:
     except BusinessRuleViolation as exc:
         return JSONResponse(status_code=422, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("register_scholar failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -74,13 +75,14 @@ async def register_scholar(request: Request, body: dict) -> JSONResponse:
 # Scholar Listing & Retrieval
 # ──────────────────────────────────────────────────────────────
 
+
 @router.get("/scholars")
 @require_permission(Permission.PHD_READ)
 async def list_scholars(
     request: Request,
-    status: Optional[str] = Query(None),
-    supervisor_id: Optional[str] = Query(None),
-    program_id: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    supervisor_id: str | None = Query(None),
+    program_id: str | None = Query(None),
 ) -> JSONResponse:
     try:
         scholars = PhDService.list_scholars(
@@ -91,7 +93,9 @@ async def list_scholars(
         )
         return JSONResponse(content={"scholars": scholars, "total": len(scholars)})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("list_scholars failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -106,7 +110,9 @@ async def get_scholar(request: Request, phd_id: str) -> JSONResponse:
     except NotFoundError as exc:
         return JSONResponse(status_code=404, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("get_scholar failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -115,6 +121,7 @@ async def get_scholar(request: Request, phd_id: str) -> JSONResponse:
 # ──────────────────────────────────────────────────────────────
 # Milestones
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/milestones/{phd_id}/complete")
 @require_permission(Permission.PHD_MANAGE)
@@ -133,7 +140,9 @@ async def complete_milestone(request: Request, phd_id: str, body: dict) -> JSONR
     except BusinessRuleViolation as exc:
         return JSONResponse(status_code=422, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("complete_milestone failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -142,6 +151,7 @@ async def complete_milestone(request: Request, phd_id: str, body: dict) -> JSONR
 # ──────────────────────────────────────────────────────────────
 # Thesis Submission
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/thesis/submit", status_code=201)
 @require_permission(Permission.PHD_MANAGE)
@@ -162,7 +172,9 @@ async def submit_thesis(request: Request, body: dict) -> JSONResponse:
     except BusinessRuleViolation as exc:
         return JSONResponse(status_code=422, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("submit_thesis failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -171,6 +183,7 @@ async def submit_thesis(request: Request, body: dict) -> JSONResponse:
 # ──────────────────────────────────────────────────────────────
 # Degree Award
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/degree/award")
 @require_permission(Permission.PHD_MANAGE)
@@ -187,7 +200,9 @@ async def award_degree(request: Request, body: dict) -> JSONResponse:
     except BusinessRuleViolation as exc:
         return JSONResponse(status_code=422, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("award_degree failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -196,6 +211,7 @@ async def award_degree(request: Request, body: dict) -> JSONResponse:
 # ──────────────────────────────────────────────────────────────
 # DC Meetings
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/dc-meetings", status_code=201)
 @require_permission(Permission.PHD_MANAGE)
@@ -213,7 +229,9 @@ async def schedule_dc_meeting(request: Request, body: dict) -> JSONResponse:
     except NotFoundError as exc:
         return JSONResponse(status_code=404, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("schedule_dc_meeting failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -221,7 +239,9 @@ async def schedule_dc_meeting(request: Request, body: dict) -> JSONResponse:
 
 @router.post("/dc-meetings/{meeting_id}/outcome")
 @require_permission(Permission.PHD_MANAGE)
-async def record_dc_outcome(request: Request, meeting_id: str, body: dict) -> JSONResponse:
+async def record_dc_outcome(
+    request: Request, meeting_id: str, body: dict
+) -> JSONResponse:
     try:
         result = PhDService.record_dc_outcome(
             meeting_id=meeting_id,
@@ -234,7 +254,9 @@ async def record_dc_outcome(request: Request, meeting_id: str, body: dict) -> JS
     except NotFoundError as exc:
         return JSONResponse(status_code=404, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("record_dc_outcome failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -243,6 +265,7 @@ async def record_dc_outcome(request: Request, meeting_id: str, body: dict) -> JS
 # ──────────────────────────────────────────────────────────────
 # Plagiarism
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/plagiarism/submit", status_code=201)
 @require_permission(Permission.PHD_MANAGE)
@@ -258,7 +281,9 @@ async def submit_plagiarism_check(request: Request, body: dict) -> JSONResponse:
     except NotFoundError as exc:
         return JSONResponse(status_code=404, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("submit_plagiarism_check failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})
@@ -280,7 +305,9 @@ async def record_plagiarism_result(
     except NotFoundError as exc:
         return JSONResponse(status_code=404, content={"detail": exc.message})
     except ALISError as exc:
-        return JSONResponse(status_code=exc.http_status, content={"detail": exc.message})
+        return JSONResponse(
+            status_code=exc.http_status, content={"detail": exc.message}
+        )
     except Exception as exc:
         logger.exception("record_plagiarism_result failed")
         return JSONResponse(status_code=500, content={"detail": str(exc)})

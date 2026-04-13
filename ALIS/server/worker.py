@@ -17,6 +17,7 @@ Run beat scheduler (for calendar triggers):
     # OR simple file-based scheduler:
     celery -A server.worker beat --loglevel=info
 """
+
 from __future__ import annotations
 
 import json
@@ -28,7 +29,6 @@ from celery import Celery
 from celery.schedules import crontab
 from celery.signals import task_failure, worker_ready
 from kombu import Queue
-
 from server.core.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -42,20 +42,20 @@ celery_app = Celery(
     broker=settings.redis_url,
     backend=settings.redis_url,
     include=[
-        "server.tasks.notifications",   # E10 — email/SMS delivery tasks
-        "server.tasks.ai_tasks",        # AI doc verify, eligibility, etc.
-        "server.tasks.events",          # Domain event dispatch (P0-S17)
-        "server.tasks.calendar",        # Academic calendar triggers (P0-S19)
-        "server.tasks.admissions",      # M1 automation pipeline (E04-S13)
-        "server.tasks.finance",          # M4 finance beat tasks (E07)
-        "server.tasks.reporting",        # M8 reporting & analytics (E11)
-        "server.tasks.shadow_divergence", # P21 shadow mode nightly divergence
-        "server.tasks.webhook_retry",    # P21 outbound webhook retry
-        "server.tasks.backup",           # P22 daily database backup
+        "server.tasks.notifications",  # E10 — email/SMS delivery tasks
+        "server.tasks.ai_tasks",  # AI doc verify, eligibility, etc.
+        "server.tasks.events",  # Domain event dispatch (P0-S17)
+        "server.tasks.calendar",  # Academic calendar triggers (P0-S19)
+        "server.tasks.admissions",  # M1 automation pipeline (E04-S13)
+        "server.tasks.finance",  # M4 finance beat tasks (E07)
+        "server.tasks.reporting",  # M8 reporting & analytics (E11)
+        "server.tasks.shadow_divergence",  # P21 shadow mode nightly divergence
+        "server.tasks.webhook_retry",  # P21 outbound webhook retry
+        "server.tasks.backup",  # P22 daily database backup
         "server.tasks.plagiarism_poll",  # E15 Drillbit plagiarism result polling
-        "server.tasks.learning_tasks",   # P40 In-house LMS — close overdue assignments
-        "server.tasks.perf_tasks",       # Performance: async audit drain, event dispatch
-        "server.tasks.partition_mgmt",   # Partition management: create/drop/detach
+        "server.tasks.learning_tasks",  # P40 In-house LMS — close overdue assignments
+        "server.tasks.perf_tasks",  # Performance: async audit drain, event dispatch
+        "server.tasks.partition_mgmt",  # Partition management: create/drop/detach
     ],
 )
 
@@ -71,27 +71,28 @@ celery_app.conf.update(
     timezone=settings.celery_timezone,
     enable_utc=True,
     task_track_started=True,
-    task_acks_late=True,            # Re-queue on worker crash
-    worker_prefetch_multiplier=1,   # Fair dispatch, one task at a time per worker
+    task_acks_late=True,  # Re-queue on worker crash
+    worker_prefetch_multiplier=1,  # Fair dispatch, one task at a time per worker
     task_reject_on_worker_lost=True,
     # Retry policy defaults (tasks can override)
     task_max_retries=3,
-    task_default_retry_delay=60,    # seconds
+    task_default_retry_delay=60,  # seconds
 )
 
 celery_app.conf.task_queues = (
     Queue("default"),
     Queue("high_priority"),
-    Queue("dead_letter"),         # Receives tasks that exhausted all retries
-    Queue("audit_queue"),         # Async audit drain (high-frequency, low-latency)
+    Queue("dead_letter"),  # Receives tasks that exhausted all retries
+    Queue("audit_queue"),  # Async audit drain (high-frequency, low-latency)
     Queue("event_dispatch_queue"),  # Domain event dispatch (decoupled from request)
-    Queue("ai_tasks"),            # AI inference tasks (may be slow)
-    Queue("notifications"),       # Email/SMS/WhatsApp delivery
+    Queue("ai_tasks"),  # AI inference tasks (may be slow)
+    Queue("notifications"),  # Email/SMS/WhatsApp delivery
 )
 celery_app.conf.task_default_queue = "default"
 
 # S5: Per-tenant task routing — routes tasks to default:{tenant_id} queues
 from server.core.tenant_tasks import TenantTaskRouter  # noqa: E402
+
 celery_app.conf.task_routes = (TenantTaskRouter(),)
 
 # ---------------------------------------------------------------------------
@@ -102,6 +103,7 @@ celery_app.conf.task_routes = (TenantTaskRouter(),)
 # the module. We must import every handler module here so that the Celery
 # worker process has all handlers registered before it starts dispatching.
 # ---------------------------------------------------------------------------
+
 
 @worker_ready.connect
 def _register_all_domain_event_handlers(**kwargs: object) -> None:
@@ -125,18 +127,25 @@ def _register_all_domain_event_handlers(**kwargs: object) -> None:
     for name, module_path in _modules:
         try:
             import importlib
+
             mod = importlib.import_module(module_path)
             mod.register_all()
             logger.info("worker: %s event handlers registered", name)
         except Exception as e:
             failed.append(name)
-            logger.error("worker: FAILED to register %s event handlers: %s", name, e, exc_info=True)
+            logger.error(
+                "worker: FAILED to register %s event handlers: %s",
+                name,
+                e,
+                exc_info=True,
+            )
 
     if failed:
         logger.critical(
             "worker: %d event handler module(s) failed to register: %s — "
             "events for these modules will NOT be processed!",
-            len(failed), ", ".join(failed),
+            len(failed),
+            ", ".join(failed),
         )
 
 
@@ -148,6 +157,7 @@ def _register_all_domain_event_handlers(**kwargs: object) -> None:
 # GET/POST /api/v1/admin/failed-tasks.
 # ---------------------------------------------------------------------------
 
+
 @task_failure.connect
 def on_task_failure(
     sender: Any,
@@ -156,35 +166,56 @@ def on_task_failure(
     args: Any,
     kwargs: Any,
     traceback: Any,
-    einfo: Any,
-    **rest: Any,
+    _einfo: Any,
+    **_rest: Any,
 ) -> None:
     """Persist failed task metadata to the dead-letter log."""
     try:
         from server.db_service import execute_transaction
+
         task_name: str = getattr(sender, "name", str(sender))
         full_tb = tb_module.format_tb(traceback) if traceback else []
         # Extract tenant_id if it was threaded through kwargs
-        tenant_id: str | None = (kwargs or {}).get("tenant_id") or (kwargs or {}).get("org_id")
-        execute_transaction([(
-            """
+        tenant_id: str | None = (kwargs or {}).get("tenant_id") or (kwargs or {}).get(
+            "org_id"
+        )
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO failed_task_log
                 (task_id, task_name, args, kwargs, error, traceback, tenant_id)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
-            (
-                task_id,
-                task_name,
-                json.dumps(list(args or [])),
-                json.dumps(dict(kwargs or {})),
-                str(exception),
-                "".join(full_tb)[:4000],  # cap at 4 KB
-                tenant_id,
-            ),
-        )])
+                    (
+                        task_id,
+                        task_name,
+                        json.dumps(list(args or [])),
+                        json.dumps(dict(kwargs or {})),
+                        str(exception),
+                        "".join(full_tb)[:4000],  # cap at 4 KB
+                        tenant_id,
+                    ),
+                )
+            ]
+        )
+        from server.core.audit import AuditAction, AuditLog
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="failed_task_log",
+            entity_id=task_id,
+            tenant_id=tenant_id or "",
+            metadata={"source": "on_task_failure", "task_name": task_name},
+        )
     except Exception:
         # Never let DLQ logging crash the worker process
-        logger.exception("DLQ: failed to persist failed_task_log entry for task %s", task_id)
+        logger.exception(
+            "DLQ: failed to persist failed_task_log entry for task %s", task_id
+        )
+
 
 # ---------------------------------------------------------------------------
 # Beat Schedule (Celery Beat — periodic tasks)
@@ -270,9 +301,7 @@ celery_app.conf.beat_schedule = {
         "task": "server.tasks.learning_tasks.close_overdue_assignments",
         "schedule": crontab(minute=0),  # every hour on the hour
     },
-
     # --- Performance Optimization Tasks ---
-
     # Drain async audit queue: every 2 seconds
     "perf-drain-audit": {
         "task": "server.tasks.perf_tasks.drain_audit_queue",
@@ -285,9 +314,7 @@ celery_app.conf.beat_schedule = {
         "schedule": 3.0,
         "kwargs": {"batch_size": 50},
     },
-
     # --- Partition Management Tasks ---
-
     # Create future partitions: weekly on Sunday at 03:30 UTC
     "partition-create-future": {
         "task": "server.tasks.partition_mgmt.create_future_partitions",

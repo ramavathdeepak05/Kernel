@@ -35,8 +35,9 @@ import logging
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
 
+from server.core.audit import AuditAction, AuditLedger
 from server.core.feature_flags import feature_flags
 from server.core.settings import settings
 from server.db_service import execute_query, execute_transaction
@@ -83,9 +84,9 @@ class WhatsAppService:
         org_id: str,
         template_name: str,
         recipient_phone: str,
-        variables: Dict[str, Any],
-        language: Optional[str] = None,
-    ) -> Optional[int]:
+        variables: dict[str, Any],
+        language: str | None = None,
+    ) -> int | None:
         """
         Send a WhatsApp message via MSG91.
 
@@ -175,8 +176,8 @@ class WhatsAppService:
         org_id: str,
         student_id: str,
         template_name: str,
-        variables: Dict[str, Any],
-    ) -> List[Optional[int]]:
+        variables: dict[str, Any],
+    ) -> list[int | None]:
         """
         Convenience: sends to the student's phone AND all linked guardian phones.
 
@@ -197,7 +198,7 @@ class WhatsAppService:
         if not feature_flags.is_enabled("communication.whatsapp", org_id):
             return []
 
-        log_ids: List[Optional[int]] = []
+        log_ids: list[int | None] = []
 
         # Student
         student_phone = cls._get_recipient_phone(org_id, student_id)
@@ -241,7 +242,7 @@ class WhatsAppService:
         cls,
         msg_ref_id: str,
         status: str,
-        timestamp: Optional[str] = None,
+        timestamp: str | None = None,
     ) -> bool:
         """
         Update delivery log when MSG91 sends a delivery receipt webhook.
@@ -276,6 +277,16 @@ class WhatsAppService:
                         (timestamp, msg_ref_id),
                     )
                 ]
+            )
+
+            AuditLedger.log(
+                action=AuditAction.UPDATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="handle_delivery_webhook",
+                entity_id="",
+                tenant_id="",
+                metadata={"source": "handle_delivery_webhook"},
             )
         elif normalised == "FAILED":
             execute_transaction(
@@ -325,7 +336,8 @@ class WhatsAppService:
         found = bool(rows)
         if not found:
             logger.warning(
-                "WhatsApp webhook: msg_ref_id '%s' not found in delivery log", msg_ref_id
+                "WhatsApp webhook: msg_ref_id '%s' not found in delivery log",
+                msg_ref_id,
             )
         return found
 
@@ -334,7 +346,7 @@ class WhatsAppService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _get_recipient_phone(cls, org_id: str, user_id: str) -> Optional[str]:
+    def _get_recipient_phone(cls, org_id: str, user_id: str) -> str | None:
         """Fetch phone number from users table for the given user_id."""
         rows = execute_query(
             "SELECT phone FROM users WHERE id = %s AND tenant_id = %s",
@@ -360,7 +372,7 @@ class WhatsAppService:
     @classmethod
     def _get_template(
         cls, org_id: str, template_name: str, language: str
-    ) -> Optional[str]:
+    ) -> str | None:
         """
         Look up whatsapp_template_id from notification_templates.
 
@@ -407,7 +419,7 @@ class WhatsAppService:
         sender_number: str,
         template_id: str,
         recipient_phone: str,
-        variables: Dict[str, Any],
+        variables: dict[str, Any],
     ) -> str:
         """
         HTTP POST to MSG91 WhatsApp Bulk API.
@@ -462,13 +474,10 @@ class WhatsAppService:
                 resp_body = resp.read().decode("utf-8")
                 resp_data = json.loads(resp_body)
                 # MSG91 returns {"type": "success", "request_id": "...", ...}
-                msg_ref = resp_data.get("request_id") or str(uuid.uuid4())
-                return msg_ref
+                return resp_data.get("request_id") or str(uuid.uuid4())
         except urllib.error.HTTPError as exc:
             err_body = exc.read().decode("utf-8") if exc.fp else ""
-            raise ValueError(
-                f"MSG91 HTTP {exc.code}: {err_body}"
-            ) from exc
+            raise ValueError(f"MSG91 HTTP {exc.code}: {err_body}") from exc
 
     @classmethod
     def _log_queued(
@@ -477,7 +486,7 @@ class WhatsAppService:
         recipient_phone: str,
         template_name: str,
         language: str,
-        variables: Dict[str, Any],
+        variables: dict[str, Any],
     ) -> int:
         """Insert a QUEUED row into whatsapp_delivery_log. Returns the new row id."""
         execute_transaction(
@@ -497,6 +506,16 @@ class WhatsAppService:
                     ),
                 )
             ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="_log_queued",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_log_queued"},
         )
         rows = execute_query(
             """
@@ -523,6 +542,16 @@ class WhatsAppService:
             ]
         )
 
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="_update_log_sent",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_update_log_sent"},
+        )
+
     @classmethod
     def _update_log_failed(cls, log_id: int, reason: str) -> None:
         execute_transaction(
@@ -538,8 +567,18 @@ class WhatsAppService:
             ]
         )
 
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="_update_log_failed",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "_update_log_failed"},
+        )
+
     @staticmethod
-    def _resolve_language(language: Optional[str]) -> str:
+    def _resolve_language(language: str | None) -> str:
         """Normalise and validate language code, defaulting to 'en'."""
         if language and language.lower() in _SUPPORTED_LANGUAGES:
             return language.lower()
@@ -737,6 +776,16 @@ def seed_whatsapp_templates(org_id: str, actor_id: str = "system") -> int:
                     ),
                 )
             ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="whatsapp_templates",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "seed_whatsapp_templates"},
         )
         inserted += 1
 

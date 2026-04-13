@@ -8,10 +8,12 @@ it can be used transparently as a drop-in inside InstrumentedLLM.
 When AI_SERVICE_URL is set in settings, AIGateway.get_llm() returns one of
 these instead of OllamaLLM or ChatOpenAI.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Iterator, List, Optional
+from collections.abc import Iterator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +37,7 @@ class AIServiceLLM:
         task_class: str = "extraction",
         temperature: float = 0.0,
         max_tokens: int = 1024,
-        model_override: Optional[str] = None,
+        model_override: str | None = None,
         tenant_plan: str = "starter",
         feature_flags: dict | None = None,
         mask_pii: bool = True,
@@ -51,7 +53,7 @@ class AIServiceLLM:
         self._feature_flags = feature_flags or {}
         self._mask_pii = mask_pii
 
-    def _build_payload(self, prompt: str, system_prompt: Optional[str] = None) -> dict:
+    def _build_payload(self, prompt: str, system_prompt: str | None = None) -> dict:
         payload: dict = {
             "tenant_id": self._tenant_id,
             "tenant_plan": self._tenant_plan,

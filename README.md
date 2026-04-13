@@ -2,7 +2,7 @@
 
 AI-native, sovereign University Operating System.
 Policy-driven, event-sourced, local-first.
-Developed by QUAICU Solutions Private Limited in partnership with Woxsen University.
+Developed by QUAICU Solutions Private Limited.
 
 ---
 

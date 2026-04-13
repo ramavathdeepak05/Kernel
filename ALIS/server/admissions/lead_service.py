@@ -24,15 +24,16 @@ State Machine:
 
 from __future__ import annotations
 
+import builtins
 import logging
 import random
 import string
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
-from server.core.exceptions import BusinessRuleViolation, PermissionDeniedError
+from server.core.audit import AuditAction, AuditLog
+from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction, safe_identifier
 
 from .models import (
@@ -55,21 +56,30 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Allowed CRM status transitions
 # ---------------------------------------------------------------------------
-_LEAD_TRANSITIONS: Dict[LeadStatus, set] = {
+_LEAD_TRANSITIONS: dict[LeadStatus, set] = {
     LeadStatus.NEW: {
-        LeadStatus.CONTACTED, LeadStatus.INTERESTED,
-        LeadStatus.NOT_INTERESTED, LeadStatus.UNRESPONSIVE, LeadStatus.DISQUALIFIED,
+        LeadStatus.CONTACTED,
+        LeadStatus.INTERESTED,
+        LeadStatus.NOT_INTERESTED,
+        LeadStatus.UNRESPONSIVE,
+        LeadStatus.DISQUALIFIED,
     },
     LeadStatus.CONTACTED: {
-        LeadStatus.INTERESTED, LeadStatus.NOT_INTERESTED,
-        LeadStatus.UNRESPONSIVE, LeadStatus.DISQUALIFIED,
+        LeadStatus.INTERESTED,
+        LeadStatus.NOT_INTERESTED,
+        LeadStatus.UNRESPONSIVE,
+        LeadStatus.DISQUALIFIED,
     },
     LeadStatus.INTERESTED: {
-        LeadStatus.READY_TO_APPLY, LeadStatus.NOT_INTERESTED,
-        LeadStatus.UNRESPONSIVE, LeadStatus.DISQUALIFIED,
+        LeadStatus.READY_TO_APPLY,
+        LeadStatus.NOT_INTERESTED,
+        LeadStatus.UNRESPONSIVE,
+        LeadStatus.DISQUALIFIED,
     },
     LeadStatus.READY_TO_APPLY: {
-        LeadStatus.CONVERTED, LeadStatus.NOT_INTERESTED, LeadStatus.DISQUALIFIED,
+        LeadStatus.CONVERTED,
+        LeadStatus.NOT_INTERESTED,
+        LeadStatus.DISQUALIFIED,
     },
     # Re-open paths for dormant leads
     LeadStatus.NOT_INTERESTED: {LeadStatus.CONTACTED},
@@ -83,6 +93,7 @@ _LEAD_TRANSITIONS: Dict[LeadStatus, set] = {
 # =============================================================================
 # LEAD SERVICE
 # =============================================================================
+
 
 class LeadService:
     """Full CRM lead lifecycle management."""
@@ -110,58 +121,73 @@ class LeadService:
         lead_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
+        queries = []
         # Validate + consume referral code
         if request.referral_code:
-            cls._validate_and_consume_referral_code(request.referral_code, org_id)
+            ref_q = cls._validate_and_consume_referral_code(
+                request.referral_code, org_id
+            )
+            if ref_q:
+                queries.append(ref_q)
 
-        execute_transaction([
+        queries.append(
             (
                 """
-                INSERT INTO leads (
-                    id, org_id, full_name, email, phone,
-                    city, state_region, course_interest, intake_year,
-                    source_type, source_detail,
-                    utm_source, utm_medium, utm_campaign, utm_term, utm_content,
-                    referred_by_user_id, consultant_id,
-                    status, metadata, created_at, updated_at
-                ) VALUES (
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s,
-                    %s, %s,
-                    %s, %s, %s, %s, %s,
-                    %s, %s,
-                    %s, %s::jsonb, %s, %s
-                )
-                """,
+            INSERT INTO leads (
+                id, org_id, full_name, email, phone,
+                city, state_region, course_interest, intake_year,
+                source_type, source_detail,
+                utm_source, utm_medium, utm_campaign, utm_term, utm_content,
+                referred_by_user_id, consultant_id,
+                status, metadata, created_at, updated_at
+            ) VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s,
+                %s, %s::jsonb, %s, %s
+            )
+            """,
                 (
-                    lead_id, org_id,
-                    request.full_name, request.email, request.phone,
-                    request.city, request.state_region,
-                    request.course_interest, request.intake_year,
+                    lead_id,
+                    org_id,
+                    request.full_name,
+                    request.email,
+                    request.phone,
+                    request.city,
+                    request.state_region,
+                    request.course_interest,
+                    request.intake_year,
                     request.source_type.value,
                     request.source_detail,
-                    request.utm_source, request.utm_medium,
-                    request.utm_campaign, request.utm_term, request.utm_content,
+                    request.utm_source,
+                    request.utm_medium,
+                    request.utm_campaign,
+                    request.utm_term,
+                    request.utm_content,
                     request.referred_by_user_id,
                     request.consultant_id,
                     LeadStatus.NEW.value,
                     __import__("json").dumps(request.metadata or {}),
-                    now, now,
+                    now,
+                    now,
                 ),
             )
-        ])
+        )
 
         # If from consultant, create a referral record
         if request.consultant_id:
-            cls._create_consultant_referral(
+            con_q = cls._create_consultant_referral(
                 org_id=org_id,
                 consultant_id=request.consultant_id,
                 lead_id=lead_id,
                 referral_code=request.referral_code,
             )
+            queries.append(con_q)
 
         # Log first activity
-        cls._log_activity_internal(
+        act_id, act_q = cls._log_activity_internal(
             lead_id=lead_id,
             org_id=org_id,
             activity_type=LeadActivityType.STATUS_CHANGE.value,
@@ -169,6 +195,9 @@ class LeadService:
             actor_id=actor_id,
             metadata={"status": LeadStatus.NEW.value},
         )
+        queries.append(act_q)
+
+        execute_transaction(queries)
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -185,7 +214,12 @@ class LeadService:
             },
         )
 
-        logger.info("Lead created: %s [org=%s source=%s]", lead_id, org_id, request.source_type.value)
+        logger.info(
+            "Lead created: %s [org=%s source=%s]",
+            lead_id,
+            org_id,
+            request.source_type.value,
+        )
         return cls.get(lead_id, org_id)
 
     # -------------------------------------------------------------------------
@@ -206,12 +240,12 @@ class LeadService:
     def list(
         cls,
         org_id: str,
-        status: Optional[str] = None,
-        counsellor_id: Optional[str] = None,
-        source_type: Optional[str] = None,
+        status: str | None = None,
+        counsellor_id: str | None = None,
+        source_type: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[LeadRead]:
+    ) -> builtins.list[LeadRead]:
         conditions = ["org_id = %s"]
         params: list = [org_id]
 
@@ -229,7 +263,7 @@ class LeadService:
         params += [limit, offset]
 
         rows = execute_query(
-            f"SELECT * FROM leads WHERE {where} "
+            f"SELECT * FROM leads WHERE {where} "  # noqa: S608
             "ORDER BY created_at DESC LIMIT %s OFFSET %s",
             tuple(params),
         )
@@ -261,7 +295,7 @@ class LeadService:
         current_status = LeadStatus(rows[0]["status"])
         now = datetime.now(timezone.utc)
 
-        updates: Dict[str, Any] = {"updated_at": now}
+        updates: dict[str, Any] = {"updated_at": now}
         activities = []
 
         if request.status and request.status != current_status:
@@ -269,14 +303,16 @@ class LeadService:
             updates["status"] = request.status.value
             if request.status == LeadStatus.CONTACTED:
                 updates["last_contacted_at"] = now
-            activities.append({
-                "type": LeadActivityType.STATUS_CHANGE.value,
-                "summary": f"Status changed: {current_status.value} → {request.status.value}",
-                "metadata": {
-                    "from": current_status.value,
-                    "to": request.status.value,
-                },
-            })
+            activities.append(
+                {
+                    "type": LeadActivityType.STATUS_CHANGE.value,
+                    "summary": f"Status changed: {current_status.value} → {request.status.value}",
+                    "metadata": {
+                        "from": current_status.value,
+                        "to": request.status.value,
+                    },
+                }
+            )
 
         if request.assigned_counsellor_id is not None:
             updates["assigned_counsellor_id"] = request.assigned_counsellor_id
@@ -293,24 +329,28 @@ class LeadService:
         if request.disqualify_reason is not None:
             updates["disqualify_reason"] = request.disqualify_reason
 
+        queries = []
+
         if updates:
             set_clause = ", ".join(f"{safe_identifier(k)} = %s" for k in updates)
-            execute_transaction([
+            queries.append(
                 (
-                    f"UPDATE leads SET {set_clause} WHERE id = %s AND org_id = %s",
+                    f"UPDATE leads SET {set_clause} WHERE id = %s AND org_id = %s",  # noqa: S608
                     (*updates.values(), lead_id, org_id),
                 )
-            ])
+            )
 
         if request.note:
-            activities.append({
-                "type": LeadActivityType.NOTE.value,
-                "summary": request.note,
-                "metadata": {},
-            })
+            activities.append(
+                {
+                    "type": LeadActivityType.NOTE.value,
+                    "summary": request.note,
+                    "metadata": {},
+                }
+            )
 
         for act in activities:
-            cls._log_activity_internal(
+            _, q = cls._log_activity_internal(
                 lead_id=lead_id,
                 org_id=org_id,
                 activity_type=act["type"],
@@ -318,6 +358,9 @@ class LeadService:
                 actor_id=actor_id,
                 metadata=act["metadata"],
             )
+            queries.append(q)
+
+        execute_transaction(queries)
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -353,7 +396,8 @@ class LeadService:
         if not rows:
             raise BusinessRuleViolation(message=f"Lead '{request.lead_id}' not found.")
 
-        activity_id = cls._log_activity_internal(
+        queries = []
+        activity_id, act_q = cls._log_activity_internal(
             lead_id=request.lead_id,
             org_id=org_id,
             activity_type=request.activity_type.value,
@@ -361,6 +405,7 @@ class LeadService:
             actor_id=actor_id,
             metadata=request.metadata or {},
         )
+        queries.append(act_q)
 
         # Update last_contacted_at for outreach activities
         if request.activity_type in (
@@ -370,14 +415,30 @@ class LeadService:
             LeadActivityType.WHATSAPP_SENT,
             LeadActivityType.MEETING_SCHEDULED,
         ):
-            execute_transaction([
+            queries.append(
                 (
                     "UPDATE leads SET last_contacted_at = %s, updated_at = %s "
                     "WHERE id = %s AND org_id = %s",
-                    (datetime.now(timezone.utc), datetime.now(timezone.utc),
-                     request.lead_id, org_id),
+                    (
+                        datetime.now(timezone.utc),
+                        datetime.now(timezone.utc),
+                        request.lead_id,
+                        org_id,
+                    ),
                 )
-            ])
+            )
+
+        execute_transaction(queries)
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="log_activity",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "log_activity"},
+        )
 
         row = execute_query(
             "SELECT * FROM lead_activities WHERE id = %s",
@@ -386,7 +447,9 @@ class LeadService:
         return LeadActivityRead(**row[0])
 
     @classmethod
-    def list_activities(cls, lead_id: str, org_id: str) -> List[LeadActivityRead]:
+    def list_activities(
+        cls, lead_id: str, org_id: str
+    ) -> builtins.list[LeadActivityRead]:
         """Return all CRM activities for a lead, newest first."""
         rows = execute_query(
             "SELECT * FROM lead_activities WHERE lead_id = %s AND org_id = %s "
@@ -405,7 +468,7 @@ class LeadService:
         request: LeadConvertRequest,
         org_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Convert a lead into an applicant (READY_TO_APPLY → CONVERTED).
 
@@ -440,7 +503,7 @@ class LeadService:
         now = datetime.now(timezone.utc)
         applicant_id = str(uuid4())
 
-        execute_transaction([
+        queries = [
             # Create applicant
             (
                 """
@@ -451,14 +514,18 @@ class LeadService:
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                 """,
                 (
-                    applicant_id, org_id,
-                    lead["full_name"], lead["email"], lead["phone"],
+                    applicant_id,
+                    org_id,
+                    lead["full_name"],
+                    lead["email"],
+                    lead["phone"],
                     request.intended_program,
                     lead.get("source_type", "WEBSITE"),
                     "APPLIED",
                     request.lead_id,
                     __import__("json").dumps(lead.get("metadata") or {}),
-                    now, now,
+                    now,
+                    now,
                 ),
             ),
             # Mark lead converted
@@ -473,8 +540,11 @@ class LeadService:
                 """,
                 (
                     LeadStatus.CONVERTED.value,
-                    applicant_id, now, now,
-                    request.lead_id, org_id,
+                    applicant_id,
+                    now,
+                    now,
+                    request.lead_id,
+                    org_id,
                 ),
             ),
             # Link referral if exists
@@ -486,16 +556,21 @@ class LeadService:
                 """,
                 (applicant_id, now, request.lead_id, org_id),
             ),
-        ])
+        ]
 
-        cls._log_activity_internal(
+        _, act_q = cls._log_activity_internal(
             lead_id=request.lead_id,
             org_id=org_id,
             activity_type=LeadActivityType.STATUS_CHANGE.value,
             summary=f"Lead converted to applicant {applicant_id} for program '{request.intended_program}'.",
             actor_id=actor_id,
-            metadata={"applicant_id": applicant_id, "program": request.intended_program},
+            metadata={
+                "applicant_id": applicant_id,
+                "program": request.intended_program,
+            },
         )
+        queries.append(act_q)
+        execute_transaction(queries)
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -506,12 +581,17 @@ class LeadService:
             module="M1",
             wizard="Lead Conversion",
             success=True,
-            metadata={"applicant_id": applicant_id, "program": request.intended_program},
+            metadata={
+                "applicant_id": applicant_id,
+                "program": request.intended_program,
+            },
         )
 
         logger.info(
             "Lead %s converted to applicant %s [org=%s]",
-            request.lead_id, applicant_id, org_id,
+            request.lead_id,
+            applicant_id,
+            org_id,
         )
         return {"lead_id": request.lead_id, "applicant_id": applicant_id}
 
@@ -520,9 +600,7 @@ class LeadService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _validate_lead_transition(
-        cls, current: LeadStatus, target: LeadStatus
-    ) -> None:
+    def _validate_lead_transition(cls, current: LeadStatus, target: LeadStatus) -> None:
         allowed = _LEAD_TRANSITIONS.get(current, set())
         if target not in allowed:
             raise BusinessRuleViolation(
@@ -538,29 +616,33 @@ class LeadService:
         activity_type: str,
         summary: str,
         actor_id: str,
-        metadata: Dict[str, Any],
-    ) -> str:
+        metadata: dict[str, Any],
+    ) -> tuple[str, tuple]:
         activity_id = str(uuid4())
         now = datetime.now(timezone.utc)
-        execute_transaction([
+        query = (
+            """
+            INSERT INTO lead_activities
+                (id, org_id, lead_id, activity_type, summary, actor_id, metadata, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+            """,
             (
-                """
-                INSERT INTO lead_activities
-                    (id, org_id, lead_id, activity_type, summary, actor_id, metadata, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
-                """,
-                (
-                    activity_id, org_id, lead_id,
-                    activity_type, summary[:1000], actor_id,
-                    __import__("json").dumps(metadata),
-                    now,
-                ),
-            )
-        ])
-        return activity_id
+                activity_id,
+                org_id,
+                lead_id,
+                activity_type,
+                summary[:1000],
+                actor_id,
+                __import__("json").dumps(metadata),
+                now,
+            ),
+        )
+        return activity_id, query
 
     @classmethod
-    def _validate_and_consume_referral_code(cls, code: str, org_id: str) -> None:
+    def _validate_and_consume_referral_code(
+        cls, code: str, org_id: str
+    ) -> tuple | None:
         rows = execute_query(
             "SELECT id, use_count, max_uses, expires_at, is_active "
             "FROM referral_codes WHERE code = %s AND org_id = %s",
@@ -577,40 +659,45 @@ class LeadService:
             raise BusinessRuleViolation(message=f"Referral code '{code}' has expired.")
 
         if rc["max_uses"] and rc["use_count"] >= rc["max_uses"]:
-            raise BusinessRuleViolation(message=f"Referral code '{code}' has reached its usage limit.")
-
-        execute_transaction([
-            (
-                "UPDATE referral_codes SET use_count = use_count + 1 WHERE id = %s",
-                (rc["id"],),
+            raise BusinessRuleViolation(
+                message=f"Referral code '{code}' has reached its usage limit."
             )
-        ])
+
+        return (
+            "UPDATE referral_codes SET use_count = use_count + 1 WHERE id = %s",
+            (rc["id"],),
+        )
 
     @classmethod
     def _create_consultant_referral(
-        cls, org_id: str, consultant_id: str, lead_id: str, referral_code: Optional[str]
-    ) -> None:
+        cls, org_id: str, consultant_id: str, lead_id: str, referral_code: str | None
+    ) -> tuple:
         referral_id = str(uuid4())
         now = datetime.now(timezone.utc)
-        execute_transaction([
+        return (
+            """
+            INSERT INTO consultant_referrals
+                (id, org_id, consultant_id, lead_id, referral_code, status, commission_status, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+            """,
             (
-                """
-                INSERT INTO consultant_referrals
-                    (id, org_id, consultant_id, lead_id, referral_code, status, commission_status, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT DO NOTHING
-                """,
-                (
-                    referral_id, org_id, consultant_id, lead_id,
-                    referral_code, "PENDING", "UNPAID", now,
-                ),
-            )
-        ])
+                referral_id,
+                org_id,
+                consultant_id,
+                lead_id,
+                referral_code,
+                "PENDING",
+                "UNPAID",
+                now,
+            ),
+        )
 
 
 # =============================================================================
 # CONSULTANT SERVICE
 # =============================================================================
+
 
 class ConsultantService:
     """CRUD management for third-party education consultants."""
@@ -625,9 +712,10 @@ class ConsultantService:
         consultant_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO consultants (
                     id, org_id, name, company_name, email, phone,
                     city, state_region, status,
@@ -635,21 +723,27 @@ class ConsultantService:
                     portal_user_id, metadata, created_at, updated_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                 """,
-                (
-                    consultant_id, org_id,
-                    request.name, request.company_name,
-                    request.email, request.phone,
-                    request.city, request.state_region,
-                    "ACTIVE",
-                    request.commission_type.value,
-                    request.commission_rate,
-                    request.commission_amount,
-                    request.portal_user_id,
-                    "{}",
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        consultant_id,
+                        org_id,
+                        request.name,
+                        request.company_name,
+                        request.email,
+                        request.phone,
+                        request.city,
+                        request.state_region,
+                        "ACTIVE",
+                        request.commission_type.value,
+                        request.commission_rate,
+                        request.commission_amount,
+                        request.portal_user_id,
+                        "{}",
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -672,17 +766,19 @@ class ConsultantService:
             (consultant_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Consultant '{consultant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Consultant '{consultant_id}' not found."
+            )
         return ConsultantRead(**rows[0])
 
     @classmethod
     def list(
         cls,
         org_id: str,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[ConsultantRead]:
+    ) -> builtins.list[ConsultantRead]:
         conditions = ["org_id = %s"]
         params: list = [org_id]
         if status:
@@ -690,7 +786,7 @@ class ConsultantService:
             params.append(status)
         params += [limit, offset]
         rows = execute_query(
-            f"SELECT * FROM consultants WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM consultants WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY name ASC LIMIT %s OFFSET %s",
             tuple(params),
         )
@@ -705,19 +801,22 @@ class ConsultantService:
         actor_id: str,
     ) -> ConsultantRead:
         from .models import ConsultantStatus
+
         if new_status not in {s.value for s in ConsultantStatus}:
             raise BusinessRuleViolation(
                 message=f"Invalid consultant status: {new_status}",
                 details={"valid": [s.value for s in ConsultantStatus]},
             )
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE consultants SET status = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (new_status, now, consultant_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE consultants SET status = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (new_status, now, consultant_id, org_id),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.UPDATE,
             actor_id=actor_id,
@@ -736,6 +835,7 @@ class ConsultantService:
 # REFERRAL CODE SERVICE
 # =============================================================================
 
+
 class ReferralCodeService:
     """Generate and manage referral codes for students, staff, and consultants."""
 
@@ -750,23 +850,30 @@ class ReferralCodeService:
         code_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO referral_codes (
                     id, org_id, code, referrer_type, referrer_id,
                     max_uses, use_count, expires_at, is_active, created_at
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    code_id, org_id, code,
-                    request.referrer_type, request.referrer_id,
-                    request.max_uses, 0,
-                    request.expires_at,
-                    True, now,
-                ),
-            )
-        ])
+                    (
+                        code_id,
+                        org_id,
+                        code,
+                        request.referrer_type,
+                        request.referrer_id,
+                        request.max_uses,
+                        0,
+                        request.expires_at,
+                        True,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -797,9 +904,7 @@ class ReferralCodeService:
         return ReferralCodeRead(**rows[0])
 
     @classmethod
-    def list_by_referrer(
-        cls, referrer_id: str, org_id: str
-    ) -> List[ReferralCodeRead]:
+    def list_by_referrer(cls, referrer_id: str, org_id: str) -> list[ReferralCodeRead]:
         rows = execute_query(
             "SELECT * FROM referral_codes WHERE referrer_id = %s AND org_id = %s "
             "ORDER BY created_at DESC",
@@ -809,13 +914,15 @@ class ReferralCodeService:
 
     @classmethod
     def deactivate(cls, code: str, org_id: str, actor_id: str) -> None:
-        execute_transaction([
-            (
-                "UPDATE referral_codes SET is_active = FALSE "
-                "WHERE code = %s AND org_id = %s",
-                (code, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE referral_codes SET is_active = FALSE "
+                    "WHERE code = %s AND org_id = %s",
+                    (code, org_id),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.UPDATE,
             actor_id=actor_id,

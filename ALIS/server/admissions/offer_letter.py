@@ -33,25 +33,25 @@ import io
 import json
 import logging
 import textwrap
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, GlobalLockViolationError
 from server.core.state_registry import StudentState
 from server.db_service import execute_query, execute_transaction
 from server.fs_service import FileStorageService
 
 from .document_verification import DocumentVerificationService
-from .service import ApplicantService
 from .models import (
-    OfferLetterGenerateRequest,
-    OfferLetterRead,
     OfferAcceptRequest,
     OfferDeclineRequest,
+    OfferLetterGenerateRequest,
+    OfferLetterRead,
     OfferRevokeRequest,
 )
+from .service import ApplicantService
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,8 @@ class OfferLetterService:
         if existing:
             logger.info(
                 "P9: Returning existing offer letter [id=%s, applicant=%s]",
-                existing[0]["id"], request.applicant_id,
+                existing[0]["id"],
+                request.applicant_id,
             )
             return cls._row_to_read(existing[0])
 
@@ -153,22 +154,26 @@ class OfferLetterService:
             file_content=pdf_bytes,
             filename=f"offer_{request.applicant_id}_{request.academic_year}.pdf",
             owner_id=actor_id,
-            context={"role": "staff", "entity_type": "offer_letter",
-                     "entity_id": request.applicant_id},
+            context={
+                "role": "staff",
+                "entity_type": "offer_letter",
+                "entity_id": request.applicant_id,
+            },
         )
         file_path = (
             str(file_meta.get_version().storage_path)
-            if file_meta.get_version() else
-            f"offer_{request.applicant_id}_{request.academic_year}.pdf"
+            if file_meta.get_version()
+            else f"offer_{request.applicant_id}_{request.academic_year}.pdf"
         )
 
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(days=request.acceptance_deadline_days)
         letter_id = str(uuid4())
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO offer_letters (
                     id, org_id, applicant_id, program_name, academic_year,
                     template_version, content_hash, pdf_path, issued_at, is_valid,
@@ -177,26 +182,28 @@ class OfferLetterService:
                     t3_reminder_sent, t1_reminder_sent
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s)
                 """,
-                (
-                    letter_id, org_id,
-                    request.applicant_id,
-                    request.program_name,
-                    request.academic_year,
-                    request.template_version,
-                    content_hash,
-                    file_path,
-                    now,
-                    True,
-                    expires_at,
-                    "PENDING",
-                    "PENDING",
-                    json.dumps(request.fee_structure),
-                    request.merit_list_entry_id,
-                    False,
-                    False,
-                ),
-            )
-        ])
+                    (
+                        letter_id,
+                        org_id,
+                        request.applicant_id,
+                        request.program_name,
+                        request.academic_year,
+                        request.template_version,
+                        content_hash,
+                        file_path,
+                        now,
+                        True,
+                        expires_at,
+                        "PENDING",
+                        "PENDING",
+                        json.dumps(request.fee_structure),
+                        request.merit_list_entry_id,
+                        False,
+                        False,
+                    ),
+                )
+            ]
+        )
 
         # --- Transition state: → OFFER_ISSUED ---
         ApplicantService.transition_state(
@@ -240,7 +247,9 @@ class OfferLetterService:
 
         logger.info(
             "P9: Offer letter generated [id=%s, applicant=%s, expires=%s]",
-            letter_id, request.applicant_id, expires_at.date(),
+            letter_id,
+            request.applicant_id,
+            expires_at.date(),
         )
 
         return cls.get(letter_id, org_id)
@@ -281,36 +290,36 @@ class OfferLetterService:
             )
 
         if not letter["is_valid"]:
-            raise BusinessRuleViolation(message=f"Offer '{letter_id}' is no longer valid.")
+            raise BusinessRuleViolation(
+                message=f"Offer '{letter_id}' is no longer valid."
+            )
 
         now = datetime.now(timezone.utc)
 
         # Check expiry
-        if letter.get("expires_at") and now > letter["expires_at"]:
-            # Auto-expire before rejecting
-            cls._do_expire(letter_id, letter["applicant_id"], org_id, actor_id)
-            raise BusinessRuleViolation(
-                message=f"Offer '{letter_id}' has expired. Cannot accept.",
-                details={"expired_at": letter["expires_at"].isoformat()},
-            )
+        cls._abort_if_expired(letter, org_id, actor_id)
 
-        execute_transaction([
-            (
-                "UPDATE offer_letters SET acceptance_status = %s, accepted_at = %s, "
-                "digital_signature_ref = %s WHERE id = %s AND org_id = %s",
-                ("ACCEPTED", now, request.digital_signature_ref, letter_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE offer_letters SET acceptance_status = %s, accepted_at = %s, "
+                    "digital_signature_ref = %s WHERE id = %s AND org_id = %s",
+                    ("ACCEPTED", now, request.digital_signature_ref, letter_id, org_id),
+                )
+            ]
+        )
 
         # Update merit list entry if linked
         if letter.get("merit_list_entry_id"):
-            execute_transaction([
-                (
-                    "UPDATE merit_list_entries SET status = 'ACCEPTED' "
-                    "WHERE id = %s AND org_id = %s",
-                    (letter["merit_list_entry_id"], org_id),
-                )
-            ])
+            execute_transaction(
+                [
+                    (
+                        "UPDATE merit_list_entries SET status = 'ACCEPTED' "
+                        "WHERE id = %s AND org_id = %s",
+                        (letter["merit_list_entry_id"], org_id),
+                    )
+                ]
+            )
 
         # Transition: OFFER_ISSUED → OFFER_ACCEPTED → SEAT_CONFIRMED
         ApplicantService.transition_state(
@@ -319,7 +328,10 @@ class OfferLetterService:
             to_state=StudentState.OFFER_ACCEPTED,
             actor_id=actor_id,
             reason="Applicant accepted the offer",
-            metadata={"letter_id": letter_id, "signature": request.digital_signature_ref},
+            metadata={
+                "letter_id": letter_id,
+                "signature": request.digital_signature_ref,
+            },
         )
         ApplicantService.transition_state(
             applicant_id=letter["applicant_id"],
@@ -346,7 +358,11 @@ class OfferLetterService:
             },
         )
 
-        logger.info("P9: Offer accepted [letter=%s, applicant=%s]", letter_id, letter["applicant_id"])
+        logger.info(
+            "P9: Offer accepted [letter=%s, applicant=%s]",
+            letter_id,
+            letter["applicant_id"],
+        )
         return cls.get(letter_id, org_id)
 
     # -------------------------------------------------------------------------
@@ -384,23 +400,27 @@ class OfferLetterService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE offer_letters SET acceptance_status = %s, declined_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                ("DECLINED", now, letter_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE offer_letters SET acceptance_status = %s, declined_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    ("DECLINED", now, letter_id, org_id),
+                )
+            ]
+        )
 
         # Update merit list entry if linked
         if letter.get("merit_list_entry_id"):
-            execute_transaction([
-                (
-                    "UPDATE merit_list_entries SET status = 'DECLINED' "
-                    "WHERE id = %s AND org_id = %s",
-                    (letter["merit_list_entry_id"], org_id),
-                )
-            ])
+            execute_transaction(
+                [
+                    (
+                        "UPDATE merit_list_entries SET status = 'DECLINED' "
+                        "WHERE id = %s AND org_id = %s",
+                        (letter["merit_list_entry_id"], org_id),
+                    )
+                ]
+            )
 
         ApplicantService.transition_state(
             applicant_id=letter["applicant_id"],
@@ -435,7 +455,11 @@ class OfferLetterService:
             actor_id=actor_id,
         )
 
-        logger.info("P9: Offer declined [letter=%s, applicant=%s]", letter_id, letter["applicant_id"])
+        logger.info(
+            "P9: Offer declined [letter=%s, applicant=%s]",
+            letter_id,
+            letter["applicant_id"],
+        )
         return cls.get(letter_id, org_id)
 
     # -------------------------------------------------------------------------
@@ -464,15 +488,17 @@ class OfferLetterService:
                 details={"letter_id": letter_id, "acceptance_status": "ACCEPTED"},
             )
 
-        now = datetime.now(timezone.utc)
+        datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE offer_letters SET is_valid = FALSE, acceptance_status = 'EXPIRED' "
-                "WHERE id = %s AND org_id = %s",
-                (letter_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE offer_letters SET is_valid = FALSE, acceptance_status = 'EXPIRED' "
+                    "WHERE id = %s AND org_id = %s",
+                    (letter_id, org_id),
+                )
+            ]
+        )
 
         ApplicantService.transition_state(
             applicant_id=letter["applicant_id"],
@@ -529,15 +555,29 @@ class OfferLetterService:
             extra_set = ", email_opened_at = %s"
             extra_params = (now,)
 
-        execute_transaction([
-            (
-                f"UPDATE offer_letters SET delivery_status = %s{extra_set} "
-                "WHERE id = %s AND org_id = %s",
-                (status, *extra_params, letter_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE offer_letters SET delivery_status = %s{extra_set} "  # noqa: S608
+                    "WHERE id = %s AND org_id = %s",
+                    (status, *extra_params, letter_id, org_id),
+                )
+            ]
+        )
 
-        logger.info("P9: Delivery status updated [letter=%s, status=%s]", letter_id, status)
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="delivery",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark_delivery"},
+        )
+
+        logger.info(
+            "P9: Delivery status updated [letter=%s, status=%s]", letter_id, status
+        )
         return cls.get(letter_id, org_id)
 
     @classmethod
@@ -552,20 +592,34 @@ class OfferLetterService:
         if reminder_type not in ("T3", "T1"):
             raise BusinessRuleViolation(message="reminder_type must be 'T3' or 'T1'.")
         col = "t3_reminder_sent" if reminder_type == "T3" else "t1_reminder_sent"
-        execute_transaction([
-            (
-                f"UPDATE offer_letters SET {col} = TRUE WHERE id = %s AND org_id = %s",
-                (letter_id, org_id),
-            )
-        ])
-        logger.info("P9: Reminder marked [letter=%s, type=%s]", letter_id, reminder_type)
+        execute_transaction(
+            [
+                (
+                    f"UPDATE offer_letters SET {col} = TRUE WHERE id = %s AND org_id = %s",  # noqa: S608
+                    (letter_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="reminder",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark_reminder"},
+        )
+        logger.info(
+            "P9: Reminder marked [letter=%s, type=%s]", letter_id, reminder_type
+        )
 
     # -------------------------------------------------------------------------
     # Expire overdue
     # -------------------------------------------------------------------------
 
     @classmethod
-    def expire_overdue(cls, org_id: str, actor_id: str) -> Dict[str, Any]:
+    def expire_overdue(cls, org_id: str, actor_id: str) -> dict[str, Any]:
         """
         Batch-expire all PENDING offer letters past their acceptance deadline.
 
@@ -583,7 +637,7 @@ class OfferLetterService:
             (org_id, now),
         )
 
-        expired_ids: List[str] = []
+        expired_ids: list[str] = []
         for row in overdue:
             try:
                 cls._do_expire(row["id"], row["applicant_id"], org_id, actor_id)
@@ -607,11 +661,15 @@ class OfferLetterService:
             (letter_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Offer letter '{letter_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Offer letter '{letter_id}' not found."
+            )
         return cls._row_to_read(rows[0])
 
     @classmethod
-    def get_for_applicant(cls, applicant_id: str, org_id: str) -> Optional[OfferLetterRead]:
+    def get_for_applicant(
+        cls, applicant_id: str, org_id: str
+    ) -> OfferLetterRead | None:
         """Return the current valid offer for an applicant (None if none exists)."""
         rows = execute_query(
             "SELECT * FROM offer_letters "
@@ -625,13 +683,28 @@ class OfferLetterService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _require_letter(cls, letter_id: str, org_id: str) -> Dict[str, Any]:
+    def _abort_if_expired(
+        cls, letter: dict[str, Any], org_id: str, actor_id: str
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        if letter.get("expires_at") and now > letter["expires_at"]:
+            # Auto-expire before rejecting
+            cls._do_expire(letter["id"], letter["applicant_id"], org_id, actor_id)
+            raise BusinessRuleViolation(
+                message=f"Offer '{letter['id']}' has expired. Cannot accept.",
+                details={"expired_at": letter["expires_at"].isoformat()},
+            )
+
+    @classmethod
+    def _require_letter(cls, letter_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM offer_letters WHERE id = %s AND org_id = %s",
             (letter_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Offer letter '{letter_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Offer letter '{letter_id}' not found."
+            )
         return rows[0]
 
     @classmethod
@@ -643,13 +716,15 @@ class OfferLetterService:
         actor_id: str,
     ) -> None:
         """Mark a single offer as EXPIRED and cancel the applicant."""
-        execute_transaction([
-            (
-                "UPDATE offer_letters SET acceptance_status = 'EXPIRED', is_valid = FALSE "
-                "WHERE id = %s AND org_id = %s",
-                (letter_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE offer_letters SET acceptance_status = 'EXPIRED', is_valid = FALSE "
+                    "WHERE id = %s AND org_id = %s",
+                    (letter_id, org_id),
+                )
+            ]
+        )
         try:
             ApplicantService.transition_state(
                 applicant_id=applicant_id,
@@ -660,7 +735,11 @@ class OfferLetterService:
                 metadata={"letter_id": letter_id, "trigger": "auto_expire"},
             )
         except Exception as exc:
-            logger.warning("P9: State transition failed on expiry [applicant=%s]: %s", applicant_id, exc)
+            logger.warning(
+                "P9: State transition failed on expiry [applicant=%s]: %s",
+                applicant_id,
+                exc,
+            )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -675,7 +754,7 @@ class OfferLetterService:
         )
 
     @classmethod
-    def _row_to_read(cls, row: Dict[str, Any]) -> OfferLetterRead:
+    def _row_to_read(cls, row: dict[str, Any]) -> OfferLetterRead:
         """Convert a DB row dict to OfferLetterRead, handling JSONB fee_structure."""
         data = dict(row)
         if isinstance(data.get("fee_structure"), str):
@@ -689,21 +768,24 @@ class OfferLetterService:
     def _publish_decline_event(
         cls,
         letter_id: str,
-        merit_list_entry_id: Optional[str],
+        merit_list_entry_id: str | None,
         org_id: str,
         actor_id: str,
     ) -> None:
         """Publish OfferDeclined domain event so waitlist service can cascade."""
         try:
             from server.core.domain_events import DomainEvent, DomainEventBus
-            DomainEventBus.publish(DomainEvent(
-                event_type="OfferDeclined",
-                entity_type="offer_letter",
-                entity_id=letter_id,
-                org_id=org_id,
-                payload={"merit_list_entry_id": merit_list_entry_id},
-                actor_id=actor_id,
-            ))
+
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type="OfferDeclined",
+                    entity_type="offer_letter",
+                    entity_id=letter_id,
+                    org_id=org_id,
+                    payload={"merit_list_entry_id": merit_list_entry_id},
+                    actor_id=actor_id,
+                )
+            )
         except Exception as exc:
             logger.warning("P9: Failed to publish OfferDeclined event: %s", exc)
 
@@ -725,13 +807,23 @@ class OfferLetterService:
     ) -> bytes:
         try:
             return cls._render_with_reportlab(
-                applicant_name, applicant_email, program, academic_year,
-                fee_structure, conditions, acceptance_deadline_days,
+                applicant_name,
+                applicant_email,
+                program,
+                academic_year,
+                fee_structure,
+                conditions,
+                acceptance_deadline_days,
             )
         except ImportError:
             return cls._render_plaintext_pdf(
-                applicant_name, applicant_email, program, academic_year,
-                fee_structure, conditions, acceptance_deadline_days,
+                applicant_name,
+                applicant_email,
+                program,
+                academic_year,
+                fee_structure,
+                conditions,
+                acceptance_deadline_days,
             )
 
     @classmethod
@@ -747,8 +839,8 @@ class OfferLetterService:
     ) -> bytes:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
         from reportlab.lib.units import cm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4)
@@ -759,17 +851,21 @@ class OfferLetterService:
         story.append(Spacer(1, 0.5 * cm))
         story.append(Paragraph(f"Dear {name},", styles["Normal"]))
         story.append(Spacer(1, 0.3 * cm))
-        story.append(Paragraph(
-            f"We are pleased to offer you admission to the <b>{program}</b> "
-            f"programme for the academic year <b>{academic_year}</b>.",
-            styles["Normal"],
-        ))
+        story.append(
+            Paragraph(
+                f"We are pleased to offer you admission to the <b>{program}</b> "
+                f"programme for the academic year <b>{academic_year}</b>.",
+                styles["Normal"],
+            )
+        )
         story.append(Spacer(1, 0.3 * cm))
-        story.append(Paragraph(
-            f"Please accept or decline this offer within <b>{deadline_days} days</b> "
-            "of receipt via the applicant portal.",
-            styles["Normal"],
-        ))
+        story.append(
+            Paragraph(
+                f"Please accept or decline this offer within <b>{deadline_days} days</b> "
+                "of receipt via the applicant portal.",
+                styles["Normal"],
+            )
+        )
 
         if fee_structure:
             story.append(Spacer(1, 0.4 * cm))
@@ -779,7 +875,9 @@ class OfferLetterService:
 
         if conditions:
             story.append(Spacer(1, 0.4 * cm))
-            story.append(Paragraph("<b>Conditions of this Offer:</b>", styles["Normal"]))
+            story.append(
+                Paragraph("<b>Conditions of this Offer:</b>", styles["Normal"])
+            )
             for i, cond in enumerate(conditions, 1):
                 story.append(Paragraph(f"  {i}. {cond}", styles["Normal"]))
 
@@ -801,12 +899,16 @@ class OfferLetterService:
         conditions: list,
         deadline_days: int,
     ) -> bytes:
-        fee_lines = "\n".join(
-            f"  {k.title()}: {v}" for k, v in fee_structure.items()
-        ) if fee_structure else "  (see portal for fee details)"
-        cond_lines = "\n".join(
-            f"  {i+1}. {c}" for i, c in enumerate(conditions)
-        ) if conditions else "  None"
+        fee_lines = (
+            "\n".join(f"  {k.title()}: {v}" for k, v in fee_structure.items())
+            if fee_structure
+            else "  (see portal for fee details)"
+        )
+        cond_lines = (
+            "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(conditions))
+            if conditions
+            else "  None"
+        )
 
         content = textwrap.dedent(f"""
             OFFER OF ADMISSION
@@ -866,6 +968,7 @@ class OfferLetterService:
     ) -> None:
         try:
             from server.core.notifications.service import NotificationService
+
             svc = NotificationService()
             svc.send(
                 template_id="offer_letter_issued",

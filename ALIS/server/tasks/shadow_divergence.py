@@ -11,14 +11,12 @@ Beat schedule entry (added in worker.py):
         "schedule": crontab(hour=20, minute=30),
     }
 """
+
 from __future__ import annotations
 
 import logging
-import uuid
-from decimal import Decimal
 
 from celery import shared_task
-
 from server.core.shadow_mode import ShadowModeService
 from server.db_service import execute_query
 
@@ -35,12 +33,15 @@ logger = logging.getLogger(__name__)
 def run_shadow_divergence(self):
     """Main entry point: runs divergence check for all shadow-mode orgs."""
     # Find all orgs currently in shadow mode
-    orgs = execute_query("""
+    orgs = execute_query(
+        """
         SELECT DISTINCT org_id
         FROM tenant_feature_flags
         WHERE flag_key = 'shadow_mode.config'
           AND flag_value::jsonb->>'enabled' = 'true'
-    """, ())
+    """,
+        (),
+    )
 
     for row in orgs:
         org_id = row["org_id"]
@@ -56,7 +57,8 @@ def _check_org(org_id: str) -> None:
     # Attendance divergence
     # -----------------------------------------------------------------------
     # ALIS computed: average attendance % across all active sessions today
-    alis_attn_rows = execute_query("""
+    alis_attn_rows = execute_query(
+        """
         SELECT COALESCE(AVG(
             CASE WHEN total_students > 0
                  THEN present_count::float / total_students * 100
@@ -73,20 +75,27 @@ def _check_org(org_id: str) -> None:
               AND marked_at >= CURRENT_DATE
             GROUP BY session_id
         ) s
-    """, (org_id,))
+    """,
+        (org_id,),
+    )
 
     alis_attn = float(alis_attn_rows[0]["avg_pct"] or 0) if alis_attn_rows else 0.0
 
     # Actual: from staff_actuals reference (uploaded by institution staff)
-    actual_attn_rows = execute_query("""
+    actual_attn_rows = execute_query(
+        """
         SELECT COALESCE(AVG(actual_value), 0) AS avg_pct
         FROM staff_actuals
         WHERE org_id = %s
           AND metric = 'attendance_pct'
           AND recorded_date = CURRENT_DATE
-    """, (org_id,))
+    """,
+        (org_id,),
+    )
 
-    actual_attn = float(actual_attn_rows[0]["avg_pct"] or 0) if actual_attn_rows else None
+    actual_attn = (
+        float(actual_attn_rows[0]["avg_pct"] or 0) if actual_attn_rows else None
+    )
 
     if actual_attn is not None:
         ShadowModeService.record_divergence(
@@ -97,7 +106,9 @@ def _check_org(org_id: str) -> None:
         )
         logger.info(
             "Org %s attendance: ALIS=%.2f%% actual=%.2f%%",
-            org_id, alis_attn, actual_attn,
+            org_id,
+            alis_attn,
+            actual_attn,
         )
     else:
         logger.debug("No actual attendance data for org %s today — skipping", org_id)
@@ -105,24 +116,32 @@ def _check_org(org_id: str) -> None:
     # -----------------------------------------------------------------------
     # Fee collection divergence
     # -----------------------------------------------------------------------
-    alis_fee_rows = execute_query("""
+    alis_fee_rows = execute_query(
+        """
         SELECT COALESCE(SUM(amount_paid), 0) AS total_collected
         FROM student_invoices
         WHERE org_id = %s
           AND updated_at >= CURRENT_DATE
-    """, (org_id,))
+    """,
+        (org_id,),
+    )
 
     alis_fee = float(alis_fee_rows[0]["total_collected"] or 0) if alis_fee_rows else 0.0
 
-    actual_fee_rows = execute_query("""
+    actual_fee_rows = execute_query(
+        """
         SELECT COALESCE(SUM(actual_value), 0) AS total_collected
         FROM staff_actuals
         WHERE org_id = %s
           AND metric = 'fee_collected_inr'
           AND recorded_date = CURRENT_DATE
-    """, (org_id,))
+    """,
+        (org_id,),
+    )
 
-    actual_fee = float(actual_fee_rows[0]["total_collected"] or 0) if actual_fee_rows else None
+    actual_fee = (
+        float(actual_fee_rows[0]["total_collected"] or 0) if actual_fee_rows else None
+    )
 
     if actual_fee is not None:
         ShadowModeService.record_divergence(
@@ -133,7 +152,9 @@ def _check_org(org_id: str) -> None:
         )
         logger.info(
             "Org %s fee: ALIS=%.2f actual=%.2f",
-            org_id, alis_fee, actual_fee,
+            org_id,
+            alis_fee,
+            actual_fee,
         )
     else:
         logger.debug("No actual fee data for org %s today — skipping", org_id)
@@ -151,16 +172,17 @@ def _check_org(org_id: str) -> None:
     )
 
     if result.can_go_live:
-        logger.warning(
-            "ORG %s IS READY FOR GO-LIVE — notify SUPER_ADMIN", org_id
-        )
+        logger.warning("ORG %s IS READY FOR GO-LIVE — notify SUPER_ADMIN", org_id)
         # Emit domain event — notification service picks this up
         from server.core.domain_events import DomainEvent, DomainEventBus
-        DomainEventBus.publish(DomainEvent(
-            event_type="shadow_mode.go_live_gate_passed",
-            org_id=org_id,
-            payload={
-                "consecutive_days_passing": result.consecutive_days_passing,
-                "required_days": result.required_days,
-            },
-        ))
+
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="shadow_mode.go_live_gate_passed",
+                org_id=org_id,
+                payload={
+                    "consecutive_days_passing": result.consecutive_days_passing,
+                    "required_days": result.required_days,
+                },
+            )
+        )

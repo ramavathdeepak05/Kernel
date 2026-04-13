@@ -11,26 +11,28 @@ nightly task can compute divergence metrics even for comms paths.
 Usage (registered in main.py):
     app.add_middleware(ShadowModeMiddleware)
 """
+
 from __future__ import annotations
 
 import logging
-import time
 
+from server.core.shadow_mode import ShadowModeService
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
-
-from server.core.shadow_mode import ShadowModeService
 
 logger = logging.getLogger(__name__)
 
 
 class SuppressedByShadowMode(Exception):
     """Raised by communication services when shadow mode blocks a dispatch."""
+
     def __init__(self, channel: str, org_id: str):
         self.channel = channel
         self.org_id = org_id
-        super().__init__(f"Communication suppressed by shadow mode: {channel} for org {org_id}")
+        super().__init__(
+            f"Communication suppressed by shadow mode: {channel} for org {org_id}"
+        )
 
 
 class ShadowModeMiddleware(BaseHTTPMiddleware):

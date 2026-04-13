@@ -40,18 +40,19 @@ Acceptance Criteria
   • [x] Admin export capability
   • [x] No UPDATE / DELETE on audit table (DB-enforced)
 """
+
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import logging
-import csv
-import io
-from uuid import uuid4
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +61,10 @@ logger = logging.getLogger(__name__)
 # AUDIT ACTION TYPES
 # ============================================================================
 
+
 class AuditAction(str, Enum):
     """Types of auditable actions."""
+
     # Entity CRUD
     CREATE = "create"
     READ = "read"
@@ -88,7 +91,7 @@ class AuditAction(str, Enum):
     OVERRIDE_EXECUTED = "override_executed"
 
     # AI Agent
-    AGENT_EXECUTION = "agent_execution"   # E03-S04: agent run start/complete
+    AGENT_EXECUTION = "agent_execution"  # E03-S04: agent run start/complete
     AGENT_DECISION = "agent_decision"
     AGENT_TOOL_CALL = "agent_tool_call"
 
@@ -164,6 +167,7 @@ class AuditAction(str, Enum):
 # AUDIT ENTRY (immutable value object)
 # ============================================================================
 
+
 @dataclass(frozen=True)
 class AuditEntry:
     """
@@ -172,6 +176,7 @@ class AuditEntry:
     Uses frozen=True to ensure immutability after creation.
     Fields mirror the `audit_ledger` DB table.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
     tenant_id: str = ""
     actor_id: str = ""
@@ -179,11 +184,9 @@ class AuditEntry:
     action: str = ""
     entity_type: str = ""
     entity_id: str = ""
-    metadata: Optional[Dict[str, Any]] = None
-    timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
-    previous_hash: Optional[str] = None
+    metadata: dict[str, Any] | None = None
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    previous_hash: str | None = None
     hash: str = ""
 
 
@@ -191,7 +194,8 @@ class AuditEntry:
 # HASH COMPUTATION
 # ============================================================================
 
-def _canonical_payload(entry_data: Dict[str, Any]) -> str:
+
+def _canonical_payload(entry_data: dict[str, Any]) -> str:
     """
     Produce a deterministic JSON string for hashing.
 
@@ -199,17 +203,19 @@ def _canonical_payload(entry_data: Dict[str, Any]) -> str:
     This ensures the same logical entry always produces the same hash
     regardless of dict insertion order.
     """
+
     def _default(obj: Any) -> str:
         if isinstance(obj, datetime):
             return obj.isoformat()
         raise TypeError(f"Non-serialisable type: {type(obj)}")
 
-    return json.dumps(entry_data, sort_keys=True, separators=(",", ":"),
-                      default=_default)
+    return json.dumps(
+        entry_data, sort_keys=True, separators=(",", ":"), default=_default
+    )
 
 
 def compute_entry_hash(
-    previous_hash: Optional[str],
+    previous_hash: str | None,
     tenant_id: str,
     actor_id: str,
     actor_role: str,
@@ -217,7 +223,7 @@ def compute_entry_hash(
     entity_type: str,
     entity_id: str,
     timestamp: datetime,
-    metadata: Optional[Dict[str, Any]] = None,
+    metadata: dict[str, Any] | None = None,
 ) -> str:
     """
     Compute SHA-256 hash for a new ledger entry.
@@ -243,6 +249,7 @@ def compute_entry_hash(
 # ADVISORY LOCK HELPER
 # ============================================================================
 
+
 def _tenant_lock_key(tenant_id: str) -> int:
     """
     Derive a stable int64 advisory-lock key from a tenant_id string.
@@ -254,8 +261,152 @@ def _tenant_lock_key(tenant_id: str) -> int:
 
 
 # ============================================================================
+# ASYNC AUDIT WRITER — Move NON-CRITICAL audit off the request latency path
+# ============================================================================
+
+# Actions that MUST be written synchronously (immediate durability required)
+_CRITICAL_AUDIT_ACTIONS = frozenset(
+    {
+        "state_transition",
+        "login",
+        "logout",
+        "session_revoked",
+        "override_requested",
+        "override_approved",
+        "override_rejected",
+        "override_executed",
+        "lockdown_activated",
+        "lockdown_deactivated",
+        "escalation_requested",
+        "escalation_granted",
+        "dual_control_requested",
+        "dual_control_completed",
+        "hard_delete",
+        "password_changed",
+        "password_reset_completed",
+        "policy_approved",
+        "policy_activated",
+    }
+)
+
+
+class AsyncAuditWriter:
+    """
+    Two-phase audit for NON-CRITICAL actions only.
+
+    Phase A (in request — <1ms): LPUSH to Redis list `alis:audit:pending`
+    Phase B (Celery worker — every 2s): RPOP → AuditLedger.log() with hash chain
+
+    CRITICAL actions (state transitions, login, overrides, lockdown) are ALWAYS
+    written synchronously via AuditLedger.log() — never deferred.
+
+    Fallback: If Redis is unavailable, enqueue returns False and the caller
+    should use AuditLedger.log() directly.
+    """
+
+    @staticmethod
+    def is_critical(action: str) -> bool:
+        """Check if an audit action requires immediate synchronous persistence."""
+        return action in _CRITICAL_AUDIT_ACTIONS
+
+    @staticmethod
+    def enqueue_sync(
+        action: str,
+        actor_id: str,
+        actor_role: str = "unknown",
+        entity_type: str = "",
+        entity_id: str = "",
+        tenant_id: str = "SYSTEM",
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Enqueue a NON-CRITICAL audit entry for async persistence.
+        Returns True if enqueued to Redis, False if Redis unavailable or action is critical.
+        """
+        if AsyncAuditWriter.is_critical(action):
+            return False  # Caller must use synchronous AuditLedger.log()
+
+        entry = {
+            "action": action,
+            "actor_id": actor_id,
+            "actor_role": actor_role,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "tenant_id": tenant_id,
+            "metadata": metadata or {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            from server.core.perf import _get_redis
+
+            r = _get_redis()
+            if r is None:
+                return False
+            r.lpush("alis:audit:pending", json.dumps(entry))
+            return True
+        except Exception as e:
+            logger.warning("AsyncAuditWriter: Redis enqueue failed: %s", e)
+            return False
+
+    @staticmethod
+    def drain_batch(batch_size: int = 100) -> int:
+        """
+        Drain pending audit entries from Redis and persist to DB.
+        Called by Celery beat task (every 2 seconds).
+        Returns number of entries persisted.
+        """
+        from server.core.perf import _get_redis
+
+        r = _get_redis()
+        if r is None:
+            return 0
+
+        persisted = 0
+        for _ in range(batch_size):
+            raw = r.rpop("alis:audit:pending")
+            if raw is None:
+                break
+
+            try:
+                entry = json.loads(raw)
+                action_str = entry.get("action", "create")
+                try:
+                    action_enum = AuditAction(action_str)
+                except ValueError:
+                    logger.warning(
+                        "AsyncAuditWriter: unknown action '%s', recording as CREATE",
+                        action_str,
+                    )
+                    action_enum = AuditAction.CREATE
+
+                AuditLedger.log(
+                    action=action_enum,
+                    actor_id=entry.get("actor_id", "unknown"),
+                    actor_role=entry.get("actor_role"),
+                    entity_type=entry.get("entity_type", ""),
+                    entity_id=entry.get("entity_id", ""),
+                    tenant_id=entry.get("tenant_id"),
+                    metadata=entry.get("metadata"),
+                )
+                persisted += 1
+            except Exception as e:
+                logger.error(
+                    "AsyncAuditWriter: failed to persist entry: %s (data: %s)",
+                    e,
+                    str(raw)[:200],
+                )
+                try:
+                    r.lpush("alis:audit:retry", raw)
+                except Exception:
+                    pass  # noqa: S110 — intentionally suppressed
+
+        return persisted
+
+
+# ============================================================================
 # AUDIT LEDGER SERVICE
 # ============================================================================
+
 
 class AuditLedger:
     """
@@ -278,21 +429,21 @@ class AuditLedger:
     def log(
         action: AuditAction,
         actor_id: str,
-        actor_role: Optional[str] = None,
+        actor_role: str | None = None,
         entity_type: str = "",
         entity_id: str = "",
-        tenant_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
         # --- Backward-compatible kwargs from old AuditLog API ---
-        actor_type: Optional[str] = None,
-        action_detail: Optional[str] = None,
+        actor_type: str | None = None,
+        action_detail: str | None = None,
         success: bool = True,
-        failure_reason: Optional[str] = None,
-        org_id: Optional[str] = None,
-        module: Optional[str] = None,
-        wizard: Optional[str] = None,
-        previous_state: Optional[str] = None,
-        new_state: Optional[str] = None,
+        failure_reason: str | None = None,
+        org_id: str | None = None,
+        module: str | None = None,
+        wizard: str | None = None,
+        previous_state: str | None = None,
+        new_state: str | None = None,
         **extra_kwargs: Any,
     ) -> AuditEntry:
         """
@@ -313,6 +464,7 @@ class AuditLedger:
         (old callers used ``actor_type`` instead of ``actor_role``).
         """
         from server.db_service import get_tenant_db_connection
+
         try:
             from psycopg2.extras import RealDictCursor
         except ImportError:
@@ -328,12 +480,13 @@ class AuditLedger:
         if not resolved_tenant:
             try:
                 from server.core.security import get_current_tenant_id
+
                 resolved_tenant = get_current_tenant_id()
             except Exception:
                 resolved_tenant = "SYSTEM"
 
         # --- Merge legacy fields into metadata ---
-        merged_meta: Dict[str, Any] = dict(metadata or {})
+        merged_meta: dict[str, Any] = dict(metadata or {})
         if actor_type:
             merged_meta["actor_type"] = actor_type
         if action_detail:
@@ -366,9 +519,7 @@ class AuditLedger:
                     #    transaction end).  This serialises hash-chain
                     #    writes for a single tenant while leaving other
                     #    tenants fully concurrent.
-                    cur.execute(
-                        "SELECT pg_advisory_xact_lock(%s)", (lock_key,)
-                    )
+                    cur.execute("SELECT pg_advisory_xact_lock(%s)", (lock_key,))
 
                     # 2. Fetch previous hash (latest entry for this tenant)
                     cur.execute(
@@ -436,8 +587,12 @@ class AuditLedger:
                 logger.info(
                     "Audit ledger entry %s recorded "
                     "[tenant=%s actor=%s action=%s entity=%s:%s]",
-                    inserted_id, resolved_tenant, actor_id, action,
-                    entity_type, entity_id,
+                    inserted_id,
+                    resolved_tenant,
+                    actor_id,
+                    action,
+                    entity_type,
+                    entity_id,
                 )
                 return entry
 
@@ -445,7 +600,6 @@ class AuditLedger:
                 conn.rollback()
                 logger.exception("Failed to write to audit ledger")
                 raise
-
 
     # ------------------------------------------------------------------
     # Async audit (off critical path — drains via Celery worker)
@@ -455,11 +609,11 @@ class AuditLedger:
     def log_deferred(
         action: AuditAction,
         actor_id: str,
-        actor_role: Optional[str] = None,
+        actor_role: str | None = None,
         entity_type: str = "",
         entity_id: str = "",
-        tenant_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
         **extra_kwargs: Any,
     ) -> bool:
         """
@@ -484,6 +638,7 @@ class AuditLedger:
         if not resolved_tenant:
             try:
                 from server.core.security import get_current_tenant_id
+
                 resolved_tenant = get_current_tenant_id()
             except Exception:
                 resolved_tenant = "SYSTEM"
@@ -491,13 +646,12 @@ class AuditLedger:
         resolved_role = actor_role or "unknown"
         action_str = action.value if isinstance(action, AuditAction) else str(action)
 
-        merged_meta: Dict[str, Any] = dict(metadata or {})
+        merged_meta: dict[str, Any] = dict(metadata or {})
         if extra_kwargs:
             merged_meta.update(extra_kwargs)
 
         # Try async path for non-critical actions
         try:
-            from server.core.perf import AsyncAuditWriter
             # is_critical() returns True for state_transition, login, overrides, etc.
             # Those skip Redis and go directly to synchronous DB write below.
             if not AsyncAuditWriter.is_critical(action_str):
@@ -514,7 +668,7 @@ class AuditLedger:
                     return True
                 # Redis unavailable — fall through to sync
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         # Fallback: synchronous DB write (always durable, always correct)
         AuditLedger.log(
@@ -546,10 +700,12 @@ class AuditLedger:
     ) -> AuditEntry:
         """Convenience: log a state transition with states in metadata."""
         meta = kwargs.pop("metadata", {}) or {}
-        meta.update({
-            "previous_state": previous_state,
-            "new_state": new_state,
-        })
+        meta.update(
+            {
+                "previous_state": previous_state,
+                "new_state": new_state,
+            }
+        )
         return cls.log(
             action=AuditAction.STATE_TRANSITION,
             actor_id=actor_id,
@@ -573,10 +729,12 @@ class AuditLedger:
     ) -> AuditEntry:
         """Log an AI agent decision."""
         meta = kwargs.pop("metadata", {}) or {}
-        meta.update({
-            "decision": decision,
-            "confidence": confidence,
-        })
+        meta.update(
+            {
+                "decision": decision,
+                "confidence": confidence,
+            }
+        )
         return cls.log(
             action=AuditAction.AGENT_DECISION,
             actor_id=agent_id,
@@ -594,24 +752,25 @@ class AuditLedger:
     @classmethod
     def query(
         cls,
-        tenant_id: Optional[str] = None,
-        actor_id: Optional[str] = None,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[str] = None,
-        action: Optional[AuditAction] = None,
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
+        tenant_id: str | None = None,
+        actor_id: str | None = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        action: AuditAction | None = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[AuditEntry]:
+    ) -> list[AuditEntry]:
         """
-        Query audit ledger entries. If tenant_id is not provided, 
+        Query audit ledger entries. If tenant_id is not provided,
         resolved from context.
         """
         resolved_tenant = tenant_id
         if not resolved_tenant:
             try:
                 from server.core.security import get_current_tenant_id
+
                 resolved_tenant = get_current_tenant_id()
             except Exception:
                 resolved_tenant = "SYSTEM"
@@ -632,7 +791,9 @@ class AuditLedger:
             params.append(entity_id)
         if action:
             conditions.append("action = %s")
-            params.append(action.value if isinstance(action, AuditAction) else str(action))
+            params.append(
+                action.value if isinstance(action, AuditAction) else str(action)
+            )
         if start_time:
             conditions.append("timestamp >= %s")
             params.append(start_time)
@@ -644,7 +805,7 @@ class AuditLedger:
         params.extend([limit, offset])
 
         sql = (
-            f"SELECT * FROM audit_ledger "
+            f"SELECT * FROM audit_ledger "  # noqa: S608
             f"WHERE {where_clause} "
             f"ORDER BY id DESC "
             f"LIMIT %s OFFSET %s"
@@ -659,7 +820,7 @@ class AuditLedger:
         entity_type: str,
         entity_id: str,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get full audit history for a specific entity."""
         return cls.query(
             tenant_id=tenant_id,
@@ -673,7 +834,7 @@ class AuditLedger:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def verify_chain_integrity(tenant_id: str) -> Dict[str, Any]:
+    def verify_chain_integrity(tenant_id: str) -> dict[str, Any]:
         """
         Walk the entire hash chain for a tenant and verify every link.
 
@@ -696,7 +857,7 @@ class AuditLedger:
 
         _CHUNK_SIZE = 10_000
         total_entries = 0
-        expected_previous_hash: Optional[str] = None
+        expected_previous_hash: str | None = None
         last_id = 0  # cursor-based pagination via id > last_id
 
         while True:
@@ -791,8 +952,8 @@ class AuditLedger:
     def export_ledger(
         tenant_id: str,
         fmt: str = "json",
-        start_time: Optional[datetime] = None,
-        end_time: Optional[datetime] = None,
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
     ) -> str:
         """
         Export the audit ledger for a tenant as a string.
@@ -821,7 +982,7 @@ class AuditLedger:
         where_clause = " AND ".join(conditions)
 
         rows = execute_system_query(
-            f"SELECT id, tenant_id, actor_id, actor_role, action, "
+            f"SELECT id, tenant_id, actor_id, actor_role, action, "  # noqa: S608
             f"       entity_type, entity_id, metadata, timestamp, "
             f"       previous_hash, hash "
             f"FROM audit_ledger "
@@ -842,22 +1003,32 @@ class AuditLedger:
 # ============================================================================
 
 _EXPORT_COLUMNS = [
-    "id", "tenant_id", "actor_id", "actor_role", "action",
-    "entity_type", "entity_id", "metadata", "timestamp",
-    "previous_hash", "hash",
+    "id",
+    "tenant_id",
+    "actor_id",
+    "actor_role",
+    "action",
+    "entity_type",
+    "entity_id",
+    "metadata",
+    "timestamp",
+    "previous_hash",
+    "hash",
 ]
 
 
-def _rows_to_json(rows: List[Dict[str, Any]]) -> str:
+def _rows_to_json(rows: list[dict[str, Any]]) -> str:
     """Serialise rows to a JSON string."""
+
     def _default(obj: Any) -> str:
         if isinstance(obj, datetime):
             return obj.isoformat()
         return str(obj)
+
     return json.dumps(rows, indent=2, default=_default)
 
 
-def _rows_to_csv(rows: List[Dict[str, Any]]) -> str:
+def _rows_to_csv(rows: list[dict[str, Any]]) -> str:
     """Serialise rows to a CSV string."""
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=_EXPORT_COLUMNS)

@@ -1,0 +1,514 @@
+﻿{
+  "violations": [
+    {
+      "file": "ALIS\\server\\academics\\ta_assignment_service.py",
+      "line": 54,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _revoke_ta() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\academics\\ta_assignment_service.py",
+      "line": 153,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in assign_course_ta() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\academics\\ta_assignment_service.py",
+      "line": 305,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in assign_session_ta() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\admissions\\deduplication_service.py",
+      "line": 229,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in initiate_merge() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\admissions\\deduplication_service.py",
+      "line": 348,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in execute_merge() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\admissions\\event_handlers.py",
+      "line": 154,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in on_offer_expired() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\admissions\\merit_list.py",
+      "line": 288,
+      "col": 17,
+      "rule": "INV-2",
+      "message": "execute_transaction() in allocate_seat() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\admin_router.py",
+      "line": 496,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in retry_failed_task() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\finance_router.py",
+      "line": 402,
+      "col": 11,
+      "rule": "INV-2",
+      "message": "execute_transaction() in razorpay_webhook() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\finance_router.py",
+      "line": 478,
+      "col": 11,
+      "rule": "INV-2",
+      "message": "execute_transaction() in raise_utr_dispute() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\finance_router.py",
+      "line": 532,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in resolve_dispute() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\intake_router.py",
+      "line": 78,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _resolve_org_from_api_key() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\intake_router.py",
+      "line": 155,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in create_api_key() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\intake_router.py",
+      "line": 312,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in razorpay_webhook() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\roles_router.py",
+      "line": 256,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in create_custom_role() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\roles_router.py",
+      "line": 490,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in approve_permission_request() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\roles_router.py",
+      "line": 574,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in deny_permission_request() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\roles_router.py",
+      "line": 814,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in request_permissions() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\roles_router.py",
+      "line": 885,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in remove_permission() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\api\\roles_router.py",
+      "line": 951,
+      "col": 4,
+      "rule": "INV-2",
+      "message": "execute_transaction() in archive_custom_role() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\communication\\notification_log.py",
+      "line": 97,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in dispatch() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\consent\\consent_service.py",
+      "line": 233,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in request_erasure() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\consent\\consent_service.py",
+      "line": 362,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in reject_erasure() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\backup_service.py",
+      "line": 105,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in run_daily_backup() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\domain_events.py",
+      "line": 140,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in publish() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\feature_flags.py",
+      "line": 226,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in set_flag() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\feature_flags.py",
+      "line": 268,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in seed_defaults() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\mfa_service.py",
+      "line": 175,
+      "col": 16,
+      "rule": "INV-2",
+      "message": "execute_transaction() in verify_backup_code() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\mfa_service.py",
+      "line": 215,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in enroll_device() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\mfa_service.py",
+      "line": 265,
+      "col": 16,
+      "rule": "INV-2",
+      "message": "execute_transaction() in confirm_enrollment() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\mfa_service.py",
+      "line": 291,
+      "col": 16,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _verify_totp_devices() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\mfa_service.py",
+      "line": 344,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in disable_mfa() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\mfa_service.py",
+      "line": 371,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in trust_device() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\core\\perf.py",
+      "line": 303,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in publish_deferred() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\finance\\einvoice_service.py",
+      "line": 450,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in generate_irn() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\integrations\\lms_service.py",
+      "line": 454,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _write_audit() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\mcp\\activity_service.py",
+      "line": 97,
+      "col": 11,
+      "rule": "INV-1",
+      "message": "SQL INSERT inside execute_query() \u2014 must use execute_transaction()",
+      "fix_hint": "Replace execute_query(...) with execute_transaction([(sql, params)])"
+    },
+    {
+      "file": "ALIS\\server\\mcp\\activity_service.py",
+      "line": 133,
+      "col": 11,
+      "rule": "INV-1",
+      "message": "SQL INSERT inside execute_query() \u2014 must use execute_transaction()",
+      "fix_hint": "Replace execute_query(...) with execute_transaction([(sql, params)])"
+    },
+    {
+      "file": "ALIS\\server\\phd\\phd_service.py",
+      "line": 140,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in register_scholar() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\phd_service.py",
+      "line": 229,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in complete_milestone() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\phd_service.py",
+      "line": 288,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in schedule_dc_meeting() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\phd_service.py",
+      "line": 335,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in record_dc_outcome() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\phd_service.py",
+      "line": 505,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in submit_thesis() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\phd_service.py",
+      "line": 589,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in award_degree() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\plagiarism_service.py",
+      "line": 195,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in submit_check() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\phd\\plagiarism_service.py",
+      "line": 385,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in record_result() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\definition.py",
+      "line": 59,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _upsert_steps() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\definition.py",
+      "line": 116,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in delete() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\executor.py",
+      "line": 318,
+      "col": 15,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _start_step_log() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\executor.py",
+      "line": 334,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _finish_step_log() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\executor.py",
+      "line": 363,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _advance() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\executor.py",
+      "line": 381,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _fail_instance() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\executor.py",
+      "line": 393,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in _merge_context() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\process_engine\\instance.py",
+      "line": 98,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in cancel() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\regulatory\\metrics_service.py",
+      "line": 44,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in record() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\regulatory\\metrics_service.py",
+      "line": 92,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in increment() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\regulatory\\naac_service.py",
+      "line": 154,
+      "col": 15,
+      "rule": "INV-1",
+      "message": "SQL INSERT inside execute_query() \u2014 must use execute_transaction()",
+      "fix_hint": "Replace execute_query(...) with execute_transaction([(sql, params)])"
+    },
+    {
+      "file": "ALIS\\server\\reporting\\dashboard.py",
+      "line": 232,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in cache_snapshot() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\student_services\\event_handlers.py",
+      "line": 88,
+      "col": 16,
+      "rule": "INV-2",
+      "message": "execute_transaction() in on_risk_score_updated() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\tasks\\admissions.py",
+      "line": 164,
+      "col": 12,
+      "rule": "INV-2",
+      "message": "execute_transaction() in expire_utr_access_lifts() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\tasks\\finance.py",
+      "line": 34,
+      "col": 21,
+      "rule": "INV-2",
+      "message": "execute_transaction() in check_invoice_overdue() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\tools\\backends\\pgvector_backend.py",
+      "line": 180,
+      "col": 16,
+      "rule": "INV-2",
+      "message": "execute_transaction() in upsert_chunks() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    },
+    {
+      "file": "ALIS\\server\\worker.py",
+      "line": 169,
+      "col": 8,
+      "rule": "INV-2",
+      "message": "execute_transaction() in on_task_failure() has no AuditLog.log() call",
+      "fix_hint": "Add AuditLog.log(action=..., actor_id=..., entity_type=..., entity_id=..., org_id=...) after the transaction"
+    }
+  ],
+  "suppressions": [],
+  "summary": {
+    "violations": 63,
+    "suppressions": 0,
+    "passed": false
+  }
+}

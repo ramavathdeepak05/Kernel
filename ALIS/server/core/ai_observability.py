@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +48,7 @@ _AI_ACTIONS = (
 # METRICS MODELS
 # =============================================================================
 
+
 @dataclass
 class InvocationMetrics:
     """
@@ -57,6 +58,7 @@ class InvocationMetrics:
     The tenant_id field is NEVER included in API responses to prevent
     cross-tenant information leakage.
     """
+
     window_start: datetime
     window_end: datetime
 
@@ -83,7 +85,7 @@ class InvocationMetrics:
     hitl_auto_proceeds: int = 0
 
     # Model usage breakdown  { model_name: count }
-    model_usage: Dict[str, int] = field(default_factory=dict)
+    model_usage: dict[str, int] = field(default_factory=dict)
 
     # Prompt injection attempts
     injection_attempts: int = 0
@@ -98,6 +100,7 @@ class InvocationMetrics:
 @dataclass
 class ModelMetrics:
     """Per-model usage breakdown."""
+
     model_name: str
     invocation_count: int
     avg_latency_ms: float
@@ -107,6 +110,7 @@ class ModelMetrics:
 # =============================================================================
 # OBSERVABILITY SERVICE
 # =============================================================================
+
 
 class AIObservabilityService:
     """
@@ -126,7 +130,7 @@ class AIObservabilityService:
         cls,
         tenant_id: str,
         window_hours: int = 24,
-        module: Optional[str] = None,
+        module: str | None = None,
     ) -> InvocationMetrics:
         """
         Aggregate AI metrics for a tenant over the specified time window.
@@ -153,7 +157,7 @@ class AIObservabilityService:
             module_clause = "AND module = %s"
             params.append(module)
 
-        sql = f"""
+        sql = f"""  # noqa: S608
             SELECT
                 action,
                 success,
@@ -181,7 +185,7 @@ class AIObservabilityService:
         cls,
         tenant_id: str,
         window_hours: int = 24,
-    ) -> List[ModelMetrics]:
+    ) -> list[ModelMetrics]:
         """
         Return per-model invocation breakdown for a tenant.
 
@@ -196,12 +200,14 @@ class AIObservabilityService:
 
         result = []
         for model_name, count in metrics.model_usage.items():
-            result.append(ModelMetrics(
-                model_name=model_name,
-                invocation_count=count,
-                avg_latency_ms=metrics.avg_latency_ms,  # approximation
-                failure_count=0,  # per-model failures require richer data
-            ))
+            result.append(
+                ModelMetrics(
+                    model_name=model_name,
+                    invocation_count=count,
+                    avg_latency_ms=metrics.avg_latency_ms,  # approximation
+                    failure_count=0,  # per-model failures require richer data
+                )
+            )
 
         return sorted(result, key=lambda m: m.invocation_count, reverse=True)
 
@@ -212,7 +218,7 @@ class AIObservabilityService:
     @classmethod
     def _aggregate(
         cls,
-        rows: List[Dict[str, Any]],
+        rows: list[dict[str, Any]],
         window_start: datetime,
         window_end: datetime,
     ) -> InvocationMetrics:
@@ -222,12 +228,12 @@ class AIObservabilityService:
             window_end=window_end,
         )
 
-        latencies: List[float] = []
+        latencies: list[float] = []
 
         for row in rows:
             action = row.get("action", "")
             success = row.get("success", True)
-            meta: Dict[str, Any] = row.get("metadata") or {}
+            meta: dict[str, Any] = row.get("metadata") or {}
 
             if action == "ai_invocation":
                 metrics.total_invocations += 1
@@ -242,9 +248,7 @@ class AIObservabilityService:
 
                 model = meta.get("model")
                 if model:
-                    metrics.model_usage[model] = (
-                        metrics.model_usage.get(model, 0) + 1
-                    )
+                    metrics.model_usage[model] = metrics.model_usage.get(model, 0) + 1
 
             elif action == "guardrail_blocked":
                 metrics.guardrail_blocks += 1
@@ -288,7 +292,8 @@ class AIObservabilityService:
 # HELPERS
 # =============================================================================
 
-def _safe_float(value: Any) -> Optional[float]:
+
+def _safe_float(value: Any) -> float | None:
     """Safely convert a value to float, returning None on failure."""
     try:
         return float(value)
@@ -296,7 +301,7 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
-def _percentile(values: List[float], pct: int) -> float:
+def _percentile(values: list[float], pct: int) -> float:
     """Compute the Nth percentile of a list of floats."""
     if not values:
         return 0.0

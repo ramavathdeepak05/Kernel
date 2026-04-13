@@ -1,4 +1,5 @@
 """E05-S06 — Attendance Tracking"""
+
 from __future__ import annotations
 
 import logging
@@ -15,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 class AttendanceService:
-
     # ------------------------------------------------------------------
     # Mark attendance for a session
     # ------------------------------------------------------------------
 
     @classmethod
-    def mark_session(cls, org_id: str, req: AttendanceMarkRequest,
-                     faculty_id: str, actor_id: str) -> dict:
+    def mark_session(
+        cls, org_id: str, req: AttendanceMarkRequest, faculty_id: str, actor_id: str
+    ) -> dict:
         """
         Create (or update) an attendance session and mark each student.
         Idempotent — re-marking a session updates existing records.
@@ -41,15 +42,26 @@ class AttendanceService:
             session_id = str(existing_session[0]["id"])
         else:
             session_id = str(uuid.uuid4())
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO attendance_sessions
                     (id, org_id, course_id, faculty_id, academic_year, session_date, slot_type)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (session_id, org_id, req.course_id, faculty_id,
-                 req.academic_year, req.session_date, req.slot_type),
-            )])
+                        (
+                            session_id,
+                            org_id,
+                            req.course_id,
+                            faculty_id,
+                            req.academic_year,
+                            req.session_date,
+                            req.slot_type,
+                        ),
+                    )
+                ]
+            )
 
         # Upsert each student's record
         ops = []
@@ -59,27 +71,48 @@ class AttendanceService:
             if status not in [s.value for s in AttendanceStatus]:
                 status = AttendanceStatus.ABSENT.value
 
-            ops.append((
-                """
+            ops.append(
+                (
+                    """
                 INSERT INTO attendance_records (id, org_id, session_id, student_id, status, marked_by)
                 VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (session_id, student_id)
                 DO UPDATE SET status = EXCLUDED.status, marked_by = EXCLUDED.marked_by, marked_at = NOW()
                 """,
-                (str(uuid.uuid4()), org_id, session_id, student_id, status, actor_id),
-            ))
+                    (
+                        str(uuid.uuid4()),
+                        org_id,
+                        session_id,
+                        student_id,
+                        status,
+                        actor_id,
+                    ),
+                )
+            )
 
         if ops:
             execute_transaction(ops)
 
-        present = sum(1 for r in req.records if r.get("status", "").upper() == "PRESENT")
+        present = sum(
+            1 for r in req.records if r.get("status", "").upper() == "PRESENT"
+        )
         total = len(req.records)
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="attendance_session", entity_id=session_id, org_id=org_id,
-                     module="E05-S06",
-                     metadata={"course_id": req.course_id, "date": req.session_date,
-                               "present": present, "total": total})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="attendance_session",
+            entity_id=session_id,
+            org_id=org_id,
+            module="E05-S06",
+            metadata={
+                "course_id": req.course_id,
+                "date": req.session_date,
+                "present": present,
+                "total": total,
+            },
+        )
 
         return {
             "session_id": session_id,
@@ -97,21 +130,33 @@ class AttendanceService:
     @classmethod
     def finalize_session(cls, org_id: str, session_id: str, actor_id: str) -> dict:
         rows = execute_query(
-            "SELECT * FROM attendance_sessions WHERE id = %s AND org_id = %s", (session_id, org_id)
+            "SELECT * FROM attendance_sessions WHERE id = %s AND org_id = %s",
+            (session_id, org_id),
         )
         if not rows:
             raise NotFoundError(f"Session {session_id} not found")
         if rows[0]["is_finalized"]:
             raise BusinessRuleViolation(message="Session already finalized")
 
-        execute_transaction([(
-            "UPDATE attendance_sessions SET is_finalized = TRUE, finalized_at = NOW() WHERE id = %s",
-            (session_id,),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE attendance_sessions SET is_finalized = TRUE, finalized_at = NOW() WHERE id = %s",
+                    (session_id,),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.UPDATE, actor_id=actor_id, actor_type="human",
-                     entity_type="attendance_session", entity_id=session_id, org_id=org_id,
-                     module="E05-S06", metadata={"action": "finalize"})
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="attendance_session",
+            entity_id=session_id,
+            org_id=org_id,
+            module="E05-S06",
+            metadata={"action": "finalize"},
+        )
 
         return {"session_id": session_id, "is_finalized": True}
 
@@ -120,8 +165,9 @@ class AttendanceService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def get_student_summary(cls, org_id: str, student_id: str,
-                             course_id: str, academic_year: str) -> dict:
+    def get_student_summary(
+        cls, org_id: str, student_id: str, course_id: str, academic_year: str
+    ) -> dict:
         rows = execute_query(
             """
             SELECT
@@ -142,6 +188,7 @@ class AttendanceService:
         pct = round((attended / total * 100), 2) if total > 0 else 0.0
 
         from server.core.policy_store import PolicyKey, PolicyStore
+
         min_pct = float(PolicyStore.get(org_id, PolicyKey.MIN_ATTENDANCE_PCT) or 75.0)
 
         return {
@@ -158,14 +205,18 @@ class AttendanceService:
         }
 
     @classmethod
-    def get_course_summary(cls, org_id: str, course_id: str, academic_year: str) -> list[dict]:
+    def get_course_summary(
+        cls, org_id: str, course_id: str, academic_year: str
+    ) -> list[dict]:
         """Attendance summary for all enrolled students in a course."""
         students = execute_query(
             "SELECT student_id FROM course_enrollments WHERE course_id = %s AND academic_year = %s AND org_id = %s AND status = 'ENROLLED'",
             (course_id, academic_year, org_id),
         )
         return [
-            cls.get_student_summary(org_id, str(s["student_id"]), course_id, academic_year)
+            cls.get_student_summary(
+                org_id, str(s["student_id"]), course_id, academic_year
+            )
             for s in students
         ]
 
@@ -174,8 +225,9 @@ class AttendanceService:
     # ------------------------------------------------------------------
 
     @classmethod
-    def finalize_semester_attendance(cls, org_id: str, academic_year: str,
-                                      semester: int, actor_id: str) -> dict:
+    def finalize_semester_attendance(
+        cls, org_id: str, academic_year: str, semester: int, actor_id: str
+    ) -> dict:
         """
         Lock all open sessions for a semester and publish AttendanceFinalized event.
         Called by the academic calendar daemon when ATTENDANCE_LOCK phase starts.
@@ -191,23 +243,52 @@ class AttendanceService:
         )
 
         for session in open_sessions:
-            execute_transaction([(
-                "UPDATE attendance_sessions SET is_finalized = TRUE, finalized_at = NOW() WHERE id = %s",
-                (str(session["id"]),),
-            )])
+            execute_transaction(
+                [
+                    (
+                        "UPDATE attendance_sessions SET is_finalized = TRUE, finalized_at = NOW() WHERE id = %s",
+                        (str(session["id"]),),
+                    )
+                ]
+            )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="AttendanceFinalized",
-            entity_type="semester",
-            entity_id=f"{org_id}:{academic_year}:sem{semester}",
-            org_id=org_id,
-            payload={"academic_year": academic_year, "semester": semester,
-                     "sessions_finalized": len(open_sessions)},
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="AttendanceFinalized",
+                entity_type="semester",
+                entity_id=f"{org_id}:{academic_year}:sem{semester}",
+                org_id=org_id,
+                payload={
+                    "academic_year": academic_year,
+                    "semester": semester,
+                    "sessions_finalized": len(open_sessions),
+                },
+                actor_id=actor_id,
+            )
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
             actor_id=actor_id,
-        ))
+            actor_type="system",
+            entity_type="semester_attendance",
+            entity_id=f"{academic_year}:sem{semester}",
+            org_id=org_id,
+            module="E05-S06",
+            metadata={
+                "academic_year": academic_year,
+                "semester": semester,
+                "sessions_finalized": len(open_sessions),
+            },
+        )
 
-        logger.info("AttendanceFinalized: org=%s year=%s semester=%d sessions=%d",
-                    org_id, academic_year, semester, len(open_sessions))
+        logger.info(
+            "AttendanceFinalized: org=%s year=%s semester=%d sessions=%d",
+            org_id,
+            academic_year,
+            semester,
+            len(open_sessions),
+        )
 
         return {
             "academic_year": academic_year,

@@ -17,22 +17,23 @@ It is consumed exclusively by the AI Gateway router.
 Registered Agents:
     - eligibility_evaluator_v1  — Eligibility Eval Wizard (M1-W3)
 """
+
 from __future__ import annotations
 
-from typing import Dict, Any, List, Callable, Literal, Optional, Tuple
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from server.core.ai_gateway import (
-    AIGateway,
     AIGatewayContext,
     AIInvocationResult,
 )
-from server.core.audit import AuditLog, AuditAction
-
+from server.core.audit import AuditAction, AuditLog
 
 # =============================================================================
 # AGENT METADATA
 # =============================================================================
+
 
 @dataclass(frozen=True)
 class AgentMeta:
@@ -48,13 +49,14 @@ class AgentMeta:
                        agents interact with data only through the AI Gateway
                        and declared read-only tools.
     """
+
     agent_id: str
     module: str
     model_version: str
     prompt_version: str
-    invocation_class: str       # EVALUATIVE, GENERATIVE, ANALYTICAL
+    invocation_class: str  # EVALUATIVE, GENERATIVE, ANALYTICAL
     authorization_policy: str
-    allowed_tools: Tuple[str, ...] = ()   # E03-S04: declared tool scope
+    allowed_tools: tuple[str, ...] = ()  # E03-S04: declared tool scope
     description: str = ""
     status: Literal["ACTIVE", "SHADOW", "DEPRECATED"] = "ACTIVE"
 
@@ -62,6 +64,7 @@ class AgentMeta:
 # =============================================================================
 # ADMISSIONS AGENT REGISTRY
 # =============================================================================
+
 
 class AdmissionsAgentRegistry:
     """
@@ -77,7 +80,7 @@ class AdmissionsAgentRegistry:
     """
 
     # --- Agent metadata store ---
-    _agents: Dict[str, AgentMeta] = {
+    _agents: dict[str, AgentMeta] = {
         "eligibility_evaluator_v1": AgentMeta(
             agent_id="eligibility_evaluator_v1",
             module="M1",
@@ -86,8 +89,8 @@ class AdmissionsAgentRegistry:
             invocation_class="EVALUATIVE",
             authorization_policy="admissions_officer_or_system",
             allowed_tools=(
-                "tool.rag.retriever",    # Semantic search over institutional docs
-                "tool.policy.lookup",    # Fetch admission criteria from policy store
+                "tool.rag.retriever",  # Semantic search over institutional docs
+                "tool.policy.lookup",  # Fetch admission criteria from policy store
                 "tool.scoring.structured",  # Compute weighted eligibility score
             ),
             description=(
@@ -99,13 +102,14 @@ class AdmissionsAgentRegistry:
 
     # --- Agent execution function map ---
     # Populated at import time by importing the agent modules.
-    _executors: Dict[str, Callable] = {}
+    _executors: dict[str, Callable] = {}
 
     @classmethod
     def _ensure_executors_loaded(cls):
         """Lazy-load agent executors to avoid circular imports."""
         if not cls._executors:
             from server.agents.admissions.eligibility import execute_eligibility_eval
+
             cls._executors["eligibility_evaluator_v1"] = execute_eligibility_eval
 
     @classmethod
@@ -114,12 +118,12 @@ class AdmissionsAgentRegistry:
         return agent_name in cls._agents
 
     @classmethod
-    def list_agents(cls) -> List[str]:
+    def list_agents(cls) -> list[str]:
         """List all registered agent names."""
         return list(cls._agents.keys())
 
     @classmethod
-    def list_agents_detail(cls) -> List[Dict[str, Any]]:
+    def list_agents_detail(cls) -> list[dict[str, Any]]:
         """List all agents with their metadata."""
         return [
             {
@@ -140,8 +144,8 @@ class AdmissionsAgentRegistry:
         cls,
         agent_name: str,
         context: AIGatewayContext,
-        input_data: Dict[str, Any],
-        model_override: Optional[str] = None,
+        input_data: dict[str, Any],
+        model_override: str | None = None,
     ) -> AIInvocationResult:
         """
         Execute a registered agent.
@@ -159,17 +163,13 @@ class AdmissionsAgentRegistry:
             ValueError: If agent_name is not registered
         """
         if agent_name not in cls._agents:
-            raise ValueError(
-                f"Agent '{agent_name}' not registered in M1 (Admissions)."
-            )
+            raise ValueError(f"Agent '{agent_name}' not registered in M1 (Admissions).")
 
         cls._ensure_executors_loaded()
 
         executor = cls._executors.get(agent_name)
         if executor is None:
-            raise ValueError(
-                f"Agent '{agent_name}' is registered but has no executor."
-            )
+            raise ValueError(f"Agent '{agent_name}' is registered but has no executor.")
 
         meta = cls._agents[agent_name]
 

@@ -3,18 +3,19 @@
 Live aggregate KPIs for the institution dashboard.
 Expensive queries are cached in kpi_snapshots (refreshed by Celery beat).
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import date
 
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 
 class DashboardService:
-
     # ------------------------------------------------------------------
     # Top-level KPI bundle
     # ------------------------------------------------------------------
@@ -27,12 +28,12 @@ class DashboardService:
         """
         return {
             "academic_year": academic_year,
-            "admissions":    cls._admissions_kpis(org_id, academic_year),
-            "academics":     cls._academics_kpis(org_id, academic_year),
-            "finance":       cls._finance_kpis(org_id, academic_year),
-            "examinations":  cls._exam_kpis(org_id, academic_year),
-            "hr":            cls._hr_kpis(org_id),
-            "services":      cls._services_kpis(org_id),
+            "admissions": cls._admissions_kpis(org_id, academic_year),
+            "academics": cls._academics_kpis(org_id, academic_year),
+            "finance": cls._finance_kpis(org_id, academic_year),
+            "examinations": cls._exam_kpis(org_id, academic_year),
+            "hr": cls._hr_kpis(org_id),
+            "services": cls._services_kpis(org_id),
         }
 
     # ------------------------------------------------------------------
@@ -207,13 +208,17 @@ class DashboardService:
         if hostel_rows:
             h = dict(hostel_rows[0])
             total = int(h.get("total_rooms") or 0)
-            occ   = int(h.get("occupied_rooms") or 0)
-            result["hostel_occupancy_pct"] = round((occ / total) * 100, 1) if total else 0.0
+            occ = int(h.get("occupied_rooms") or 0)
+            result["hostel_occupancy_pct"] = (
+                round((occ / total) * 100, 1) if total else 0.0
+            )
             result["hostel_occupied"] = occ
-            result["hostel_total"]    = total
+            result["hostel_total"] = total
         if library_rows:
-            result["library_books_borrowed"] = int(library_rows[0]["books_borrowed"] or 0)
-            result["library_overdue"]        = int(library_rows[0]["overdue"] or 0)
+            result["library_books_borrowed"] = int(
+                library_rows[0]["books_borrowed"] or 0
+            )
+            result["library_overdue"] = int(library_rows[0]["overdue"] or 0)
         return result
 
     # ------------------------------------------------------------------
@@ -224,20 +229,34 @@ class DashboardService:
     def cache_snapshot(cls, org_id: str, academic_year: str) -> None:
         """Called by Celery beat daily to persist KPIs into kpi_snapshots."""
         import json
+
         kpis = cls.get_kpis(org_id, academic_year)
         today = date.today().isoformat()
         for key, value in kpis.items():
             if not isinstance(value, dict):
                 continue
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO kpi_snapshots (id, org_id, snapshot_date, kpi_key, value)
                 VALUES (uuid_generate_v4(), %s, %s, %s, %s::jsonb)
                 ON CONFLICT (org_id, snapshot_date, kpi_key)
                 DO UPDATE SET value = EXCLUDED.value, computed_at = NOW()
                 """,
-                (org_id, today, key, json.dumps(value)),
-            )])
+                        (org_id, today, key, json.dumps(value)),
+                    )
+                ]
+            )
+            AuditLog.log(
+                action=AuditAction.CREATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="dashboard_cache",
+                entity_id="",
+                tenant_id="",
+                metadata={"source": "cache_snapshot"},
+            )
 
     @classmethod
     def get_trend(cls, org_id: str, kpi_key: str, days: int = 30) -> list[dict]:

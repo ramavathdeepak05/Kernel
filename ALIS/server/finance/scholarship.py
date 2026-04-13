@@ -1,4 +1,5 @@
 """E07-S05 — Scholarship Management"""
+
 from __future__ import annotations
 
 import logging
@@ -14,28 +15,47 @@ logger = logging.getLogger(__name__)
 
 
 class ScholarshipService:
-
     @classmethod
     def create(cls, org_id: str, req: ScholarshipCreate, actor_id: str) -> dict:
         import json
+
         sid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO scholarships
                 (id, org_id, name, description, type, discount_type, discount_value,
                  academic_year, max_recipients, criteria, created_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
             """,
-            (sid, org_id, req.name, req.description, req.type.value,
-             req.discount_type.value, req.discount_value,
-             req.academic_year, req.max_recipients,
-             json.dumps(req.criteria) if req.criteria else None, actor_id),
-        )])
+                    (
+                        sid,
+                        org_id,
+                        req.name,
+                        req.description,
+                        req.type.value,
+                        req.discount_type.value,
+                        req.discount_value,
+                        req.academic_year,
+                        req.max_recipients,
+                        json.dumps(req.criteria) if req.criteria else None,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="scholarship", entity_id=sid, org_id=org_id,
-                     module="E07-S05",
-                     metadata={"name": req.name, "type": req.type.value})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="scholarship",
+            entity_id=sid,
+            org_id=org_id,
+            module="E07-S05",
+            metadata={"name": req.name, "type": req.type.value},
+        )
 
         return cls.get(org_id, sid)
 
@@ -56,7 +76,9 @@ class ScholarshipService:
                 (req.scholarship_id, req.academic_year, org_id),
             )
             if int(current[0]["cnt"]) >= int(sc["max_recipients"]):
-                raise BusinessRuleViolation(message="Scholarship has reached maximum recipients")
+                raise BusinessRuleViolation(
+                    message="Scholarship has reached maximum recipients"
+                )
 
         # Compute discount amount for reference
         if sc["discount_type"] == "FIXED":
@@ -66,8 +88,10 @@ class ScholarshipService:
             amount_applied = float(sc["discount_value"])
 
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO scholarship_assignments
                 (id, org_id, scholarship_id, student_id, academic_year, amount_applied, assigned_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -75,15 +99,32 @@ class ScholarshipService:
             DO UPDATE SET status = 'ACTIVE', amount_applied = EXCLUDED.amount_applied,
                           assigned_by = EXCLUDED.assigned_by, assigned_at = NOW()
             """,
-            (aid, org_id, req.scholarship_id, req.student_id,
-             req.academic_year, amount_applied, actor_id),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        req.scholarship_id,
+                        req.student_id,
+                        req.academic_year,
+                        amount_applied,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="scholarship_assignment", entity_id=aid, org_id=org_id,
-                     module="E07-S05",
-                     metadata={"scholarship_id": req.scholarship_id,
-                               "student_id": req.student_id})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="scholarship_assignment",
+            entity_id=aid,
+            org_id=org_id,
+            module="E07-S05",
+            metadata={
+                "scholarship_id": req.scholarship_id,
+                "student_id": req.student_id,
+            },
+        )
 
         rows = execute_query(
             "SELECT sa.*, s.name AS scholarship_name FROM scholarship_assignments sa JOIN scholarships s ON s.id = sa.scholarship_id WHERE sa.id = %s OR (sa.scholarship_id = %s AND sa.student_id = %s AND sa.academic_year = %s)",
@@ -93,10 +134,24 @@ class ScholarshipService:
 
     @classmethod
     def revoke(cls, org_id: str, assignment_id: str, actor_id: str) -> dict:
-        execute_transaction([(
-            "UPDATE scholarship_assignments SET status = 'SUSPENDED' WHERE id = %s AND org_id = %s",
-            (assignment_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE scholarship_assignments SET status = 'SUSPENDED' WHERE id = %s AND org_id = %s",
+                    (assignment_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.DELETE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="revoke",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "revoke"},
+        )
         rows = execute_query(
             "SELECT * FROM scholarship_assignments WHERE id = %s", (assignment_id,)
         )
@@ -121,8 +176,9 @@ class ScholarshipService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def list_for_student(cls, org_id: str, student_id: str,
-                          academic_year: str | None = None) -> list[dict]:
+    def list_for_student(
+        cls, org_id: str, student_id: str, academic_year: str | None = None
+    ) -> list[dict]:
         sql = """
             SELECT sa.*, s.name AS scholarship_name, s.type, s.discount_type, s.discount_value
             FROM scholarship_assignments sa

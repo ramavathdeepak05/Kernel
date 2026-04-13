@@ -8,10 +8,9 @@ Both v1 and v2 prefixes registered on the FastAPI app.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
 
 
 class VersionedRouter:
@@ -36,7 +35,7 @@ class VersionedRouter:
     useful for generating OpenAPI descriptions or Deprecation hints.
     """
 
-    def __init__(self, current_version: str, prefix: str, tags: List[str]) -> None:
+    def __init__(self, current_version: str, prefix: str, tags: list[str]) -> None:
         self.current_version = current_version
         self.v1 = APIRouter(prefix=f"/api/v1{prefix}", tags=tags)
         self.v2 = APIRouter(prefix=f"/api/v2{prefix}", tags=tags)
@@ -75,7 +74,7 @@ class DeprecationMiddleware:
             if is_v1 and message["type"] == "http.response.start":
                 # Build the v2 equivalent link by replacing the version segment.
                 v2_path = path.replace("/api/v1/", "/api/v2/", 1)
-                headers: List[tuple] = list(message.get("headers", []))
+                headers: list[tuple] = list(message.get("headers", []))
                 headers += [
                     (b"sunset", self.sunset_date.encode()),
                     (b"deprecation", b"true"),
@@ -101,7 +100,7 @@ def get_api_v2_router() -> APIRouter:
     v2_router = APIRouter(prefix="/api/v2", tags=["v2"])
 
     @v2_router.get("/health", summary="v2 API health probe")
-    async def v2_health() -> Dict[str, str]:
+    async def v2_health() -> dict[str, str]:
         """Confirm the v2 API surface is reachable."""
         return {"status": "ok", "version": "v2", "note": "v2 API — stable"}
 

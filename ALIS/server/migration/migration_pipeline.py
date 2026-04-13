@@ -18,6 +18,7 @@ Duplicate detection
 Jaro-Winkler similarity ≥ 0.90 on (name, dob, phone) combination.
 All rows audited with source='migration_pipeline' in audit_ledger.
 """
+
 from __future__ import annotations
 
 import csv
@@ -25,11 +26,9 @@ import io
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel
-
 from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
@@ -41,6 +40,7 @@ Mode = Literal["validate", "dry_run", "commit"]
 # Result models
 # ---------------------------------------------------------------------------
 
+
 class RowError(BaseModel):
     row_number: int
     raw_data: dict
@@ -48,7 +48,7 @@ class RowError(BaseModel):
 
 
 class MigrationResult(BaseModel):
-    job_id: Optional[str]
+    job_id: str | None
     entity_type: str
     mode: Mode
     status: str
@@ -67,9 +67,21 @@ _REQUIRED_COLUMNS: dict[str, list[str]] = {
     "students": ["name", "dob", "phone", "program_code", "enrollment_year"],
     "faculty": ["name", "dob", "phone", "department_code", "designation"],
     "courses": ["course_code", "title", "credits", "department_code", "academic_year"],
-    "fee_records": ["student_ref", "invoice_date", "amount_due", "amount_paid", "academic_year"],
+    "fee_records": [
+        "student_ref",
+        "invoice_date",
+        "amount_due",
+        "amount_paid",
+        "academic_year",
+    ],
     "historical_attendance": ["student_ref", "course_code", "session_date", "status"],
-    "exam_results": ["student_ref", "course_code", "semester", "marks_obtained", "max_marks"],
+    "exam_results": [
+        "student_ref",
+        "course_code",
+        "semester",
+        "marks_obtained",
+        "max_marks",
+    ],
     "alumni": ["name", "dob", "phone", "graduation_year", "program_code"],
 }
 
@@ -77,6 +89,7 @@ _REQUIRED_COLUMNS: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 # Duplicate detection
 # ---------------------------------------------------------------------------
+
 
 def _jaro_winkler(s1: str, s2: str) -> float:
     """Simplified Jaro-Winkler similarity."""
@@ -120,9 +133,7 @@ def _jaro_winkler(s1: str, s2: str) -> float:
         k += 1
 
     jaro = (
-        matches / len_s1
-        + matches / len_s2
-        + (matches - transpositions / 2) / matches
+        matches / len_s1 + matches / len_s2 + (matches - transpositions / 2) / matches
     ) / 3
 
     # Winkler prefix bonus (up to 4 chars)
@@ -145,23 +156,32 @@ def _detect_duplicates(row: dict, org_id: str, entity_type: str) -> list[str]:
     phone = str(row.get("phone", "")).strip()
 
     if entity_type == "students":
-        candidates = execute_query("""
+        candidates = execute_query(
+            """
             SELECT id, name, phone FROM students
             WHERE org_id = %s AND phone = %s
             LIMIT 20
-        """, (org_id, phone))
+        """,
+            (org_id, phone),
+        )
     elif entity_type == "faculty":
-        candidates = execute_query("""
+        candidates = execute_query(
+            """
             SELECT id, name, phone FROM faculty_members
             WHERE org_id = %s AND phone = %s
             LIMIT 20
-        """, (org_id, phone))
+        """,
+            (org_id, phone),
+        )
     else:
-        candidates = execute_query("""
+        candidates = execute_query(
+            """
             SELECT id, name, phone FROM alumni_profiles
             WHERE org_id = %s AND phone = %s
             LIMIT 20
-        """, (org_id, phone))
+        """,
+            (org_id, phone),
+        )
 
     duplicates = []
     for c in candidates:
@@ -177,110 +197,163 @@ def _detect_duplicates(row: dict, org_id: str, entity_type: str) -> list[str]:
 # Entity-specific insert
 # ---------------------------------------------------------------------------
 
-def _insert_row(entity_type: str, row: dict, org_id: str, job_id: str) -> None:
-    """Insert a single validated row into the correct table."""
+
+def _build_insert_query(
+    entity_type: str, row: dict, org_id: str, job_id: str
+) -> tuple | None:
+    """Return a single validated row insert tuple."""
     eid = str(uuid.uuid4())
 
     if entity_type == "students":
-        execute_transaction([("""
+        return (
+            """
             INSERT INTO students
                 (id, org_id, name, date_of_birth, phone, program_code,
                  enrollment_year, status, source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'ENROLLED', 'migration_pipeline', NOW())
             ON CONFLICT DO NOTHING
-        """, (
-            eid, org_id,
-            row["name"], row.get("dob"), row.get("phone"),
-            row.get("program_code"), row.get("enrollment_year"),
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["name"],
+                row.get("dob"),
+                row.get("phone"),
+                row.get("program_code"),
+                row.get("enrollment_year"),
+            ),
+        )
 
-    elif entity_type == "faculty":
-        execute_transaction([("""
+    if entity_type == "faculty":
+        return (
+            """
             INSERT INTO faculty_members
                 (id, org_id, name, date_of_birth, phone, department_code,
                  designation, status, source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE', 'migration_pipeline', NOW())
             ON CONFLICT DO NOTHING
-        """, (
-            eid, org_id,
-            row["name"], row.get("dob"), row.get("phone"),
-            row.get("department_code"), row.get("designation"),
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["name"],
+                row.get("dob"),
+                row.get("phone"),
+                row.get("department_code"),
+                row.get("designation"),
+            ),
+        )
 
-    elif entity_type == "courses":
-        execute_transaction([("""
+    if entity_type == "courses":
+        return (
+            """
             INSERT INTO courses
                 (id, org_id, course_code, title, credits, department_code,
                  academic_year, status, source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE', 'migration_pipeline', NOW())
             ON CONFLICT (org_id, course_code) DO NOTHING
-        """, (
-            eid, org_id,
-            row["course_code"], row["title"], row.get("credits"),
-            row.get("department_code"), row.get("academic_year"),
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["course_code"],
+                row["title"],
+                row.get("credits"),
+                row.get("department_code"),
+                row.get("academic_year"),
+            ),
+        )
 
-    elif entity_type == "fee_records":
-        execute_transaction([("""
+    if entity_type == "fee_records":
+        return (
+            """
             INSERT INTO student_invoices
                 (id, org_id, student_ref, invoice_date, amount_due, amount_paid,
                  balance, academic_year, status, source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s - %s, %s, 'HISTORICAL', 'migration_pipeline', NOW())
             ON CONFLICT DO NOTHING
-        """, (
-            eid, org_id,
-            row["student_ref"], row.get("invoice_date"),
-            row["amount_due"], row["amount_paid"],
-            row["amount_due"], row["amount_paid"],
-            row.get("academic_year"),
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["student_ref"],
+                row.get("invoice_date"),
+                row["amount_due"],
+                row["amount_paid"],
+                row["amount_due"],
+                row["amount_paid"],
+                row.get("academic_year"),
+            ),
+        )
 
-    elif entity_type == "historical_attendance":
-        execute_transaction([("""
+    if entity_type == "historical_attendance":
+        return (
+            """
             INSERT INTO attendance_records
                 (id, org_id, student_ref, course_code, session_date, status,
                  source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, 'migration_pipeline', NOW())
             ON CONFLICT DO NOTHING
-        """, (
-            eid, org_id,
-            row["student_ref"], row["course_code"],
-            row.get("session_date"), row["status"],
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["student_ref"],
+                row["course_code"],
+                row.get("session_date"),
+                row["status"],
+            ),
+        )
 
-    elif entity_type == "exam_results":
-        execute_transaction([("""
+    if entity_type == "exam_results":
+        return (
+            """
             INSERT INTO exam_results
                 (id, org_id, student_ref, course_code, semester,
                  marks_obtained, max_marks, source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'migration_pipeline', NOW())
             ON CONFLICT DO NOTHING
-        """, (
-            eid, org_id,
-            row["student_ref"], row["course_code"], row["semester"],
-            row["marks_obtained"], row["max_marks"],
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["student_ref"],
+                row["course_code"],
+                row["semester"],
+                row["marks_obtained"],
+                row["max_marks"],
+            ),
+        )
 
-    elif entity_type == "alumni":
-        execute_transaction([("""
+    if entity_type == "alumni":
+        return (
+            """
             INSERT INTO alumni_profiles
                 (id, org_id, name, date_of_birth, phone, graduation_year,
                  program_code, status, source, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'ACTIVE', 'migration_pipeline', NOW())
             ON CONFLICT DO NOTHING
-        """, (
-            eid, org_id,
-            row["name"], row.get("dob"), row.get("phone"),
-            row.get("graduation_year"), row.get("program_code"),
-        ))])
+        """,
+            (
+                eid,
+                org_id,
+                row["name"],
+                row.get("dob"),
+                row.get("phone"),
+                row.get("graduation_year"),
+                row.get("program_code"),
+            ),
+        )
+
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
-class MigrationPipeline:
 
+class MigrationPipeline:
     @classmethod
     async def run(
         cls,
@@ -295,12 +368,19 @@ class MigrationPipeline:
 
         # Create job record for commit mode
         if mode == "commit" and job_id:
-            execute_transaction([("""
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO data_migration_jobs
                     (id, org_id, entity_type, mode, status, total_rows, processed_rows,
                      error_count, started_at, actor_id)
                 VALUES (%s, %s, %s, %s, 'RUNNING', 0, 0, 0, NOW(), %s)
-            """, (job_id, org_id, entity_type, mode, actor_id))])
+            """,
+                        (job_id, org_id, entity_type, mode, actor_id),
+                    )
+                ]
+            )
 
         errors: list[RowError] = []
         processed = 0
@@ -327,11 +407,13 @@ class MigrationPipeline:
                         processed_rows=0,
                         skipped_duplicates=0,
                         error_count=1,
-                        errors=[RowError(
-                            row_number=0,
-                            raw_data={},
-                            error_message=f"Missing required columns: {', '.join(sorted(missing))}",
-                        )],
+                        errors=[
+                            RowError(
+                                row_number=0,
+                                raw_data={},
+                                error_message=f"Missing required columns: {', '.join(sorted(missing))}",
+                            )
+                        ],
                     )
 
             for i, row in enumerate(rows_raw, start=1):
@@ -347,19 +429,32 @@ class MigrationPipeline:
                     if dupe_ids:
                         skipped += 1
                         if mode == "commit" and job_id:
-                            execute_transaction([("""
+                            execute_transaction(
+                                [
+                                    (
+                                        """
                                 INSERT INTO data_migration_errors
                                     (id, job_id, row_number, raw_data, error_message)
                                 VALUES (%s, %s, %s, %s, %s)
-                            """, (
-                                str(uuid.uuid4()), job_id, i,
-                                json.dumps(row_dict),
-                                f"Duplicate detected — matches existing IDs: {', '.join(dupe_ids[:3])}",
-                            ))])
+                            """,
+                                        (
+                                            str(uuid.uuid4()),
+                                            job_id,
+                                            i,
+                                            json.dumps(row_dict),
+                                            f"Duplicate detected — matches existing IDs: {', '.join(dupe_ids[:3])}",
+                                        ),
+                                    )
+                                ]
+                            )
                         continue
 
                     if mode == "commit":
-                        _insert_row(entity_type, row_dict, org_id, job_id or "")
+                        q_tup = _build_insert_query(
+                            entity_type, row_dict, org_id, job_id or ""
+                        )
+                        if q_tup:
+                            execute_transaction([q_tup])
                         AuditLog.log(
                             org_id=org_id,
                             actor_id=actor_id,
@@ -372,31 +467,50 @@ class MigrationPipeline:
                     processed += 1
 
                 except Exception as exc:
-                    errors.append(RowError(
-                        row_number=i,
-                        raw_data=row_dict,
-                        error_message=str(exc),
-                    ))
+                    errors.append(
+                        RowError(
+                            row_number=i,
+                            raw_data=row_dict,
+                            error_message=str(exc),
+                        )
+                    )
                     if mode == "commit" and job_id:
-                        execute_transaction([("""
+                        execute_transaction(
+                            [
+                                (
+                                    """
                             INSERT INTO data_migration_errors
                                 (id, job_id, row_number, raw_data, error_message)
                             VALUES (%s, %s, %s, %s, %s)
-                        """, (
-                            str(uuid.uuid4()), job_id, i,
-                            json.dumps(row_dict), str(exc)[:1000],
-                        ))])
+                        """,
+                                    (
+                                        str(uuid.uuid4()),
+                                        job_id,
+                                        i,
+                                        json.dumps(row_dict),
+                                        str(exc)[:1000],
+                                    ),
+                                )
+                            ]
+                        )
 
         except Exception as exc:
             logger.exception("Migration pipeline failed: %s", exc)
             final_status = "FAILED"
             if mode == "commit" and job_id:
-                execute_transaction([("""
+                execute_transaction(
+                    [
+                        (
+                            """
                     UPDATE data_migration_jobs
                     SET status = 'FAILED', completed_at = NOW(),
                         total_rows = %s, processed_rows = %s, error_count = %s
                     WHERE id = %s
-                """, (total, processed, len(errors), job_id))])
+                """,
+                            (total, processed, len(errors), job_id),
+                        )
+                    ]
+                )
             return MigrationResult(
                 job_id=job_id,
                 entity_type=entity_type,
@@ -411,12 +525,19 @@ class MigrationPipeline:
 
         final_status = "COMPLETED" if not errors else "COMPLETED_WITH_ERRORS"
         if mode == "commit" and job_id:
-            execute_transaction([("""
+            execute_transaction(
+                [
+                    (
+                        """
                 UPDATE data_migration_jobs
                 SET status = %s, completed_at = NOW(),
                     total_rows = %s, processed_rows = %s, error_count = %s
                 WHERE id = %s
-            """, (final_status, total, processed, len(errors), job_id))])
+            """,
+                        (final_status, total, processed, len(errors), job_id),
+                    )
+                ]
+            )
 
         return MigrationResult(
             job_id=job_id,

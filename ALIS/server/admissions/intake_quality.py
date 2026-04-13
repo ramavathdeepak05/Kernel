@@ -26,10 +26,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 from .models import IntakeQualityScoreRead, IntakeScoreRequest
@@ -72,25 +72,29 @@ class IntakeQualityService:
         now = datetime.now(timezone.utc)
 
         import json
-        execute_transaction([
-            (
-                """
+
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO intake_quality_scores
                     (id, org_id, batch_id, program, quality_score,
                      factors, alert_triggered, scored_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    score_id, org_id,
-                    request.batch_id,
-                    request.program,
-                    quality_score,
-                    json.dumps(factors),
-                    alert_triggered,
-                    now,
-                ),
-            )
-        ])
+                    (
+                        score_id,
+                        org_id,
+                        request.batch_id,
+                        request.program,
+                        quality_score,
+                        json.dumps(factors),
+                        alert_triggered,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -118,12 +122,17 @@ class IntakeQualityService:
             logger.warning(
                 "E04-S08: ALERT — Intake quality below threshold "
                 "[batch=%s, score=%.2f, threshold=%.2f, org=%s]",
-                request.batch_id, quality_score, _ALERT_THRESHOLD, org_id,
+                request.batch_id,
+                quality_score,
+                _ALERT_THRESHOLD,
+                org_id,
             )
         else:
             logger.info(
                 "E04-S08: Intake scored [batch=%s, score=%.2f, org=%s]",
-                request.batch_id, quality_score, org_id,
+                request.batch_id,
+                quality_score,
+                org_id,
             )
 
         return IntakeQualityScoreRead(
@@ -143,8 +152,8 @@ class IntakeQualityService:
 
     @classmethod
     def _compute_factors(
-        cls, batch_id: str, org_id: str, program: Optional[str]
-    ) -> Dict[str, Any]:
+        cls, batch_id: str, org_id: str, program: str | None
+    ) -> dict[str, Any]:
         """Compute individual scoring factors from the admissions data."""
         program_filter = ""
         params_base = [org_id]
@@ -154,7 +163,7 @@ class IntakeQualityService:
 
         # Total applicants
         total_rows = execute_query(
-            f"SELECT COUNT(*) AS cnt FROM applicants "
+            f"SELECT COUNT(*) AS cnt FROM applicants "  # noqa: S608
             f"WHERE org_id = %s {program_filter}",
             tuple(params_base),
         )
@@ -171,7 +180,7 @@ class IntakeQualityService:
 
         # Admitted count for yield rate
         admitted_rows = execute_query(
-            f"SELECT COUNT(*) AS cnt FROM applicants "
+            f"SELECT COUNT(*) AS cnt FROM applicants "  # noqa: S608
             f"WHERE org_id = %s AND status IN ('ADMITTED','ENROLLED') {program_filter}",
             tuple(params_base),
         )
@@ -185,11 +194,7 @@ class IntakeQualityService:
             "AND metadata->>'to_state' IN ('ELIGIBLE','NOT_ELIGIBLE','PROVISIONALLY_ELIGIBLE')",
             (org_id,),
         )
-        scores = [
-            float(r["score"])
-            for r in score_rows
-            if r.get("score") is not None
-        ]
+        scores = [float(r["score"]) for r in score_rows if r.get("score") is not None]
         avg_score = sum(scores) / len(scores) if scores else 0.5
 
         # Diversity index: number of distinct programs / 10 (capped at 1.0)
@@ -221,7 +226,7 @@ class IntakeQualityService:
         }
 
     @staticmethod
-    def _aggregate_score(factors: Dict[str, Any]) -> float:
+    def _aggregate_score(factors: dict[str, Any]) -> float:
         """Weighted aggregate score from factors."""
         return round(
             0.40 * factors.get("avg_eligibility_score", 0.0)
@@ -236,6 +241,7 @@ class IntakeQualityService:
         """Send alert to leadership when quality score is below threshold."""
         try:
             from server.core.notifications.service import NotificationService
+
             svc = NotificationService()
             svc.send(
                 template_id="intake_quality_alert",

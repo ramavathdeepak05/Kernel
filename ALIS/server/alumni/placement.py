@@ -1,4 +1,5 @@
 """E12-S02 — Placement Records"""
+
 from __future__ import annotations
 
 import logging
@@ -14,31 +15,49 @@ logger = logging.getLogger(__name__)
 
 
 class PlacementService:
-
     @classmethod
     def record(cls, org_id: str, req: PlacementRecordCreate, actor_id: str) -> dict:
         pid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO placement_records
                 (id, org_id, student_id, academic_year, company_name, role,
                  package_lpa, placement_type, offer_date, joining_date,
                  location, is_ppo, recorded_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (
-                pid, org_id, req.student_id, req.academic_year, req.company_name,
-                req.role, req.package_lpa, req.placement_type.value,
-                req.offer_date, req.joining_date, req.location, req.is_ppo, actor_id,
-            ),
-        )])
+                    (
+                        pid,
+                        org_id,
+                        req.student_id,
+                        req.academic_year,
+                        req.company_name,
+                        req.role,
+                        req.package_lpa,
+                        req.placement_type.value,
+                        req.offer_date,
+                        req.joining_date,
+                        req.location,
+                        req.is_ppo,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-            entity_type="placement_record", entity_id=pid, org_id=org_id,
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="placement_record",
+            entity_id=pid,
+            org_id=org_id,
             module="E12-S02",
             metadata={
-                "student_id": req.student_id, "company": req.company_name,
+                "student_id": req.student_id,
+                "company": req.company_name,
                 "package_lpa": req.package_lpa,
             },
         )
@@ -75,11 +94,14 @@ class PlacementService:
         """
         params: list = [org_id]
         if academic_year:
-            sql += " AND pr.academic_year = %s"; params.append(academic_year)
+            sql += " AND pr.academic_year = %s"
+            params.append(academic_year)
         if placement_type:
-            sql += " AND pr.placement_type = %s"; params.append(placement_type)
+            sql += " AND pr.placement_type = %s"
+            params.append(placement_type)
         if company_name:
-            sql += " AND pr.company_name ILIKE %s"; params.append(f"%{company_name}%")
+            sql += " AND pr.company_name ILIKE %s"
+            params.append(f"%{company_name}%")
         sql += " ORDER BY pr.created_at DESC"
         return [dict(r) for r in execute_query(sql, params)]
 

@@ -15,21 +15,23 @@ Constraints (from Master Handbook):
 - No domain-specific fields
 - Status lifecycle: ACTIVE, SUSPENDED, ARCHIVED
 """
+
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from enum import Enum
 from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional
+
 from pydantic import BaseModel, Field
 
-from .data_classification import SensitivityLevel, RegulatedDataType
-
+from .data_classification import RegulatedDataType, SensitivityLevel
 
 # --- Enums ---
 
+
 class ActorType(str, Enum):
     """Type of actor in the system."""
+
     HUMAN = "human"
     AI_AGENT = "ai_agent"
     SYSTEM = "system"
@@ -37,6 +39,7 @@ class ActorType(str, Enum):
 
 class UserStatus(str, Enum):
     """Lifecycle states for a User entity (Layer 3 compliant)."""
+
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     ARCHIVED = "ARCHIVED"  # Soft-delete state
@@ -44,6 +47,7 @@ class UserStatus(str, Enum):
 
 class OrganizationStatus(str, Enum):
     """Lifecycle states for an Organization entity."""
+
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     ARCHIVED = "ARCHIVED"
@@ -51,8 +55,10 @@ class OrganizationStatus(str, Enum):
 
 # --- E02-S03: Notification Enums ---
 
+
 class NotificationStatus(str, Enum):
     """Delivery status for notifications."""
+
     PENDING = "PENDING"
     SENT = "SENT"
     FAILED = "FAILED"
@@ -61,12 +67,14 @@ class NotificationStatus(str, Enum):
 
 class NotificationChannel(str, Enum):
     """Supported notification channels."""
+
     EMAIL = "EMAIL"
     SMS = "SMS"
     WHATSAPP = "WHATSAPP"
 
 
 # --- Base Models ---
+
 
 class BaseEntity(BaseModel):
     """
@@ -75,10 +83,14 @@ class BaseEntity(BaseModel):
 
     E00-S01: All entities carry sensitivity metadata.
     """
+
     id: str = Field(default_factory=lambda: str(uuid4()), frozen=True)
-    version: int = Field(default=1, description="Entity version for optimistic locking (Runtime Contract v1.0)")
+    version: int = Field(
+        default=1,
+        description="Entity version for optimistic locking (Runtime Contract v1.0)",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
     # E00-S01: Data Classification (Layer 1 metadata extension)
     sensitivity_level: SensitivityLevel = Field(
@@ -96,6 +108,7 @@ class BaseEntity(BaseModel):
 
 # --- E01-S01: Core Identity Model ---
 
+
 class User(BaseEntity):
     """
     Canonical User entity.
@@ -112,14 +125,15 @@ class User(BaseEntity):
     - [x] Soft-delete only (status -> ARCHIVED)
     - [x] E00-S01: Sensitivity = CONFIDENTIAL, Regulated = PII
     """
+
     # E00-S01: User data is CONFIDENTIAL (PII)
     sensitivity_level: SensitivityLevel = SensitivityLevel.CONFIDENTIAL
     regulated_data_type: RegulatedDataType = RegulatedDataType.PII
 
     # Identity
     username: str = Field(..., min_length=3, max_length=64)
-    email: Optional[str] = None
-    display_name: Optional[str] = None
+    email: str | None = None
+    display_name: str | None = None
 
     # Actor Classification
     actor_type: ActorType = ActorType.HUMAN
@@ -128,11 +142,11 @@ class User(BaseEntity):
     status: UserStatus = UserStatus.ACTIVE
 
     # Organization Scoping (for E01-S05)
-    org_id: Optional[str] = None
+    org_id: str | None = None
 
     # Soft-delete marker
     is_deleted: bool = False
-    deleted_at: Optional[datetime] = None
+    deleted_at: datetime | None = None
 
     def archive(self) -> None:
         """Soft-delete the user by transitioning to ARCHIVED state."""
@@ -145,6 +159,7 @@ class User(BaseEntity):
 
 
 # --- E01-S05: Organization & Tenant Isolation ---
+
 
 class Organization(BaseEntity):
     """
@@ -159,18 +174,19 @@ class Organization(BaseEntity):
     - [x] Support for department/unit hierarchy (parent_id)
     - [x] Mandatory org_id scoping (enforced at service layer)
     """
+
     name: str = Field(..., min_length=2, max_length=256)
     code: str = Field(..., min_length=2, max_length=32)  # Short code, e.g., "WOXSEN"
 
     # Hierarchy
-    parent_id: Optional[str] = None  # For department/unit hierarchy
+    parent_id: str | None = None  # For department/unit hierarchy
 
     # Status
     status: OrganizationStatus = OrganizationStatus.ACTIVE
 
     # Soft-delete
     is_deleted: bool = False
-    deleted_at: Optional[datetime] = None
+    deleted_at: datetime | None = None
 
     def archive(self) -> None:
         """Soft-delete the organization."""
@@ -184,6 +200,7 @@ class Organization(BaseEntity):
 
 # --- E02-S03: Notification Log ---
 
+
 class NotificationLog(BaseEntity):
     """
     Audit log for notification delivery attempts.
@@ -195,6 +212,7 @@ class NotificationLog(BaseEntity):
 
     E00-S01: Contains recipient PII (addresses) — CONFIDENTIAL.
     """
+
     # E00-S01: Notification logs contain PII
     sensitivity_level: SensitivityLevel = SensitivityLevel.CONFIDENTIAL
     regulated_data_type: RegulatedDataType = RegulatedDataType.PII
@@ -209,25 +227,27 @@ class NotificationLog(BaseEntity):
 
     # Delivery Status
     status: NotificationStatus = NotificationStatus.PENDING
-    error_message: Optional[str] = None
+    error_message: str | None = None
     retry_count: int = 0
     max_retries: int = 3
 
     # Timestamps
-    sent_at: Optional[datetime] = None
-    last_retry_at: Optional[datetime] = None
+    sent_at: datetime | None = None
+    last_retry_at: datetime | None = None
 
     # Context (for debugging)
-    context_snapshot: Optional[dict] = None
+    context_snapshot: dict | None = None
 
     # Organization scoping
-    org_id: Optional[str] = None
+    org_id: str | None = None
 
 
 # --- E02-S08: Task & Reminder Engine ---
 
+
 class TaskStatus(str, Enum):
     """Lifecycle states for a Task entity."""
+
     PENDING = "PENDING"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
@@ -237,6 +257,7 @@ class TaskStatus(str, Enum):
 
 class TaskPriority(str, Enum):
     """Priority levels for tasks."""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -246,46 +267,45 @@ class TaskPriority(str, Enum):
 class Task(BaseEntity):
     """
     System-driven Task entity (E02-S08).
-    
+
     Represents a unit of work assigned to a User OR a Role.
-    
+
     constraints:
     - Must have either assignee_id OR assignee_role (but not both empty)
     - If assignee_role is set, it follows the "Shared Worklist" pattern
     """
+
     # content
     title: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     priority: TaskPriority = TaskPriority.MEDIUM
-    
+
     # Assignment (User OR Role)
-    assignee_id: Optional[str] = None
-    assignee_role: Optional[str] = None  # Stores Role.value
-    
+    assignee_id: str | None = None
+    assignee_role: str | None = None  # Stores Role.value
+
     # Scheduling
-    due_date: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    due_date: datetime | None = None
+    completed_at: datetime | None = None
     reminder_sent: bool = False
-    
+
     # Context / Source Linking
-    entity_type: Optional[str] = None  # e.g., "approval_request", "document"
-    entity_id: Optional[str] = None
-    
+    entity_type: str | None = None  # e.g., "approval_request", "document"
+    entity_id: str | None = None
+
     # Status
     status: TaskStatus = TaskStatus.PENDING
-    
+
     # Organization
-    org_id: Optional[str] = None
-    
+    org_id: str | None = None
+
     def complete(self, user_id: str) -> None:
         """Mark task as completed by a specific user."""
         if self.status in [TaskStatus.COMPLETED, TaskStatus.CANCELLED]:
             raise ValueError(f"Task is already {self.status}")
-            
+
         self.status = TaskStatus.COMPLETED
         self.completed_at = datetime.now(timezone.utc)
         self.updated_at = datetime.now(timezone.utc)
         # If it was a role-based task, we might want to capture who actually did it
         # effectively "claiming" it. For now, we just mark it done.
-
-

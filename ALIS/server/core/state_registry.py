@@ -23,14 +23,14 @@ Acceptance Criteria:
 - [x] Runtime rejection of illegal transitions
 - [x] Forward-only invalidation via ANNULLED
 """
+
 from __future__ import annotations
 
-from enum import Enum
-from typing import Dict, Set, Optional, List
 from dataclasses import dataclass
-
+from enum import Enum
 
 # --- Student State Machine (Canonical) ---
+
 
 class StudentState(str, Enum):
     """
@@ -78,13 +78,14 @@ class StudentState(str, Enum):
         ADMITTED             = SEAT_CONFIRMED
         ANNULLED             = CANCELLED
     """
+
     # Stage 1
     LEAD = "LEAD"
 
     # Stage 2 — Application form
     DRAFT = "DRAFT"
     SUBMITTED = "SUBMITTED"
-    PENDING_PAYMENT = "PENDING_PAYMENT"         # application fee unpaid
+    PENDING_PAYMENT = "PENDING_PAYMENT"  # application fee unpaid
 
     # Stage 3 — Documents
     DOCUMENTS_PENDING = "DOCUMENTS_PENDING"
@@ -94,7 +95,7 @@ class StudentState(str, Enum):
     # Stage 4 — Eligibility
     ELIGIBLE = "ELIGIBLE"
     NOT_ELIGIBLE = "NOT_ELIGIBLE"
-    PROVISIONALLY_ELIGIBLE = "PROVISIONALLY_ELIGIBLE"   # borderline → staff review
+    PROVISIONALLY_ELIGIBLE = "PROVISIONALLY_ELIGIBLE"  # borderline → staff review
 
     # Stage 5 — Assessment
     ASSESSMENT_SCHEDULED = "ASSESSMENT_SCHEDULED"
@@ -114,7 +115,7 @@ class StudentState(str, Enum):
 
     # Stage 8.5 — Reporting gate (EC-ADM-03 Ghost Withdrawal)
     REPORTING_PENDING = "REPORTING_PENDING"
-    FORFEITED = "FORFEITED"               # seat forfeited after SLA breach
+    FORFEITED = "FORFEITED"  # seat forfeited after SLA breach
 
     # Stage 9 — Final verification
     VERIFICATION_PENDING = "VERIFICATION_PENDING"
@@ -133,13 +134,14 @@ class StudentState(str, Enum):
     CANCELLED = "CANCELLED"
 
     # --- Legacy aliases (pipeline backward-compatibility) ---
-    APPLIED = "SUBMITTED"           # maps to SUBMITTED
-    ADMITTED = "SEAT_CONFIRMED"     # maps to SEAT_CONFIRMED
-    ANNULLED = "CANCELLED"          # maps to CANCELLED
+    APPLIED = "SUBMITTED"  # maps to SUBMITTED
+    ADMITTED = "SEAT_CONFIRMED"  # maps to SEAT_CONFIRMED
+    ANNULLED = "CANCELLED"  # maps to CANCELLED
 
 
 class ExamState(str, Enum):
     """Exam lifecycle states."""
+
     DRAFT = "DRAFT"
     SCHEDULED = "SCHEDULED"
     REGISTRATION_OPEN = "REGISTRATION_OPEN"
@@ -153,6 +155,7 @@ class ExamState(str, Enum):
 
 class OverrideState(str, Enum):
     """Override lifecycle states (Layer 6)."""
+
     REQUESTED = "REQUESTED"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -178,6 +181,7 @@ class WorkflowState(str, Enum):
         COMPLETED → CLOSED
         FAILED → CLOSED
     """
+
     CREATED = "CREATED"
     IN_PROGRESS = "IN_PROGRESS"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
@@ -190,38 +194,45 @@ class WorkflowState(str, Enum):
 
 # --- Transition Result ---
 
+
 @dataclass
 class TransitionResult:
     """Result of a state transition attempt."""
+
     allowed: bool
     from_state: str
     to_state: str
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 # --- State Transition Matrices ---
 
-STUDENT_TRANSITIONS: Dict[StudentState, Set[StudentState]] = {
+STUDENT_TRANSITIONS: dict[StudentState, set[StudentState]] = {
     # Stage 1
     StudentState.LEAD: {
-        StudentState.DRAFT, StudentState.SUBMITTED, StudentState.CANCELLED
+        StudentState.DRAFT,
+        StudentState.SUBMITTED,
+        StudentState.CANCELLED,
     },
     # Stage 2
-    StudentState.DRAFT: {
-        StudentState.SUBMITTED, StudentState.CANCELLED
-    },
+    StudentState.DRAFT: {StudentState.SUBMITTED, StudentState.CANCELLED},
     StudentState.SUBMITTED: {
-        StudentState.PENDING_PAYMENT, StudentState.DOCUMENTS_PENDING, StudentState.CANCELLED
+        StudentState.PENDING_PAYMENT,
+        StudentState.DOCUMENTS_PENDING,
+        StudentState.CANCELLED,
     },
     StudentState.PENDING_PAYMENT: {
-        StudentState.DOCUMENTS_PENDING, StudentState.CANCELLED
+        StudentState.DOCUMENTS_PENDING,
+        StudentState.CANCELLED,
     },
     # Stage 3
     StudentState.DOCUMENTS_PENDING: {
-        StudentState.UNDER_DOCUMENT_REVIEW, StudentState.CANCELLED
+        StudentState.UNDER_DOCUMENT_REVIEW,
+        StudentState.CANCELLED,
     },
     StudentState.UNDER_DOCUMENT_REVIEW: {
-        StudentState.DOCUMENTS_VERIFIED, StudentState.CANCELLED
+        StudentState.DOCUMENTS_VERIFIED,
+        StudentState.CANCELLED,
         # Note: document rejection is handled at document level, not applicant state.
         # Applicant stays UNDER_DOCUMENT_REVIEW until all docs approved.
     },
@@ -234,16 +245,19 @@ STUDENT_TRANSITIONS: Dict[StudentState, Set[StudentState]] = {
     },
     StudentState.ELIGIBLE: {
         StudentState.ASSESSMENT_SCHEDULED,  # if test required
-        StudentState.MERIT_LISTED,          # if no test (direct merit)
+        StudentState.MERIT_LISTED,  # if no test (direct merit)
         StudentState.CANCELLED,
     },
     StudentState.NOT_ELIGIBLE: {StudentState.CANCELLED},
     StudentState.PROVISIONALLY_ELIGIBLE: {
-        StudentState.ELIGIBLE, StudentState.NOT_ELIGIBLE, StudentState.CANCELLED
+        StudentState.ELIGIBLE,
+        StudentState.NOT_ELIGIBLE,
+        StudentState.CANCELLED,
     },
     # Stage 5
     StudentState.ASSESSMENT_SCHEDULED: {
-        StudentState.ASSESSMENT_COMPLETE, StudentState.CANCELLED
+        StudentState.ASSESSMENT_COMPLETE,
+        StudentState.CANCELLED,
     },
     StudentState.ASSESSMENT_COMPLETE: {
         StudentState.MERIT_LISTED,
@@ -252,59 +266,58 @@ STUDENT_TRANSITIONS: Dict[StudentState, Set[StudentState]] = {
         StudentState.CANCELLED,
     },
     # Stage 6
-    StudentState.MERIT_LISTED: {
-        StudentState.OFFER_ISSUED, StudentState.CANCELLED
-    },
+    StudentState.MERIT_LISTED: {StudentState.OFFER_ISSUED, StudentState.CANCELLED},
     StudentState.WAITLISTED: {
         StudentState.MERIT_LISTED,  # waitlist activation moves to merit
         StudentState.CANCELLED,
     },
     # Stage 7
     StudentState.OFFER_ISSUED: {
-        StudentState.OFFER_ACCEPTED, StudentState.OFFER_DECLINED, StudentState.CANCELLED
+        StudentState.OFFER_ACCEPTED,
+        StudentState.OFFER_DECLINED,
+        StudentState.CANCELLED,
     },
-    StudentState.OFFER_ACCEPTED: {
-        StudentState.SEAT_CONFIRMED, StudentState.CANCELLED
-    },
+    StudentState.OFFER_ACCEPTED: {StudentState.SEAT_CONFIRMED, StudentState.CANCELLED},
     StudentState.OFFER_DECLINED: {StudentState.CANCELLED},
     # Stage 8
     StudentState.SEAT_CONFIRMED: {
-        StudentState.REPORTING_PENDING,     # EC-ADM-03 reporting gate
+        StudentState.REPORTING_PENDING,  # EC-ADM-03 reporting gate
         StudentState.VERIFICATION_PENDING,  # direct path (no reporting gate)
         StudentState.CANCELLED,
     },
     # Stage 8.5 — Reporting gate (EC-ADM-03)
     StudentState.REPORTING_PENDING: {
         StudentState.VERIFICATION_PENDING,  # student reported within SLA
-        StudentState.FORFEITED,             # SLA breached → seat forfeited
+        StudentState.FORFEITED,  # SLA breached → seat forfeited
         StudentState.CANCELLED,
     },
-    StudentState.FORFEITED: {StudentState.CANCELLED},  # terminal-like (waitlist activated)
+    StudentState.FORFEITED: {
+        StudentState.CANCELLED
+    },  # terminal-like (waitlist activated)
     # Stage 9
     StudentState.VERIFICATION_PENDING: {
-        StudentState.READY_FOR_ENROLLMENT, StudentState.CANCELLED
+        StudentState.READY_FOR_ENROLLMENT,
+        StudentState.CANCELLED,
     },
-    StudentState.READY_FOR_ENROLLMENT: {
-        StudentState.ENROLLED, StudentState.CANCELLED
-    },
+    StudentState.READY_FOR_ENROLLMENT: {StudentState.ENROLLED, StudentState.CANCELLED},
     # Stage 10
     StudentState.ENROLLED: {StudentState.CANCELLED},
     # Identity verification (EC-ADM-01) — can enter from document review
     StudentState.KYC_RECONCILIATION: {
-        StudentState.DOCUMENTS_VERIFIED,    # identity confirmed → proceed
-        StudentState.POTENTIAL_FORGERY,     # escalated to forgery
+        StudentState.DOCUMENTS_VERIFIED,  # identity confirmed → proceed
+        StudentState.POTENTIAL_FORGERY,  # escalated to forgery
         StudentState.CANCELLED,
     },
     # Document fraud (EC-ADM-04) — escalation from KYC or document review
     StudentState.POTENTIAL_FORGERY: {
-        StudentState.DOCUMENTS_VERIFIED,    # cleared after investigation
-        StudentState.CANCELLED,             # confirmed fraud → cancel
+        StudentState.DOCUMENTS_VERIFIED,  # cleared after investigation
+        StudentState.CANCELLED,  # confirmed fraud → cancel
     },
     # Terminal
     StudentState.CANCELLED: set(),
 }
 
-EXAM_TRANSITIONS: Dict[ExamState, Set[ExamState]] = {
+EXAM_TRANSITIONS: dict[ExamState, set[ExamState]] = {
     ExamState.DRAFT: {ExamState.SCHEDULED},
     ExamState.SCHEDULED: {ExamState.REGISTRATION_OPEN},
     ExamState.REGISTRATION_OPEN: {ExamState.REGISTRATION_CLOSED},
@@ -316,11 +329,11 @@ EXAM_TRANSITIONS: Dict[ExamState, Set[ExamState]] = {
     ExamState.ARCHIVED: set(),  # Terminal
 }
 
-OVERRIDE_TRANSITIONS: Dict[OverrideState, Set[OverrideState]] = {
+OVERRIDE_TRANSITIONS: dict[OverrideState, set[OverrideState]] = {
     OverrideState.REQUESTED: {
         OverrideState.APPROVED,
         OverrideState.REJECTED,
-        OverrideState.EXPIRED
+        OverrideState.EXPIRED,
     },
     OverrideState.APPROVED: {OverrideState.EXECUTED, OverrideState.EXPIRED},
     OverrideState.REJECTED: {OverrideState.CLOSED},
@@ -329,21 +342,15 @@ OVERRIDE_TRANSITIONS: Dict[OverrideState, Set[OverrideState]] = {
     OverrideState.CLOSED: set(),  # Terminal
 }
 
-WORKFLOW_TRANSITIONS: Dict[WorkflowState, Set[WorkflowState]] = {
+WORKFLOW_TRANSITIONS: dict[WorkflowState, set[WorkflowState]] = {
     WorkflowState.CREATED: {WorkflowState.IN_PROGRESS, WorkflowState.FAILED},
     WorkflowState.IN_PROGRESS: {
         WorkflowState.AWAITING_APPROVAL,
         WorkflowState.COMPLETED,
-        WorkflowState.FAILED
+        WorkflowState.FAILED,
     },
-    WorkflowState.AWAITING_APPROVAL: {
-        WorkflowState.APPROVED,
-        WorkflowState.REJECTED
-    },
-    WorkflowState.APPROVED: {
-        WorkflowState.COMPLETED,
-        WorkflowState.FAILED
-    },
+    WorkflowState.AWAITING_APPROVAL: {WorkflowState.APPROVED, WorkflowState.REJECTED},
+    WorkflowState.APPROVED: {WorkflowState.COMPLETED, WorkflowState.FAILED},
     WorkflowState.REJECTED: {WorkflowState.CLOSED},
     WorkflowState.COMPLETED: {WorkflowState.CLOSED},
     WorkflowState.FAILED: {WorkflowState.CLOSED},
@@ -352,6 +359,7 @@ WORKFLOW_TRANSITIONS: Dict[WorkflowState, Set[WorkflowState]] = {
 
 
 # --- State Registry Class ---
+
 
 class StateRegistry:
     """
@@ -373,19 +381,15 @@ class StateRegistry:
 
     @classmethod
     def register_entity(
-        cls,
-        entity_type: str,
-        transitions: Dict[Enum, Set[Enum]]
+        cls, entity_type: str, transitions: dict[Enum, set[Enum]]
     ) -> None:
         """Register a new entity type's state transitions."""
         cls._registries[entity_type] = transitions
 
     @classmethod
     def get_allowed_transitions(
-        cls,
-        entity_type: str,
-        current_state: Enum
-    ) -> Set[Enum]:
+        cls, entity_type: str, current_state: Enum
+    ) -> set[Enum]:
         """Get the set of allowed next states from current state."""
         registry = cls._registries.get(entity_type)
         if registry is None:
@@ -394,10 +398,7 @@ class StateRegistry:
 
     @classmethod
     def validate_transition(
-        cls,
-        entity_type: str,
-        from_state: Enum,
-        to_state: Enum
+        cls, entity_type: str, from_state: Enum, to_state: Enum
     ) -> TransitionResult:
         """
         Validate a state transition.
@@ -418,23 +419,26 @@ class StateRegistry:
         if to_state in allowed_states:
             return TransitionResult(
                 allowed=True,
-                from_state=from_state.value if hasattr(from_state, 'value') else str(from_state),
-                to_state=to_state.value if hasattr(to_state, 'value') else str(to_state)
+                from_state=from_state.value
+                if hasattr(from_state, "value")
+                else str(from_state),
+                to_state=to_state.value
+                if hasattr(to_state, "value")
+                else str(to_state),
             )
 
         return TransitionResult(
             allowed=False,
-            from_state=from_state.value if hasattr(from_state, 'value') else str(from_state),
-            to_state=to_state.value if hasattr(to_state, 'value') else str(to_state),
-            reason=f"Illegal transition: {from_state.value} → {to_state.value} is not allowed for entity type '{entity_type}'"
+            from_state=from_state.value
+            if hasattr(from_state, "value")
+            else str(from_state),
+            to_state=to_state.value if hasattr(to_state, "value") else str(to_state),
+            reason=f"Illegal transition: {from_state.value} → {to_state.value} is not allowed for entity type '{entity_type}'",
         )
 
     @classmethod
     def execute_transition(
-        cls,
-        entity_type: str,
-        from_state: Enum,
-        to_state: Enum
+        cls, entity_type: str, from_state: Enum, to_state: Enum
     ) -> TransitionResult:
         """
         Execute a state transition with validation.
@@ -452,25 +456,23 @@ class StateRegistry:
 
 # --- Convenience Functions ---
 
+
 def validate_student_transition(
-    from_state: StudentState,
-    to_state: StudentState
+    from_state: StudentState, to_state: StudentState
 ) -> TransitionResult:
     """Validate a student state transition."""
     return StateRegistry.validate_transition("student", from_state, to_state)
 
 
 def validate_exam_transition(
-    from_state: ExamState,
-    to_state: ExamState
+    from_state: ExamState, to_state: ExamState
 ) -> TransitionResult:
     """Validate an exam state transition."""
     return StateRegistry.validate_transition("exam", from_state, to_state)
 
 
 def validate_override_transition(
-    from_state: OverrideState,
-    to_state: OverrideState
+    from_state: OverrideState, to_state: OverrideState
 ) -> TransitionResult:
     """Validate an override state transition."""
     return StateRegistry.validate_transition("override", from_state, to_state)

@@ -27,12 +27,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.core.state_registry import StudentState
 from server.db_service import execute_query, execute_transaction
@@ -47,6 +46,7 @@ _SUBSYSTEM_STATUS = {"PENDING", "DONE", "SKIPPED", "FAILED"}
 # =============================================================================
 # Roll Number Generation
 # =============================================================================
+
 
 def _generate_roll_number(org_id: str, program: str, batch_year: int) -> str:
     """
@@ -86,47 +86,49 @@ def _program_prefix(program: str) -> str:
 # Pydantic Models
 # =============================================================================
 
+
 class EnrollmentInitiateRequest(BaseModel):
     applicant_id: str
-    batch_year: int = Field(..., ge=2000, le=2100, description="Enrollment batch year e.g. 2025")
-    university_reg_number: Optional[str] = Field(
-        default=None,
-        description="Pre-assigned university registration number (if any)"
+    batch_year: int = Field(
+        ..., ge=2000, le=2100, description="Enrollment batch year e.g. 2025"
     )
-    notes: Optional[str] = None
+    university_reg_number: str | None = Field(
+        default=None, description="Pre-assigned university registration number (if any)"
+    )
+    notes: str | None = None
 
 
 class EnrollmentProvisioningRead(BaseModel):
     id: str
     org_id: str
     applicant_id: str
-    student_id: Optional[str] = None
-    roll_number: Optional[str] = None
-    university_reg_number: Optional[str] = None
+    student_id: str | None = None
+    roll_number: str | None = None
+    university_reg_number: str | None = None
     # LMS
     lms_status: str
-    lms_account_id: Optional[str] = None
-    lms_created_at: Optional[datetime] = None
+    lms_account_id: str | None = None
+    lms_created_at: datetime | None = None
     # Email
     email_status: str
-    university_email: Optional[str] = None
-    email_created_at: Optional[datetime] = None
+    university_email: str | None = None
+    email_created_at: datetime | None = None
     # Library
     library_status: str
-    library_member_id: Optional[str] = None
-    library_created_at: Optional[datetime] = None
+    library_member_id: str | None = None
+    library_created_at: datetime | None = None
     # ID Card
     id_card_status: str
-    id_card_dispatched_at: Optional[datetime] = None
+    id_card_dispatched_at: datetime | None = None
     # ERP
     erp_status: str
-    erp_synced_at: Optional[datetime] = None
-    erp_export_path: Optional[str] = None
+    erp_synced_at: datetime | None = None
+    erp_export_path: str | None = None
     # Welcome comms
     welcome_email_sent: bool
     parent_email_sent: bool
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class LMSProvisionRequest(BaseModel):
@@ -146,12 +148,13 @@ class LibraryProvisionRequest(BaseModel):
 
 class ERPSyncRequest(BaseModel):
     status: str = Field(default="SYNCED", description="SYNCED | EXPORT_READY | FAILED")
-    erp_export_path: Optional[str] = None
+    erp_export_path: str | None = None
 
 
 # =============================================================================
 # Student Record (created on complete())
 # =============================================================================
+
 
 class StudentRead(BaseModel):
     id: str
@@ -160,7 +163,7 @@ class StudentRead(BaseModel):
     roll_number: str
     name: str
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
     program: str
     enrolled_at: datetime
 
@@ -168,6 +171,7 @@ class StudentRead(BaseModel):
 # =============================================================================
 # ENROLLMENT PROVISIONING SERVICE
 # =============================================================================
+
 
 class EnrollmentProvisioningService:
     """
@@ -212,7 +216,10 @@ class EnrollmentProvisioningService:
                 message=f"Applicant '{request.applicant_id}' not found."
             )
         app = app_rows[0]
-        if app["status"] not in (StudentState.READY_FOR_ENROLLMENT.value, "READY_FOR_ENROLLMENT"):
+        if app["status"] not in (
+            StudentState.READY_FOR_ENROLLMENT.value,
+            "READY_FOR_ENROLLMENT",
+        ):
             raise BusinessRuleViolation(
                 message=(
                     f"Enrollment provisioning requires READY_FOR_ENROLLMENT status — "
@@ -228,9 +235,10 @@ class EnrollmentProvisioningService:
         prov_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO enrollment_provisioning (
                     id, org_id, applicant_id,
                     roll_number, university_reg_number,
@@ -240,16 +248,25 @@ class EnrollmentProvisioningService:
                     created_at, updated_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    prov_id, org_id, request.applicant_id,
-                    roll_number, request.university_reg_number,
-                    "PENDING", "PENDING", "PENDING",
-                    "PENDING", "PENDING",
-                    False, False,
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        prov_id,
+                        org_id,
+                        request.applicant_id,
+                        roll_number,
+                        request.university_reg_number,
+                        "PENDING",
+                        "PENDING",
+                        "PENDING",
+                        "PENDING",
+                        "PENDING",
+                        False,
+                        False,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -269,7 +286,9 @@ class EnrollmentProvisioningService:
 
         logger.info(
             "P12: Enrollment provisioning initiated [id=%s, applicant=%s, roll=%s]",
-            prov_id, request.applicant_id, roll_number,
+            prov_id,
+            request.applicant_id,
+            roll_number,
         )
         return cls.get(prov_id, org_id)
 
@@ -285,14 +304,23 @@ class EnrollmentProvisioningService:
         cls._require(provisioning_id, org_id)
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE enrollment_provisioning "
-                "SET lms_status = %s, lms_account_id = %s, lms_created_at = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (request.status, request.lms_account_id, now, now, provisioning_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE enrollment_provisioning "
+                    "SET lms_status = %s, lms_account_id = %s, lms_created_at = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (
+                        request.status,
+                        request.lms_account_id,
+                        now,
+                        now,
+                        provisioning_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -303,7 +331,11 @@ class EnrollmentProvisioningService:
             module="M1",
             wizard="Enrollment Provisioning",
             success=True,
-            metadata={"step": "lms", "lms_account_id": request.lms_account_id, "status": request.status},
+            metadata={
+                "step": "lms",
+                "lms_account_id": request.lms_account_id,
+                "status": request.status,
+            },
         )
         return cls.get(provisioning_id, org_id)
 
@@ -319,14 +351,23 @@ class EnrollmentProvisioningService:
         cls._require(provisioning_id, org_id)
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE enrollment_provisioning "
-                "SET email_status = %s, university_email = %s, email_created_at = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (request.status, request.university_email, now, now, provisioning_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE enrollment_provisioning "
+                    "SET email_status = %s, university_email = %s, email_created_at = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (
+                        request.status,
+                        request.university_email,
+                        now,
+                        now,
+                        provisioning_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -353,14 +394,23 @@ class EnrollmentProvisioningService:
         cls._require(provisioning_id, org_id)
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE enrollment_provisioning "
-                "SET library_status = %s, library_member_id = %s, library_created_at = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (request.status, request.library_member_id, now, now, provisioning_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE enrollment_provisioning "
+                    "SET library_status = %s, library_member_id = %s, library_created_at = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (
+                        request.status,
+                        request.library_member_id,
+                        now,
+                        now,
+                        provisioning_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -371,7 +421,10 @@ class EnrollmentProvisioningService:
             module="M1",
             wizard="Enrollment Provisioning",
             success=True,
-            metadata={"step": "library", "library_member_id": request.library_member_id},
+            metadata={
+                "step": "library",
+                "library_member_id": request.library_member_id,
+            },
         )
         return cls.get(provisioning_id, org_id)
 
@@ -386,14 +439,16 @@ class EnrollmentProvisioningService:
         cls._require(provisioning_id, org_id)
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE enrollment_provisioning "
-                "SET id_card_status = 'DONE', id_card_dispatched_at = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, now, provisioning_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE enrollment_provisioning "
+                    "SET id_card_status = 'DONE', id_card_dispatched_at = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (now, now, provisioning_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -420,14 +475,23 @@ class EnrollmentProvisioningService:
         cls._require(provisioning_id, org_id)
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE enrollment_provisioning "
-                "SET erp_status = %s, erp_synced_at = %s, erp_export_path = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (request.status, now, request.erp_export_path, now, provisioning_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE enrollment_provisioning "
+                    "SET erp_status = %s, erp_synced_at = %s, erp_export_path = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (
+                        request.status,
+                        now,
+                        request.erp_export_path,
+                        now,
+                        provisioning_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -438,7 +502,11 @@ class EnrollmentProvisioningService:
             module="M1",
             wizard="Enrollment Provisioning",
             success=True,
-            metadata={"step": "erp", "status": request.status, "export_path": request.erp_export_path},
+            metadata={
+                "step": "erp",
+                "status": request.status,
+                "export_path": request.erp_export_path,
+            },
         )
         return cls.get(provisioning_id, org_id)
 
@@ -455,13 +523,15 @@ class EnrollmentProvisioningService:
         now = datetime.now(timezone.utc)
 
         field = "parent_email_sent" if parent else "welcome_email_sent"
-        execute_transaction([
-            (
-                f"UPDATE enrollment_provisioning SET {field} = TRUE, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (now, provisioning_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE enrollment_provisioning SET {field} = TRUE, updated_at = %s "  # noqa: S608
+                    "WHERE id = %s AND org_id = %s",
+                    (now, provisioning_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -525,30 +595,36 @@ class EnrollmentProvisioningService:
         now = datetime.now(timezone.utc)
         student_id = str(uuid4())
 
-        execute_transaction([
-            # Create student record
-            (
-                """
+        execute_transaction(
+            [
+                # Create student record
+                (
+                    """
                 INSERT INTO students (
                     id, org_id, applicant_id, roll_number,
                     name, email, phone, program, enrolled_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    student_id, org_id, prov["applicant_id"],
-                    prov["roll_number"],
-                    app["name"], app["email"], app.get("phone"),
-                    app.get("intended_program") or "GENERAL",
-                    now,
+                    (
+                        student_id,
+                        org_id,
+                        prov["applicant_id"],
+                        prov["roll_number"],
+                        app["name"],
+                        app["email"],
+                        app.get("phone"),
+                        app.get("intended_program") or "GENERAL",
+                        now,
+                    ),
                 ),
-            ),
-            # Link student_id back to provisioning
-            (
-                "UPDATE enrollment_provisioning SET student_id = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (student_id, now, provisioning_id, org_id),
-            ),
-        ])
+                # Link student_id back to provisioning
+                (
+                    "UPDATE enrollment_provisioning SET student_id = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (student_id, now, provisioning_id, org_id),
+                ),
+            ]
+        )
 
         # Transition applicant → ENROLLED
         ApplicantService.transition_state(
@@ -582,7 +658,9 @@ class EnrollmentProvisioningService:
 
         logger.info(
             "P12: Student enrolled [student_id=%s, applicant=%s, roll=%s]",
-            student_id, prov["applicant_id"], prov["roll_number"],
+            student_id,
+            prov["applicant_id"],
+            prov["roll_number"],
         )
 
         rows = execute_query(
@@ -610,7 +688,7 @@ class EnrollmentProvisioningService:
     @classmethod
     def get_for_applicant(
         cls, applicant_id: str, org_id: str
-    ) -> Optional[EnrollmentProvisioningRead]:
+    ) -> EnrollmentProvisioningRead | None:
         rows = execute_query(
             "SELECT * FROM enrollment_provisioning WHERE applicant_id = %s AND org_id = %s",
             (applicant_id, org_id),
@@ -624,9 +702,7 @@ class EnrollmentProvisioningService:
             (student_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(
-                message=f"Student '{student_id}' not found."
-            )
+            raise BusinessRuleViolation(message=f"Student '{student_id}' not found.")
         return StudentRead(**rows[0])
 
     # -------------------------------------------------------------------------
@@ -634,7 +710,7 @@ class EnrollmentProvisioningService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _require(cls, provisioning_id: str, org_id: str) -> Dict[str, Any]:
+    def _require(cls, provisioning_id: str, org_id: str) -> dict[str, Any]:
         rows = execute_query(
             "SELECT * FROM enrollment_provisioning WHERE id = %s AND org_id = %s",
             (provisioning_id, org_id),
@@ -646,5 +722,5 @@ class EnrollmentProvisioningService:
         return rows[0]
 
     @classmethod
-    def _row_to_read(cls, row: Dict[str, Any]) -> EnrollmentProvisioningRead:
+    def _row_to_read(cls, row: dict[str, Any]) -> EnrollmentProvisioningRead:
         return EnrollmentProvisioningRead(**dict(row))

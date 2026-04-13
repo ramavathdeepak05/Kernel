@@ -1,4 +1,5 @@
 """E11 — Reporting & Analytics Celery Tasks"""
+
 from __future__ import annotations
 
 import logging
@@ -8,11 +9,14 @@ from server.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="reporting.run_export", bind=True, max_retries=2, default_retry_delay=30)
+@celery_app.task(
+    name="reporting.run_export", bind=True, max_retries=2, default_retry_delay=30
+)
 def task_run_export(self, org_id: str, job_id: str) -> dict:
     """Process an export job asynchronously."""
     try:
         from server.reporting.export_engine import ExportEngine
+
         ExportEngine.process_job(org_id, job_id)
         return {"status": "done", "job_id": job_id}
     except Exception as exc:
@@ -28,6 +32,7 @@ def task_refresh_kpi_snapshots() -> dict:
     """
     try:
         from server.db_service import execute_system_query
+
         orgs = execute_system_query(
             "SELECT id FROM organizations WHERE status = 'ACTIVE'"
         )
@@ -48,6 +53,7 @@ def task_refresh_kpi_snapshots() -> dict:
                     continue
                 academic_year = year_rows[0]["academic_year"]
                 from server.reporting.dashboard import DashboardService
+
                 DashboardService.cache_snapshot(org_id, academic_year)
                 refreshed += 1
             except Exception as exc:

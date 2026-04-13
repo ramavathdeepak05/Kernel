@@ -10,4 +10,5 @@ submissions, and grades natively via:
 The beat entry "lms-grade-sync" was removed from worker.py in P40.
 This module is retained as a tombstone to preserve import stability.
 """
+
 from __future__ import annotations

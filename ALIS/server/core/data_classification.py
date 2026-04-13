@@ -25,13 +25,14 @@ Acceptance Criteria (E00-S01):
     - [x] Encrypted-at-rest for CONFIDENTIAL and REGULATED
     - [x] Masking in logs and AI context
 """
+
 from __future__ import annotations
 
-import re
 import logging
-from enum import Enum
-from typing import Dict, List, Optional, Any, Set
+import re
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # SENSITIVITY ENUMS
 # =============================================================================
+
 
 class SensitivityLevel(str, Enum):
     """
@@ -49,6 +51,7 @@ class SensitivityLevel(str, Enum):
 
         PUBLIC < INTERNAL < CONFIDENTIAL < REGULATED
     """
+
     PUBLIC = "PUBLIC"
     INTERNAL = "INTERNAL"
     CONFIDENTIAL = "CONFIDENTIAL"
@@ -56,7 +59,7 @@ class SensitivityLevel(str, Enum):
 
 
 # Ordering for comparison
-_SENSITIVITY_ORDER: Dict[SensitivityLevel, int] = {
+_SENSITIVITY_ORDER: dict[SensitivityLevel, int] = {
     SensitivityLevel.PUBLIC: 0,
     SensitivityLevel.INTERNAL: 1,
     SensitivityLevel.CONFIDENTIAL: 2,
@@ -75,11 +78,12 @@ class RegulatedDataType(str, Enum):
 
     NONE is used for non-regulated entities or fields.
     """
+
     NONE = "NONE"
-    PII = "PII"               # Personally Identifiable Information
-    FINANCE = "FINANCE"       # Financial records (fees, payments, salary)
-    BIOMETRIC = "BIOMETRIC"   # Biometric logs (attendance, facial recognition)
-    TRANSCRIPT = "TRANSCRIPT" # Academic transcripts and grade records
+    PII = "PII"  # Personally Identifiable Information
+    FINANCE = "FINANCE"  # Financial records (fees, payments, salary)
+    BIOMETRIC = "BIOMETRIC"  # Biometric logs (attendance, facial recognition)
+    TRANSCRIPT = "TRANSCRIPT"  # Academic transcripts and grade records
 
 
 class RetentionClass(str, Enum):
@@ -94,6 +98,7 @@ class RetentionClass(str, Enum):
         LONG_TERM   — Extended retention (e.g., biometric logs)
         PERMANENT   — Never deleted (e.g., transcripts, audit records)
     """
+
     TEMPORARY = "TEMPORARY"
     STANDARD = "STANDARD"
     LONG_TERM = "LONG_TERM"
@@ -101,17 +106,18 @@ class RetentionClass(str, Enum):
 
 
 # Default retention periods in days (None = permanent / no auto-archival)
-_DEFAULT_RETENTION_DAYS: Dict[RetentionClass, Optional[int]] = {
-    RetentionClass.TEMPORARY: 90,       # 3 months
-    RetentionClass.STANDARD: 1825,      # 5 years
-    RetentionClass.LONG_TERM: 730,      # 2 years (biometric default)
-    RetentionClass.PERMANENT: None,     # Never
+_DEFAULT_RETENTION_DAYS: dict[RetentionClass, int | None] = {
+    RetentionClass.TEMPORARY: 90,  # 3 months
+    RetentionClass.STANDARD: 1825,  # 5 years
+    RetentionClass.LONG_TERM: 730,  # 2 years (biometric default)
+    RetentionClass.PERMANENT: None,  # Never
 }
 
 
 # =============================================================================
 # FIELD-LEVEL CLASSIFICATION
 # =============================================================================
+
 
 @dataclass
 class FieldClassification:
@@ -126,6 +132,7 @@ class FieldClassification:
         mask_in_ai:      Whether to mask before sending to AI context
         mask_pattern:    Optional custom mask pattern ('partial', 'full', 'hash')
     """
+
     field_name: str
     sensitivity: SensitivityLevel = SensitivityLevel.INTERNAL
     regulated_type: RegulatedDataType = RegulatedDataType.NONE
@@ -146,18 +153,19 @@ class EntityClassification:
         retention_class:  Lifecycle classification for archival
         retention_days:   Override for auto-archival period (None = use class default)
     """
+
     entity_type: str
     default_sensitivity: SensitivityLevel = SensitivityLevel.INTERNAL
     default_regulated_type: RegulatedDataType = RegulatedDataType.NONE
-    field_overrides: Dict[str, FieldClassification] = field(default_factory=dict)
+    field_overrides: dict[str, FieldClassification] = field(default_factory=dict)
     description: str = ""
 
     # E00-S07: Data Retention Metadata (Layer 1)
     retention_class: RetentionClass = RetentionClass.STANDARD
-    retention_days: Optional[int] = None  # None = use _DEFAULT_RETENTION_DAYS
+    retention_days: int | None = None  # None = use _DEFAULT_RETENTION_DAYS
 
     @property
-    def effective_retention_days(self) -> Optional[int]:
+    def effective_retention_days(self) -> int | None:
         """Return explicit override or class-level default. None = permanent."""
         if self.retention_days is not None:
             return self.retention_days
@@ -172,6 +180,7 @@ class EntityClassification:
 # =============================================================================
 # ENTITY CLASSIFICATION REGISTRY
 # =============================================================================
+
 
 class EntityClassificationRegistry:
     """
@@ -193,7 +202,7 @@ class EntityClassificationRegistry:
         classification = EntityClassificationRegistry.get("user")
     """
 
-    _registry: Dict[str, EntityClassification] = {}
+    _registry: dict[str, EntityClassification] = {}
 
     @classmethod
     def register(cls, classification: EntityClassification) -> None:
@@ -206,7 +215,7 @@ class EntityClassificationRegistry:
         )
 
     @classmethod
-    def get(cls, entity_type: str) -> Optional[EntityClassification]:
+    def get(cls, entity_type: str) -> EntityClassification | None:
         """Get the classification profile for an entity type."""
         return cls._registry.get(entity_type)
 
@@ -217,11 +226,14 @@ class EntityClassificationRegistry:
 
         Default is INTERNAL sensitivity (fail-safe: don't expose unclassified data).
         """
-        return cls._registry.get(entity_type, EntityClassification(
-            entity_type=entity_type,
-            default_sensitivity=SensitivityLevel.INTERNAL,
-            description="Unregistered entity — defaulting to INTERNAL",
-        ))
+        return cls._registry.get(
+            entity_type,
+            EntityClassification(
+                entity_type=entity_type,
+                default_sensitivity=SensitivityLevel.INTERNAL,
+                description="Unregistered entity — defaulting to INTERNAL",
+            ),
+        )
 
     @classmethod
     def get_field_classification(
@@ -245,7 +257,7 @@ class EntityClassificationRegistry:
         )
 
     @classmethod
-    def list_registered(cls) -> List[str]:
+    def list_registered(cls) -> list[str]:
         """List all registered entity types."""
         return list(cls._registry.keys())
 
@@ -258,6 +270,7 @@ class EntityClassificationRegistry:
 # =============================================================================
 # DATA MASKER
 # =============================================================================
+
 
 class DataMasker:
     """
@@ -291,7 +304,7 @@ class DataMasker:
     @staticmethod
     def mask_phone(phone: str) -> str:
         """Mask a phone number, keeping last 4 digits."""
-        digits = re.sub(r'\D', '', phone)
+        digits = re.sub(r"\D", "", phone)
         if len(digits) <= 4:
             return "***"
         return "*" * (len(digits) - 4) + digits[-4:]
@@ -359,28 +372,28 @@ class DataMasker:
 
         if "email" in field_lower:
             return cls.mask_email(str_value)
-        elif "phone" in field_lower or "mobile" in field_lower:
+        if "phone" in field_lower or "mobile" in field_lower:
             return cls.mask_phone(str_value)
-        elif any(n in field_lower for n in ["name", "display_name", "full_name"]):
+        if any(n in field_lower for n in ["name", "display_name", "full_name"]):
             return cls.mask_name(str_value)
-        elif any(s in field_lower for s in [
-            "password", "secret", "token", "key", "biometric"
-        ]):
+        if any(
+            s in field_lower
+            for s in ["password", "secret", "token", "key", "biometric"]
+        ):
             return cls.mask_full(str_value)
-        elif sensitivity == SensitivityLevel.REGULATED:
+        if sensitivity == SensitivityLevel.REGULATED:
             return cls.mask_generic(str_value, keep_chars=2)
-        elif sensitivity == SensitivityLevel.CONFIDENTIAL:
+        if sensitivity == SensitivityLevel.CONFIDENTIAL:
             return cls.mask_generic(str_value, keep_chars=3)
-        else:
-            # INTERNAL — light masking
-            return cls.mask_generic(str_value, keep_chars=4)
+        # INTERNAL — light masking
+        return cls.mask_generic(str_value, keep_chars=4)
 
     @classmethod
     def mask_dict(
         cls,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         entity_type: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Mask all classified fields in a dictionary.
 
@@ -415,9 +428,9 @@ class DataMasker:
     @classmethod
     def mask_for_ai_context(
         cls,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         entity_type: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Aggressively mask data before sending to AI context.
 
@@ -436,8 +449,16 @@ class DataMasker:
         result = {}
 
         # Fields that are safe to pass through to AI regardless
-        safe_fields: Set[str] = {"id", "status", "entity_type", "org_id", "created_at",
-                                  "updated_at", "actor_type", "sensitivity_level"}
+        safe_fields: set[str] = {
+            "id",
+            "status",
+            "entity_type",
+            "org_id",
+            "created_at",
+            "updated_at",
+            "actor_type",
+            "sensitivity_level",
+        }
 
         for key, value in data.items():
             if key in safe_fields:
@@ -463,9 +484,9 @@ class DataMasker:
     @classmethod
     def mask_for_log(
         cls,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         entity_type: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Mask data for audit/application log output.
 
@@ -499,6 +520,7 @@ class DataMasker:
 # ENCRYPTION HELPERS
 # =============================================================================
 
+
 def encryption_required(sensitivity: SensitivityLevel) -> bool:
     """
     Determine if a sensitivity level requires encryption-at-rest.
@@ -518,6 +540,7 @@ def encryption_required(sensitivity: SensitivityLevel) -> bool:
 # DEFAULT REGISTRATIONS
 # =============================================================================
 
+
 def initialize_default_classifications() -> None:
     """
     Register default classifications for all known ALIS entities.
@@ -527,180 +550,200 @@ def initialize_default_classifications() -> None:
     """
 
     # --- User (E01-S01) ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="user",
-        default_sensitivity=SensitivityLevel.CONFIDENTIAL,
-        default_regulated_type=RegulatedDataType.PII,
-        description="User identity — contains PII (name, email)",
-        retention_class=RetentionClass.STANDARD,   # E00-S07: PII — 5 years
-        field_overrides={
-            "id": FieldClassification(
-                field_name="id",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-            "username": FieldClassification(
-                field_name="username",
-                sensitivity=SensitivityLevel.CONFIDENTIAL,
-                regulated_type=RegulatedDataType.PII,
-                mask_in_logs=True,
-                mask_in_ai=True,
-            ),
-            "email": FieldClassification(
-                field_name="email",
-                sensitivity=SensitivityLevel.REGULATED,
-                regulated_type=RegulatedDataType.PII,
-                mask_in_logs=True,
-                mask_in_ai=True,
-            ),
-            "display_name": FieldClassification(
-                field_name="display_name",
-                sensitivity=SensitivityLevel.CONFIDENTIAL,
-                regulated_type=RegulatedDataType.PII,
-                mask_in_logs=True,
-                mask_in_ai=True,
-            ),
-            "status": FieldClassification(
-                field_name="status",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-            "org_id": FieldClassification(
-                field_name="org_id",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-            "actor_type": FieldClassification(
-                field_name="actor_type",
-                sensitivity=SensitivityLevel.PUBLIC,
-            ),
-        },
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="user",
+            default_sensitivity=SensitivityLevel.CONFIDENTIAL,
+            default_regulated_type=RegulatedDataType.PII,
+            description="User identity — contains PII (name, email)",
+            retention_class=RetentionClass.STANDARD,  # E00-S07: PII — 5 years
+            field_overrides={
+                "id": FieldClassification(
+                    field_name="id",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+                "username": FieldClassification(
+                    field_name="username",
+                    sensitivity=SensitivityLevel.CONFIDENTIAL,
+                    regulated_type=RegulatedDataType.PII,
+                    mask_in_logs=True,
+                    mask_in_ai=True,
+                ),
+                "email": FieldClassification(
+                    field_name="email",
+                    sensitivity=SensitivityLevel.REGULATED,
+                    regulated_type=RegulatedDataType.PII,
+                    mask_in_logs=True,
+                    mask_in_ai=True,
+                ),
+                "display_name": FieldClassification(
+                    field_name="display_name",
+                    sensitivity=SensitivityLevel.CONFIDENTIAL,
+                    regulated_type=RegulatedDataType.PII,
+                    mask_in_logs=True,
+                    mask_in_ai=True,
+                ),
+                "status": FieldClassification(
+                    field_name="status",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+                "org_id": FieldClassification(
+                    field_name="org_id",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+                "actor_type": FieldClassification(
+                    field_name="actor_type",
+                    sensitivity=SensitivityLevel.PUBLIC,
+                ),
+            },
+        )
+    )
 
     # --- Organization (E01-S05) ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="organization",
-        default_sensitivity=SensitivityLevel.INTERNAL,
-        description="Institutional entity — generally non-sensitive",
-        field_overrides={
-            "name": FieldClassification(
-                field_name="name",
-                sensitivity=SensitivityLevel.PUBLIC,
-            ),
-            "code": FieldClassification(
-                field_name="code",
-                sensitivity=SensitivityLevel.PUBLIC,
-            ),
-        },
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="organization",
+            default_sensitivity=SensitivityLevel.INTERNAL,
+            description="Institutional entity — generally non-sensitive",
+            field_overrides={
+                "name": FieldClassification(
+                    field_name="name",
+                    sensitivity=SensitivityLevel.PUBLIC,
+                ),
+                "code": FieldClassification(
+                    field_name="code",
+                    sensitivity=SensitivityLevel.PUBLIC,
+                ),
+            },
+        )
+    )
 
     # --- NotificationLog (E02-S03) ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="notification_log",
-        default_sensitivity=SensitivityLevel.CONFIDENTIAL,
-        default_regulated_type=RegulatedDataType.PII,
-        description="Notification records — contains recipient PII",
-        retention_class=RetentionClass.STANDARD,   # E00-S07: 5 years
-        field_overrides={
-            "recipient_address": FieldClassification(
-                field_name="recipient_address",
-                sensitivity=SensitivityLevel.REGULATED,
-                regulated_type=RegulatedDataType.PII,
-                mask_in_logs=True,
-                mask_in_ai=True,
-                mask_pattern="partial",
-            ),
-            "recipient_id": FieldClassification(
-                field_name="recipient_id",
-                sensitivity=SensitivityLevel.CONFIDENTIAL,
-                mask_in_logs=True,
-                mask_in_ai=True,
-            ),
-        },
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="notification_log",
+            default_sensitivity=SensitivityLevel.CONFIDENTIAL,
+            default_regulated_type=RegulatedDataType.PII,
+            description="Notification records — contains recipient PII",
+            retention_class=RetentionClass.STANDARD,  # E00-S07: 5 years
+            field_overrides={
+                "recipient_address": FieldClassification(
+                    field_name="recipient_address",
+                    sensitivity=SensitivityLevel.REGULATED,
+                    regulated_type=RegulatedDataType.PII,
+                    mask_in_logs=True,
+                    mask_in_ai=True,
+                    mask_pattern="partial",
+                ),
+                "recipient_id": FieldClassification(
+                    field_name="recipient_id",
+                    sensitivity=SensitivityLevel.CONFIDENTIAL,
+                    mask_in_logs=True,
+                    mask_in_ai=True,
+                ),
+            },
+        )
+    )
 
     # --- Task (E02-S08) ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="task",
-        default_sensitivity=SensitivityLevel.INTERNAL,
-        description="System tasks — internal operational data",
-        retention_class=RetentionClass.TEMPORARY,  # E00-S07: 90 days
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="task",
+            default_sensitivity=SensitivityLevel.INTERNAL,
+            description="System tasks — internal operational data",
+            retention_class=RetentionClass.TEMPORARY,  # E00-S07: 90 days
+        )
+    )
 
     # --- FileMetadata (E02-S05) ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="file_metadata",
-        default_sensitivity=SensitivityLevel.CONFIDENTIAL,
-        description="Files may contain sensitive data — default to CONFIDENTIAL",
-        field_overrides={
-            "filename": FieldClassification(
-                field_name="filename",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-            "content_hash": FieldClassification(
-                field_name="content_hash",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-        },
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="file_metadata",
+            default_sensitivity=SensitivityLevel.CONFIDENTIAL,
+            description="Files may contain sensitive data — default to CONFIDENTIAL",
+            field_overrides={
+                "filename": FieldClassification(
+                    field_name="filename",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+                "content_hash": FieldClassification(
+                    field_name="content_hash",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+            },
+        )
+    )
 
     # --- GeneratedDocument (Documents) ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="generated_document",
-        default_sensitivity=SensitivityLevel.REGULATED,
-        default_regulated_type=RegulatedDataType.TRANSCRIPT,
-        description="Official documents (transcripts, certificates) — REGULATED",
-        retention_class=RetentionClass.PERMANENT,  # E00-S07: Transcripts are permanent
-        field_overrides={
-            "document_id": FieldClassification(
-                field_name="document_id",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-            "file_hash": FieldClassification(
-                field_name="file_hash",
-                sensitivity=SensitivityLevel.INTERNAL,
-            ),
-        },
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="generated_document",
+            default_sensitivity=SensitivityLevel.REGULATED,
+            default_regulated_type=RegulatedDataType.TRANSCRIPT,
+            description="Official documents (transcripts, certificates) — REGULATED",
+            retention_class=RetentionClass.PERMANENT,  # E00-S07: Transcripts are permanent
+            field_overrides={
+                "document_id": FieldClassification(
+                    field_name="document_id",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+                "file_hash": FieldClassification(
+                    field_name="file_hash",
+                    sensitivity=SensitivityLevel.INTERNAL,
+                ),
+            },
+        )
+    )
 
     # --- AuditEntry ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="audit_entry",
-        default_sensitivity=SensitivityLevel.INTERNAL,
-        description="Audit logs — metadata is INTERNAL, contents may be masked",
-        retention_class=RetentionClass.PERMANENT,  # E00-S07: Audit records are permanent
-        field_overrides={
-            "metadata": FieldClassification(
-                field_name="metadata",
-                sensitivity=SensitivityLevel.CONFIDENTIAL,
-                mask_in_logs=False,  # Already in the log
-                mask_in_ai=True,
-            ),
-        },
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="audit_entry",
+            default_sensitivity=SensitivityLevel.INTERNAL,
+            description="Audit logs — metadata is INTERNAL, contents may be masked",
+            retention_class=RetentionClass.PERMANENT,  # E00-S07: Audit records are permanent
+            field_overrides={
+                "metadata": FieldClassification(
+                    field_name="metadata",
+                    sensitivity=SensitivityLevel.CONFIDENTIAL,
+                    mask_in_logs=False,  # Already in the log
+                    mask_in_ai=True,
+                ),
+            },
+        )
+    )
 
     # --- E00-S07: Biometric Attendance Logs ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="biometric_log",
-        default_sensitivity=SensitivityLevel.REGULATED,
-        default_regulated_type=RegulatedDataType.BIOMETRIC,
-        description="Biometric attendance logs — REGULATED, 2-year retention",
-        retention_class=RetentionClass.LONG_TERM,  # E00-S07: Biometric = 2 years
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="biometric_log",
+            default_sensitivity=SensitivityLevel.REGULATED,
+            default_regulated_type=RegulatedDataType.BIOMETRIC,
+            description="Biometric attendance logs — REGULATED, 2-year retention",
+            retention_class=RetentionClass.LONG_TERM,  # E00-S07: Biometric = 2 years
+        )
+    )
 
     # --- E00-S07: Attendance Records ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="attendance_record",
-        default_sensitivity=SensitivityLevel.INTERNAL,
-        description="Daily attendance records — 5-year retention",
-        retention_class=RetentionClass.STANDARD,   # E00-S07: Attendance = 5 years
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="attendance_record",
+            default_sensitivity=SensitivityLevel.INTERNAL,
+            description="Daily attendance records — 5-year retention",
+            retention_class=RetentionClass.STANDARD,  # E00-S07: Attendance = 5 years
+        )
+    )
 
     # --- E00-S07: Financial Records ---
-    EntityClassificationRegistry.register(EntityClassification(
-        entity_type="financial_record",
-        default_sensitivity=SensitivityLevel.REGULATED,
-        default_regulated_type=RegulatedDataType.FINANCE,
-        description="Fee payments, ledger entries — REGULATED, permanent",
-        retention_class=RetentionClass.PERMANENT,  # E00-S07: Financial = permanent
-    ))
+    EntityClassificationRegistry.register(
+        EntityClassification(
+            entity_type="financial_record",
+            default_sensitivity=SensitivityLevel.REGULATED,
+            default_regulated_type=RegulatedDataType.FINANCE,
+            description="Fee payments, ledger entries — REGULATED, permanent",
+            retention_class=RetentionClass.PERMANENT,  # E00-S07: Financial = permanent
+        )
+    )
 
     logger.info(
         "Initialized default data classifications for %d entity types.",

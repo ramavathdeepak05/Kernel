@@ -18,13 +18,14 @@ Hard Constraints:
 - %s placeholders throughout
 - IDs are UUID strings
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import List, Optional
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from server.core.audit import AuditAction, AuditLog
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ class ConsentService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def get_consents(org_id: str, user_id: str) -> List[dict]:
+    def get_consents(org_id: str, user_id: str) -> list[dict]:
         """Return all consent records for a user within a tenant."""
         rows = execute_query(
             """
@@ -123,10 +124,10 @@ class ConsentService:
     def give_consent(
         org_id: str,
         user_id: str,
-        purposes: List[str],
+        purposes: list[str],
         ip_address: str = None,
         user_agent: str = None,
-    ) -> List[dict]:
+    ) -> list[dict]:
         """
         UPSERT consent records for the requested purposes.
 
@@ -141,8 +142,9 @@ class ConsentService:
         statements = []
         for purpose in purposes:
             record_id = str(uuid4())
-            statements.append((
-                """
+            statements.append(
+                (
+                    """
                 INSERT INTO consent_records (
                     id, org_id, user_id, purpose, status,
                     given_at, withdrawn_at, ip_address, user_agent,
@@ -160,12 +162,19 @@ class ConsentService:
                     user_agent   = EXCLUDED.user_agent,
                     updated_at   = EXCLUDED.updated_at
                 """,
-                (
-                    record_id, org_id, user_id, purpose,
-                    now, ip_address, user_agent,
-                    now, now,
-                ),
-            ))
+                    (
+                        record_id,
+                        org_id,
+                        user_id,
+                        purpose,
+                        now,
+                        ip_address,
+                        user_agent,
+                        now,
+                        now,
+                    ),
+                )
+            )
 
         execute_transaction(statements, tenant_id=org_id)
         return ConsentService.get_consents(org_id, user_id)
@@ -174,8 +183,8 @@ class ConsentService:
     def withdraw_consent(
         org_id: str,
         user_id: str,
-        purposes: List[str],
-    ) -> List[dict]:
+        purposes: list[str],
+    ) -> list[dict]:
         """
         Withdraw consent for the requested purposes.
 
@@ -189,8 +198,9 @@ class ConsentService:
         now = datetime.now(timezone.utc)
         statements = []
         for purpose in purposes:
-            statements.append((
-                """
+            statements.append(
+                (
+                    """
                 UPDATE consent_records
                 SET status       = 'WITHDRAWN',
                     withdrawn_at = %s,
@@ -200,8 +210,9 @@ class ConsentService:
                   AND purpose  = %s
                   AND status  IN ('GIVEN', 'PENDING')
                 """,
-                (now, now, org_id, user_id, purpose),
-            ))
+                    (now, now, org_id, user_id, purpose),
+                )
+            )
 
         execute_transaction(statements, tenant_id=org_id)
         return ConsentService.get_consents(org_id, user_id)
@@ -228,8 +239,6 @@ class ConsentService:
         now = datetime.now(timezone.utc)
         due_by = now + timedelta(days=30)
 
-        from psycopg2.extras import Json as PgJson  # type: ignore
-
         execute_transaction(
             [
                 (
@@ -245,31 +254,49 @@ class ConsentService:
                     )
                     """,
                     (
-                        erasure_id, org_id, user_id, requested_by, reason,
+                        erasure_id,
+                        org_id,
+                        user_id,
+                        requested_by,
+                        reason,
                         ALL_MODULES,
-                        due_by, now, now,
+                        due_by,
+                        now,
+                        now,
                     ),
                 )
             ],
             tenant_id=org_id,
         )
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=requested_by,
+            actor_role="system",
+            entity_type="erasure_request",
+            entity_id=erasure_id,
+            tenant_id=org_id,
+            metadata={"source": "request_erasure"},
+        )
 
         # Emit domain event so every module can act asynchronously
         try:
             from server.core.domain_events import DomainEvent, DomainEventBus
-            DomainEventBus.publish(DomainEvent(
-                event_type="USER_ERASURE_REQUESTED",
-                entity_type="erasure_request",
-                entity_id=erasure_id,
-                org_id=org_id,
-                payload={
-                    "user_id": user_id,
-                    "requested_by": requested_by,
-                    "reason": reason,
-                    "due_by": due_by.isoformat(),
-                    "modules_queued": ALL_MODULES,
-                },
-            ))
+
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type="USER_ERASURE_REQUESTED",
+                    entity_type="erasure_request",
+                    entity_id=erasure_id,
+                    org_id=org_id,
+                    payload={
+                        "user_id": user_id,
+                        "requested_by": requested_by,
+                        "reason": reason,
+                        "due_by": due_by.isoformat(),
+                        "modules_queued": ALL_MODULES,
+                    },
+                )
+            )
         except Exception:
             logger.warning(
                 "ConsentService.request_erasure: failed to publish domain event "
@@ -280,7 +307,7 @@ class ConsentService:
         return ConsentService.get_erasure_status(org_id, user_id) or {}
 
     @staticmethod
-    def get_erasure_status(org_id: str, user_id: str) -> Optional[dict]:
+    def get_erasure_status(org_id: str, user_id: str) -> dict | None:
         """Return the most recent erasure request for a user, or None."""
         rows = execute_query(
             """
@@ -312,6 +339,7 @@ class ConsentService:
         # Use system-level transaction because this is called by internal
         # module workers that don't necessarily have a tenant ContextVar set.
         from server.db_service import execute_system_transaction
+
         execute_system_transaction(
             [
                 (
@@ -377,6 +405,15 @@ class ConsentService:
             ],
             tenant_id=org_id,
         )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="admin",
+            actor_role="admin",
+            entity_type="erasure_request",
+            entity_id=erasure_id,
+            tenant_id=org_id,
+            metadata={"source": "reject_erasure", "reason": reason},
+        )
 
         rows = execute_query(
             """
@@ -391,5 +428,7 @@ class ConsentService:
             tenant_id=org_id,
         )
         if not rows:
-            raise ValueError(f"Erasure request {erasure_id} not found or not rejectable")
+            raise ValueError(
+                f"Erasure request {erasure_id} not found or not rejectable"
+            )
         return _row_to_dict(rows[0])

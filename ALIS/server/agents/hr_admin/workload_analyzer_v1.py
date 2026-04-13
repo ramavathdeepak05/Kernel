@@ -21,11 +21,12 @@ Hard Constraints:
     - Read-only. Never mutates state.
     - Workload tier is a Draft — HOD confirms before any reassignment.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -41,8 +42,8 @@ _HIGH_TIER_DEFAULT = 3 / 4
 
 def execute_workload_analyzer(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Workload Analyzer.
@@ -73,15 +74,15 @@ def execute_workload_analyzer(
             prompt_name="hr.workload_analysis",
             prompt_version=1,
             variables={
-                "faculty_id":              input_data.get("faculty_id", "unknown"),
-                "faculty_name":            input_data.get("faculty_name", ""),
+                "faculty_id": input_data.get("faculty_id", "unknown"),
+                "faculty_name": input_data.get("faculty_name", ""),
                 "teaching_hours_per_week": input_data.get("teaching_hours_per_week", 0),
-                "courses_assigned":        input_data.get("courses_assigned", 0),
-                "exam_duties":             input_data.get("exam_duties", 0),
-                "admin_roles":             input_data.get("admin_roles", 0),
-                "policy_max_hours":        input_data.get("policy_max_hours", 18),
-                "policy_min_hours":        input_data.get("policy_min_hours", 10),
-                "department":              input_data.get("department", ""),
+                "courses_assigned": input_data.get("courses_assigned", 0),
+                "exam_duties": input_data.get("exam_duties", 0),
+                "admin_roles": input_data.get("admin_roles", 0),
+                "policy_max_hours": input_data.get("policy_max_hours", 18),
+                "policy_min_hours": input_data.get("policy_min_hours", 10),
+                "department": input_data.get("department", ""),
             },
             validate_schema=True,
         )
@@ -93,7 +94,9 @@ def execute_workload_analyzer(
             policy_min = input_data.get("policy_min_hours", 10)
 
             high_threshold = float(
-                PolicyStore.get(context.org_id or "", "ai.hr.workload_overloaded_threshold")
+                PolicyStore.get(
+                    context.org_id or "", "ai.hr.workload_overloaded_threshold"
+                )
                 or _HIGH_TIER_DEFAULT
             )
             if score >= high_threshold:
@@ -111,24 +114,29 @@ def execute_workload_analyzer(
 
             return AIInvocationResult(
                 success=True,
-                content=json.dumps({
-                    "workload_tier": tier,
-                    "severity_score": round(score, 3),
-                    "findings": vo.reasoning or result.content or "",
-                    "recommended_action": action,
-                }),
+                content=json.dumps(
+                    {
+                        "workload_tier": tier,
+                        "severity_score": round(score, 3),
+                        "findings": vo.reasoning or result.content or "",
+                        "recommended_action": action,
+                    }
+                ),
                 request_id=context.request_id,
                 model=model_override or result.model or "qwen2.5",
             )
 
         return AIInvocationResult(
             success=True,
-            content=result.content or json.dumps({
-                "workload_tier": "BALANCED",
-                "severity_score": 0.0,
-                "findings": "Insufficient data for workload analysis.",
-                "recommended_action": "Provide complete workload data before re-running.",
-            }),
+            content=result.content
+            or json.dumps(
+                {
+                    "workload_tier": "BALANCED",
+                    "severity_score": 0.0,
+                    "findings": "Insufficient data for workload analysis.",
+                    "recommended_action": "Provide complete workload data before re-running.",
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "qwen2.5",
         )

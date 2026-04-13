@@ -26,21 +26,23 @@ Acceptance Criteria (E00-S05):
     - [x] Activation/deactivation audit logged
     - [x] Blocked attempts audit logged
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Any
 from uuid import uuid4
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .rbac import Role
 
 logger = logging.getLogger(__name__)
 
 
 # --- Lockdown State Entity ---
+
 
 @dataclass
 class LockdownEvent:
@@ -49,28 +51,32 @@ class LockdownEvent:
 
     Each activation or deactivation creates one of these.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
-    event_type: str = ""       # "activated" or "deactivated"
+    event_type: str = ""  # "activated" or "deactivated"
     actor_id: str = ""
     actor_role: str = ""
     reason: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sessions_revoked: int = 0  # Number of sessions killed on activation
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 # --- Roles Immune to Lockdown ---
 # These roles retain write access and session validity during lockdown.
 # Only system-level administrators can operate during an incident.
 
-LOCKDOWN_IMMUNE_ROLES = frozenset({
-    Role.ADMIN,
-    Role.SUPER_ADMIN,
-    Role.SYSTEM,
-})
+LOCKDOWN_IMMUNE_ROLES = frozenset(
+    {
+        Role.ADMIN,
+        Role.SUPER_ADMIN,
+        Role.SYSTEM,
+    }
+)
 
 
 # --- Lockdown Manager Singleton ---
+
 
 class LockdownManager:
     """
@@ -100,10 +106,10 @@ class LockdownManager:
 
     # --- Internal State ---
     _active: bool = False
-    _activated_at: Optional[datetime] = None
-    _activated_by: Optional[str] = None
-    _activation_reason: Optional[str] = None
-    _event_history: List[LockdownEvent] = []
+    _activated_at: datetime | None = None
+    _activated_by: str | None = None
+    _activation_reason: str | None = None
+    _event_history: list[LockdownEvent] = []
 
     # ================================================================
     # QUERY METHODS
@@ -120,18 +126,20 @@ class LockdownManager:
         return cls._active
 
     @classmethod
-    def get_status(cls) -> Dict[str, Any]:
+    def get_status(cls) -> dict[str, Any]:
         """Return a structured status snapshot for dashboards / API."""
         return {
             "is_active": cls._active,
-            "activated_at": cls._activated_at.isoformat() if cls._activated_at else None,
+            "activated_at": cls._activated_at.isoformat()
+            if cls._activated_at
+            else None,
             "activated_by": cls._activated_by,
             "reason": cls._activation_reason,
             "event_count": len(cls._event_history),
         }
 
     @classmethod
-    def get_event_history(cls) -> List[LockdownEvent]:
+    def get_event_history(cls) -> list[LockdownEvent]:
         """Return the full lockdown event history (append-only)."""
         return list(cls._event_history)
 
@@ -145,7 +153,7 @@ class LockdownManager:
         actor_id: str,
         actor_role: str,
         reason: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> LockdownEvent:
         """
         Activate lockdown mode.
@@ -168,7 +176,6 @@ class LockdownManager:
             PermissionDeniedError: If actor_role is not in LOCKDOWN_IMMUNE_ROLES.
             ValueError: If lockdown is already active.
         """
-        from .exceptions import PermissionDeniedError
 
         # --- Guard: Only immune roles may trigger lockdown ---
         _assert_immune_role(actor_role, "activate lockdown")
@@ -217,7 +224,10 @@ class LockdownManager:
 
         logger.critical(
             "LOCKDOWN ACTIVATED by %s (role=%s): %s  |  Sessions revoked: %d",
-            actor_id, actor_role, reason, sessions_revoked,
+            actor_id,
+            actor_role,
+            reason,
+            sessions_revoked,
         )
 
         return event
@@ -232,7 +242,7 @@ class LockdownManager:
         actor_id: str,
         actor_role: str,
         reason: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> LockdownEvent:
         """
         Deactivate lockdown mode and restore normal operations.
@@ -250,7 +260,6 @@ class LockdownManager:
             PermissionDeniedError: If actor_role is not in LOCKDOWN_IMMUNE_ROLES.
             ValueError: If lockdown is not currently active.
         """
-        from .exceptions import PermissionDeniedError
 
         _assert_immune_role(actor_role, "deactivate lockdown")
 
@@ -292,7 +301,9 @@ class LockdownManager:
 
         logger.critical(
             "LOCKDOWN DEACTIVATED by %s (role=%s): %s",
-            actor_id, actor_role, reason,
+            actor_id,
+            actor_role,
+            reason,
         )
 
         return event
@@ -304,8 +315,8 @@ class LockdownManager:
     @classmethod
     def assert_write_allowed(
         cls,
-        actor_role: Optional[str] = None,
-        actor_id: Optional[str] = None,
+        actor_role: str | None = None,
+        actor_id: str | None = None,
     ) -> None:
         """
         Assert that a write operation is permitted.
@@ -345,7 +356,7 @@ class LockdownManager:
     @classmethod
     def assert_ai_allowed(
         cls,
-        actor_id: Optional[str] = None,
+        actor_id: str | None = None,
     ) -> None:
         """
         Assert that AI invocations are permitted.
@@ -394,7 +405,8 @@ class LockdownManager:
 # PRIVATE HELPERS
 # ============================================================================
 
-def _resolve_role(role_str: Optional[str]) -> Optional[Role]:
+
+def _resolve_role(role_str: str | None) -> Role | None:
     """Safely resolve a role string to a Role enum."""
     if role_str is None:
         return None
@@ -412,7 +424,7 @@ def _assert_immune_role(actor_role: str, operation: str) -> None:
     if role_enum not in LOCKDOWN_IMMUNE_ROLES:
         raise PermissionDeniedError(
             message=f"Only ADMIN, SUPER_ADMIN, or SYSTEM roles may {operation}. "
-                    f"Got: '{actor_role}'.",
+            f"Got: '{actor_role}'.",
             details={"actor_role": actor_role},
         )
 

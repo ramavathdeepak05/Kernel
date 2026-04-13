@@ -20,10 +20,9 @@ return failures gracefully so the workflow can proceed without SMS.
 from __future__ import annotations
 
 import logging
-import secrets
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +30,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # PROVIDER ENUM
 # =============================================================================
+
 
 class SMSProvider(str, Enum):
     MSG91 = "MSG91"
@@ -41,47 +41,53 @@ class SMSProvider(str, Enum):
 # DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class SMSResult:
     """Result of sending a single SMS."""
+
     success: bool
-    message_id: Optional[str] = None
+    message_id: str | None = None
     provider: str = ""
     phone: str = ""
-    error: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class OTPSendResult:
     """Result of sending an OTP."""
+
     success: bool
-    request_id: Optional[str] = None  # Provider's OTP session ID
+    request_id: str | None = None  # Provider's OTP session ID
     provider: str = ""
     phone: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class OTPVerifyResult:
     """Result of verifying an OTP."""
+
     is_valid: bool
     phone: str = ""
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class BulkSMSResult:
     """Result of sending bulk SMS."""
+
     total: int = 0
     sent: int = 0
     failed: int = 0
-    results: List[SMSResult] = field(default_factory=list)
+    results: list[SMSResult] = field(default_factory=list)
 
 
 # =============================================================================
 # SMS GATEWAY CLIENT
 # =============================================================================
+
 
 class SMSGatewayClient:
     """
@@ -122,6 +128,7 @@ class SMSGatewayClient:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
         self._provider = getattr(settings, "sms_provider", "MSG91").upper()
 
@@ -157,12 +164,11 @@ class SMSGatewayClient:
 
         if self._provider == SMSProvider.MSG91:
             return self._msg91_send_otp(phone, otp_length, expiry_minutes)
-        elif self._provider == SMSProvider.TWILIO:
+        if self._provider == SMSProvider.TWILIO:
             return self._twilio_send_otp(phone, otp_length, expiry_minutes)
-        else:
-            return OTPSendResult(
-                success=False, phone=phone, error=f"Unknown provider: {self._provider}"
-            )
+        return OTPSendResult(
+            success=False, phone=phone, error=f"Unknown provider: {self._provider}"
+        )
 
     def _msg91_send_otp(
         self, phone: str, otp_length: int, expiry_minutes: int
@@ -194,14 +200,13 @@ class SMSGatewayClient:
                     provider=SMSProvider.MSG91,
                     phone=phone,
                 )
-            else:
-                logger.warning("MSG91: OTP send failed — %s", data.get("message"))
-                return OTPSendResult(
-                    success=False,
-                    provider=SMSProvider.MSG91,
-                    phone=phone,
-                    error=data.get("message", "Unknown MSG91 error"),
-                )
+            logger.warning("MSG91: OTP send failed — %s", data.get("message"))
+            return OTPSendResult(
+                success=False,
+                provider=SMSProvider.MSG91,
+                phone=phone,
+                error=data.get("message", "Unknown MSG91 error"),
+            )
         except Exception as exc:
             logger.error("MSG91: OTP send exception — %s", exc)
             return OTPSendResult(
@@ -234,14 +239,13 @@ class SMSGatewayClient:
                     provider=SMSProvider.TWILIO,
                     phone=phone,
                 )
-            else:
-                logger.warning("Twilio: OTP send failed — %s", data.get("message"))
-                return OTPSendResult(
-                    success=False,
-                    provider=SMSProvider.TWILIO,
-                    phone=phone,
-                    error=data.get("message", "Unknown Twilio error"),
-                )
+            logger.warning("Twilio: OTP send failed — %s", data.get("message"))
+            return OTPSendResult(
+                success=False,
+                provider=SMSProvider.TWILIO,
+                phone=phone,
+                error=data.get("message", "Unknown Twilio error"),
+            )
         except Exception as exc:
             logger.error("Twilio: OTP send exception — %s", exc)
             return OTPSendResult(
@@ -256,22 +260,23 @@ class SMSGatewayClient:
         self,
         phone: str,
         otp: str,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> OTPVerifyResult:
         """
         Verify an OTP entered by the user.
         """
         if not self.is_enabled():
-            return OTPVerifyResult(is_valid=False, phone=phone, error="SMS not configured")
+            return OTPVerifyResult(
+                is_valid=False, phone=phone, error="SMS not configured"
+            )
 
         if self._provider == SMSProvider.MSG91:
             return self._msg91_verify_otp(phone, otp)
-        elif self._provider == SMSProvider.TWILIO:
+        if self._provider == SMSProvider.TWILIO:
             return self._twilio_verify_otp(phone, otp)
-        else:
-            return OTPVerifyResult(
-                is_valid=False, phone=phone, error=f"Unknown provider: {self._provider}"
-            )
+        return OTPVerifyResult(
+            is_valid=False, phone=phone, error=f"Unknown provider: {self._provider}"
+        )
 
     def _msg91_verify_otp(self, phone: str, otp: str) -> OTPVerifyResult:
         import httpx
@@ -339,7 +344,7 @@ class SMSGatewayClient:
         self,
         phone: str,
         message: str,
-        template_id: Optional[str] = None,
+        template_id: str | None = None,
     ) -> SMSResult:
         """
         Send a single transactional SMS.
@@ -351,20 +356,19 @@ class SMSGatewayClient:
 
         if self._provider == SMSProvider.MSG91:
             return self._msg91_send_sms(phone, message, template_id)
-        elif self._provider == SMSProvider.TWILIO:
+        if self._provider == SMSProvider.TWILIO:
             return self._twilio_send_sms(phone, message)
-        else:
-            return SMSResult(
-                success=False, phone=phone, error=f"Unknown provider: {self._provider}"
-            )
+        return SMSResult(
+            success=False, phone=phone, error=f"Unknown provider: {self._provider}"
+        )
 
     def _msg91_send_sms(
-        self, phone: str, message: str, template_id: Optional[str]
+        self, phone: str, message: str, template_id: str | None
     ) -> SMSResult:
         import httpx
 
         auth_key = self._settings.msg91_auth_key
-        sender_id = getattr(self._settings, "msg91_sender_id", "ALISUN")
+        getattr(self._settings, "msg91_sender_id", "ALISUN")
         timeout = getattr(self._settings, "sms_timeout_seconds", 10)
 
         try:
@@ -373,15 +377,15 @@ class SMSGatewayClient:
                 headers={"authkey": auth_key},
                 json={
                     "template_id": template_id or "",
-                    "recipients": [
-                        {"mobiles": phone.lstrip("+"), "message": message}
-                    ],
+                    "recipients": [{"mobiles": phone.lstrip("+"), "message": message}],
                 },
                 timeout=timeout,
             )
             data = resp.json()
             success = data.get("type") == "success"
-            logger.info("MSG91: SMS %s to %s***", "sent" if success else "failed", phone[:6])
+            logger.info(
+                "MSG91: SMS %s to %s***", "sent" if success else "failed", phone[:6]
+            )
             return SMSResult(
                 success=success,
                 message_id=data.get("request_id"),
@@ -413,7 +417,9 @@ class SMSGatewayClient:
             )
             data = resp.json()
             success = resp.status_code in (200, 201)
-            logger.info("Twilio: SMS %s to %s***", "sent" if success else "failed", phone[:6])
+            logger.info(
+                "Twilio: SMS %s to %s***", "sent" if success else "failed", phone[:6]
+            )
             return SMSResult(
                 success=success,
                 message_id=data.get("sid"),
@@ -434,8 +440,8 @@ class SMSGatewayClient:
 
     def send_bulk(
         self,
-        recipients: List[Dict[str, str]],
-        template_id: Optional[str] = None,
+        recipients: list[dict[str, str]],
+        template_id: str | None = None,
     ) -> BulkSMSResult:
         """
         Send SMS to multiple recipients.

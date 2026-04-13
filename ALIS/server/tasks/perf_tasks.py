@@ -6,6 +6,7 @@ Tasks:
   2. dispatch_pending_events — Poll domain_events for PENDING and push to Celery
   3. warm_caches — Periodic cache warming for hot RBAC/policy lookups
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # 1. DRAIN ASYNC AUDIT QUEUE
 # =============================================================================
+
 
 @celery_app.task(name="server.tasks.perf_tasks.drain_audit_queue", queue="default")
 def drain_audit_queue(batch_size: int = 200) -> dict:
@@ -41,10 +43,12 @@ def drain_audit_queue(batch_size: int = 200) -> dict:
         if r:
             remaining = r.llen("alis:audit:pending") or 0
     except Exception:
-        pass
+        pass  # noqa: S110 — intentionally suppressed
 
     if persisted > 0:
-        logger.info("drain_audit_queue: persisted=%d remaining=%d", persisted, remaining)
+        logger.info(
+            "drain_audit_queue: persisted=%d remaining=%d", persisted, remaining
+        )
 
     return {"persisted": persisted, "remaining": remaining}
 
@@ -53,7 +57,10 @@ def drain_audit_queue(batch_size: int = 200) -> dict:
 # 2. DISPATCH PENDING DOMAIN EVENTS (Stage 2 of two-stage events)
 # =============================================================================
 
-@celery_app.task(name="server.tasks.perf_tasks.dispatch_pending_events", queue="default")
+
+@celery_app.task(
+    name="server.tasks.perf_tasks.dispatch_pending_events", queue="default"
+)
 def dispatch_pending_events(batch_size: int = 50) -> dict:
     """
     Poll domain_events table for PENDING events and dispatch to Celery.
@@ -68,8 +75,9 @@ def dispatch_pending_events(batch_size: int = 50) -> dict:
     Also handles events from the standard DomainEventBus.publish() path
     where Celery was unavailable at publish time.
     """
-    from server.db_service import execute_system_query, execute_system_transaction
     from datetime import datetime, timezone
+
+    from server.db_service import execute_system_query, execute_system_transaction
 
     # Only pick up events that have been PENDING for at least 5 seconds.
     # This avoids racing with DomainEventBus.publish() which dispatches
@@ -100,18 +108,27 @@ def dispatch_pending_events(batch_size: int = 50) -> dict:
         event_id = row["id"]
         try:
             # Mark as being picked up to prevent double-dispatch
-            execute_system_transaction([(
-                "UPDATE domain_events SET processing_started_at = %s WHERE id = %s AND status = 'PENDING'",
-                (datetime.now(timezone.utc), event_id),
-            )])
+            execute_system_transaction(
+                [
+                    (
+                        "UPDATE domain_events SET processing_started_at = %s WHERE id = %s AND status = 'PENDING'",
+                        (datetime.now(timezone.utc), event_id),
+                    )
+                ]
+            )
             from server.tasks.events import dispatch_domain_event
+
             dispatch_domain_event.delay(event_id)
             dispatched += 1
         except Exception as e:
-            logger.warning("dispatch_pending_events: failed to dispatch %s: %s", event_id, e)
+            logger.warning(
+                "dispatch_pending_events: failed to dispatch %s: %s", event_id, e
+            )
 
     if dispatched > 0:
-        logger.info("dispatch_pending_events: dispatched=%d of %d", dispatched, len(rows))
+        logger.info(
+            "dispatch_pending_events: dispatched=%d of %d", dispatched, len(rows)
+        )
 
     return {"dispatched": dispatched}
 
@@ -119,6 +136,7 @@ def dispatch_pending_events(batch_size: int = 50) -> dict:
 # =============================================================================
 # 3. CACHE WARMING — Periodic hot-cache refresh
 # =============================================================================
+
 
 @celery_app.task(name="server.tasks.perf_tasks.warm_caches", queue="default")
 def warm_caches() -> dict:

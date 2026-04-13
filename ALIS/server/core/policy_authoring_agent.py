@@ -12,12 +12,10 @@ import json as _json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 import httpx
-
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.core.llm_router import LLMTaskClass, get_model_for_task
@@ -38,16 +36,16 @@ class PolicyDraftResult:
 
     draft_id: str
     policy_key: str
-    policy_type: str          # INTEGER | DECIMAL | BOOLEAN | STRING | JSON
-    current_value: Optional[str]
-    current_version: Optional[int]
+    policy_type: str  # INTEGER | DECIMAL | BOOLEAN | STRING | JSON
+    current_value: str | None
+    current_version: int | None
     proposed_value: str
     justification: str
-    confidence: float         # LLM confidence 0.0–1.0
-    status: str               # always "DRAFT" at creation
+    confidence: float  # LLM confidence 0.0–1.0
+    status: str  # always "DRAFT" at creation
     created_by: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "draft_id": self.draft_id,
             "policy_key": self.policy_key,
@@ -74,7 +72,7 @@ class PolicyAuthoringAgent:
     """
 
     # Policies governed at the platform level — §4.4 of Engineering Build Guidelines
-    _QUAICU_ONLY_PREFIXES: List[str] = [
+    _QUAICU_ONLY_PREFIXES: list[str] = [
         "audit_ledger_retention",
         "tenant_isolation",
         "dpdp_compliance_mode",
@@ -86,7 +84,7 @@ class PolicyAuthoringAgent:
 
     def _get_current_policy(
         self, org_id: str, policy_key: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Return the latest APPROVED policy row, or None if not set."""
         rows = execute_query(
             """
@@ -103,10 +101,10 @@ class PolicyAuthoringAgent:
     def _call_llm(
         self,
         policy_key: str,
-        current_value: Optional[str],
-        policy_type: Optional[str],
+        current_value: str | None,
+        policy_type: str | None,
         plain_english_description: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Call Ollama and parse the JSON draft response.
 
         Falls back to a safe empty draft if the LLM is unavailable or
@@ -121,13 +119,13 @@ class PolicyAuthoringAgent:
             f"Current value: {current_value or 'not set'}\n"
             f"Policy type: {policy_type or 'unknown'}\n\n"
             f"Admin's request: {plain_english_description}\n\n"
-            'Return JSON only:\n'
+            "Return JSON only:\n"
             '{"proposed_value": "...", "policy_type": "INTEGER|DECIMAL|BOOLEAN|STRING|JSON", '
             '"justification": "...", "confidence": 0.0}\n\n'
             "Rules:\n"
             "- INTEGER: whole number only\n"
             "- DECIMAL: number with decimals\n"
-            "- BOOLEAN: \"true\" or \"false\" only\n"
+            '- BOOLEAN: "true" or "false" only\n'
             "- JSON: valid JSON array or object\n"
             "- STRING: plain text\n"
             "- proposed_value MUST be a string representation\n"
@@ -136,6 +134,7 @@ class PolicyAuthoringAgent:
 
         try:
             from server.core.settings import settings as _settings
+
             resp = httpx.post(
                 f"{_settings.ollama_base_url}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": False},
@@ -143,9 +142,7 @@ class PolicyAuthoringAgent:
             )
             raw = resp.json().get("response", "{}")
             match = re.search(r"\{.*\}", raw, re.DOTALL)
-            draft_json: Dict[str, Any] = (
-                _json.loads(match.group()) if match else {}
-            )
+            draft_json: dict[str, Any] = _json.loads(match.group()) if match else {}
         except Exception as exc:
             logger.warning("PAA LLM call failed: %s", exc)
             draft_json = {
@@ -167,7 +164,7 @@ class PolicyAuthoringAgent:
         policy_key: str,
         plain_english_description: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Generate an LLM-assisted policy draft.
 
         Inserts a new institution_policies row with status='DRAFT'.
@@ -193,15 +190,9 @@ class PolicyAuthoringAgent:
                 )
 
         current = self._get_current_policy(org_id, policy_key)
-        current_value: Optional[str] = (
-            current["policy_value"] if current else None
-        )
-        current_version: Optional[int] = (
-            int(current["version"]) if current else None
-        )
-        current_type: Optional[str] = (
-            current["policy_type"] if current else None
-        )
+        current_value: str | None = current["policy_value"] if current else None
+        current_version: int | None = int(current["version"]) if current else None
+        current_type: str | None = current["policy_type"] if current else None
 
         draft_json = self._call_llm(
             policy_key,
@@ -267,7 +258,7 @@ class PolicyAuthoringAgent:
         )
         return result.to_dict()
 
-    def list_drafts(self, org_id: str) -> List[Dict[str, Any]]:
+    def list_drafts(self, org_id: str) -> list[dict[str, Any]]:
         """Return all pending DRAFT policy rows for the given org."""
         return execute_query(
             """
@@ -286,7 +277,7 @@ class PolicyAuthoringAgent:
         org_id: str,
         actor_id: str,
         justification: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Approve a DRAFT policy, making it the active version.
 
         Updates status to APPROVED and appends the reviewer's justification
@@ -369,7 +360,7 @@ class PolicyAuthoringAgent:
         org_id: str,
         actor_id: str,
         reason: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Reject and delete a DRAFT policy row.
 
         Removes the draft from institution_policies — rejected drafts do not

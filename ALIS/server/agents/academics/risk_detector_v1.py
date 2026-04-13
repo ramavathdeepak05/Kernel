@@ -18,11 +18,12 @@ Hard Constraints:
     - Read-only. Never mutates state.
     - Risk tier is a Draft — academic counsellor confirms before action.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -39,8 +40,8 @@ _HIGH_TIER_DEFAULT = 3 / 4
 
 def execute_risk_detector(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Student Risk Detector.
@@ -68,12 +69,12 @@ def execute_risk_detector(
             prompt_name="academics.risk_detection",
             prompt_version=1,
             variables={
-                "student_id":        input_data.get("student_id", "unknown"),
-                "attendance_pct":    input_data.get("attendance_pct", 0),
-                "internal_avg":      input_data.get("internal_avg", 0),
-                "lms_logins_30d":    input_data.get("lms_logins_30d", 0),
+                "student_id": input_data.get("student_id", "unknown"),
+                "attendance_pct": input_data.get("attendance_pct", 0),
+                "internal_avg": input_data.get("internal_avg", 0),
+                "lms_logins_30d": input_data.get("lms_logins_30d", 0),
                 "counselling_flags": input_data.get("counselling_flags", 0),
-                "course_name":       input_data.get("course_name", ""),
+                "course_name": input_data.get("course_name", ""),
             },
             validate_schema=True,
         )
@@ -82,7 +83,9 @@ def execute_risk_detector(
             vo = result.validated_output
             score = vo.confidence_score
             high_threshold = float(
-                PolicyStore.get(context.org_id or "", "ai.academics.risk_high_threshold")
+                PolicyStore.get(
+                    context.org_id or "", "ai.academics.risk_high_threshold"
+                )
                 or _HIGH_TIER_DEFAULT
             )
             if score >= high_threshold:
@@ -97,20 +100,29 @@ def execute_risk_detector(
 
             return AIInvocationResult(
                 success=True,
-                content=json.dumps({
-                    "risk_tier": tier,
-                    "risk_score": round(score, 3),
-                    "rationale": vo.reasoning or result.content or "",
-                    "recommended_action": action,
-                }),
+                content=json.dumps(
+                    {
+                        "risk_tier": tier,
+                        "risk_score": round(score, 3),
+                        "rationale": vo.reasoning or result.content or "",
+                        "recommended_action": action,
+                    }
+                ),
                 request_id=context.request_id,
                 model=model_override or result.model or "qwen2.5",
             )
 
         return AIInvocationResult(
             success=True,
-            content=result.content or json.dumps({"risk_tier": "LOW", "risk_score": 0.0,
-                                                   "rationale": "Insufficient data.", "recommended_action": "Monitor."}),
+            content=result.content
+            or json.dumps(
+                {
+                    "risk_tier": "LOW",
+                    "risk_score": 0.0,
+                    "rationale": "Insufficient data.",
+                    "recommended_action": "Monitor.",
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "qwen2.5",
         )

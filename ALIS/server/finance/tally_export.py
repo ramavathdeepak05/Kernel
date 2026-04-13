@@ -11,7 +11,6 @@ import csv
 import io
 import logging
 from datetime import date
-from typing import List, Optional
 from xml.sax.saxutils import escape as xml_escape
 
 from server.core.exceptions import BusinessRuleViolation
@@ -23,6 +22,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _check_feature_flag(org_id: str, flag_key: str) -> bool:
     """Return True if the feature flag is enabled for this tenant."""
@@ -40,7 +40,7 @@ def _check_feature_flag(org_id: str, flag_key: str) -> bool:
     return str(rows[0]["flag_value"]).lower() == "true"
 
 
-def _query_invoices(org_id: str, from_date: date, to_date: date) -> List[dict]:
+def _query_invoices(org_id: str, from_date: date, to_date: date) -> list[dict]:
     return execute_query(
         """
         SELECT si.invoice_number,
@@ -65,8 +65,8 @@ def _query_invoices(org_id: str, from_date: date, to_date: date) -> List[dict]:
 # Service
 # ---------------------------------------------------------------------------
 
-class TallyExportService:
 
+class TallyExportService:
     @classmethod
     def export_tally_xml(
         cls,
@@ -140,7 +140,11 @@ class TallyExportService:
 """
         logger.info(
             "tally_export | org=%s from=%s to=%s vouchers=%d actor=%s",
-            org_id, from_date, to_date, len(vouchers_xml), actor_id,
+            org_id,
+            from_date,
+            to_date,
+            len(vouchers_xml),
+            actor_id,
         )
         return xml_body.encode("utf-8")
 
@@ -170,7 +174,14 @@ class TallyExportService:
         output = io.StringIO()
         writer = csv.DictWriter(
             output,
-            fieldnames=["Date", "VoucherNo", "Party", "Amount", "Narration", "PaymentMode"],
+            fieldnames=[
+                "Date",
+                "VoucherNo",
+                "Party",
+                "Amount",
+                "Narration",
+                "PaymentMode",
+            ],
             lineterminator="\r\n",
         )
         writer.writeheader()
@@ -189,18 +200,23 @@ class TallyExportService:
                     parts = raw.split("-")
                     txn_date = "/".join(reversed(parts)) if len(parts) == 3 else raw
 
-            writer.writerow({
-                "Date": txn_date,
-                "VoucherNo": r["invoice_number"] or "",
-                "Party": str(r["student_id"] or ""),
-                "Amount": str(r["paid_amount"]),
-                "Narration": r["invoice_number"] or "",
-                "PaymentMode": r["payment_method"] or "",
-            })
+            writer.writerow(
+                {
+                    "Date": txn_date,
+                    "VoucherNo": r["invoice_number"] or "",
+                    "Party": str(r["student_id"] or ""),
+                    "Amount": str(r["paid_amount"]),
+                    "Narration": r["invoice_number"] or "",
+                    "PaymentMode": r["payment_method"] or "",
+                }
+            )
 
         csv_content = output.getvalue()
         logger.info(
             "busy_export | org=%s from=%s to=%s actor=%s",
-            org_id, from_date, to_date, actor_id,
+            org_id,
+            from_date,
+            to_date,
+            actor_id,
         )
         return csv_content.encode("utf-8")

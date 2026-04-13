@@ -6,6 +6,7 @@ Provides:
 3. Department performance summary
 4. AI narrative via Qwen (non-fatal fallback)
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,11 +17,11 @@ logger = logging.getLogger(__name__)
 
 
 class HRAnalyticsService:
-
     @classmethod
     def workload_distribution(cls, org_id: str, academic_year: str) -> list[dict]:
         """Faculty workload: courses per faculty, credit hours, vs. policy limit."""
         from server.core.policy_store import PolicyStore
+
         max_courses = int(
             PolicyStore.get(org_id, "academics.faculty.max_courses_per_year") or 6
         )
@@ -94,8 +95,9 @@ class HRAnalyticsService:
         }
 
     @classmethod
-    def department_performance_summary(cls, org_id: str,
-                                        review_period: str) -> list[dict]:
+    def department_performance_summary(
+        cls, org_id: str, review_period: str
+    ) -> list[dict]:
         rows = execute_query(
             """
             SELECT
@@ -122,7 +124,7 @@ class HRAnalyticsService:
         overloaded = [w for w in workload if w.get("is_overloaded")]
 
         leave_data = cls.leave_patterns(org_id, int(academic_year[:4]))
-        high_leave  = leave_data.get("high_leave_staff", [])[:3]
+        high_leave = leave_data.get("high_leave_staff", [])[:3]
 
         prompt = f"""You are an HR analytics assistant for an educational institution.
 
@@ -146,6 +148,7 @@ Be concise and professional."""
         ai_narrative = None
         try:
             from server.core.ai_gateway import AIGateway
+
             result = AIGateway.invoke(
                 org_id=org_id,
                 prompt=prompt,
@@ -157,14 +160,16 @@ Be concise and professional."""
                 },
                 actor_id="system",
             )
-            ai_narrative = result.get("narrative") if isinstance(result, dict) else str(result)
+            ai_narrative = (
+                result.get("narrative") if isinstance(result, dict) else str(result)
+            )
         except Exception as exc:
             logger.warning("HRAnalytics: AI narrative failed (non-fatal): %s", exc)
 
         return {
-            "academic_year":      academic_year,
-            "workload_summary":   workload,
-            "overloaded_count":   len(overloaded),
-            "leave_patterns":     leave_data,
-            "ai_narrative":       ai_narrative,
+            "academic_year": academic_year,
+            "workload_summary": workload,
+            "overloaded_count": len(overloaded),
+            "leave_patterns": leave_data,
+            "ai_narrative": ai_narrative,
         }

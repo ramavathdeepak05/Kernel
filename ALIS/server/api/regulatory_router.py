@@ -17,15 +17,15 @@ RBAC:
 
 Feature gate: regulatory.naac_evidence_collection must be enabled.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-
 from server.core.feature_flags import feature_flags
 from server.core.rbac import Permission, require_permission
 
@@ -60,31 +60,34 @@ def _require_regulatory_flag(org_id: str) -> None:
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
+
 class EvidenceCreate(BaseModel):
     criterion: int = Field(..., ge=1, le=7)
     indicator_key: str
     title: str
     academic_year: str
     evidence_type: str = "DOCUMENT"
-    file_key: Optional[str] = None
-    evidence_data: Optional[Dict[str, Any]] = None
+    file_key: str | None = None
+    evidence_data: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
 # NAAC Dashboard
 # ---------------------------------------------------------------------------
 
+
 @router.get("/naac/dashboard")
 @require_permission(Permission.COMPLIANCE_READ)
 async def naac_dashboard(
     request: Request,
-    academic_year: Optional[str] = Query(default=None),
+    academic_year: str | None = Query(default=None),
 ):
     """Full NAAC criterion summary — all 7 criteria from regulatory_metrics."""
     org_id = _org(request)
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.naac_service import NAACService
+
         data = NAACService.get_dashboard(org_id, academic_year)
         return JSONResponse(content=data)
     except HTTPException:
@@ -99,11 +102,14 @@ async def naac_dashboard(
 async def naac_criterion_detail(criterion: int, request: Request):
     """Drill-down metrics for a single NAAC criterion (1–7)."""
     if criterion < 1 or criterion > 7:
-        raise HTTPException(status_code=400, detail="Criterion must be between 1 and 7.")
+        raise HTTPException(
+            status_code=400, detail="Criterion must be between 1 and 7."
+        )
     org_id = _org(request)
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.naac_service import NAACService
+
         return JSONResponse(content=NAACService.get_criterion_detail(org_id, criterion))
     except HTTPException:
         raise
@@ -116,15 +122,16 @@ async def naac_criterion_detail(criterion: int, request: Request):
 @require_permission(Permission.COMPLIANCE_READ)
 async def list_evidence(
     request: Request,
-    criterion: Optional[int] = Query(default=None),
-    academic_year: Optional[str] = Query(default=None),
-    status: Optional[str] = Query(default=None),
+    criterion: int | None = Query(default=None),
+    academic_year: str | None = Query(default=None),
+    status: str | None = Query(default=None),
 ):
     """List NAAC evidence items, optionally filtered."""
     org_id = _org(request)
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.naac_service import NAACService
+
         items = NAACService.get_evidence_list(org_id, criterion, academic_year, status)
         return JSONResponse(content={"evidence": items, "total": len(items)})
     except HTTPException:
@@ -142,6 +149,7 @@ async def add_evidence(body: EvidenceCreate, request: Request):
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.naac_service import NAACService
+
         new_id = NAACService.add_evidence(
             org_id=org_id,
             criterion=body.criterion,
@@ -153,7 +161,9 @@ async def add_evidence(body: EvidenceCreate, request: Request):
             evidence_data=body.evidence_data,
             collected_by=_actor(request),
         )
-        return JSONResponse(content={"id": new_id, "status": "COLLECTED"}, status_code=201)
+        return JSONResponse(
+            content={"id": new_id, "status": "COLLECTED"}, status_code=201
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -169,6 +179,7 @@ async def iqac_score(request: Request):
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.naac_service import NAACService
+
         return JSONResponse(content=NAACService.compute_iqac_score(org_id))
     except HTTPException:
         raise
@@ -180,6 +191,7 @@ async def iqac_score(request: Request):
 # ---------------------------------------------------------------------------
 # Raw metrics
 # ---------------------------------------------------------------------------
+
 
 @router.get("/metrics")
 @require_permission(Permission.COMPLIANCE_READ)
@@ -193,8 +205,11 @@ async def list_metrics(
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.metrics_service import RegulatoryMetricsService
+
         rows = RegulatoryMetricsService.get_latest(org_id, framework, limit)
-        return JSONResponse(content={"metrics": rows, "total": len(rows), "framework": framework})
+        return JSONResponse(
+            content={"metrics": rows, "total": len(rows), "framework": framework}
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -214,8 +229,11 @@ async def metric_trend(
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.metrics_service import RegulatoryMetricsService
+
         rows = RegulatoryMetricsService.get_trend(org_id, metric_key, days)
-        return JSONResponse(content={"metric_key": metric_key, "trend": rows, "days": days})
+        return JSONResponse(
+            content={"metric_key": metric_key, "trend": rows, "days": days}
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -226,6 +244,7 @@ async def metric_trend(
 # ---------------------------------------------------------------------------
 # NIRF
 # ---------------------------------------------------------------------------
+
 
 @router.post("/nirf/compute")
 @require_permission(Permission.COMPLIANCE_SUBMIT)
@@ -238,6 +257,7 @@ async def compute_nirf(
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.nirf_service import NIRFService
+
         result = NIRFService.compute_submission(org_id, submission_year)
         return JSONResponse(content=result)
     except HTTPException:
@@ -255,13 +275,16 @@ async def get_nirf(submission_year: int, request: Request):
     _require_regulatory_flag(org_id)
     try:
         from server.regulatory.nirf_service import NIRFService
+
         rows = NIRFService.get_submission(org_id, submission_year)
         if not rows:
             raise HTTPException(
                 status_code=404,
                 detail=f"No NIRF data found for {submission_year}. Run POST /nirf/compute first.",
             )
-        return JSONResponse(content={"submission_year": submission_year, "parameters": rows})
+        return JSONResponse(
+            content={"submission_year": submission_year, "parameters": rows}
+        )
     except HTTPException:
         raise
     except Exception as exc:

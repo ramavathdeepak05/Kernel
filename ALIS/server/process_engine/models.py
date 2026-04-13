@@ -36,80 +36,83 @@ Step config schemas (stored in process_steps.config as JSONB):
 """
 
 from __future__ import annotations
+
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class StepType(str, Enum):
-    FORM           = "FORM"
-    APPROVAL       = "APPROVAL"
-    CONDITION      = "CONDITION"
-    NOTIFICATION   = "NOTIFICATION"
-    AI_EVALUATION  = "AI_EVALUATION"
-    AUTO_ACTION    = "AUTO_ACTION"
+    FORM = "FORM"
+    APPROVAL = "APPROVAL"
+    CONDITION = "CONDITION"
+    NOTIFICATION = "NOTIFICATION"
+    AI_EVALUATION = "AI_EVALUATION"
+    AUTO_ACTION = "AUTO_ACTION"
 
 
 class ProcessStatus(str, Enum):
-    RUNNING   = "RUNNING"
+    RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
-    FAILED    = "FAILED"
+    FAILED = "FAILED"
     CANCELLED = "CANCELLED"
 
 
 class StepStatus(str, Enum):
-    PENDING  = "PENDING"
-    RUNNING  = "RUNNING"
-    PASSED   = "PASSED"
-    FAILED   = "FAILED"
-    SKIPPED  = "SKIPPED"
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PASSED = "PASSED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
 
 
 # --- Request models ---
 
+
 class StepCreate(BaseModel):
-    name:         str
-    step_type:    StepType
-    config:       Dict[str, Any] = Field(default_factory=dict)
-    on_pass_step: Optional[int] = None
-    on_fail_step: Optional[int] = None
-    is_required:  bool = True
+    name: str
+    step_type: StepType
+    config: dict[str, Any] = Field(default_factory=dict)
+    on_pass_step: int | None = None
+    on_fail_step: int | None = None
+    is_required: bool = True
 
 
 class ProcessDefinitionCreate(BaseModel):
-    name:           str
-    description:    Optional[str] = None
-    trigger_event:  Optional[str] = None
-    trigger_filter: Dict[str, Any] = Field(default_factory=dict)
-    context_schema: Dict[str, Any] = Field(default_factory=dict)
-    steps:          List[StepCreate] = Field(default_factory=list)
+    name: str
+    description: str | None = None
+    trigger_event: str | None = None
+    trigger_filter: dict[str, Any] = Field(default_factory=dict)
+    context_schema: dict[str, Any] = Field(default_factory=dict)
+    steps: list[StepCreate] = Field(default_factory=list)
 
 
 class ProcessDefinitionUpdate(BaseModel):
-    name:           Optional[str] = None
-    description:    Optional[str] = None
-    trigger_event:  Optional[str] = None
-    trigger_filter: Optional[Dict[str, Any]] = None
-    is_active:      Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    trigger_event: str | None = None
+    trigger_filter: dict[str, Any] | None = None
+    is_active: bool | None = None
 
 
 class ProcessLaunchRequest(BaseModel):
-    process_id:  str
-    entity_type: Optional[str] = None
-    entity_id:   Optional[str] = None
-    context:     Dict[str, Any] = Field(default_factory=dict)
+    process_id: str
+    entity_type: str | None = None
+    entity_id: str | None = None
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class FormSubmission(BaseModel):
-    form_data: Dict[str, Any]
+    form_data: dict[str, Any]
 
 
 class FormField(BaseModel):
-    name:       str
-    label:      str
-    type:       str = "text"           # text | number | date | select | checkbox | textarea
-    options:    List[str] = Field(default_factory=list)
-    required:   bool = True
-    validation: Dict[str, Any] = Field(default_factory=dict)
-    default:    Any = None
-    help_text:  Optional[str] = None
+    name: str
+    label: str
+    type: str = "text"  # text | number | date | select | checkbox | textarea
+    options: list[str] = Field(default_factory=list)
+    required: bool = True
+    validation: dict[str, Any] = Field(default_factory=dict)
+    default: Any = None
+    help_text: str | None = None

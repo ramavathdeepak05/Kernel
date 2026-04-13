@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, IllegalStateTransitionError
 from server.core.state_registry import StudentState, validate_student_transition
 from server.db_service import execute_query, execute_transaction
@@ -96,29 +96,31 @@ class ApplicantService:
         applicant_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO applicants
                     (id, org_id, name, email, phone, intended_program,
                      source_channel, status, metadata, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    applicant_id,
-                    org_id,
-                    data.name,
-                    data.email,
-                    data.phone,
-                    data.intended_program,
-                    data.source_channel.value,
-                    ApplicantStatus.APPLIED.value,
-                    _json_dumps(data.metadata or {}),
-                    now,
-                    now,
-                ),
-            )
-        ])
+                    (
+                        applicant_id,
+                        org_id,
+                        data.name,
+                        data.email,
+                        data.phone,
+                        data.intended_program,
+                        data.source_channel.value,
+                        ApplicantStatus.APPLIED.value,
+                        _json_dumps(data.metadata or {}),
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -162,10 +164,10 @@ class ApplicantService:
     def list_applicants(
         cls,
         org_id: str,
-        status: Optional[str] = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[ApplicantRead]:
+    ) -> list[ApplicantRead]:
         """List applicants for a tenant, optionally filtered by status."""
         if status:
             rows = execute_query(
@@ -192,8 +194,8 @@ class ApplicantService:
         org_id: str,
         to_state: StudentState,
         actor_id: str,
-        reason: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        reason: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> ApplicantRead:
         """
         Execute a state transition for an applicant.
@@ -222,12 +224,14 @@ class ApplicantService:
             )
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE applicants SET status = %s, updated_at = %s WHERE id = %s AND org_id = %s",
-                (to_state.value, now, applicant_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE applicants SET status = %s, updated_at = %s WHERE id = %s AND org_id = %s",
+                    (to_state.value, now, applicant_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -246,7 +250,10 @@ class ApplicantService:
         )
 
         logger.info(
-            "E04: Applicant %s → %s [id=%s]", current.value, to_state.value, applicant_id
+            "E04: Applicant %s → %s [id=%s]",
+            current.value,
+            to_state.value,
+            applicant_id,
         )
         return cls.get_applicant(applicant_id, org_id)
 
@@ -257,7 +264,7 @@ class ApplicantService:
     @classmethod
     def _find_duplicate(
         cls, email: str, phone: str, org_id: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Check for existing applicant with same email or phone in tenant."""
         rows = execute_query(
             "SELECT id, status FROM applicants "
@@ -272,6 +279,8 @@ class ApplicantService:
 # Helpers
 # =============================================================================
 
+
 def _json_dumps(obj: Any) -> str:
     import json
+
     return json.dumps(obj, default=str)

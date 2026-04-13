@@ -4,14 +4,15 @@
 Supervisor load balancer (max scholars from policy).
 DC meeting scheduler.
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
 from uuid import uuid4
 
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.core.policy_engine import policy_engine
@@ -68,7 +69,6 @@ _TERMINAL_STATUSES = {
 
 
 class PhDService:
-
     @classmethod
     def register_scholar(
         cls,
@@ -77,8 +77,8 @@ class PhDService:
         supervisor_id: str,
         program_id: str,
         research_area: str,
-        co_supervisor_id: Optional[str] = None,
-        actor_id: Optional[str] = None,
+        co_supervisor_id: str | None = None,
+        actor_id: str | None = None,
     ) -> dict:
         # Check supervisor load
         max_scholars = policy_engine.get_value(
@@ -96,9 +96,7 @@ class PhDService:
         )
         load_count = current_load[0]["cnt"] if current_load else 0
         if load_count >= max_scholars:
-            raise BusinessRuleViolation(
-                "Supervisor has reached maximum scholar load"
-            )
+            raise BusinessRuleViolation("Supervisor has reached maximum scholar load")
 
         phd_id = str(uuid4())
         now = datetime.now(timezone.utc)
@@ -110,34 +108,54 @@ class PhDService:
         ops = []
 
         # Insert registration
-        ops.append((
-            """
+        ops.append(
+            (
+                """
             INSERT INTO phd_registrations
                 (id, org_id, student_id, supervisor_id, co_supervisor_id,
                  program_id, research_area, status, registered_at,
                  next_dc_meeting_due, created_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (
-                phd_id, org_id, student_id, supervisor_id, co_supervisor_id,
-                program_id, research_area, PhDStatus.REGISTERED.value,
-                now.isoformat(), first_dc_due.isoformat(),
-                actor_id,
-            ),
-        ))
+                (
+                    phd_id,
+                    org_id,
+                    student_id,
+                    supervisor_id,
+                    co_supervisor_id,
+                    program_id,
+                    research_area,
+                    PhDStatus.REGISTERED.value,
+                    now.isoformat(),
+                    first_dc_due.isoformat(),
+                    actor_id,
+                ),
+            )
+        )
 
         # Create all 9 milestones as PENDING
         for milestone in MilestoneType:
-            ops.append((
-                """
+            ops.append(
+                (
+                    """
                 INSERT INTO phd_milestones
                     (id, phd_id, org_id, milestone_type, status, due_date)
                 VALUES (%s, %s, %s, %s, 'PENDING', NULL)
                 """,
-                (str(uuid4()), phd_id, org_id, milestone.value),
-            ))
+                    (str(uuid4()), phd_id, org_id, milestone.value),
+                )
+            )
 
         execute_transaction(ops)
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="phd_scholar",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "register_scholar"},
+        )
 
         # Fire domain event
         event = DomainEvent(
@@ -152,6 +170,7 @@ class PhDService:
             entity_id=phd_id,
         )
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -170,7 +189,7 @@ class PhDService:
         milestone_type: str,
         org_id: str,
         actor_id: str,
-        notes: Optional[str] = None,
+        notes: str | None = None,
     ) -> dict:
         # Fetch registration
         rows = execute_query(
@@ -204,8 +223,9 @@ class PhDService:
         mt = MilestoneType(milestone_type)
         next_status = _MILESTONE_STATUS_MAP.get(mt)
 
-        ops = [(
-            """
+        ops = [
+            (
+                """
             UPDATE phd_milestones
             SET status = 'COMPLETED',
                 completed_at = %s,
@@ -213,20 +233,32 @@ class PhDService:
                 notes = %s
             WHERE phd_id = %s AND org_id = %s AND milestone_type = %s
             """,
-            (now, actor_id, notes, phd_id, org_id, milestone_type),
-        )]
+                (now, actor_id, notes, phd_id, org_id, milestone_type),
+            )
+        ]
 
         if next_status is not None:
-            ops.append((
-                """
+            ops.append(
+                (
+                    """
                 UPDATE phd_registrations
                 SET status = %s, updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (next_status.value, now, phd_id, org_id),
-            ))
+                    (next_status.value, now, phd_id, org_id),
+                )
+            )
 
         execute_transaction(ops)
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="phd_milestone",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "complete_milestone"},
+        )
 
         # Fire event
         event = DomainEvent(
@@ -241,6 +273,7 @@ class PhDService:
             entity_id=phd_id,
         )
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -285,29 +318,51 @@ class PhDService:
         next_due = scheduled_dt + timedelta(days=interval_months * 30)
 
         import json
-        execute_transaction([
-            (
-                """
+
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO phd_dc_meetings
                     (id, phd_id, org_id, scheduled_at, committee_members,
                      agenda, status, next_meeting_due, created_by)
                 VALUES (%s, %s, %s, %s, %s::jsonb, %s, 'SCHEDULED', %s, %s)
                 """,
-                (
-                    meeting_id, phd_id, org_id, scheduled_at_iso,
-                    json.dumps(committee_members), agenda,
-                    next_due.isoformat(), actor_id,
+                    (
+                        meeting_id,
+                        phd_id,
+                        org_id,
+                        scheduled_at_iso,
+                        json.dumps(committee_members),
+                        agenda,
+                        next_due.isoformat(),
+                        actor_id,
+                    ),
                 ),
-            ),
-            (
-                """
+                (
+                    """
                 UPDATE phd_registrations
                 SET next_dc_meeting_due = %s, updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (next_due.isoformat(), datetime.now(timezone.utc).isoformat(), phd_id, org_id),
-            ),
-        ])
+                    (
+                        next_due.isoformat(),
+                        datetime.now(timezone.utc).isoformat(),
+                        phd_id,
+                        org_id,
+                    ),
+                ),
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="dc_meeting",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "schedule_dc_meeting"},
+        )
 
         result = execute_query(
             "SELECT * FROM phd_dc_meetings WHERE id = %s AND org_id = %s",
@@ -332,8 +387,10 @@ class PhDService:
             raise NotFoundError(f"DC meeting {meeting_id} not found")
 
         now = datetime.now(timezone.utc).isoformat()
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE phd_dc_meetings
             SET held_at = %s,
                 outcome = %s,
@@ -342,8 +399,19 @@ class PhDService:
                 updated_by = %s
             WHERE id = %s AND org_id = %s
             """,
-            (now, outcome, minutes, actor_id, meeting_id, org_id),
-        )])
+                    (now, outcome, minutes, actor_id, meeting_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="dc_meeting",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "record_dc_outcome"},
+        )
 
         if outcome == "CRITICAL":
             meeting = rows[0]
@@ -359,6 +427,7 @@ class PhDService:
                 entity_id=meeting_id,
             )
             import asyncio
+
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
@@ -422,9 +491,9 @@ class PhDService:
     def list_scholars(
         cls,
         org_id: str,
-        status: Optional[str] = None,
-        supervisor_id: Optional[str] = None,
-        program_id: Optional[str] = None,
+        status: str | None = None,
+        supervisor_id: str | None = None,
+        program_id: str | None = None,
     ) -> list:
         conditions = ["pr.org_id = %s"]
         params: list = [org_id]
@@ -440,7 +509,7 @@ class PhDService:
             params.append(program_id)
 
         where = " AND ".join(conditions)
-        sql = f"""
+        sql = f"""  # noqa: S608
             SELECT
                 pr.*,
                 COALESCE(su.name, pr.student_id::text)       AS student_name,
@@ -473,8 +542,8 @@ class PhDService:
         thesis_document_url: str,
         examiner_1_id: str,
         examiner_2_id: str,
-        external_examiner_id: Optional[str] = None,
-        actor_id: Optional[str] = None,
+        external_examiner_id: str | None = None,
+        actor_id: str | None = None,
     ) -> dict:
         # Verify registration
         rows = execute_query(
@@ -502,30 +571,47 @@ class PhDService:
         now = datetime.now(timezone.utc).isoformat()
         submission_id = str(uuid4())
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE phd_registrations
                 SET status = %s, updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (PhDStatus.THESIS_SUBMITTED.value, now, phd_id, org_id),
-            ),
-            (
-                """
+                    (PhDStatus.THESIS_SUBMITTED.value, now, phd_id, org_id),
+                ),
+                (
+                    """
                 INSERT INTO phd_thesis_submissions
                     (id, phd_id, org_id, thesis_document_url,
                      examiner_1_id, examiner_2_id, external_examiner_id,
                      status, submitted_at, submitted_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'SUBMITTED', %s, %s)
                 """,
-                (
-                    submission_id, phd_id, org_id, thesis_document_url,
-                    examiner_1_id, examiner_2_id, external_examiner_id,
-                    now, actor_id,
+                    (
+                        submission_id,
+                        phd_id,
+                        org_id,
+                        thesis_document_url,
+                        examiner_1_id,
+                        examiner_2_id,
+                        external_examiner_id,
+                        now,
+                        actor_id,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="phd_thesis",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "submit_thesis"},
+        )
 
         event = DomainEvent(
             event_type="phd.thesis_submitted",
@@ -540,6 +626,7 @@ class PhDService:
             entity_id=submission_id,
         )
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -586,14 +673,27 @@ class PhDService:
             )
 
         now = datetime.now(timezone.utc).isoformat()
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE phd_registrations
             SET status = %s, awarded_at = %s, updated_at = %s
             WHERE id = %s AND org_id = %s
             """,
-            (PhDStatus.AWARDED.value, now, now, phd_id, org_id),
-        )])
+                    (PhDStatus.AWARDED.value, now, now, phd_id, org_id),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="phd_scholar",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "award_degree"},
+        )
 
         event = DomainEvent(
             event_type="phd.degree_awarded",
@@ -603,6 +703,7 @@ class PhDService:
             entity_id=phd_id,
         )
         import asyncio
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():

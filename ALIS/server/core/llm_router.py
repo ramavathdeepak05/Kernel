@@ -45,6 +45,7 @@ Usage
 Agents should call get_model_for_task() rather than reading
 settings.ollama_extraction_model directly, so routing logic stays in one place.
 """
+
 from __future__ import annotations
 
 from enum import Enum
@@ -91,7 +92,7 @@ def get_model_for_task(task_class: LLMTaskClass) -> str:
     _MODEL_MAP = {
         LLMTaskClass.EXTRACTION: settings.ollama_extraction_model,
         LLMTaskClass.GENERATION: settings.ollama_generation_model,
-        LLMTaskClass.REASONING:  settings.ollama_reasoning_model,
+        LLMTaskClass.REASONING: settings.ollama_reasoning_model,
     }
     return _MODEL_MAP[task_class]
 
@@ -107,8 +108,8 @@ def get_temperature_for_task(task_class: LLMTaskClass) -> float:
     _TEMP_MAP = {
         LLMTaskClass.EXTRACTION: 0.0,
         LLMTaskClass.GENERATION: 0.3,
-        LLMTaskClass.REASONING:  0.0,
-        LLMTaskClass.EMBEDDING:  0.0,
+        LLMTaskClass.REASONING: 0.0,
+        LLMTaskClass.EMBEDDING: 0.0,
     }
     return _TEMP_MAP[task_class]
 
@@ -139,7 +140,7 @@ def get_timeout_for_task(task_class: LLMTaskClass) -> int:
     _TIMEOUT_MAP = {
         LLMTaskClass.EXTRACTION: 15,
         LLMTaskClass.GENERATION: 60,
-        LLMTaskClass.REASONING:  120,
-        LLMTaskClass.EMBEDDING:  30,
+        LLMTaskClass.REASONING: 120,
+        LLMTaskClass.EMBEDDING: 30,
     }
     return _TIMEOUT_MAP[task_class]

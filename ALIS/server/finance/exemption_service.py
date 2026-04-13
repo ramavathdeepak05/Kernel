@@ -10,6 +10,7 @@ Business rules enforced here:
   adjustment invoice (never modifies the existing invoice).
 - student_dues_status view provides the read model for hall-ticket block checks.
 """
+
 from __future__ import annotations
 
 import logging
@@ -51,6 +52,7 @@ VALID_COMPONENT_TYPES = {
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _policy_validity_days(org_id: str) -> int:
     """Return configured validity days or the default 180."""
     rows = execute_query(
@@ -64,9 +66,10 @@ def _policy_validity_days(org_id: str) -> int:
     if rows:
         try:
             import json as _json
+
             return int(_json.loads(rows[0]["value"]))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
     return _DEFAULT_VALIDITY_DAYS
 
 
@@ -94,6 +97,7 @@ def _adjustment_invoice_number(org_id: str, academic_year: str) -> str:
 # ===========================================================================
 # ExemptionService — EC-FIN-01
 # ===========================================================================
+
 
 class ExemptionService:
     """Manages student fee exemptions (DBT holds, court orders, management waivers)."""
@@ -128,7 +132,7 @@ class ExemptionService:
         if exemption_type not in VALID_EXEMPTION_TYPES:
             raise BusinessRuleViolation(
                 message=f"Invalid exemption_type '{exemption_type}'. "
-                        f"Must be one of {sorted(VALID_EXEMPTION_TYPES)}"
+                f"Must be one of {sorted(VALID_EXEMPTION_TYPES)}"
             )
 
         # --- Validate student exists ---
@@ -151,27 +155,46 @@ class ExemptionService:
                 )
 
         # --- Validity window ---
-        days = valid_days if valid_days and valid_days > 0 else _policy_validity_days(org_id)
+        days = (
+            valid_days
+            if valid_days and valid_days > 0
+            else _policy_validity_days(org_id)
+        )
         valid_from = date.today()
         valid_until = valid_from + timedelta(days=days)
 
         eid = str(uuid.uuid4())
         try:
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO student_fee_exemptions
                     (id, org_id, student_id, invoice_id, exemption_type, reason,
                      valid_from, valid_until, status, approved_by, second_approver)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'ACTIVE', %s, %s)
                 """,
-                (
-                    eid, org_id, student_id, invoice_id, exemption_type, reason,
-                    valid_from, valid_until, approver_id, second_approver_id,
-                ),
-            )])
+                        (
+                            eid,
+                            org_id,
+                            student_id,
+                            invoice_id,
+                            exemption_type,
+                            reason,
+                            valid_from,
+                            valid_until,
+                            approver_id,
+                            second_approver_id,
+                        ),
+                    )
+                ]
+            )
         except Exception as exc:
             # Unique constraint on (org_id, student_id, invoice_id, exemption_type)
-            if "uq_exemption_student_invoice" in str(exc).lower() or "unique" in str(exc).lower():
+            if (
+                "uq_exemption_student_invoice" in str(exc).lower()
+                or "unique" in str(exc).lower()
+            ):
                 raise BusinessRuleViolation(
                     message=(
                         f"Active {exemption_type} exemption already exists for "
@@ -199,19 +222,21 @@ class ExemptionService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="FeeExemptionCreated",
-            entity_type="student_fee_exemption",
-            entity_id=eid,
-            org_id=org_id,
-            payload={
-                "exemption_type": exemption_type,
-                "student_id": student_id,
-                "invoice_id": invoice_id,
-                "valid_until": valid_until.isoformat(),
-            },
-            actor_id=approver_id,
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="FeeExemptionCreated",
+                entity_type="student_fee_exemption",
+                entity_id=eid,
+                org_id=org_id,
+                payload={
+                    "exemption_type": exemption_type,
+                    "student_id": student_id,
+                    "invoice_id": invoice_id,
+                    "valid_until": valid_until.isoformat(),
+                },
+                actor_id=approver_id,
+            )
+        )
 
         return cls._get(org_id, eid)
 
@@ -231,14 +256,18 @@ class ExemptionService:
                 message=f"Exemption is already {exemption['status']}"
             )
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE student_fee_exemptions
                SET status = 'REVOKED', revoked_by = %s, revoked_at = NOW()
              WHERE id = %s AND org_id = %s
             """,
-            (revoker_id, exemption_id, org_id),
-        )])
+                    (revoker_id, exemption_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -251,14 +280,16 @@ class ExemptionService:
             metadata={"action": "revoke", "student_id": str(exemption["student_id"])},
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="FeeExemptionRevoked",
-            entity_type="student_fee_exemption",
-            entity_id=exemption_id,
-            org_id=org_id,
-            payload={"student_id": str(exemption["student_id"])},
-            actor_id=revoker_id,
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="FeeExemptionRevoked",
+                entity_type="student_fee_exemption",
+                entity_id=exemption_id,
+                org_id=org_id,
+                payload={"student_id": str(exemption["student_id"])},
+                actor_id=revoker_id,
+            )
+        )
 
         return cls._get(org_id, exemption_id)
 
@@ -319,6 +350,7 @@ class ExemptionService:
 # PromissoryService — EC-FIN-02
 # ===========================================================================
 
+
 class PromissoryService:
     """
     Manages fee payment components including promissory notes, loan tranches,
@@ -353,10 +385,12 @@ class PromissoryService:
         if component_type not in VALID_COMPONENT_TYPES:
             raise BusinessRuleViolation(
                 message=f"Invalid component_type '{component_type}'. "
-                        f"Must be one of {sorted(VALID_COMPONENT_TYPES)}"
+                f"Must be one of {sorted(VALID_COMPONENT_TYPES)}"
             )
         if amount <= 0:
-            raise BusinessRuleViolation(message="Component amount must be greater than zero")
+            raise BusinessRuleViolation(
+                message="Component amount must be greater than zero"
+            )
         if component_type == "PROMISSORY" and not expected_date:
             raise BusinessRuleViolation(
                 message="expected_date is required for PROMISSORY components"
@@ -371,18 +405,29 @@ class PromissoryService:
             raise NotFoundError(f"Invoice {invoice_id} not found")
 
         cid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO fee_payment_components
                 (id, org_id, invoice_id, student_id, component_type,
                  amount, expected_date, reference_no, status, created_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'PENDING', %s)
             """,
-            (
-                cid, org_id, invoice_id, student_id, component_type,
-                amount, expected_date, reference_no, created_by,
-            ),
-        )])
+                    (
+                        cid,
+                        org_id,
+                        invoice_id,
+                        student_id,
+                        component_type,
+                        amount,
+                        expected_date,
+                        reference_no,
+                        created_by,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -424,16 +469,20 @@ class PromissoryService:
                 message=f"Component is already {component['status']} and cannot be reconciled"
             )
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE fee_payment_components
                SET status = 'RECONCILED',
                    received_date = %s,
                    reference_no = COALESCE(%s, reference_no)
              WHERE id = %s AND org_id = %s
             """,
-            (received_date, reference_no, component_id, org_id),
-        )])
+                    (received_date, reference_no, component_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -468,14 +517,18 @@ class PromissoryService:
             )
 
         # Mark MISSED
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE fee_payment_components
                SET status = 'MISSED'
              WHERE id = %s AND org_id = %s
             """,
-            (component_id, org_id),
-        )])
+                    (component_id, org_id),
+                )
+            ]
+        )
 
         # Retrieve original invoice metadata for the adjustment invoice
         inv_rows = execute_query(
@@ -492,47 +545,55 @@ class PromissoryService:
                 missed_amount = float(component["amount"])
                 adjustment_id = str(uuid.uuid4())
                 # Adjustment due: 14 days from today (immediate follow-up)
-                from datetime import date as _date, timedelta as _td
+                from datetime import date as _date
+                from datetime import timedelta as _td
+
                 adj_due = _date.today() + _td(days=14)
 
-                execute_transaction([(
-                    """
+                execute_transaction(
+                    [
+                        (
+                            """
                     INSERT INTO student_invoices
                         (id, org_id, student_id, fee_structure_id, academic_year, semester,
                          invoice_number, amount_due, discount, currency, due_date,
                          generated_by, notes)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, 'system', %s)
                     """,
-                    (
-                        adjustment_id,
-                        org_id,
-                        str(original_invoice["student_id"]),
-                        original_invoice.get("fee_structure_id"),
-                        academic_year,
-                        original_invoice.get("semester"),
-                        adj_num,
-                        missed_amount,
-                        original_invoice.get("currency", "INR"),
-                        adj_due,
-                        f"Adjustment: promissory component {component_id} missed. "
-                        f"Original invoice: {original_invoice['invoice_number']}",
-                    ),
-                )])
+                            (
+                                adjustment_id,
+                                org_id,
+                                str(original_invoice["student_id"]),
+                                original_invoice.get("fee_structure_id"),
+                                academic_year,
+                                original_invoice.get("semester"),
+                                adj_num,
+                                missed_amount,
+                                original_invoice.get("currency", "INR"),
+                                adj_due,
+                                f"Adjustment: promissory component {component_id} missed. "
+                                f"Original invoice: {original_invoice['invoice_number']}",
+                            ),
+                        )
+                    ]
+                )
 
-                DomainEventBus.publish(DomainEvent(
-                    event_type="PromissoryMissed",
-                    entity_type="fee_payment_component",
-                    entity_id=component_id,
-                    org_id=org_id,
-                    payload={
-                        "component_id": component_id,
-                        "student_id": str(original_invoice["student_id"]),
-                        "missed_amount": missed_amount,
-                        "original_invoice_id": str(original_invoice["id"]),
-                        "adjustment_invoice_id": adjustment_id,
-                    },
-                    actor_id="system",
-                ))
+                DomainEventBus.publish(
+                    DomainEvent(
+                        event_type="PromissoryMissed",
+                        entity_type="fee_payment_component",
+                        entity_id=component_id,
+                        org_id=org_id,
+                        payload={
+                            "component_id": component_id,
+                            "student_id": str(original_invoice["student_id"]),
+                            "missed_amount": missed_amount,
+                            "original_invoice_id": str(original_invoice["id"]),
+                            "adjustment_invoice_id": adjustment_id,
+                        },
+                        actor_id="system",
+                    )
+                )
             except Exception as exc:
                 logger.error(
                     "PromissoryService.flag_missed: adjustment invoice creation failed "

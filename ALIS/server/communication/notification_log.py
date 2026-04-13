@@ -3,6 +3,7 @@
 Provides the `dispatch()` class method used by all other modules.
 Replaces the in-memory _logs dict in the legacy NotificationDispatcher.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationLogService:
-
     @classmethod
     def dispatch(
         cls,
@@ -28,6 +28,7 @@ class NotificationLogService:
         channel: str = "EMAIL",
         _subject_override: str | None = None,
         _body_override: str | None = None,
+        _extra_queries: list[tuple] | None = None,
     ) -> dict:
         """
         Central dispatch method called by all modules.
@@ -43,20 +44,29 @@ class NotificationLogService:
         error_msg = None
 
         subject, body = cls._resolve_and_render(
-            org_id or "system", template_key, context,
-            _subject_override, _body_override,
+            org_id or "system",
+            template_key,
+            context,
+            _subject_override,
+            _body_override,
         )
 
         # Send via channel
         try:
             if channel == "EMAIL":
                 from server.core.notifications.channels import EmailChannel
-                result = EmailChannel().send(recipient=recipient_email, subject=subject, body=body)
+
+                result = EmailChannel().send(
+                    recipient=recipient_email, subject=subject, body=body
+                )
                 status = "SENT" if result.success else "FAILED"
                 error_msg = None if result.success else result.error_message
             elif channel == "SMS":
                 from server.core.notifications.channels import SMSChannel
-                result = SMSChannel().send(recipient=recipient_email, subject=None, body=body)
+
+                result = SMSChannel().send(
+                    recipient=recipient_email, subject=None, body=body
+                )
                 status = "SENT" if result.success else "FAILED"
                 error_msg = None if result.success else result.error_message
             else:
@@ -70,6 +80,7 @@ class NotificationLogService:
         if org_id and channel == "EMAIL" and status == "SENT":
             try:
                 from .in_app import InAppNotificationService
+
                 InAppNotificationService.send(
                     org_id=org_id,
                     recipient_id=recipient_id,
@@ -80,16 +91,45 @@ class NotificationLogService:
                 logger.debug("dispatch: in-app creation skipped: %s", exc)
 
         # Persist log
-        try:
-            execute_transaction([(
+        queries = [
+            (
                 """
-                INSERT INTO notification_logs
-                    (id, org_id, recipient_id, recipient_addr, template_key, channel, status, error_message, sent_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                """,
-                (log_id, org_id, recipient_id, recipient_email,
-                 template_key, channel, status, error_msg),
-            )])
+            INSERT INTO notification_logs
+                (id, org_id, recipient_id, recipient_addr, template_key, channel, status, error_message, sent_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            """,
+                (
+                    log_id,
+                    org_id,
+                    recipient_id,
+                    recipient_email,
+                    template_key,
+                    channel,
+                    status,
+                    error_msg,
+                ),
+            )
+        ]
+        if _extra_queries:
+            queries.extend(_extra_queries)
+
+        try:
+            execute_transaction(queries)
+            from server.core.audit import AuditAction, AuditLog
+
+            AuditLog.log(
+                action=AuditAction.CREATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="notification_log",
+                entity_id=log_id,
+                tenant_id=org_id,
+                metadata={
+                    "source": "dispatch",
+                    "channel": channel,
+                    "template_key": template_key,
+                },
+            )
         except Exception as exc:
             logger.warning("dispatch: log persistence failed (non-fatal): %s", exc)
 
@@ -129,10 +169,11 @@ class NotificationLogService:
         # 2. Fallback — core TemplateRegistry (in-memory hardcoded)
         try:
             from server.core.notifications.templates import TemplateRegistry
+
             subject, body = TemplateRegistry.render(template_key, context)
             return subject, body
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         # 3. Generic fallback
         title = context.get("title", template_key.replace("_", " ").title())
@@ -140,7 +181,9 @@ class NotificationLogService:
         return title, body_text
 
     @classmethod
-    def list_for_recipient(cls, org_id: str, recipient_id: str, limit: int = 50) -> list[dict]:
+    def list_for_recipient(
+        cls, org_id: str, recipient_id: str, limit: int = 50
+    ) -> list[dict]:
         rows = execute_query(
             """
             SELECT * FROM notification_logs
@@ -171,23 +214,24 @@ class NotificationLogService:
         )
         if not rows:
             from server.core.exceptions import NotFoundError
+
             raise NotFoundError(f"Notification log {log_id} not found")
         log = dict(rows[0])
 
         if log["status"] == "SENT":
             return log
 
-        result = cls.dispatch(
+        return cls.dispatch(
             template_key=log["template_key"],
             recipient_id=log["recipient_id"],
             recipient_email=log["recipient_addr"],
             context={},
             org_id=org_id,
             channel=log["channel"],
+            _extra_queries=[
+                (
+                    "UPDATE notification_logs SET retry_count = retry_count + 1 WHERE id = %s",
+                    (log_id,),
+                )
+            ],
         )
-
-        execute_transaction([(
-            "UPDATE notification_logs SET retry_count = retry_count + 1 WHERE id = %s",
-            (log_id,),
-        )])
-        return result

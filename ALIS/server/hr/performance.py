@@ -1,4 +1,5 @@
 """E08-S05 — Performance Reviews"""
+
 from __future__ import annotations
 
 import logging
@@ -15,10 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class PerformanceReviewService:
-
     @classmethod
     def create(cls, org_id: str, req: PerformanceReviewCreate, actor_id: str) -> dict:
         import json
+
         existing = execute_query(
             "SELECT id FROM performance_reviews WHERE org_id = %s AND staff_id = %s AND review_period = %s",
             (org_id, req.staff_id, req.review_period),
@@ -31,29 +32,51 @@ class PerformanceReviewService:
         overall = round(mean(req.ratings.values()), 1) if req.ratings else None
 
         rid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO performance_reviews
                 (id, org_id, staff_id, reviewer_id, review_period, review_type,
                  ratings, overall_rating, strengths, improvements, goals_next)
             VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
             """,
-            (rid, org_id, req.staff_id, actor_id, req.review_period,
-             req.review_type.value, json.dumps(req.ratings),
-             overall, req.strengths, req.improvements, req.goals_next),
-        )])
+                    (
+                        rid,
+                        org_id,
+                        req.staff_id,
+                        actor_id,
+                        req.review_period,
+                        req.review_type.value,
+                        json.dumps(req.ratings),
+                        overall,
+                        req.strengths,
+                        req.improvements,
+                        req.goals_next,
+                    ),
+                )
+            ]
+        )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="performance_review", entity_id=rid, org_id=org_id,
-                     module="E08-S05",
-                     metadata={"staff_id": req.staff_id, "period": req.review_period})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="performance_review",
+            entity_id=rid,
+            org_id=org_id,
+            module="E08-S05",
+            metadata={"staff_id": req.staff_id, "period": req.review_period},
+        )
 
         return cls.get(org_id, rid)
 
     @classmethod
-    def update(cls, org_id: str, review_id: str,
-                req: PerformanceReviewUpdate, actor_id: str) -> dict:
+    def update(
+        cls, org_id: str, review_id: str, req: PerformanceReviewUpdate, actor_id: str
+    ) -> dict:
         import json
+
         review = cls.get(org_id, review_id)
         if review["status"] == "FINALIZED":
             raise BusinessRuleViolation(message="Cannot update a finalized review")
@@ -88,10 +111,24 @@ class PerformanceReviewService:
             return review
 
         values.extend([review_id, org_id])
-        execute_transaction([(
-            f"UPDATE performance_reviews SET {', '.join(fields)} WHERE id = %s AND org_id = %s",
-            values,
-        )])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE performance_reviews SET {', '.join(fields)} WHERE id = %s AND org_id = %s",  # noqa: S608
+                    values,
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="update",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "update"},
+        )
 
         return cls.get(org_id, review_id)
 

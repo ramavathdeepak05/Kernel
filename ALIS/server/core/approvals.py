@@ -27,20 +27,21 @@ Acceptance Criteria:
 - [x] Approval actions audited
 - [x] No hard-coded approver logic
 """
+
 from __future__ import annotations
 
-from uuid import uuid4
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any
+from uuid import uuid4
 
+from .audit import AuditAction, AuditLog
 from .rbac import Role
-from .audit import AuditLog, AuditAction
 from .state_registry import StateRegistry, TransitionResult
 
-
 # --- Approval State Machine ---
+
 
 class ApprovalState(str, Enum):
     """
@@ -51,13 +52,14 @@ class ApprovalState(str, Enum):
         APPROVED → (terminal)
         REJECTED → (terminal)
     """
+
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
 
 
 # Register Approval state transitions
-APPROVAL_TRANSITIONS: Dict[ApprovalState, Set[ApprovalState]] = {
+APPROVAL_TRANSITIONS: dict[ApprovalState, set[ApprovalState]] = {
     ApprovalState.PENDING: {ApprovalState.APPROVED, ApprovalState.REJECTED},
     ApprovalState.APPROVED: set(),  # Terminal
     ApprovalState.REJECTED: set(),  # Terminal
@@ -69,6 +71,7 @@ StateRegistry.register_entity("approval", APPROVAL_TRANSITIONS)
 
 # --- Approval Mode ---
 
+
 class ApprovalMode(str, Enum):
     """
     Defines how approvals are evaluated.
@@ -77,12 +80,14 @@ class ApprovalMode(str, Enum):
     - ANY: Any N approvers from allowed roles (quorum).
     - ALL: All specified roles must approve.
     """
+
     SINGLE = "single"
     ANY = "any"
     ALL = "all"
 
 
 # --- Approval Configuration ---
+
 
 @dataclass
 class ApprovalConfig:
@@ -92,11 +97,12 @@ class ApprovalConfig:
     This is the data-driven heart of the framework.
     Domain modules configure this per action type.
     """
+
     # Identifier (e.g., "refund_request", "curriculum_change")
     config_id: str
 
     # Which roles can approve
-    allowed_roles: List[Role]
+    allowed_roles: list[Role]
 
     # How approvals are evaluated
     mode: ApprovalMode = ApprovalMode.SINGLE
@@ -105,7 +111,7 @@ class ApprovalConfig:
     quorum_count: int = 1
 
     # Human-readable description
-    description: Optional[str] = None
+    description: str | None = None
 
     def __post_init__(self):
         """Validate configuration."""
@@ -122,18 +128,21 @@ class ApprovalConfig:
 
 # --- Approval Action ---
 
+
 @dataclass
 class ApprovalAction:
     """Record of an approval or rejection action."""
+
     action_id: str = field(default_factory=lambda: str(uuid4()))
     approver_id: str = ""
     approver_role: Role = Role.ADMIN
     action: str = "approve"  # "approve" or "reject"
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    comment: Optional[str] = None
+    comment: str | None = None
 
 
 # --- Approval Request ---
+
 
 @dataclass
 class ApprovalRequest:
@@ -142,6 +151,7 @@ class ApprovalRequest:
 
     This is the runtime entity that moves through the approval lifecycle.
     """
+
     id: str = field(default_factory=lambda: str(uuid4()))
 
     # What is being approved
@@ -160,17 +170,17 @@ class ApprovalRequest:
     requested_by: str = ""
 
     # Approval tracking
-    actions: List[ApprovalAction] = field(default_factory=list)
+    actions: list[ApprovalAction] = field(default_factory=list)
     required_count: int = 1
-    required_roles: List[Role] = field(default_factory=list)
+    required_roles: list[Role] = field(default_factory=list)
     mode: ApprovalMode = ApprovalMode.SINGLE
 
     # Resolution
-    resolved_at: Optional[datetime] = None
-    resolution_reason: Optional[str] = None
+    resolved_at: datetime | None = None
+    resolution_reason: str | None = None
 
     # Context data (for audit)
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
     @property
     def approval_count(self) -> int:
@@ -183,17 +193,18 @@ class ApprovalRequest:
         return sum(1 for a in self.actions if a.action == "reject")
 
     @property
-    def approver_roles(self) -> Set[Role]:
+    def approver_roles(self) -> set[Role]:
         """Set of roles that have approved."""
         return {a.approver_role for a in self.actions if a.action == "approve"}
 
     @property
-    def approver_ids(self) -> Set[str]:
+    def approver_ids(self) -> set[str]:
         """Set of user IDs that have taken action."""
         return {a.approver_id for a in self.actions}
 
 
 # --- Approval Service ---
+
 
 class ApprovalService:
     """
@@ -209,8 +220,8 @@ class ApprovalService:
     """
 
     # In-memory storage for development
-    _requests: Dict[str, ApprovalRequest] = {}
-    _configs: Dict[str, ApprovalConfig] = {}
+    _requests: dict[str, ApprovalRequest] = {}
+    _configs: dict[str, ApprovalConfig] = {}
 
     # --- Configuration Management ---
 
@@ -224,7 +235,7 @@ class ApprovalService:
         cls._configs[config.config_id] = config
 
     @classmethod
-    def get_config(cls, config_id: str) -> Optional[ApprovalConfig]:
+    def get_config(cls, config_id: str) -> ApprovalConfig | None:
         """Get a registered configuration."""
         return cls._configs.get(config_id)
 
@@ -238,7 +249,7 @@ class ApprovalService:
         action_type: str,
         config_id: str,
         requested_by: str,
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None,
     ) -> ApprovalRequest:
         """
         Create a new approval request.
@@ -270,7 +281,7 @@ class ApprovalService:
             required_count=config.quorum_count,
             required_roles=list(config.allowed_roles),
             mode=config.mode,
-            context=context or {}
+            context=context or {},
         )
 
         cls._requests[request.id] = request
@@ -287,26 +298,25 @@ class ApprovalService:
                 "target_entity_type": entity_type,
                 "target_entity_id": entity_id,
                 "action_type": action_type,
-                "config_id": config_id
-            }
+                "config_id": config_id,
+            },
         )
 
         return request
 
     @classmethod
-    def get_request(cls, request_id: str) -> Optional[ApprovalRequest]:
+    def get_request(cls, request_id: str) -> ApprovalRequest | None:
         """Get an approval request by ID."""
         return cls._requests.get(request_id)
 
     @classmethod
     def get_pending_for_entity(
-        cls,
-        entity_type: str,
-        entity_id: str
-    ) -> List[ApprovalRequest]:
+        cls, entity_type: str, entity_id: str
+    ) -> list[ApprovalRequest]:
         """Get all pending approval requests for an entity."""
         return [
-            r for r in cls._requests.values()
+            r
+            for r in cls._requests.values()
             if r.entity_type == entity_type
             and r.entity_id == entity_id
             and r.status == ApprovalState.PENDING
@@ -320,7 +330,7 @@ class ApprovalService:
         request_id: str,
         approver_id: str,
         approver_role: Role,
-        comment: Optional[str] = None
+        comment: str | None = None,
     ) -> ApprovalRequest:
         """
         Record an approval for a request.
@@ -349,7 +359,9 @@ class ApprovalService:
 
         # Check for duplicate approval by same user
         if approver_id in request.approver_ids:
-            raise ValueError(f"User '{approver_id}' has already taken action on this request")
+            raise ValueError(
+                f"User '{approver_id}' has already taken action on this request"
+            )
 
         # For ALL mode, check if this role has already approved
         if request.mode == ApprovalMode.ALL:
@@ -364,7 +376,7 @@ class ApprovalService:
             approver_id=approver_id,
             approver_role=approver_role,
             action="approve",
-            comment=comment
+            comment=comment,
         )
         request.actions.append(action)
 
@@ -381,8 +393,8 @@ class ApprovalService:
                 "action": "approve",
                 "comment": comment,
                 "approval_count": request.approval_count,
-                "required_count": request.required_count
-            }
+                "required_count": request.required_count,
+            },
         )
 
         # Check if quorum is met
@@ -397,7 +409,7 @@ class ApprovalService:
         request_id: str,
         rejector_id: str,
         rejector_role: Role,
-        comment: Optional[str] = None
+        comment: str | None = None,
     ) -> ApprovalRequest:
         """
         Reject an approval request.
@@ -429,7 +441,7 @@ class ApprovalService:
             approver_id=rejector_id,
             approver_role=rejector_role,
             action="reject",
-            comment=comment
+            comment=comment,
         )
         request.actions.append(action)
 
@@ -445,10 +457,7 @@ class ApprovalService:
             entity_type="approval_request",
             entity_id=request_id,
             action_detail="Request rejected",
-            metadata={
-                "action": "reject",
-                "comment": comment
-            }
+            metadata={"action": "reject", "comment": comment},
         )
 
         return request
@@ -507,17 +516,12 @@ class ApprovalService:
 
     @classmethod
     def _resolve_request(
-        cls,
-        request: ApprovalRequest,
-        new_state: ApprovalState,
-        reason: str
+        cls, request: ApprovalRequest, new_state: ApprovalState, reason: str
     ) -> None:
         """Transition request to terminal state."""
         # Validate state transition
         result = StateRegistry.validate_transition(
-            "approval",
-            request.status,
-            new_state
+            "approval", request.status, new_state
         )
         if not result.allowed:
             raise ValueError(result.reason)
@@ -534,15 +538,15 @@ class ApprovalService:
             entity_id=request.id,
             previous_state=ApprovalState.PENDING.value,
             new_state=new_state.value,
-            metadata={"reason": reason}
+            metadata={"reason": reason},
         )
 
 
 # --- Convenience Functions ---
 
+
 def validate_approval_transition(
-    from_state: ApprovalState,
-    to_state: ApprovalState
+    from_state: ApprovalState, to_state: ApprovalState
 ) -> TransitionResult:
     """Validate an approval state transition."""
     return StateRegistry.validate_transition("approval", from_state, to_state)

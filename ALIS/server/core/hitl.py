@@ -24,10 +24,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 from uuid import uuid4
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .exceptions import HITLRequiredError
 
 logger = logging.getLogger(__name__)
@@ -39,32 +39,33 @@ logger = logging.getLogger(__name__)
 
 # Confidence thresholds for gate routing.
 # These align with ConfidenceTier boundaries in ai_gateway.py.
-_THRESHOLD_AUTO_PROCEED: float = 0.85    # HIGH-confidence auto-proceed floor
-_THRESHOLD_ESCALATE: float = 0.40        # Below this → mandatory escalation
+_THRESHOLD_AUTO_PROCEED: float = 0.85  # HIGH-confidence auto-proceed floor
+_THRESHOLD_ESCALATE: float = 0.40  # Below this → mandatory escalation
 
 # Domains that always require REVIEW regardless of confidence.
 # These are institutional-critical domains where any AI output must be seen
 # by a human before it influences state.
-_ALWAYS_REVIEW_DOMAINS: Set[str] = {
-    "scholarship",       # Scholarship approval
-    "disciplinary",      # Disciplinary summaries
-    "revaluation",       # Revaluation grading
-    "fee_waiver",        # Financial waivers
-    "grade_override",    # Grade amendments
-    "admission_final",   # Final admission decisions
-    "transcript",        # Official transcripts
+_ALWAYS_REVIEW_DOMAINS: set[str] = {
+    "scholarship",  # Scholarship approval
+    "disciplinary",  # Disciplinary summaries
+    "revaluation",  # Revaluation grading
+    "fee_waiver",  # Financial waivers
+    "grade_override",  # Grade amendments
+    "admission_final",  # Final admission decisions
+    "transcript",  # Official transcripts
 }
 
 # Domains that require ESCALATION (senior authority) even on high confidence.
-_ALWAYS_ESCALATE_DOMAINS: Set[str] = {
-    "disciplinary",      # Disciplinary actions require senior authority
-    "grade_override",    # Grade overrides require academic authority
+_ALWAYS_ESCALATE_DOMAINS: set[str] = {
+    "disciplinary",  # Disciplinary actions require senior authority
+    "grade_override",  # Grade overrides require academic authority
 }
 
 
 # =============================================================================
 # HITL DISPOSITION
 # =============================================================================
+
 
 class HITLDisposition(str, Enum):
     """
@@ -77,6 +78,7 @@ class HITLDisposition(str, Enum):
     ESCALATE        — AI output requires senior authority review.
                       HITLRequiredError with escalation flag is raised.
     """
+
     AUTO_PROCEED = "auto_proceed"
     REVIEW_REQUIRED = "review_required"
     ESCALATE = "escalate"
@@ -85,6 +87,7 @@ class HITLDisposition(str, Enum):
 # =============================================================================
 # HITL RESULT
 # =============================================================================
+
 
 @dataclass
 class HITLResult:
@@ -99,17 +102,19 @@ class HITLResult:
         review_id:       Unique ID for the pending review (if applicable).
         metadata:        Additional context for the approval workflow.
     """
+
     disposition: HITLDisposition
     confidence_score: float
     domain: str
-    reasons: List[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
     review_id: str = field(default_factory=lambda: str(uuid4()))
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
 # HITL ENFORCER
 # =============================================================================
+
 
 class HITLEnforcer:
     """
@@ -144,13 +149,13 @@ class HITLEnforcer:
         confidence_score: float,
         domain: str,
         actor_id: str,
-        org_id: Optional[str] = None,
-        actor_role: Optional[str] = None,
-        module: Optional[str] = None,
-        wizard: Optional[str] = None,
-        request_id: Optional[str] = None,
-        ai_output: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        org_id: str | None = None,
+        actor_role: str | None = None,
+        module: str | None = None,
+        wizard: str | None = None,
+        request_id: str | None = None,
+        ai_output: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> HITLResult:
         """
         Evaluate AI output against HITL policy and route appropriately.
@@ -175,7 +180,7 @@ class HITLEnforcer:
                                Callers MUST catch this and route to the
                                approval workflow — they must NOT suppress it.
         """
-        reasons: List[str] = []
+        reasons: list[str] = []
         domain_lower = domain.lower()
 
         # --- Gate 1: Always-escalate domains ---
@@ -187,9 +192,7 @@ class HITLEnforcer:
 
         # --- Gate 2: Always-review domains ---
         elif domain_lower in _ALWAYS_REVIEW_DOMAINS:
-            reasons.append(
-                f"Domain '{domain}' unconditionally requires human review"
-            )
+            reasons.append(f"Domain '{domain}' unconditionally requires human review")
             disposition = HITLDisposition.REVIEW_REQUIRED
 
         # --- Gate 3: Low confidence → escalate ---
@@ -235,7 +238,9 @@ class HITLEnforcer:
         if disposition == HITLDisposition.AUTO_PROCEED:
             logger.info(
                 "E03-S09: HITL AUTO_PROCEED [domain=%s, score=%.2f, review_id=%s]",
-                domain, confidence_score, result.review_id,
+                domain,
+                confidence_score,
+                result.review_id,
             )
             return result
 
@@ -243,7 +248,10 @@ class HITLEnforcer:
         hitl_decision = disposition.value
         logger.warning(
             "E03-S09: HITL %s [domain=%s, score=%.2f, review_id=%s]",
-            hitl_decision.upper(), domain, confidence_score, result.review_id,
+            hitl_decision.upper(),
+            domain,
+            confidence_score,
+            result.review_id,
         )
         raise HITLRequiredError(
             message=(
@@ -266,10 +274,10 @@ class HITLEnforcer:
         cls,
         result: HITLResult,
         actor_id: str,
-        actor_role: Optional[str],
-        org_id: Optional[str],
-        module: Optional[str],
-        wizard: Optional[str],
+        actor_role: str | None,
+        org_id: str | None,
+        module: str | None,
+        wizard: str | None,
     ) -> None:
         """Log the HITL disposition to the immutable audit ledger."""
         if result.disposition == HITLDisposition.AUTO_PROCEED:
@@ -303,7 +311,8 @@ class HITLEnforcer:
 # HELPERS
 # =============================================================================
 
-def _summarise_output(ai_output: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+
+def _summarise_output(ai_output: dict[str, Any] | None) -> dict[str, Any]:
     """
     Extract a minimal summary of AI output for audit/handoff metadata.
 

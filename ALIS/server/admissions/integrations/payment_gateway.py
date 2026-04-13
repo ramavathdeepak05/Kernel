@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # GATEWAY PROVIDER ENUM
 # =============================================================================
+
 
 class GatewayProvider(str, Enum):
     RAZORPAY = "RAZORPAY"
@@ -44,48 +45,53 @@ class GatewayProvider(str, Enum):
 # DATA CLASSES
 # =============================================================================
 
+
 @dataclass
 class PaymentOrder:
     """Gateway order created before checkout."""
-    order_id: str                  # Gateway-assigned order ID
-    amount_paise: int              # Amount in smallest currency unit (paise)
-    currency: str                  # INR
-    receipt: str                   # Internal receipt reference (Application ID)
-    gateway_key: str               # Public key for frontend SDK
-    provider: str                  # RAZORPAY | PAYU
-    status: str                    # created | paid | failed
-    raw: Dict[str, Any] = field(default_factory=dict)
+
+    order_id: str  # Gateway-assigned order ID
+    amount_paise: int  # Amount in smallest currency unit (paise)
+    currency: str  # INR
+    receipt: str  # Internal receipt reference (Application ID)
+    gateway_key: str  # Public key for frontend SDK
+    provider: str  # RAZORPAY | PAYU
+    status: str  # created | paid | failed
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class PaymentVerification:
     """Result of verifying a payment callback."""
+
     is_valid: bool
     order_id: str
     payment_id: str
     signature: str
     amount_paise: int
-    method: str                    # card | upi | netbanking | wallet
+    method: str  # card | upi | netbanking | wallet
     provider: str
-    error: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class RefundResult:
     """Result of initiating a refund."""
+
     refund_id: str
     payment_id: str
     amount_paise: int
-    status: str                    # processed | pending | failed
+    status: str  # processed | pending | failed
     provider: str
-    error: Optional[str] = None
-    raw: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 # =============================================================================
 # PAYMENT GATEWAY CLIENT
 # =============================================================================
+
 
 class PaymentGatewayClient:
     """
@@ -120,8 +126,11 @@ class PaymentGatewayClient:
 
     def __init__(self) -> None:
         from server.core.settings import settings
+
         self._settings = settings
-        self._provider = getattr(settings, "payment_gateway_provider", "RAZORPAY").upper()
+        self._provider = getattr(
+            settings, "payment_gateway_provider", "RAZORPAY"
+        ).upper()
 
     def is_enabled(self) -> bool:
         return getattr(self._settings, "payment_gateway_enabled", False)
@@ -138,7 +147,7 @@ class PaymentGatewayClient:
         self,
         amount: Decimal,
         receipt: str,
-        notes: Optional[Dict[str, str]] = None,
+        notes: dict[str, str] | None = None,
         currency: str = "INR",
     ) -> PaymentOrder:
         """
@@ -157,14 +166,15 @@ class PaymentGatewayClient:
         amount_paise = int(amount * 100)
 
         if self._provider == GatewayProvider.RAZORPAY:
-            return self._razorpay_create_order(amount_paise, currency, receipt, notes or {})
-        elif self._provider == GatewayProvider.PAYU:
+            return self._razorpay_create_order(
+                amount_paise, currency, receipt, notes or {}
+            )
+        if self._provider == GatewayProvider.PAYU:
             return self._payu_create_order(amount_paise, currency, receipt, notes or {})
-        else:
-            raise ValueError(f"Unsupported gateway provider: {self._provider}")
+        raise ValueError(f"Unsupported gateway provider: {self._provider}")
 
     def _razorpay_create_order(
-        self, amount_paise: int, currency: str, receipt: str, notes: Dict[str, str]
+        self, amount_paise: int, currency: str, receipt: str, notes: dict[str, str]
     ) -> PaymentOrder:
         import httpx
 
@@ -186,7 +196,9 @@ class PaymentGatewayClient:
             )
             resp.raise_for_status()
             data = resp.json()
-            logger.info("Razorpay: order created [%s] amount=%d", data["id"], amount_paise)
+            logger.info(
+                "Razorpay: order created [%s] amount=%d", data["id"], amount_paise
+            )
             return PaymentOrder(
                 order_id=data["id"],
                 amount_paise=data["amount"],
@@ -202,7 +214,7 @@ class PaymentGatewayClient:
             raise
 
     def _payu_create_order(
-        self, amount_paise: int, currency: str, receipt: str, notes: Dict[str, str]
+        self, amount_paise: int, currency: str, receipt: str, notes: dict[str, str]
     ) -> PaymentOrder:
         """PayU uses a hash-based form POST flow. We generate the hash and return it."""
         merchant_key = self._settings.payu_merchant_key
@@ -214,12 +226,14 @@ class PaymentGatewayClient:
         # PayU hash: sha512(key|txnid|amount|productinfo|firstname|email|||||||||||salt)
         # Must use the same values that will be submitted in the checkout form.
         productinfo = notes.get("productinfo", "admission_fee")
-        firstname   = notes.get("firstname", "applicant")
-        email       = notes.get("email", "noreply@alis.edu")
+        firstname = notes.get("firstname", "applicant")
+        email = notes.get("email", "noreply@alis.edu")
         hash_string = f"{merchant_key}|{txn_id}|{amount_rupees}|{productinfo}|{firstname}|{email}|||||||||||{merchant_salt}"
         payment_hash = hashlib.sha512(hash_string.encode("utf-8")).hexdigest()
 
-        logger.info("PayU: order hash generated for txn=%s amount=%s", txn_id, amount_rupees)
+        logger.info(
+            "PayU: order hash generated for txn=%s amount=%s", txn_id, amount_rupees
+        )
         return PaymentOrder(
             order_id=txn_id,
             amount_paise=amount_paise,
@@ -229,8 +243,12 @@ class PaymentGatewayClient:
             provider=GatewayProvider.PAYU,
             status="created",
             raw={
-                "hash": payment_hash, "txn_id": txn_id, "amount": amount_rupees,
-                "productinfo": productinfo, "firstname": firstname, "email": email,
+                "hash": payment_hash,
+                "txn_id": txn_id,
+                "amount": amount_rupees,
+                "productinfo": productinfo,
+                "firstname": firstname,
+                "email": email,
             },
         )
 
@@ -243,7 +261,7 @@ class PaymentGatewayClient:
         order_id: str,
         payment_id: str,
         signature: str,
-        callback_params: Optional[Dict[str, Any]] = None,
+        callback_params: dict[str, Any] | None = None,
     ) -> PaymentVerification:
         """
         Verify the payment callback signature from the gateway.
@@ -258,10 +276,9 @@ class PaymentGatewayClient:
 
         if self._provider == GatewayProvider.RAZORPAY:
             return self._razorpay_verify(order_id, payment_id, signature)
-        elif self._provider == GatewayProvider.PAYU:
+        if self._provider == GatewayProvider.PAYU:
             return self._payu_verify(order_id, payment_id, signature, callback_params)
-        else:
-            raise ValueError(f"Unsupported gateway provider: {self._provider}")
+        raise ValueError(f"Unsupported gateway provider: {self._provider}")
 
     def _razorpay_verify(
         self, order_id: str, payment_id: str, signature: str
@@ -292,20 +309,19 @@ class PaymentGatewayClient:
                 provider=GatewayProvider.RAZORPAY,
                 raw=payment_details,
             )
-        else:
-            logger.warning("Razorpay: signature mismatch for payment [%s]", payment_id)
-            return PaymentVerification(
-                is_valid=False,
-                order_id=order_id,
-                payment_id=payment_id,
-                signature=signature,
-                amount_paise=0,
-                method="unknown",
-                provider=GatewayProvider.RAZORPAY,
-                error="Signature verification failed",
-            )
+        logger.warning("Razorpay: signature mismatch for payment [%s]", payment_id)
+        return PaymentVerification(
+            is_valid=False,
+            order_id=order_id,
+            payment_id=payment_id,
+            signature=signature,
+            amount_paise=0,
+            method="unknown",
+            provider=GatewayProvider.RAZORPAY,
+            error="Signature verification failed",
+        )
 
-    def _razorpay_fetch_payment(self, payment_id: str) -> Dict[str, Any]:
+    def _razorpay_fetch_payment(self, payment_id: str) -> dict[str, Any]:
         import httpx
 
         key_id = self._settings.razorpay_key_id
@@ -329,7 +345,7 @@ class PaymentGatewayClient:
         order_id: str,
         payment_id: str,
         signature: str,
-        callback_params: Optional[Dict[str, Any]] = None,
+        callback_params: dict[str, Any] | None = None,
     ) -> PaymentVerification:
         """
         PayU reverse hash verification.
@@ -340,11 +356,14 @@ class PaymentGatewayClient:
         `callback_params` must be the full dict POSTed by PayU to the callback URL.
         If absent, the payment is rejected (safer than accepting blindly).
         """
-        merchant_key  = self._settings.payu_merchant_key
+        merchant_key = self._settings.payu_merchant_key
         merchant_salt = self._settings.payu_merchant_salt
 
         if not callback_params:
-            logger.warning("PayU: verify_payment called without callback_params — rejecting txn=%s", order_id)
+            logger.warning(
+                "PayU: verify_payment called without callback_params — rejecting txn=%s",
+                order_id,
+            )
             return PaymentVerification(
                 is_valid=False,
                 order_id=order_id,
@@ -358,30 +377,39 @@ class PaymentGatewayClient:
 
         p = callback_params
         # Build reverse hash string
-        hash_seq = "|".join([
-            merchant_salt,
-            p.get("status", ""),
-            p.get("udf5", ""),
-            p.get("udf4", ""),
-            p.get("udf3", ""),
-            p.get("udf2", ""),
-            p.get("udf1", ""),
-            p.get("email", ""),
-            p.get("firstname", ""),
-            p.get("productinfo", ""),
-            p.get("amount", ""),
-            p.get("txnid", ""),
-            merchant_key,
-        ])
-        expected     = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
-        provided     = p.get("hash", signature)
-        is_valid     = hmac.compare_digest(expected.lower(), provided.lower())
+        hash_seq = "|".join(
+            [
+                merchant_salt,
+                p.get("status", ""),
+                p.get("udf5", ""),
+                p.get("udf4", ""),
+                p.get("udf3", ""),
+                p.get("udf2", ""),
+                p.get("udf1", ""),
+                p.get("email", ""),
+                p.get("firstname", ""),
+                p.get("productinfo", ""),
+                p.get("amount", ""),
+                p.get("txnid", ""),
+                merchant_key,
+            ]
+        )
+        expected = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
+        provided = p.get("hash", signature)
+        is_valid = hmac.compare_digest(expected.lower(), provided.lower())
         amount_paise = int(float(p.get("amount", "0")) * 100)
 
         if is_valid:
-            logger.info("PayU: payment verified [%s] txn=%s", p.get("mihpayid", payment_id), order_id)
+            logger.info(
+                "PayU: payment verified [%s] txn=%s",
+                p.get("mihpayid", payment_id),
+                order_id,
+            )
         else:
-            logger.warning("PayU: hash mismatch — txn=%s (possible tamper)", p.get("txnid", order_id))
+            logger.warning(
+                "PayU: hash mismatch — txn=%s (possible tamper)",
+                p.get("txnid", order_id),
+            )
 
         return PaymentVerification(
             is_valid=is_valid,
@@ -402,8 +430,8 @@ class PaymentGatewayClient:
     def refund_payment(
         self,
         payment_id: str,
-        amount: Optional[Decimal] = None,
-        notes: Optional[Dict[str, str]] = None,
+        amount: Decimal | None = None,
+        notes: dict[str, str] | None = None,
     ) -> RefundResult:
         """
         Initiate a full or partial refund.
@@ -417,13 +445,12 @@ class PaymentGatewayClient:
 
         if self._provider == GatewayProvider.RAZORPAY:
             return self._razorpay_refund(payment_id, amount, notes or {})
-        elif self._provider == GatewayProvider.PAYU:
+        if self._provider == GatewayProvider.PAYU:
             return self._payu_refund(payment_id, amount, notes or {})
-        else:
-            raise ValueError(f"Unsupported gateway provider: {self._provider}")
+        raise ValueError(f"Unsupported gateway provider: {self._provider}")
 
     def _razorpay_refund(
-        self, payment_id: str, amount: Optional[Decimal], notes: Dict[str, str]
+        self, payment_id: str, amount: Decimal | None, notes: dict[str, str]
     ) -> RefundResult:
         import httpx
 
@@ -431,7 +458,7 @@ class PaymentGatewayClient:
         key_secret = self._settings.razorpay_key_secret
         timeout = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
 
-        payload: Dict[str, Any] = {"notes": notes}
+        payload: dict[str, Any] = {"notes": notes}
         if amount is not None:
             payload["amount"] = int(amount * 100)
 
@@ -444,7 +471,11 @@ class PaymentGatewayClient:
             )
             resp.raise_for_status()
             data = resp.json()
-            logger.info("Razorpay: refund initiated [%s] for payment [%s]", data["id"], payment_id)
+            logger.info(
+                "Razorpay: refund initiated [%s] for payment [%s]",
+                data["id"],
+                payment_id,
+            )
             return RefundResult(
                 refund_id=data["id"],
                 payment_id=payment_id,
@@ -465,7 +496,7 @@ class PaymentGatewayClient:
             )
 
     def _payu_refund(
-        self, payment_id: str, amount: Optional[Decimal], notes: Dict[str, str]
+        self, payment_id: str, amount: Decimal | None, notes: dict[str, str]
     ) -> RefundResult:
         """
         PayU cancel/refund API.
@@ -476,33 +507,38 @@ class PaymentGatewayClient:
         """
         import httpx
 
-        merchant_key  = self._settings.payu_merchant_key
+        merchant_key = self._settings.payu_merchant_key
         merchant_salt = self._settings.payu_merchant_salt
-        timeout       = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
-        amount_str    = f"{amount:.2f}" if amount else "0.00"
+        timeout = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
+        amount_str = f"{amount:.2f}" if amount else "0.00"
 
         # Build refund hash
-        hash_seq     = f"{merchant_key}|cancel_refund_transaction|{payment_id}|{amount_str}|||{merchant_salt}"
-        refund_hash  = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
+        hash_seq = f"{merchant_key}|cancel_refund_transaction|{payment_id}|{amount_str}|||{merchant_salt}"
+        refund_hash = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
 
         try:
             resp = httpx.post(
                 "https://info.payu.in/merchant/postservice.php?form=2",
                 data={
-                    "key":     merchant_key,
+                    "key": merchant_key,
                     "command": "cancel_refund_transaction",
-                    "var1":    payment_id,   # mihpayid
-                    "var2":    amount_str,   # net_amount_debit
-                    "hash":    refund_hash,
+                    "var1": payment_id,  # mihpayid
+                    "var2": amount_str,  # net_amount_debit
+                    "hash": refund_hash,
                 },
                 timeout=timeout,
             )
             resp.raise_for_status()
-            data   = resp.json()
+            data = resp.json()
             # PayU returns {"status": 1, "msg": "...", "request_id": "..."}
             status = data.get("status", 0)
 
-            logger.info("PayU: refund for [%s] status=%s request_id=%s", payment_id, status, data.get("request_id"))
+            logger.info(
+                "PayU: refund for [%s] status=%s request_id=%s",
+                payment_id,
+                status,
+                data.get("request_id"),
+            )
             return RefundResult(
                 refund_id=str(data.get("request_id", "")),
                 payment_id=payment_id,
@@ -527,7 +563,7 @@ class PaymentGatewayClient:
     # FETCH ORDER STATUS
     # -------------------------------------------------------------------------
 
-    def fetch_order_status(self, order_id: str) -> Dict[str, Any]:
+    def fetch_order_status(self, order_id: str) -> dict[str, Any]:
         """
         Fetch the current status of an order from the gateway.
         Useful for reconciliation and status polling.
@@ -536,12 +572,11 @@ class PaymentGatewayClient:
 
         if self._provider == GatewayProvider.RAZORPAY:
             return self._razorpay_fetch_order(order_id)
-        elif self._provider == GatewayProvider.PAYU:
+        if self._provider == GatewayProvider.PAYU:
             return self._payu_fetch_order(order_id)
-        else:
-            return {"error": f"fetch_order_status not implemented for {self._provider}"}
+        return {"error": f"fetch_order_status not implemented for {self._provider}"}
 
-    def _payu_fetch_order(self, order_id: str) -> Dict[str, Any]:
+    def _payu_fetch_order(self, order_id: str) -> dict[str, Any]:
         """
         PayU transaction status API (verify_payment).
         Endpoint: POST https://info.payu.in/merchant/postservice.php?form=2
@@ -549,21 +584,21 @@ class PaymentGatewayClient:
         """
         import httpx
 
-        merchant_key  = self._settings.payu_merchant_key
+        merchant_key = self._settings.payu_merchant_key
         merchant_salt = self._settings.payu_merchant_salt
-        timeout       = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
+        timeout = getattr(self._settings, "payment_gateway_timeout_seconds", 30)
 
-        hash_seq  = f"{merchant_key}|verify_payment|{order_id}|{merchant_salt}"
-        req_hash  = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
+        hash_seq = f"{merchant_key}|verify_payment|{order_id}|{merchant_salt}"
+        req_hash = hashlib.sha512(hash_seq.encode("utf-8")).hexdigest()
 
         try:
             resp = httpx.post(
                 "https://info.payu.in/merchant/postservice.php?form=2",
                 data={
-                    "key":     merchant_key,
+                    "key": merchant_key,
                     "command": "verify_payment",
-                    "var1":    order_id,
-                    "hash":    req_hash,
+                    "var1": order_id,
+                    "hash": req_hash,
                 },
                 timeout=timeout,
             )
@@ -578,7 +613,7 @@ class PaymentGatewayClient:
             logger.error("PayU: fetch order status failed — %s", exc)
             return {"error": str(exc)}
 
-    def _razorpay_fetch_order(self, order_id: str) -> Dict[str, Any]:
+    def _razorpay_fetch_order(self, order_id: str) -> dict[str, Any]:
         import httpx
 
         key_id = self._settings.razorpay_key_id

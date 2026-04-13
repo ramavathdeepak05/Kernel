@@ -21,17 +21,16 @@ Entities:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
+from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
-
+from pydantic import BaseModel, Field, field_validator
 
 # =============================================================================
 # ENUMS
 # =============================================================================
+
 
 class ApplicantStatus(str, Enum):
     """
@@ -41,11 +40,12 @@ class ApplicantStatus(str, Enum):
     Old values (APPLIED, ADMITTED, ANNULLED) retained for backward-compat
     with existing pipeline code and any data already in the DB.
     """
+
     # Stage 1
     LEAD = "LEAD"
     # Stage 2
     DRAFT = "DRAFT"
-    APPLIED = "APPLIED"             # legacy alias for SUBMITTED
+    APPLIED = "APPLIED"  # legacy alias for SUBMITTED
     SUBMITTED = "SUBMITTED"
     PENDING_PAYMENT = "PENDING_PAYMENT"
     # Stage 3
@@ -67,7 +67,7 @@ class ApplicantStatus(str, Enum):
     OFFER_ACCEPTED = "OFFER_ACCEPTED"
     OFFER_DECLINED = "OFFER_DECLINED"
     # Stage 8
-    ADMITTED = "ADMITTED"           # legacy alias for SEAT_CONFIRMED
+    ADMITTED = "ADMITTED"  # legacy alias for SEAT_CONFIRMED
     SEAT_CONFIRMED = "SEAT_CONFIRMED"
     # Stage 9
     VERIFICATION_PENDING = "VERIFICATION_PENDING"
@@ -76,46 +76,49 @@ class ApplicantStatus(str, Enum):
     ENROLLED = "ENROLLED"
     # Terminal
     CANCELLED = "CANCELLED"
-    ANNULLED = "ANNULLED"           # legacy alias for CANCELLED
+    ANNULLED = "ANNULLED"  # legacy alias for CANCELLED
 
 
 class SourceChannel(str, Enum):
     """How the lead / applicant was acquired."""
+
     WEBSITE = "WEBSITE"
     REFERRAL_STUDENT = "REFERRAL_STUDENT"
     REFERRAL_STAFF = "REFERRAL_STAFF"
     CONSULTANT = "CONSULTANT"
     SOCIAL_AD = "SOCIAL_AD"
     EDUCATION_FAIR = "EDUCATION_FAIR"
-    THIRD_PARTY_PORTAL = "THIRD_PARTY_PORTAL"   # Shiksha, CollegeDekho, etc.
+    THIRD_PARTY_PORTAL = "THIRD_PARTY_PORTAL"  # Shiksha, CollegeDekho, etc.
     WALK_IN = "WALK_IN"
-    AGENT_ASSISTED = "AGENT_ASSISTED"           # counsellor submitted on behalf
-    CSV_IMPORT = "CSV_IMPORT"                   # NTA / state CET import
+    AGENT_ASSISTED = "AGENT_ASSISTED"  # counsellor submitted on behalf
+    CSV_IMPORT = "CSV_IMPORT"  # NTA / state CET import
     OTHER = "OTHER"
 
 
 class DocumentType(str, Enum):
     """Document types required during the admissions process (Stages 3 & 9)."""
+
     MARKSHEET_10 = "MARKSHEET_10"
     MARKSHEET_12 = "MARKSHEET_12"
     TRANSFER_CERTIFICATE = "TRANSFER_CERTIFICATE"
     CHARACTER_CERTIFICATE = "CHARACTER_CERTIFICATE"
     MIGRATION_CERTIFICATE = "MIGRATION_CERTIFICATE"
-    CATEGORY_CERTIFICATE = "CATEGORY_CERTIFICATE"       # SC/ST/OBC/EWS
+    CATEGORY_CERTIFICATE = "CATEGORY_CERTIFICATE"  # SC/ST/OBC/EWS
     PHOTO = "PHOTO"
-    GOVT_ID = "GOVT_ID"                                 # Aadhaar / Passport
-    ENTRANCE_SCORECARD = "ENTRANCE_SCORECARD"           # JEE/NEET/CAT result
+    GOVT_ID = "GOVT_ID"  # Aadhaar / Passport
+    ENTRANCE_SCORECARD = "ENTRANCE_SCORECARD"  # JEE/NEET/CAT result
     GAP_CERTIFICATE = "GAP_CERTIFICATE"
-    DEGREE_CERTIFICATE = "DEGREE_CERTIFICATE"           # UG degree for PG applicants
-    EXPERIENCE_LETTER = "EXPERIENCE_LETTER"             # for MBA/executive programs
+    DEGREE_CERTIFICATE = "DEGREE_CERTIFICATE"  # UG degree for PG applicants
+    EXPERIENCE_LETTER = "EXPERIENCE_LETTER"  # for MBA/executive programs
     MEDICAL_FITNESS = "MEDICAL_FITNESS"
-    PASSPORT = "PASSPORT"                               # NRI / international
-    EQUIVALENCY_CERTIFICATE = "EQUIVALENCY_CERTIFICATE" # foreign qualifications
+    PASSPORT = "PASSPORT"  # NRI / international
+    EQUIVALENCY_CERTIFICATE = "EQUIVALENCY_CERTIFICATE"  # foreign qualifications
     OTHER = "OTHER"
 
 
 class DocumentStatus(str, Enum):
     """Per-document lifecycle status."""
+
     PENDING = "PENDING"
     UNDER_REVIEW = "UNDER_REVIEW"
     APPROVED = "APPROVED"
@@ -125,6 +128,7 @@ class DocumentStatus(str, Enum):
 
 class DocumentVerificationMethod(str, Enum):
     """How a document was verified."""
+
     AI_AUTO = "ai_auto"
     MANUAL_OFFICER = "manual_officer"
     ADMIN_OVERRIDE = "admin_override"
@@ -132,6 +136,7 @@ class DocumentVerificationMethod(str, Enum):
 
 class AllocationMethod(str, Enum):
     """How counsellor was matched to applicant."""
+
     VECTOR_SEARCH = "vector_search"
     LOAD_BALANCED = "load_balanced"
     MANUAL = "manual"
@@ -141,14 +146,16 @@ class AllocationMethod(str, Enum):
 # E04-S01: APPLICANT
 # =============================================================================
 
+
 class ApplicantCreate(BaseModel):
     """Input schema for creating a new applicant (LEAD → APPLIED)."""
+
     name: str = Field(..., min_length=2, max_length=200)
     email: str = Field(..., description="Primary contact email")
     phone: str = Field(..., min_length=7, max_length=20)
     intended_program: str = Field(..., min_length=2, max_length=200)
     source_channel: SourceChannel = Field(default=SourceChannel.WEBSITE)
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
     @field_validator("phone")
     @classmethod
@@ -168,6 +175,7 @@ class ApplicantCreate(BaseModel):
 
 class ApplicantRead(BaseModel):
     """Output schema for an applicant record."""
+
     id: str
     org_id: str
     name: str
@@ -177,33 +185,35 @@ class ApplicantRead(BaseModel):
     source_channel: str
     status: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
-    metadata: Optional[Dict[str, Any]] = None
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
 
 
 # =============================================================================
 # E04-S02: LEAD MERGE LOG
 # =============================================================================
 
+
 class LeadMergeRequest(BaseModel):
     """Input for initiating a lead merge."""
+
     primary_applicant_id: str
     duplicate_applicant_id: str
-    justification: Optional[str] = Field(
-        default=None,
-        description="Required for manual merges (confidence < 0.9)"
+    justification: str | None = Field(
+        default=None, description="Required for manual merges (confidence < 0.9)"
     )
 
 
 class LeadMergeLog(BaseModel):
     """Audit record of a lead merge operation."""
+
     id: str
     org_id: str
     primary_id: str
     merged_id: str
     similarity_score: float
-    method: str   # "auto" | "admin_approved"
-    justification: Optional[str]
+    method: str  # "auto" | "admin_approved"
+    justification: str | None
     merged_by: str
     created_at: datetime
 
@@ -212,36 +222,37 @@ class LeadMergeLog(BaseModel):
 # E04-S04: APPLICATION DOCUMENT
 # =============================================================================
 
+
 class DocumentUploadRequest(BaseModel):
     """Input for uploading an application document."""
+
     applicant_id: str
     doc_type: DocumentType
     file_name: str = Field(..., min_length=1, max_length=255)
-    file_content_base64: str = Field(
-        ..., description="Base64-encoded file content"
-    )
+    file_content_base64: str = Field(..., description="Base64-encoded file content")
 
 
 class ApplicationDocumentRead(BaseModel):
     """Output schema for a document record (v2 — includes Stage 3 status workflow)."""
+
     id: str
     org_id: str
     applicant_id: str
     doc_type: str
     file_path: str
     is_verified: bool
-    verification_method: Optional[str] = None
-    verification_detail: Optional[str] = None
-    verified_by: Optional[str] = None
-    verified_at: Optional[datetime] = None
+    verification_method: str | None = None
+    verification_detail: str | None = None
+    verified_by: str | None = None
+    verified_at: datetime | None = None
     # Stage 3 document status workflow
     doc_status: str = "PENDING"
-    rejection_reason: Optional[str] = None
+    rejection_reason: str | None = None
     reupload_count: int = 0
-    reupload_deadline: Optional[datetime] = None
-    file_size_bytes: Optional[int] = None
-    file_mime_type: Optional[str] = None
-    original_file_name: Optional[str] = None
+    reupload_deadline: datetime | None = None
+    file_size_bytes: int | None = None
+    file_mime_type: str | None = None
+    original_file_name: str | None = None
     digilocker_verified: bool = False
     created_at: datetime
 
@@ -250,24 +261,27 @@ class ApplicationDocumentRead(BaseModel):
 # E04-S05: COUNSELLOR ASSIGNMENT
 # =============================================================================
 
+
 class CounsellorAssignRequest(BaseModel):
     """Input for requesting counsellor allocation."""
+
     applicant_id: str
-    preferred_counsellor_id: Optional[str] = Field(
+    preferred_counsellor_id: str | None = Field(
         default=None,
-        description="Optional manual preference — triggers admin override path"
+        description="Optional manual preference — triggers admin override path",
     )
-    justification: Optional[str] = None
+    justification: str | None = None
 
 
 class CounsellorAssignmentRead(BaseModel):
     """Output schema for a counsellor assignment."""
+
     id: str
     org_id: str
     applicant_id: str
     counsellor_id: str
     method: str
-    similarity_score: Optional[float]
+    similarity_score: float | None
     assigned_by: str
     created_at: datetime
 
@@ -276,33 +290,38 @@ class CounsellorAssignmentRead(BaseModel):
 # P9: OFFER LETTER v2
 # =============================================================================
 
+
 class OfferLetterGenerateRequest(BaseModel):
     """Input for generating an offer letter (v2)."""
+
     applicant_id: str
     program_name: str
     academic_year: str = Field(..., pattern=r"^\d{4}-\d{4}$")
     template_version: int = Field(default=1, ge=1)
     # P9 additions
     acceptance_deadline_days: int = Field(
-        default=7, ge=1, le=60,
-        description="Days from issuance by which applicant must accept/decline"
+        default=7,
+        ge=1,
+        le=60,
+        description="Days from issuance by which applicant must accept/decline",
     )
     fee_structure: dict = Field(
         default_factory=dict,
-        description='{"tuition": 120000, "hostel": 60000, "other": 5000}'
+        description='{"tuition": 120000, "hostel": 60000, "other": 5000}',
     )
     conditions: list = Field(
         default_factory=list,
-        description="List of conditions applicant must acknowledge"
+        description="List of conditions applicant must acknowledge",
     )
-    merit_list_entry_id: Optional[str] = Field(
+    merit_list_entry_id: str | None = Field(
         default=None,
-        description="Link to the merit list entry that triggered this offer"
+        description="Link to the merit list entry that triggered this offer",
     )
 
 
 class OfferLetterRead(BaseModel):
     """Output schema for an offer letter record (v2)."""
+
     id: str
     org_id: str
     applicant_id: str
@@ -314,39 +333,40 @@ class OfferLetterRead(BaseModel):
     issued_at: datetime
     is_valid: bool
     # P9 fields
-    expires_at: Optional[datetime] = None
-    accepted_at: Optional[datetime] = None
-    declined_at: Optional[datetime] = None
+    expires_at: datetime | None = None
+    accepted_at: datetime | None = None
+    declined_at: datetime | None = None
     acceptance_status: str = "PENDING"  # PENDING | ACCEPTED | DECLINED | EXPIRED
-    digital_signature_ref: Optional[str] = None
-    merit_list_entry_id: Optional[str] = None
-    delivery_status: str = "PENDING"   # PENDING | SENT | OPENED | BOUNCED
-    email_opened_at: Optional[datetime] = None
+    digital_signature_ref: str | None = None
+    merit_list_entry_id: str | None = None
+    delivery_status: str = "PENDING"  # PENDING | SENT | OPENED | BOUNCED
+    email_opened_at: datetime | None = None
     t3_reminder_sent: bool = False
     t1_reminder_sent: bool = False
-    fee_structure: Optional[dict] = None
+    fee_structure: dict | None = None
 
 
 class OfferAcceptRequest(BaseModel):
     """Applicant accepts their offer."""
+
     applicant_id: str
-    digital_signature_ref: Optional[str] = Field(
-        default=None,
-        description="Reference ID of digital signature if e-signed"
+    digital_signature_ref: str | None = Field(
+        default=None, description="Reference ID of digital signature if e-signed"
     )
 
 
 class OfferDeclineRequest(BaseModel):
     """Applicant declines their offer."""
+
     applicant_id: str
-    reason: Optional[str] = Field(
-        default=None, max_length=1000,
-        description="Optional reason for declining"
+    reason: str | None = Field(
+        default=None, max_length=1000, description="Optional reason for declining"
     )
 
 
 class OfferRevokeRequest(BaseModel):
     """Staff revokes a previously issued offer."""
+
     reason: str = Field(..., min_length=10, max_length=1000)
 
 
@@ -354,8 +374,10 @@ class OfferRevokeRequest(BaseModel):
 # E04-S07: ADMISSION CONFIRMATION
 # =============================================================================
 
+
 class AdmissionConfirmRequest(BaseModel):
     """Input for confirming an admission (fee paid → ADMITTED)."""
+
     applicant_id: str
     payment_reference: str = Field(..., min_length=3, max_length=100)
     fee_amount: float = Field(..., gt=0)
@@ -363,6 +385,7 @@ class AdmissionConfirmRequest(BaseModel):
 
 class AdmissionRecordRead(BaseModel):
     """Output schema for an admission record."""
+
     id: str
     org_id: str
     applicant_id: str
@@ -377,23 +400,25 @@ class AdmissionRecordRead(BaseModel):
 # E04-S08: INTAKE QUALITY SCORE
 # =============================================================================
 
+
 class IntakeScoreRequest(BaseModel):
     """Input for scoring an intake batch."""
+
     batch_id: str = Field(
-        ...,
-        description="Intake batch identifier (e.g., 'AY2025-26-Q1')"
+        ..., description="Intake batch identifier (e.g., 'AY2025-26-Q1')"
     )
-    program: Optional[str] = None
+    program: str | None = None
 
 
 class IntakeQualityScoreRead(BaseModel):
     """Output schema for an intake quality score."""
+
     id: str
     org_id: str
     batch_id: str
-    program: Optional[str]
+    program: str | None
     quality_score: float
-    factors: Dict[str, Any]
+    factors: dict[str, Any]
     alert_triggered: bool
     scored_at: datetime
 
@@ -402,13 +427,16 @@ class IntakeQualityScoreRead(BaseModel):
 # E04-S09: STUDENT RECORD (Post-Enrollment)
 # =============================================================================
 
+
 class EnrollmentHandoverRequest(BaseModel):
     """Input for triggering enrollment handover for an admitted applicant."""
+
     applicant_id: str
 
 
 class StudentRecordRead(BaseModel):
     """Output schema for a newly created student record."""
+
     id: str
     org_id: str
     applicant_id: str
@@ -425,8 +453,10 @@ class StudentRecordRead(BaseModel):
 # STAGE 1: LEAD CRM
 # =============================================================================
 
+
 class LeadStatus(str, Enum):
     """CRM lifecycle states for a lead before conversion."""
+
     NEW = "NEW"
     CONTACTED = "CONTACTED"
     INTERESTED = "INTERESTED"
@@ -439,6 +469,7 @@ class LeadStatus(str, Enum):
 
 class LeadActivityType(str, Enum):
     """Types of CRM activities that can be logged against a lead."""
+
     EMAIL_SENT = "EMAIL_SENT"
     SMS_SENT = "SMS_SENT"
     CALL_LOGGED = "CALL_LOGGED"
@@ -451,24 +482,25 @@ class LeadActivityType(str, Enum):
 
 class LeadCreate(BaseModel):
     """Input for capturing a new lead."""
+
     full_name: str = Field(..., min_length=2, max_length=200)
     email: str = Field(..., description="Contact email")
     phone: str = Field(..., min_length=7, max_length=20)
-    city: Optional[str] = None
-    state_region: Optional[str] = None
-    course_interest: Optional[str] = None
-    intake_year: Optional[str] = None
+    city: str | None = None
+    state_region: str | None = None
+    course_interest: str | None = None
+    intake_year: str | None = None
     source_type: SourceChannel = Field(default=SourceChannel.WEBSITE)
-    source_detail: Optional[str] = None
-    utm_source: Optional[str] = None
-    utm_medium: Optional[str] = None
-    utm_campaign: Optional[str] = None
-    utm_term: Optional[str] = None
-    utm_content: Optional[str] = None
-    referred_by_user_id: Optional[str] = None
-    consultant_id: Optional[str] = None
-    referral_code: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    source_detail: str | None = None
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    utm_term: str | None = None
+    utm_content: str | None = None
+    referred_by_user_id: str | None = None
+    consultant_id: str | None = None
+    referral_code: str | None = None
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
     @field_validator("email")
     @classmethod
@@ -488,70 +520,74 @@ class LeadCreate(BaseModel):
 
 class LeadUpdateRequest(BaseModel):
     """Input for updating a lead's CRM fields."""
-    status: Optional[LeadStatus] = None
-    assigned_counsellor_id: Optional[str] = None
-    next_followup_at: Optional[datetime] = None
-    course_interest: Optional[str] = None
-    intake_year: Optional[str] = None
-    disqualify_reason: Optional[str] = None
-    note: Optional[str] = Field(
-        default=None,
-        description="Optional note logged as a CRM activity"
+
+    status: LeadStatus | None = None
+    assigned_counsellor_id: str | None = None
+    next_followup_at: datetime | None = None
+    course_interest: str | None = None
+    intake_year: str | None = None
+    disqualify_reason: str | None = None
+    note: str | None = Field(
+        default=None, description="Optional note logged as a CRM activity"
     )
 
 
 class LeadRead(BaseModel):
     """Output schema for a lead record."""
+
     id: str
     org_id: str
     full_name: str
     email: str
     phone: str
-    city: Optional[str] = None
-    state_region: Optional[str] = None
-    course_interest: Optional[str] = None
-    intake_year: Optional[str] = None
+    city: str | None = None
+    state_region: str | None = None
+    course_interest: str | None = None
+    intake_year: str | None = None
     source_type: str
-    source_detail: Optional[str] = None
-    utm_source: Optional[str] = None
-    utm_medium: Optional[str] = None
-    utm_campaign: Optional[str] = None
-    referred_by_user_id: Optional[str] = None
-    consultant_id: Optional[str] = None
+    source_detail: str | None = None
+    utm_source: str | None = None
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    referred_by_user_id: str | None = None
+    consultant_id: str | None = None
     status: str
-    assigned_counsellor_id: Optional[str] = None
-    last_contacted_at: Optional[datetime] = None
-    next_followup_at: Optional[datetime] = None
-    disqualify_reason: Optional[str] = None
-    converted_applicant_id: Optional[str] = None
-    converted_at: Optional[datetime] = None
-    metadata: Optional[Dict[str, Any]] = None
+    assigned_counsellor_id: str | None = None
+    last_contacted_at: datetime | None = None
+    next_followup_at: datetime | None = None
+    disqualify_reason: str | None = None
+    converted_applicant_id: str | None = None
+    converted_at: datetime | None = None
+    metadata: dict[str, Any] | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class LeadActivityCreate(BaseModel):
     """Input for logging a CRM activity against a lead."""
+
     lead_id: str
     activity_type: LeadActivityType
     summary: str = Field(..., min_length=1, max_length=1000)
-    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    metadata: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class LeadActivityRead(BaseModel):
     """Output schema for a lead activity record."""
+
     id: str
     org_id: str
     lead_id: str
     activity_type: str
     summary: str
     actor_id: str
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
     created_at: datetime
 
 
 class LeadConvertRequest(BaseModel):
     """Input for converting a lead into an applicant."""
+
     lead_id: str
     intended_program: str = Field(..., min_length=2, max_length=200)
 
@@ -559,6 +595,7 @@ class LeadConvertRequest(BaseModel):
 # =============================================================================
 # STAGE 1: CONSULTANT MANAGEMENT
 # =============================================================================
+
 
 class ConsultantStatus(str, Enum):
     ACTIVE = "ACTIVE"
@@ -573,16 +610,17 @@ class ConsultantCommissionType(str, Enum):
 
 class ConsultantCreate(BaseModel):
     """Input for registering a third-party consultant."""
+
     name: str = Field(..., min_length=2, max_length=200)
-    company_name: Optional[str] = None
+    company_name: str | None = None
     email: str
     phone: str = Field(..., min_length=7, max_length=20)
-    city: Optional[str] = None
-    state_region: Optional[str] = None
+    city: str | None = None
+    state_region: str | None = None
     commission_type: ConsultantCommissionType = ConsultantCommissionType.FLAT
     commission_rate: float = Field(default=0.0, ge=0)
-    commission_amount: Optional[float] = Field(default=None, ge=0)
-    portal_user_id: Optional[str] = None
+    commission_amount: float | None = Field(default=None, ge=0)
+    portal_user_id: str | None = None
 
     @field_validator("email")
     @classmethod
@@ -594,45 +632,49 @@ class ConsultantCreate(BaseModel):
 
 class ConsultantRead(BaseModel):
     """Output schema for a consultant record."""
+
     id: str
     org_id: str
     name: str
-    company_name: Optional[str] = None
+    company_name: str | None = None
     email: str
     phone: str
-    city: Optional[str] = None
-    state_region: Optional[str] = None
+    city: str | None = None
+    state_region: str | None = None
     status: str
     commission_type: str
     commission_rate: float
-    commission_amount: Optional[float] = None
-    portal_user_id: Optional[str] = None
-    agreement_signed_at: Optional[datetime] = None
+    commission_amount: float | None = None
+    portal_user_id: str | None = None
+    agreement_signed_at: datetime | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 # =============================================================================
 # STAGE 1: REFERRAL CODES
 # =============================================================================
 
+
 class ReferralCodeCreate(BaseModel):
     """Input for generating a referral code."""
+
     referrer_type: str = Field(..., description="STUDENT | STAFF | CONSULTANT")
     referrer_id: str
-    max_uses: Optional[int] = Field(default=None, ge=1)
-    expires_at: Optional[datetime] = None
+    max_uses: int | None = Field(default=None, ge=1)
+    expires_at: datetime | None = None
 
 
 class ReferralCodeRead(BaseModel):
     """Output schema for a referral code."""
+
     id: str
     org_id: str
     code: str
     referrer_type: str
     referrer_id: str
-    max_uses: Optional[int] = None
+    max_uses: int | None = None
     use_count: int
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     is_active: bool
     created_at: datetime

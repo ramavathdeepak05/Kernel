@@ -186,7 +186,7 @@ def upgrade() -> None:
     # -------------------------------------------------------------------------
     op.execute("""
         INSERT INTO institution_policies
-            (id, org_id, key, value, description, category, status, created_by)
+            (id, org_id, key, value, description, category, is_active, created_by)
         SELECT
             gen_random_uuid(),
             id,
@@ -194,7 +194,7 @@ def upgrade() -> None:
             '10'::jsonb,
             'Default % of max_marks deducted per day for late assignment submissions',
             'academics',
-            'APPROVED',
+            TRUE,
             'system'
         FROM organizations
         WHERE status = 'ACTIVE'
@@ -203,7 +203,7 @@ def upgrade() -> None:
 
     op.execute("""
         INSERT INTO institution_policies
-            (id, org_id, key, value, description, category, status, created_by)
+            (id, org_id, key, value, description, category, is_active, created_by)
         SELECT
             gen_random_uuid(),
             id,
@@ -211,7 +211,7 @@ def upgrade() -> None:
             '3'::jsonb,
             'Maximum days past due date that late submissions are accepted',
             'academics',
-            'APPROVED',
+            TRUE,
             'system'
         FROM organizations
         WHERE status = 'ACTIVE'
@@ -220,7 +220,7 @@ def upgrade() -> None:
 
     op.execute("""
         INSERT INTO institution_policies
-            (id, org_id, key, value, description, category, status, created_by)
+            (id, org_id, key, value, description, category, is_active, created_by)
         SELECT
             gen_random_uuid(),
             id,
@@ -228,7 +228,7 @@ def upgrade() -> None:
             'false'::jsonb,
             'Auto-transition submissions to UNDER_REVIEW on receipt (default: faculty manually begins review)',
             'academics',
-            'APPROVED',
+            TRUE,
             'system'
         FROM organizations
         WHERE status = 'ACTIVE'

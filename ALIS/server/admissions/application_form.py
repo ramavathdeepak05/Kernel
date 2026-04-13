@@ -30,21 +30,23 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
-from server.core.exceptions import BusinessRuleViolation, IllegalStateTransitionError
-from server.core.state_registry import StudentState, validate_student_transition
+from server.core.audit import AuditAction, AuditLog
+from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 # States that are allowed to be "in-form"
 _FORM_EDITABLE_STATES = {
-    "LEAD", "APPLIED", "DRAFT", "SUBMITTED", "PENDING_PAYMENT",
+    "LEAD",
+    "APPLIED",
+    "DRAFT",
+    "SUBMITTED",
+    "PENDING_PAYMENT",
 }
 
 
@@ -52,51 +54,51 @@ _FORM_EDITABLE_STATES = {
 # Pydantic Models — Stage 2
 # =============================================================================
 
+
 class PersonalDetailsRequest(BaseModel):
     """Step 1: Personal identity fields."""
-    date_of_birth: Optional[str] = Field(
-        default=None, description="ISO date: YYYY-MM-DD"
-    )
-    gender: Optional[str] = Field(
+
+    date_of_birth: str | None = Field(default=None, description="ISO date: YYYY-MM-DD")
+    gender: str | None = Field(
         default=None, description="MALE | FEMALE | OTHER | PREFER_NOT_TO_SAY"
     )
-    nationality: Optional[str] = None
-    category: Optional[str] = Field(
+    nationality: str | None = None
+    category: str | None = Field(
         default=None, description="GENERAL | SC | ST | OBC_NCL | EWS | PWD"
     )
-    aadhaar_number: Optional[str] = Field(
-        default=None, min_length=12, max_length=12
-    )
-    has_disability: Optional[bool] = None
-    special_requirements: Optional[str] = None
+    aadhaar_number: str | None = Field(default=None, min_length=12, max_length=12)
+    has_disability: bool | None = None
+    special_requirements: str | None = None
 
 
 class AddressRequest(BaseModel):
     """Step 2: Address information."""
-    permanent_address: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="{line1, line2, city, state, pincode, country}"
+
+    permanent_address: dict[str, Any] | None = Field(
+        default=None, description="{line1, line2, city, state, pincode, country}"
     )
-    correspondence_address: Optional[Dict[str, Any]] = None
-    emergency_contact: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="{name, relation, phone, email}"
+    correspondence_address: dict[str, Any] | None = None
+    emergency_contact: dict[str, Any] | None = Field(
+        default=None, description="{name, relation, phone, email}"
     )
 
 
 class AcademicQualificationRequest(BaseModel):
     """Step 3: One academic level record (10th / 12th / UG / PG)."""
+
     applicant_id: str
-    level: str = Field(..., description="CLASS_10 | CLASS_12 | DIPLOMA | UG | PG | OTHER")
+    level: str = Field(
+        ..., description="CLASS_10 | CLASS_12 | DIPLOMA | UG | PG | OTHER"
+    )
     board_or_university: str = Field(..., min_length=2, max_length=200)
     institution_name: str = Field(..., min_length=2, max_length=300)
     year_of_passing: int = Field(..., ge=1980, le=2030)
-    stream_or_subject: Optional[str] = None
-    marks_obtained: Optional[int] = None
-    max_marks: Optional[int] = None
-    percentage: Optional[float] = Field(default=None, ge=0, le=100)
-    cgpa: Optional[float] = Field(default=None, ge=0, le=10)
-    grade_scale: Optional[float] = Field(default=None, ge=0)
+    stream_or_subject: str | None = None
+    marks_obtained: int | None = None
+    max_marks: int | None = None
+    percentage: float | None = Field(default=None, ge=0, le=100)
+    cgpa: float | None = Field(default=None, ge=0, le=10)
+    grade_scale: float | None = Field(default=None, ge=0)
     pass_status: str = Field(default="PASSED")
 
 
@@ -108,29 +110,30 @@ class AcademicQualificationRead(BaseModel):
     board_or_university: str
     institution_name: str
     year_of_passing: int
-    stream_or_subject: Optional[str] = None
-    marks_obtained: Optional[int] = None
-    max_marks: Optional[int] = None
-    percentage: Optional[float] = None
-    cgpa: Optional[float] = None
-    grade_scale: Optional[float] = None
+    stream_or_subject: str | None = None
+    marks_obtained: int | None = None
+    max_marks: int | None = None
+    percentage: float | None = None
+    cgpa: float | None = None
+    grade_scale: float | None = None
     pass_status: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class EntranceScoreRequest(BaseModel):
     """Step 4: One entrance exam score record."""
+
     applicant_id: str
     exam_name: str = Field(
         ..., description="JEE_MAINS | NEET | CAT | MAT | XAT | SAT | STATE_CET | OTHER"
     )
-    exam_roll_number: Optional[str] = None
-    exam_year: Optional[int] = Field(default=None, ge=2000, le=2030)
-    score: Optional[float] = None
-    percentile: Optional[float] = Field(default=None, ge=0, le=100)
-    rank: Optional[int] = Field(default=None, ge=1)
-    score_detail: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    exam_roll_number: str | None = None
+    exam_year: int | None = Field(default=None, ge=2000, le=2030)
+    score: float | None = None
+    percentile: float | None = Field(default=None, ge=0, le=100)
+    rank: int | None = Field(default=None, ge=1)
+    score_detail: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class EntranceScoreRead(BaseModel):
@@ -138,41 +141,44 @@ class EntranceScoreRead(BaseModel):
     org_id: str
     applicant_id: str
     exam_name: str
-    exam_roll_number: Optional[str] = None
-    exam_year: Optional[int] = None
-    score: Optional[float] = None
-    percentile: Optional[float] = None
-    rank: Optional[int] = None
-    score_detail: Optional[Dict[str, Any]] = None
+    exam_roll_number: str | None = None
+    exam_year: int | None = None
+    score: float | None = None
+    percentile: float | None = None
+    rank: int | None = None
+    score_detail: dict[str, Any] | None = None
     is_verified: bool
-    verified_method: Optional[str] = None
+    verified_method: str | None = None
     created_at: datetime
 
 
 class ProgramPreferenceItem(BaseModel):
     """One program preference entry (ordered)."""
+
     program_name: str = Field(..., min_length=2, max_length=200)
-    specialization: Optional[str] = None
-    intake_batch: Optional[str] = None
+    specialization: str | None = None
+    intake_batch: str | None = None
 
 
 class ProgramPreferencesRequest(BaseModel):
     """Step 5: Full ordered list of program preferences (replaces existing)."""
+
     applicant_id: str
-    preferences: List[ProgramPreferenceItem] = Field(..., min_length=1, max_length=5)
+    preferences: list[ProgramPreferenceItem] = Field(..., min_length=1, max_length=5)
 
 
 class DeclarationRequest(BaseModel):
     """Step 7: Accept declaration and provide digital signature."""
+
     applicant_id: str
     digital_signature: str = Field(
-        ..., min_length=2,
-        description="Typed full name as digital signature"
+        ..., min_length=2, description="Typed full name as digital signature"
     )
 
 
 class ApplicationFeeRequest(BaseModel):
     """Step 8: Record application fee payment."""
+
     applicant_id: str
     payment_reference: str = Field(..., min_length=3, max_length=100)
     fee_amount: float = Field(..., gt=0)
@@ -180,6 +186,7 @@ class ApplicationFeeRequest(BaseModel):
 
 class ApplicationDraftRead(BaseModel):
     """Full application form read model (with extended fields)."""
+
     id: str
     org_id: str
     name: str
@@ -188,37 +195,38 @@ class ApplicationDraftRead(BaseModel):
     intended_program: str
     source_channel: str
     status: str
-    application_id: Optional[str] = None
-    date_of_birth: Optional[str] = None
-    gender: Optional[str] = None
-    nationality: Optional[str] = None
-    category: Optional[str] = None
-    aadhaar_number: Optional[str] = None
-    permanent_address: Optional[Dict[str, Any]] = None
-    correspondence_address: Optional[Dict[str, Any]] = None
-    emergency_contact: Optional[Dict[str, Any]] = None
+    application_id: str | None = None
+    date_of_birth: str | None = None
+    gender: str | None = None
+    nationality: str | None = None
+    category: str | None = None
+    aadhaar_number: str | None = None
+    permanent_address: dict[str, Any] | None = None
+    correspondence_address: dict[str, Any] | None = None
+    emergency_contact: dict[str, Any] | None = None
     hostel_required: bool = False
     scholarship_required: bool = False
     has_disability: bool = False
-    special_requirements: Optional[str] = None
+    special_requirements: str | None = None
     declaration_accepted: bool = False
-    declaration_accepted_at: Optional[datetime] = None
-    digital_signature: Optional[str] = None
-    submitted_at: Optional[datetime] = None
+    declaration_accepted_at: datetime | None = None
+    digital_signature: str | None = None
+    submitted_at: datetime | None = None
     application_fee_paid: bool = False
-    application_fee_amount: Optional[float] = None
-    application_fee_ref: Optional[str] = None
-    study_mode: Optional[str] = None
-    intake_batch: Optional[str] = None
-    work_experience_months: Optional[int] = None
-    lead_id: Optional[str] = None
+    application_fee_amount: float | None = None
+    application_fee_ref: str | None = None
+    study_mode: str | None = None
+    intake_batch: str | None = None
+    work_experience_months: int | None = None
+    lead_id: str | None = None
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 # =============================================================================
 # APPLICATION FORM SERVICE
 # =============================================================================
+
 
 class ApplicationFormService:
     """
@@ -233,7 +241,9 @@ class ApplicationFormService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def start_draft(cls, applicant_id: str, org_id: str, actor_id: str) -> ApplicationDraftRead:
+    def start_draft(
+        cls, applicant_id: str, org_id: str, actor_id: str
+    ) -> ApplicationDraftRead:
         """
         Transition an applicant into DRAFT state and assign an Application ID.
 
@@ -245,7 +255,9 @@ class ApplicationFormService:
             (applicant_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Applicant '{applicant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Applicant '{applicant_id}' not found."
+            )
 
         applicant = rows[0]
         current_status = applicant["status"]
@@ -260,13 +272,15 @@ class ApplicationFormService:
             app_id = cls._generate_application_id(org_id)
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE applicants SET status = %s, application_id = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                ("DRAFT", app_id, now, applicant_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE applicants SET status = %s, application_id = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    ("DRAFT", app_id, now, applicant_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -302,7 +316,7 @@ class ApplicationFormService:
         """Step 1: Save personal identity fields."""
         cls._assert_form_editable(applicant_id, org_id)
 
-        updates: Dict[str, Any] = {}
+        updates: dict[str, Any] = {}
         if request.date_of_birth is not None:
             updates["date_of_birth"] = request.date_of_birth
         if request.gender is not None:
@@ -343,11 +357,13 @@ class ApplicationFormService:
         """Step 2: Save address information."""
         cls._assert_form_editable(applicant_id, org_id)
 
-        updates: Dict[str, Any] = {}
+        updates: dict[str, Any] = {}
         if request.permanent_address is not None:
             updates["permanent_address"] = json.dumps(request.permanent_address)
         if request.correspondence_address is not None:
-            updates["correspondence_address"] = json.dumps(request.correspondence_address)
+            updates["correspondence_address"] = json.dumps(
+                request.correspondence_address
+            )
         if request.emergency_contact is not None:
             updates["emergency_contact"] = json.dumps(request.emergency_contact)
 
@@ -377,11 +393,15 @@ class ApplicationFormService:
         cls._assert_form_editable(applicant_id, org_id)
 
         now = datetime.now(timezone.utc)
-        cls._update_applicant(applicant_id, org_id, {
-            "declaration_accepted": True,
-            "declaration_accepted_at": now,
-            "digital_signature": request.digital_signature,
-        })
+        cls._update_applicant(
+            applicant_id,
+            org_id,
+            {
+                "declaration_accepted": True,
+                "declaration_accepted_at": now,
+                "digital_signature": request.digital_signature,
+            },
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -392,7 +412,10 @@ class ApplicationFormService:
             module="M1",
             wizard="Application Form",
             success=True,
-            metadata={"step": "declaration", "digital_signature": request.digital_signature[:50]},
+            metadata={
+                "step": "declaration",
+                "digital_signature": request.digital_signature[:50],
+            },
         )
         return cls.get_draft(applicant_id, org_id)
 
@@ -420,14 +443,16 @@ class ApplicationFormService:
             (applicant_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Applicant '{applicant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Applicant '{applicant_id}' not found."
+            )
 
         applicant = rows[0]
 
         if applicant["status"] != "DRAFT":
             raise BusinessRuleViolation(
                 message=f"Application must be in DRAFT state to submit. "
-                        f"Current: {applicant['status']}",
+                f"Current: {applicant['status']}",
                 details={"status": applicant["status"]},
             )
 
@@ -449,13 +474,15 @@ class ApplicationFormService:
             )
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE applicants SET status = %s, submitted_at = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                ("SUBMITTED", now, now, applicant_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE applicants SET status = %s, submitted_at = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    ("SUBMITTED", now, now, applicant_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -474,7 +501,11 @@ class ApplicationFormService:
             },
         )
 
-        logger.info("Application submitted: %s [app_id=%s]", applicant_id, applicant.get("application_id"))
+        logger.info(
+            "Application submitted: %s [app_id=%s]",
+            applicant_id,
+            applicant.get("application_id"),
+        )
         return cls.get_draft(applicant_id, org_id)
 
     # -------------------------------------------------------------------------
@@ -498,20 +529,23 @@ class ApplicationFormService:
             (request.applicant_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Applicant '{request.applicant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Applicant '{request.applicant_id}' not found."
+            )
 
         applicant = rows[0]
 
         if applicant["status"] not in ("SUBMITTED", "PENDING_PAYMENT"):
             raise BusinessRuleViolation(
                 message=f"Application fee can only be recorded in SUBMITTED or PENDING_PAYMENT state. "
-                        f"Current: {applicant['status']}",
+                f"Current: {applicant['status']}",
             )
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE applicants
                 SET application_fee_paid = TRUE,
                     application_fee_amount = %s,
@@ -520,15 +554,17 @@ class ApplicationFormService:
                     updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    request.fee_amount,
-                    request.payment_reference,
-                    "DOCUMENTS_PENDING",
-                    now,
-                    request.applicant_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        request.fee_amount,
+                        request.payment_reference,
+                        "DOCUMENTS_PENDING",
+                        now,
+                        request.applicant_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -549,7 +585,9 @@ class ApplicationFormService:
 
         logger.info(
             "Application fee recorded: %s [ref=%s amount=%.2f]",
-            request.applicant_id, request.payment_reference, request.fee_amount,
+            request.applicant_id,
+            request.payment_reference,
+            request.fee_amount,
         )
         return cls.get_draft(request.applicant_id, org_id)
 
@@ -571,14 +609,15 @@ class ApplicationFormService:
         now = datetime.now(timezone.utc)
 
         # Upsert: delete existing for same applicant+level, then insert
-        execute_transaction([
-            (
-                "DELETE FROM academic_qualifications "
-                "WHERE applicant_id = %s AND org_id = %s AND level = %s",
-                (request.applicant_id, org_id, request.level),
-            ),
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM academic_qualifications "
+                    "WHERE applicant_id = %s AND org_id = %s AND level = %s",
+                    (request.applicant_id, org_id, request.level),
+                ),
+                (
+                    """
                 INSERT INTO academic_qualifications (
                     id, org_id, applicant_id, level,
                     board_or_university, institution_name,
@@ -588,23 +627,27 @@ class ApplicationFormService:
                     pass_status, created_at, updated_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    qual_id, org_id,
-                    request.applicant_id, request.level,
-                    request.board_or_university,
-                    request.institution_name,
-                    request.year_of_passing,
-                    request.stream_or_subject,
-                    request.marks_obtained,
-                    request.max_marks,
-                    request.percentage,
-                    request.cgpa,
-                    request.grade_scale,
-                    request.pass_status,
-                    now, now,
+                    (
+                        qual_id,
+                        org_id,
+                        request.applicant_id,
+                        request.level,
+                        request.board_or_university,
+                        request.institution_name,
+                        request.year_of_passing,
+                        request.stream_or_subject,
+                        request.marks_obtained,
+                        request.max_marks,
+                        request.percentage,
+                        request.cgpa,
+                        request.grade_scale,
+                        request.pass_status,
+                        now,
+                        now,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -627,7 +670,7 @@ class ApplicationFormService:
     @classmethod
     def list_academic_qualifications(
         cls, applicant_id: str, org_id: str
-    ) -> List[AcademicQualificationRead]:
+    ) -> list[AcademicQualificationRead]:
         rows = execute_query(
             "SELECT * FROM academic_qualifications "
             "WHERE applicant_id = %s AND org_id = %s "
@@ -653,9 +696,10 @@ class ApplicationFormService:
         score_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO entrance_exam_scores (
                     id, org_id, applicant_id,
                     exam_name, exam_roll_number, exam_year,
@@ -663,20 +707,23 @@ class ApplicationFormService:
                     is_verified, created_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s)
                 """,
-                (
-                    score_id, org_id, request.applicant_id,
-                    request.exam_name,
-                    request.exam_roll_number,
-                    request.exam_year,
-                    request.score,
-                    request.percentile,
-                    request.rank,
-                    json.dumps(request.score_detail or {}),
-                    False,
-                    now,
-                ),
-            )
-        ])
+                    (
+                        score_id,
+                        org_id,
+                        request.applicant_id,
+                        request.exam_name,
+                        request.exam_roll_number,
+                        request.exam_year,
+                        request.score,
+                        request.percentile,
+                        request.rank,
+                        json.dumps(request.score_detail or {}),
+                        False,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -699,7 +746,7 @@ class ApplicationFormService:
     @classmethod
     def list_entrance_scores(
         cls, applicant_id: str, org_id: str
-    ) -> List[EntranceScoreRead]:
+    ) -> list[EntranceScoreRead]:
         rows = execute_query(
             "SELECT * FROM entrance_exam_scores "
             "WHERE applicant_id = %s AND org_id = %s "
@@ -714,13 +761,15 @@ class ApplicationFormService:
     ) -> None:
         """Remove an entrance score entry (only while form is editable)."""
         cls._assert_form_editable(applicant_id, org_id)
-        execute_transaction([
-            (
-                "DELETE FROM entrance_exam_scores "
-                "WHERE id = %s AND applicant_id = %s AND org_id = %s",
-                (score_id, applicant_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM entrance_exam_scores "
+                    "WHERE id = %s AND applicant_id = %s AND org_id = %s",
+                    (score_id, applicant_id, org_id),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.UPDATE,
             actor_id=actor_id,
@@ -743,7 +792,7 @@ class ApplicationFormService:
         request: ProgramPreferencesRequest,
         org_id: str,
         actor_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Set ordered program preferences (replaces all existing for applicant).
 
@@ -754,27 +803,36 @@ class ApplicationFormService:
         now = datetime.now(timezone.utc)
         inserts = []
         for i, pref in enumerate(request.preferences, start=1):
-            inserts.append((
-                """
+            inserts.append(
+                (
+                    """
                 INSERT INTO program_preferences
                     (id, org_id, applicant_id, preference_order, program_name,
                      specialization, intake_batch, created_at)
                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    str(uuid4()), org_id, request.applicant_id,
-                    i, pref.program_name, pref.specialization,
-                    pref.intake_batch, now,
-                ),
-            ))
+                    (
+                        str(uuid4()),
+                        org_id,
+                        request.applicant_id,
+                        i,
+                        pref.program_name,
+                        pref.specialization,
+                        pref.intake_batch,
+                        now,
+                    ),
+                )
+            )
 
-        execute_transaction([
-            (
-                "DELETE FROM program_preferences WHERE applicant_id = %s AND org_id = %s",
-                (request.applicant_id, org_id),
-            ),
-            *inserts,
-        ])
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM program_preferences WHERE applicant_id = %s AND org_id = %s",
+                    (request.applicant_id, org_id),
+                ),
+                *inserts,
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -799,7 +857,7 @@ class ApplicationFormService:
     @classmethod
     def get_program_preferences(
         cls, applicant_id: str, org_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         rows = execute_query(
             "SELECT * FROM program_preferences "
             "WHERE applicant_id = %s AND org_id = %s "
@@ -819,7 +877,9 @@ class ApplicationFormService:
             (applicant_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Applicant '{applicant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Applicant '{applicant_id}' not found."
+            )
         return cls._to_draft_read(rows[0])
 
     # -------------------------------------------------------------------------
@@ -833,29 +893,47 @@ class ApplicationFormService:
             (applicant_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Applicant '{applicant_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Applicant '{applicant_id}' not found."
+            )
         status = rows[0]["status"]
         if status not in _FORM_EDITABLE_STATES:
             raise BusinessRuleViolation(
                 message=f"Application form cannot be edited in status '{status}'.",
-                details={"status": status, "editable_statuses": list(_FORM_EDITABLE_STATES)},
+                details={
+                    "status": status,
+                    "editable_statuses": list(_FORM_EDITABLE_STATES),
+                },
             )
 
     @classmethod
     def _update_applicant(
-        cls, applicant_id: str, org_id: str, updates: Dict[str, Any]
+        cls, applicant_id: str, org_id: str, updates: dict[str, Any]
     ) -> None:
         if not updates:
             return
         updates["updated_at"] = datetime.now(timezone.utc)
         from server.db_service import safe_set_clause
+
         clause, vals = safe_set_clause(updates)
-        execute_transaction([
-            (
-                f"UPDATE applicants SET {clause} WHERE id = %s AND org_id = %s",
-                (*vals, applicant_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    f"UPDATE applicants SET {clause} WHERE id = %s AND org_id = %s",  # noqa: S608
+                    (*vals, applicant_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="_update_applicant",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "_update_applicant"},
+        )
 
     @classmethod
     def _generate_application_id(cls, org_id: str) -> str:
@@ -871,16 +949,19 @@ class ApplicationFormService:
         return f"APP-{year}-{seq:06d}"
 
     @classmethod
-    def _to_draft_read(cls, row: Dict[str, Any]) -> ApplicationDraftRead:
+    def _to_draft_read(cls, row: dict[str, Any]) -> ApplicationDraftRead:
         # Handle JSONB fields that may come back as dicts or strings
-        for field in ("permanent_address", "correspondence_address", "emergency_contact"):
+        for field in (
+            "permanent_address",
+            "correspondence_address",
+            "emergency_contact",
+        ):
             val = row.get(field)
             if isinstance(val, str):
                 try:
                     row[field] = json.loads(val)
                 except (ValueError, TypeError):
                     row[field] = None
-        return ApplicationDraftRead(**{
-            k: v for k, v in row.items()
-            if k in ApplicationDraftRead.model_fields
-        })
+        return ApplicationDraftRead(
+            **{k: v for k, v in row.items() if k in ApplicationDraftRead.model_fields}
+        )

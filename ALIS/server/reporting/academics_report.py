@@ -1,16 +1,19 @@
 """E11-S03 — Academic Reports"""
+
 from __future__ import annotations
 
 import logging
+
 from server.db_service import execute_query
 
 logger = logging.getLogger(__name__)
 
 
 class AcademicsReportService:
-
     @classmethod
-    def enrollment_summary(cls, org_id: str, academic_year: str, semester: int | None = None) -> dict:
+    def enrollment_summary(
+        cls, org_id: str, academic_year: str, semester: int | None = None
+    ) -> dict:
         """Enrollment counts by program and semester."""
         sql = """
             SELECT
@@ -24,13 +27,16 @@ class AcademicsReportService:
         """
         params: list = [org_id, academic_year]
         if semester:
-            sql += " AND ce.semester = %s"; params.append(semester)
+            sql += " AND ce.semester = %s"
+            params.append(semester)
         sql += " GROUP BY s.program, ce.semester ORDER BY s.program, ce.semester"
         rows = execute_query(sql, params)
         return {"academic_year": academic_year, "breakdown": [dict(r) for r in rows]}
 
     @classmethod
-    def attendance_summary(cls, org_id: str, academic_year: str, semester: int | None = None) -> list[dict]:
+    def attendance_summary(
+        cls, org_id: str, academic_year: str, semester: int | None = None
+    ) -> list[dict]:
         """Average attendance % per course."""
         sql = """
             SELECT
@@ -48,7 +54,8 @@ class AcademicsReportService:
         """
         params: list = [org_id, academic_year]
         if semester:
-            sql += " AND sess.semester = %s"; params.append(semester)
+            sql += " AND sess.semester = %s"
+            params.append(semester)
         sql += " GROUP BY c.id, c.code, c.name ORDER BY avg_attendance_pct"
         return [dict(r) for r in execute_query(sql, params)]
 
@@ -106,7 +113,9 @@ class AcademicsReportService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def timetable_conflicts(cls, org_id: str, academic_year: str, semester: int) -> list[dict]:
+    def timetable_conflicts(
+        cls, org_id: str, academic_year: str, semester: int
+    ) -> list[dict]:
         """Detect overlapping timetable slots for the same faculty or room."""
         rows = execute_query(
             """

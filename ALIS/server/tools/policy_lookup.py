@@ -18,13 +18,14 @@ Output data keys:
         "version": int
     }
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, ClassVar, Dict, Optional
+from datetime import datetime
+from typing import Any, ClassVar
 
-from server.core.tool_registry import BaseTool, ToolOutputSchema
 from server.core.exceptions import ToolSchemaViolationError
+from server.core.tool_registry import BaseTool, ToolOutputSchema
 
 
 class PolicyLookupTool(BaseTool):
@@ -50,7 +51,7 @@ class PolicyLookupTool(BaseTool):
 
     def execute(
         self,
-        input_data: Dict[str, Any],
+        input_data: dict[str, Any],
         tenant_id: str,
     ) -> ToolOutputSchema:
         """
@@ -69,14 +70,12 @@ class PolicyLookupTool(BaseTool):
         policy_key = input_data.get("policy_key")
         if not policy_key or not isinstance(policy_key, str):
             raise ToolSchemaViolationError(
-                message=(
-                    "PolicyLookupTool requires 'policy_key' (str) in input_data."
-                ),
+                message=("PolicyLookupTool requires 'policy_key' (str) in input_data."),
                 details={"received_keys": list(input_data.keys())},
             )
 
-        as_of_str: Optional[str] = input_data.get("as_of")
-        as_of: Optional[datetime] = None
+        as_of_str: str | None = input_data.get("as_of")
+        as_of: datetime | None = None
         if as_of_str:
             try:
                 as_of = datetime.fromisoformat(as_of_str)

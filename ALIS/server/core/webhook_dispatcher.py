@@ -10,6 +10,7 @@ Usage:
     subscription_id = await WebhookDispatcher.register(org_id, event_type, url, secret, actor_id)
     await WebhookDispatcher.dispatch(org_id, event_type, payload)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -18,12 +19,9 @@ import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 import httpx
-
-from server.core.audit import AuditAction, AuditLog
-from server.core.domain_events import DomainEvent, DomainEventBus
+from server.core.audit import AuditAction, AuditLedger
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
@@ -45,13 +43,10 @@ def _sign_payload(secret_hash: str, payload_bytes: bytes) -> str:
     Note: we store the SHA256 of the original secret, and sign with that.
     Clients must compute: HMAC-SHA256(sha256(their_secret), json_body).
     """
-    return hmac.new(
-        secret_hash.encode(), payload_bytes, hashlib.sha256
-    ).hexdigest()
+    return hmac.new(secret_hash.encode(), payload_bytes, hashlib.sha256).hexdigest()
 
 
 class WebhookDispatcher:
-
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
@@ -69,15 +64,20 @@ class WebhookDispatcher:
         subscription_id = str(uuid.uuid4())
         secret_hash = _hash_secret(secret)
 
-        execute_transaction([
-            ("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO outbound_webhook_subscriptions
                 (id, org_id, event_type, url, secret_hash, active, created_by)
             VALUES (%s, %s, %s, %s, %s, TRUE, %s)
-            """, (subscription_id, org_id, event_type, url, secret_hash, actor_id)),
-        ])
+            """,
+                    (subscription_id, org_id, event_type, url, secret_hash, actor_id),
+                ),
+            ]
+        )
 
-        AuditLog.log(
+        AuditLedger.log(
             org_id=org_id,
             actor_id=actor_id,
             action=AuditAction.CREATED,
@@ -97,14 +97,19 @@ class WebhookDispatcher:
         actor_id: str,
     ) -> None:
         """Deactivate a subscription — no new deliveries will be dispatched."""
-        execute_transaction([
-            ("""
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE outbound_webhook_subscriptions
             SET active = FALSE
             WHERE id = %s AND org_id = %s
-            """, (subscription_id, org_id)),
-        ])
-        AuditLog.log(
+            """,
+                    (subscription_id, org_id),
+                ),
+            ]
+        )
+        AuditLedger.log(
             org_id=org_id,
             actor_id=actor_id,
             action=AuditAction.UPDATED,
@@ -125,11 +130,14 @@ class WebhookDispatcher:
         payload: dict,
     ) -> None:
         """Find active subscriptions and queue a delivery for each."""
-        subscriptions = execute_query("""
+        subscriptions = execute_query(
+            """
             SELECT id, url, secret_hash
             FROM outbound_webhook_subscriptions
             WHERE org_id = %s AND event_type = %s AND active = TRUE
-        """, (org_id, event_type))
+        """,
+            (org_id, event_type),
+        )
 
         if not subscriptions:
             return
@@ -138,22 +146,32 @@ class WebhookDispatcher:
             delivery_id = str(uuid.uuid4())
             next_retry_at = _next_retry_at(attempt=0)
 
-            execute_transaction([
-                ("""
+            initial_queries = [
+                (
+                    """
                 INSERT INTO outbound_webhook_deliveries
                     (id, subscription_id, payload, status, attempt_count, next_retry_at)
                 VALUES (%s, %s, %s, 'PENDING', 0, %s)
-                """, (
-                    delivery_id,
-                    sub["id"],
-                    json.dumps(payload),
-                    next_retry_at,
-                )),
-            ])
+                """,
+                    (
+                        delivery_id,
+                        sub["id"],
+                        json.dumps(payload),
+                        next_retry_at,
+                    ),
+                ),
+            ]
 
-            # Attempt first delivery immediately (non-blocking)
+            # Attempt first delivery immediately
             try:
-                await cls._attempt_delivery(delivery_id, sub["url"], sub["secret_hash"], payload)
+                await cls._attempt_delivery(
+                    delivery_id,
+                    sub["url"],
+                    sub["secret_hash"],
+                    payload,
+                    attempt_count=1,
+                    initial_queries=initial_queries,
+                )
             except Exception as exc:
                 logger.warning("Initial delivery %s failed: %s", delivery_id, exc)
 
@@ -164,29 +182,47 @@ class WebhookDispatcher:
     @classmethod
     async def replay(cls, delivery_id: str, org_id: str) -> None:
         """Reset a DEAD or FAILED delivery for immediate retry."""
-        rows = execute_query("""
+        rows = execute_query(
+            """
             SELECT d.id, d.payload, s.url, s.secret_hash
             FROM outbound_webhook_deliveries d
             JOIN outbound_webhook_subscriptions s ON s.id = d.subscription_id
             WHERE d.id = %s AND s.org_id = %s
-        """, (delivery_id, org_id))
+        """,
+            (delivery_id, org_id),
+        )
 
         if not rows:
             from server.core.exceptions import NotFoundError
+
             raise NotFoundError(f"Delivery {delivery_id} not found")
 
         row = rows[0]
-        execute_transaction([
-            ("""
+        initial_queries = [
+            (
+                """
             UPDATE outbound_webhook_deliveries
             SET status = 'PENDING', attempt_count = 0, next_retry_at = NOW(), last_error = NULL
             WHERE id = %s
-            """, (delivery_id,)),
-        ])
+            """,
+                (delivery_id,),
+            ),
+        ]
 
-        payload = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
+        payload = (
+            json.loads(row["payload"])
+            if isinstance(row["payload"], str)
+            else row["payload"]
+        )
         try:
-            await cls._attempt_delivery(delivery_id, row["url"], row["secret_hash"], payload)
+            await cls._attempt_delivery(
+                delivery_id,
+                row["url"],
+                row["secret_hash"],
+                payload,
+                attempt_count=1,
+                initial_queries=initial_queries,
+            )
         except Exception as exc:
             logger.warning("Replay delivery %s failed: %s", delivery_id, exc)
 
@@ -201,6 +237,8 @@ class WebhookDispatcher:
         url: str,
         secret_hash: str,
         payload: dict,
+        attempt_count: int | None = None,
+        initial_queries: list | None = None,
     ) -> None:
         payload_bytes = json.dumps(payload, sort_keys=True).encode()
         signature = _sign_payload(secret_hash, payload_bytes)
@@ -212,38 +250,60 @@ class WebhookDispatcher:
         }
 
         # Fetch current attempt count
-        rows = execute_query(
-            "SELECT attempt_count FROM outbound_webhook_deliveries WHERE id = %s",
-            (delivery_id,),
-        )
-        attempt_count = int(rows[0]["attempt_count"]) + 1 if rows else 1
+        if attempt_count is None:
+            rows = execute_query(
+                "SELECT attempt_count FROM outbound_webhook_deliveries WHERE id = %s",
+                (delivery_id,),
+            )
+            attempt_count = int(rows[0]["attempt_count"]) + 1 if rows else 1
+
+        queries = list(initial_queries) if initial_queries else []
 
         try:
             async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
                 resp = await client.post(url, content=payload_bytes, headers=headers)
                 resp.raise_for_status()
 
-            execute_transaction([
-                ("""
+            queries.append(
+                (
+                    """
                 UPDATE outbound_webhook_deliveries
                 SET status = 'DELIVERED', attempt_count = %s, last_error = NULL
                 WHERE id = %s
-                """, (attempt_count, delivery_id)),
-            ])
+                """,
+                    (attempt_count, delivery_id),
+                )
+            )
+            execute_transaction(queries)
+
+            AuditLedger.log(
+                action=AuditAction.UPDATE,
+                actor_id="system",
+                actor_role="system",
+                entity_type="_attempt_delivery",
+                entity_id=delivery_id,
+                tenant_id="",
+                metadata={"source": "_attempt_delivery"},
+            )
             logger.info("Webhook delivered: %s → %s", delivery_id, url)
 
         except Exception as exc:
             error_msg = str(exc)[:500]
             if attempt_count >= _MAX_ATTEMPTS:
                 # Mark dead, notify SUPER_ADMIN via domain event
-                execute_transaction([
-                    ("""
+                queries.append(
+                    (
+                        """
                     UPDATE outbound_webhook_deliveries
                     SET status = 'DEAD', attempt_count = %s, last_error = %s
                     WHERE id = %s
-                    """, (attempt_count, error_msg, delivery_id)),
-                ])
-                logger.error("Webhook DEAD after %d attempts: %s", attempt_count, delivery_id)
+                    """,
+                        (attempt_count, error_msg, delivery_id),
+                    )
+                )
+                logger.error(
+                    "Webhook DEAD after %d attempts: %s", attempt_count, delivery_id
+                )
                 # Domain event to alert admin
                 sub_rows = execute_query(
                     "SELECT subscription_id FROM outbound_webhook_deliveries WHERE id = %s",
@@ -256,31 +316,52 @@ class WebhookDispatcher:
                         (sub_id,),
                     )
                     if sub_info:
-                        DomainEventBus.publish(DomainEvent(
-                            event_type="webhook.delivery_dead",
-                            org_id=sub_info[0]["org_id"],
-                            payload={
+                        event_id = str(uuid.uuid4())
+                        payload_json = json.dumps(
+                            {
                                 "delivery_id": delivery_id,
                                 "subscription_id": sub_id,
                                 "url": sub_info[0]["url"],
                                 "event_type": sub_info[0]["event_type"],
                                 "attempts": attempt_count,
-                            },
-                        ))
+                            }
+                        )
+                        queries.append(
+                            (
+                                """
+                            INSERT INTO domain_events
+                                (id, org_id, event_type, entity_type, entity_id, payload, actor_id, status, published_at, retry_count)
+                            VALUES (%s, %s, %s, '', '', %s, 'system', 'PENDING', NOW(), 0)
+                            """,
+                                (
+                                    event_id,
+                                    sub_info[0]["org_id"],
+                                    "webhook.delivery_dead",
+                                    payload_json,
+                                ),
+                            )
+                        )
             else:
                 next_retry = _next_retry_at(attempt=attempt_count)
-                execute_transaction([
-                    ("""
+                queries.append(
+                    (
+                        """
                     UPDATE outbound_webhook_deliveries
                     SET status = 'FAILED', attempt_count = %s,
                         next_retry_at = %s, last_error = %s
                     WHERE id = %s
-                    """, (attempt_count, next_retry, error_msg, delivery_id)),
-                ])
+                    """,
+                        (attempt_count, next_retry, error_msg, delivery_id),
+                    )
+                )
                 logger.warning(
                     "Webhook attempt %d failed for %s, retry at %s: %s",
-                    attempt_count, delivery_id, next_retry, error_msg,
+                    attempt_count,
+                    delivery_id,
+                    next_retry,
+                    error_msg,
                 )
+            execute_transaction(queries)
             raise
 
 

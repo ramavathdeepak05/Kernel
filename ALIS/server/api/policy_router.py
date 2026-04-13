@@ -1,3 +1,6 @@
+from __future__ import annotations
+from server.core.rbac import require_permission, Permission  # noqa: E402
+
 """
 ALIS Policy Governance API Router — E00-S09
 
@@ -14,20 +17,19 @@ Endpoints:
 
 All endpoints enforce RBAC via the standard middleware pattern.
 """
-from __future__ import annotations
 
-import logging
-from datetime import datetime
-from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, HTTPException, Query, Header
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+import logging  # noqa: E402
+from datetime import datetime  # noqa: E402
+from typing import Any  # noqa: E402
 
-from server.core.policy_service import PolicyService, PolicyStatus
-from server.core.security import SessionManager
-from server.core.rbac import Role
-from server.db_service import execute_query
+from fastapi import APIRouter, Header, HTTPException, Query  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from server.core.policy_service import PolicyService, PolicyStatus  # noqa: E402
+from server.core.rbac import Role  # noqa: E402
+from server.core.security import SessionManager  # noqa: E402
+from server.db_service import execute_query  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,8 @@ router = APIRouter(prefix="/policy", tags=["Policy Governance (E00-S09)"])
 # AUTH HELPERS
 # ============================================================================
 
-def _extract_token(authorization: Optional[str]) -> Optional[str]:
+
+def _extract_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split(" ", 1)
@@ -47,7 +50,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip()
 
 
-def _require_session(authorization: Optional[str]):
+def _require_session(authorization: str | None):
     token = _extract_token(authorization)
     if not token:
         return None, "Missing or malformed Authorization header"
@@ -57,7 +60,7 @@ def _require_session(authorization: Optional[str]):
     return session, None
 
 
-def _fetch_caller(session) -> Optional[Dict[str, Any]]:
+def _fetch_caller(session) -> dict[str, Any] | None:
     rows = execute_query(
         "SELECT id, username, role, status FROM users "
         "WHERE id = %s AND is_deleted = FALSE",
@@ -75,41 +78,53 @@ def _err(status: int, message: str, code: str) -> JSONResponse:
 # REQUEST / RESPONSE SCHEMAS
 # ============================================================================
 
+
 class PolicyDraftRequest(BaseModel):
     """Request body for creating a policy draft."""
-    policy_type: str = Field(..., min_length=1, max_length=100,
-                             description="Category (e.g., 'attendance_threshold')")
+
+    policy_type: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Category (e.g., 'attendance_threshold')",
+    )
     name: str = Field(..., min_length=1, max_length=255)
     description: str = Field(default="")
-    parameters: Dict[str, Any] = Field(..., description="Structured JSON parameters")
-    effective_from: datetime = Field(..., description="When the policy becomes applicable")
-    effective_to: Optional[datetime] = Field(None, description="When the policy expires")
-    module: Optional[str] = Field(None, description="Owning module (e.g., 'm1', 'm4')")
+    parameters: dict[str, Any] = Field(..., description="Structured JSON parameters")
+    effective_from: datetime = Field(
+        ..., description="When the policy becomes applicable"
+    )
+    effective_to: datetime | None = Field(None, description="When the policy expires")
+    module: str | None = Field(None, description="Owning module (e.g., 'm1', 'm4')")
 
 
 class PolicyActionRequest(BaseModel):
     """Request body for submit / approve actions."""
+
     policy_id: str = Field(..., description="ID of the policy to act on")
 
 
 class PolicyResponse(BaseModel):
     """Standard response for policy mutations."""
+
     id: str
     status: str
-    policy_type: Optional[str] = None
-    version: Optional[int] = None
-    name: Optional[str] = None
-    content_hash: Optional[str] = None
+    policy_type: str | None = None
+    version: int | None = None
+    name: str | None = None
+    content_hash: str | None = None
 
 
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
 
+
 @router.post("/draft", response_model=PolicyResponse)
+@require_permission(Permission.POLICY_DRAFT)
 async def create_draft(
     body: PolicyDraftRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ):
     """
     POST /policy/draft — Create a new policy draft. ADMIN / SUPER_ADMIN only.
@@ -147,9 +162,10 @@ async def create_draft(
 
 
 @router.post("/submit", response_model=PolicyResponse)
+@require_permission(Permission.POLICY_SUBMIT)
 async def submit_for_approval(
     body: PolicyActionRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ):
     """
     POST /policy/submit — Submit a DRAFT policy for approval. ADMIN / SUPER_ADMIN only.
@@ -183,9 +199,10 @@ async def submit_for_approval(
 
 
 @router.post("/approve", response_model=PolicyResponse)
+@require_permission(Permission.POLICY_APPROVE)
 async def approve_policy(
     body: PolicyActionRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ):
     """
     POST /policy/approve — Approve a SUBMITTED policy. SUPER_ADMIN only.
@@ -201,7 +218,9 @@ async def approve_policy(
     except ValueError:
         return _err(403, "Unrecognised caller role", "ERR_LAYER5_ACCESS")
     if caller_role != Role.SUPER_ADMIN:
-        return _err(403, "SUPER_ADMIN role required to approve policies", "ERR_LAYER5_ACCESS")
+        return _err(
+            403, "SUPER_ADMIN role required to approve policies", "ERR_LAYER5_ACCESS"
+        )
 
     try:
         result = PolicyService.approve_policy(
@@ -221,10 +240,13 @@ async def approve_policy(
 
 
 @router.get("/{policy_id}")
+@require_permission(Permission.POLICY_READ)
 async def get_policy(
     policy_id: str,
-    authorization: Optional[str] = Header(default=None),
-    date: Optional[datetime] = Query(None, description="Temporal query — returns the version active on this date"),
+    authorization: str | None = Header(default=None),
+    date: datetime | None = Query(
+        None, description="Temporal query — returns the version active on this date"
+    ),
 ):
     """
     GET /policy/{policy_id}?date= — Retrieve a policy by ID. Any authenticated user.
@@ -250,10 +272,11 @@ async def get_policy(
 
 
 @router.get("/type/{policy_type}")
+@require_permission(Permission.POLICY_READ)
 async def get_active_by_type(
     policy_type: str,
-    authorization: Optional[str] = Header(default=None),
-    date: Optional[datetime] = Query(None, description="Point-in-time resolution"),
+    authorization: str | None = Header(default=None),
+    date: datetime | None = Query(None, description="Point-in-time resolution"),
 ):
     """
     GET /policy/type/{policy_type}?date= — Active policy by type. Any authenticated user.
@@ -269,7 +292,9 @@ async def get_active_by_type(
             as_of_date=date,
         )
         if not result:
-            raise HTTPException(status_code=404, detail="No active policy found for this type.")
+            raise HTTPException(
+                status_code=404, detail="No active policy found for this type."
+            )
         return result
     except HTTPException:
         raise
@@ -279,10 +304,11 @@ async def get_active_by_type(
 
 
 @router.get("/")
+@require_permission(Permission.POLICY_READ)
 async def list_policies(
-    authorization: Optional[str] = Header(default=None),
-    policy_type: Optional[str] = Query(None),
-    status: Optional[str] = Query(None),
+    authorization: str | None = Header(default=None),
+    policy_type: str | None = Query(None),
+    status: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
@@ -318,9 +344,10 @@ async def list_policies(
 
 
 @router.get("/history/{policy_type}")
+@require_permission(Permission.POLICY_READ)
 async def get_version_history(
     policy_type: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ):
     """
     GET /policy/history/{policy_type} — Version history. ADMIN / SUPER_ADMIN only.

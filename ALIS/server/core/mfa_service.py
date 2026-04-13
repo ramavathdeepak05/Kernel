@@ -15,25 +15,34 @@ Hard constraints:
   - All DB access uses execute_query / execute_transaction with tenant_id.
   - No async/await — sync only.
 """
+
 from __future__ import annotations
 
-import secrets
-import hashlib
-import uuid as _uuid
 import base64
+import hashlib
 import logging
+import secrets
+import uuid as _uuid
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Roles that MUST complete MFA before a full session is issued
 # ---------------------------------------------------------------------------
-MFA_REQUIRED_ROLES = {"SUPER_ADMIN", "ADMIN", "REGISTRAR", "FINANCE_OFFICER", "HOD", "COE"}
+MFA_REQUIRED_ROLES = {
+    "SUPER_ADMIN",
+    "ADMIN",
+    "REGISTRAR",
+    "FINANCE_OFFICER",
+    "HOD",
+    "COE",
+}
 
 
 # ---------------------------------------------------------------------------
 # MFAService
 # ---------------------------------------------------------------------------
+
 
 class MFAService:
     """
@@ -64,6 +73,7 @@ class MFAService:
             ) from exc
 
         from server.core.settings import settings
+
         # Take first 32 bytes of the secret key, right-pad with '0' if shorter.
         key_bytes = settings.app_secret_key.encode()[:32].ljust(32, b"0")
         return Fernet(base64.urlsafe_b64encode(key_bytes))
@@ -134,7 +144,7 @@ class MFAService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def generate_backup_codes(count: int = 8) -> "tuple[list[str], list[str]]":
+    def generate_backup_codes(count: int = 8) -> tuple[list[str], list[str]]:
         """
         Generate backup codes.
 
@@ -173,11 +183,24 @@ class MFAService:
             if matched_hash is not None:
                 new_codes = [c for c in codes if c != matched_hash]
                 execute_transaction(
-                    [(
-                        "UPDATE mfa_devices SET backup_codes = %s WHERE id = %s",
-                        (new_codes, device["id"]),
-                    )],
+                    [
+                        (
+                            "UPDATE mfa_devices SET backup_codes = %s WHERE id = %s",
+                            (new_codes, device["id"]),
+                        )
+                    ],
                     tenant_id=org_id,
+                )
+                from server.core.audit import AuditAction, AuditLog
+
+                AuditLog.log(
+                    action=AuditAction.UPDATE,
+                    actor_id=user_id,
+                    actor_role="system",
+                    entity_type="mfa_device",
+                    entity_id=str(device["id"]),
+                    tenant_id=org_id,
+                    metadata={"source": "verify_backup_code"},
                 )
                 return True
         return False
@@ -213,18 +236,31 @@ class MFAService:
         device_id = str(_uuid.uuid4())
 
         execute_transaction(
-            [(
-                "INSERT INTO mfa_devices "
-                "  (id, org_id, user_id, device_name, totp_secret, backup_codes, is_active) "
-                "VALUES (%s, %s, %s, %s, %s, %s, FALSE) "
-                "ON CONFLICT (org_id, user_id, device_name) DO UPDATE "
-                "SET totp_secret = EXCLUDED.totp_secret, "
-                "    backup_codes = EXCLUDED.backup_codes, "
-                "    is_active = FALSE, "
-                "    enrolled_at = NOW()",
-                (device_id, org_id, user_id, device_name, encrypted, hashed_codes),
-            )],
+            [
+                (
+                    "INSERT INTO mfa_devices "
+                    "  (id, org_id, user_id, device_name, totp_secret, backup_codes, is_active) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, FALSE) "
+                    "ON CONFLICT (org_id, user_id, device_name) DO UPDATE "
+                    "SET totp_secret = EXCLUDED.totp_secret, "
+                    "    backup_codes = EXCLUDED.backup_codes, "
+                    "    is_active = FALSE, "
+                    "    enrolled_at = NOW()",
+                    (device_id, org_id, user_id, device_name, encrypted, hashed_codes),
+                )
+            ],
             tenant_id=org_id,
+        )
+        from server.core.audit import AuditAction, AuditLog
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=user_id,
+            actor_role="system",
+            entity_type="mfa_device",
+            entity_id=device_id,
+            tenant_id=org_id,
+            metadata={"source": "enroll_device", "device_name": device_name},
         )
 
         # Fetch user email for the provisioning URI
@@ -263,11 +299,24 @@ class MFAService:
         for device in devices:
             if MFAService.verify_totp(device["totp_secret"], code):
                 execute_transaction(
-                    [(
-                        "UPDATE mfa_devices SET is_active = TRUE WHERE id = %s",
-                        (device["id"],),
-                    )],
+                    [
+                        (
+                            "UPDATE mfa_devices SET is_active = TRUE WHERE id = %s",
+                            (device["id"],),
+                        )
+                    ],
                     tenant_id=org_id,
+                )
+                from server.core.audit import AuditAction, AuditLog
+
+                AuditLog.log(
+                    action=AuditAction.UPDATE,
+                    actor_id=user_id,
+                    actor_role="system",
+                    entity_type="mfa_device",
+                    entity_id=str(device["id"]),
+                    tenant_id=org_id,
+                    metadata={"source": "confirm_enrollment"},
                 )
                 return True
         return False
@@ -275,6 +324,41 @@ class MFAService:
     # ------------------------------------------------------------------
     # Login challenge verification
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _verify_totp_devices(org_id: str, user_id: str, code: str) -> bool:
+        from server.db_service import execute_query, execute_transaction
+
+        devices = execute_query(
+            "SELECT id, totp_secret FROM mfa_devices "
+            "WHERE org_id = %s AND user_id = %s AND is_active = TRUE",
+            (org_id, user_id),
+            tenant_id=org_id,
+        )
+        for device in devices:
+            if MFAService.verify_totp(device["totp_secret"], code):
+                execute_transaction(
+                    [
+                        (
+                            "UPDATE mfa_devices SET last_used_at = NOW() WHERE id = %s",
+                            (device["id"],),
+                        )
+                    ],
+                    tenant_id=org_id,
+                )
+                from server.core.audit import AuditAction, AuditLog
+
+                AuditLog.log(
+                    action=AuditAction.UPDATE,
+                    actor_id=user_id,
+                    actor_role="system",
+                    entity_type="mfa_device",
+                    entity_id=str(device["id"]),
+                    tenant_id=org_id,
+                    metadata={"source": "_verify_totp_devices"},
+                )
+                return True
+        return False
 
     @staticmethod
     def verify_challenge(org_id: str, user_id: str, code: str) -> bool:
@@ -288,27 +372,14 @@ class MFAService:
         Returns True if the challenge is satisfied, False otherwise.
         """
         from server.core.security import RateLimiter
-        if not RateLimiter.check(f"mfa_challenge:{org_id}:{user_id}", max_requests=5, window_seconds=300):
+
+        if not RateLimiter.check(
+            f"mfa_challenge:{org_id}:{user_id}", max_requests=5, window_seconds=300
+        ):
             return False
 
-        from server.db_service import execute_query, execute_transaction
-
-        devices = execute_query(
-            "SELECT id, totp_secret FROM mfa_devices "
-            "WHERE org_id = %s AND user_id = %s AND is_active = TRUE",
-            (org_id, user_id),
-            tenant_id=org_id,
-        )
-        for device in devices:
-            if MFAService.verify_totp(device["totp_secret"], code):
-                execute_transaction(
-                    [(
-                        "UPDATE mfa_devices SET last_used_at = NOW() WHERE id = %s",
-                        (device["id"],),
-                    )],
-                    tenant_id=org_id,
-                )
-                return True
+        if MFAService._verify_totp_devices(org_id, user_id, code):
+            return True
 
         # Fall back to backup code
         return MFAService.verify_backup_code(org_id, user_id, code)
@@ -336,12 +407,25 @@ class MFAService:
         from server.db_service import execute_transaction
 
         execute_transaction(
-            [(
-                "UPDATE mfa_devices SET is_active = FALSE "
-                "WHERE org_id = %s AND user_id = %s",
-                (org_id, user_id),
-            )],
+            [
+                (
+                    "UPDATE mfa_devices SET is_active = FALSE "
+                    "WHERE org_id = %s AND user_id = %s",
+                    (org_id, user_id),
+                )
+            ],
             tenant_id=org_id,
+        )
+        from server.core.audit import AuditAction, AuditLog
+
+        AuditLog.log(
+            action=AuditAction.DELETE,
+            actor_id=user_id,
+            actor_role="system",
+            entity_type="mfa_device",
+            entity_id=user_id,
+            tenant_id=org_id,
+            metadata={"source": "disable_mfa"},
         )
 
     # ------------------------------------------------------------------
@@ -363,15 +447,28 @@ class MFAService:
 
         device_hash = hashlib.sha256(device_fingerprint.encode()).hexdigest()
         execute_transaction(
-            [(
-                "INSERT INTO trusted_devices "
-                "  (id, org_id, user_id, device_hash, trusted_until) "
-                "VALUES (%s, %s, %s, %s, NOW() + INTERVAL '30 days') "
-                "ON CONFLICT (org_id, user_id, device_hash) DO UPDATE "
-                "SET trusted_until = NOW() + INTERVAL '30 days'",
-                (str(_uuid.uuid4()), org_id, user_id, device_hash),
-            )],
+            [
+                (
+                    "INSERT INTO trusted_devices "
+                    "  (id, org_id, user_id, device_hash, trusted_until) "
+                    "VALUES (%s, %s, %s, %s, NOW() + INTERVAL '30 days') "
+                    "ON CONFLICT (org_id, user_id, device_hash) DO UPDATE "
+                    "SET trusted_until = NOW() + INTERVAL '30 days'",
+                    (str(_uuid.uuid4()), org_id, user_id, device_hash),
+                )
+            ],
             tenant_id=org_id,
+        )
+        from server.core.audit import AuditAction, AuditLog
+
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=user_id,
+            actor_role="system",
+            entity_type="trusted_device",
+            entity_id=user_id,
+            tenant_id=org_id,
+            metadata={"source": "trust_device"},
         )
 
     @staticmethod

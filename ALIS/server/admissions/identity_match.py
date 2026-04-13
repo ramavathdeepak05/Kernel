@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import NotFoundError
@@ -40,6 +39,7 @@ _SIMILARITY_THRESHOLD = 0.85
 # ---------------------------------------------------------------------------
 # Jaro-Winkler (no external deps — same logic as deduplication_service.py)
 # ---------------------------------------------------------------------------
+
 
 def _jaro(s1: str, s2: str) -> float:
     if s1 == s2:
@@ -73,7 +73,9 @@ def _jaro(s1: str, s2: str) -> float:
         if s1[i] != s2[k]:
             transpositions += 1
         k += 1
-    return (matches / len1 + matches / len2 + (matches - transpositions / 2) / matches) / 3.0
+    return (
+        matches / len1 + matches / len2 + (matches - transpositions / 2) / matches
+    ) / 3.0
 
 
 def _jaro_winkler(s1: str, s2: str, p: float = 0.1) -> float:
@@ -92,19 +94,15 @@ def _jaro_winkler(s1: str, s2: str, p: float = 0.1) -> float:
 # Service
 # ---------------------------------------------------------------------------
 
+
 class IdentityMatchService:
     """Cross-document identity mismatch check (EC-ADM-01)."""
 
     @classmethod
-    def check(cls, application_id: str, org_id: str, actor_id: str) -> dict:
+    def _check_internal(cls, application_id: str, org_id: str) -> tuple[dict, list]:
         """
-        Run the cross-document name consistency check.
-
-        Returns a dict with keys:
-          kyc_status   — MATCHED | KYC_RECONCILIATION
-          name_variants — list of {source, name} dicts
-          pairs        — list of {a, b, score} comparison results
-          min_score    — lowest pairwise Jaro-Winkler score
+        Internal logic for cross-document consistency check.
+        Returns (result_dict, list_of_sql_tuples). Does NOT execute transactions or audit logs.
         """
         rows = execute_query(
             """
@@ -121,22 +119,23 @@ class IdentityMatchService:
         sources: list[dict] = []
 
         if row.get("applicant_name"):
-            sources.append({"source": "application_form", "name": row["applicant_name"]})
+            sources.append(
+                {"source": "application_form", "name": row["applicant_name"]}
+            )
         if row.get("aadhaar_name"):
-            sources.append({"source": "aadhaar",          "name": row["aadhaar_name"]})
+            sources.append({"source": "aadhaar", "name": row["aadhaar_name"]})
         if row.get("jee_name"):
             sources.append({"source": "entrance_scorecard", "name": row["jee_name"]})
 
         # Need at least two sources to compare
         if len(sources) < 2:
-            result = {
-                "kyc_status":    "NOT_CHECKED",
+            return {
+                "kyc_status": "NOT_CHECKED",
                 "name_variants": sources,
-                "pairs":         [],
-                "min_score":     None,
-                "note":          "Only one name source available — check deferred until Aadhaar/scorecard data arrives",
-            }
-            return result
+                "pairs": [],
+                "min_score": None,
+                "note": "Only one name source available — check deferred",
+            }, []
 
         # Pairwise Jaro-Winkler
         pairs: list[dict] = []
@@ -144,65 +143,89 @@ class IdentityMatchService:
         for i in range(len(sources)):
             for j in range(i + 1, len(sources)):
                 score = _jaro_winkler(sources[i]["name"], sources[j]["name"])
-                pairs.append({
-                    "a":     sources[i]["source"],
-                    "b":     sources[j]["source"],
-                    "score": score,
-                })
+                pairs.append(
+                    {
+                        "a": sources[i]["source"],
+                        "b": sources[j]["source"],
+                        "score": score,
+                    }
+                )
                 if score < min_score:
                     min_score = score
 
-        kyc_status = "MATCHED" if min_score >= _SIMILARITY_THRESHOLD else "KYC_RECONCILIATION"
+        kyc_status = (
+            "MATCHED" if min_score >= _SIMILARITY_THRESHOLD else "KYC_RECONCILIATION"
+        )
 
+        queries = []
         # Persist to DB
-        execute_transaction([(
-            """
+        queries.append(
+            (
+                """
             UPDATE applicants
                SET name_variants = %s,
                    kyc_status    = %s
              WHERE id = %s AND org_id = %s
             """,
-            (json.dumps(sources), kyc_status, application_id, org_id),
-        )])
+                (json.dumps(sources), kyc_status, application_id, org_id),
+            )
+        )
 
         if kyc_status == "KYC_RECONCILIATION":
-            # Route to KYC queue — update application status
-            execute_transaction([(
-                """
+            queries.append(
+                (
+                    """
                 UPDATE applicants
                    SET status = 'KYC_RECONCILIATION'
                  WHERE id = %s AND org_id = %s
                    AND status NOT IN ('ENROLLED', 'CANCELLED', 'WITHDRAWN')
                 """,
-                (application_id, org_id),
-            )])
-            logger.warning(
-                "EC-ADM-01: application %s routed to KYC_RECONCILIATION (min_score=%.3f)",
-                application_id,
-                min_score,
+                    (application_id, org_id),
+                )
             )
 
-        AuditLog.log(
-            org_id=org_id,
-            actor_id=actor_id,
-            actor_type="system",
-            action=AuditAction.UPDATE,
-            resource_type="application",
-            resource_id=application_id,
-            detail={
-                "event":      "identity_match_check",
-                "kyc_status": kyc_status,
-                "min_score":  min_score,
-                "pairs":      pairs,
-            },
-        )
-
-        return {
-            "kyc_status":    kyc_status,
+        result = {
+            "kyc_status": kyc_status,
             "name_variants": sources,
-            "pairs":         pairs,
-            "min_score":     min_score,
+            "pairs": pairs,
+            "min_score": min_score,
+            "event": "identity_match_check",
         }
+        return result, queries
+
+    @classmethod
+    def check(cls, application_id: str, org_id: str, actor_id: str) -> dict:
+        """
+        Run the cross-document name consistency check.
+        """
+        result, queries = cls._check_internal(application_id, org_id)
+
+        if queries:
+            execute_transaction(queries)
+
+            if result["kyc_status"] == "KYC_RECONCILIATION":
+                logger.warning(
+                    "EC-ADM-01: application %s routed to KYC_RECONCILIATION (min_score=%.3f)",
+                    application_id,
+                    result["min_score"],
+                )
+
+            AuditLog.log(
+                org_id=org_id,
+                actor_id=actor_id,
+                actor_type="system",
+                action=AuditAction.UPDATE,
+                resource_type="application",
+                resource_id=application_id,
+                detail={
+                    "event": result.get("event"),
+                    "kyc_status": result["kyc_status"],
+                    "min_score": result["min_score"],
+                    "pairs": result["pairs"],
+                },
+            )
+
+        return {k: v for k, v in result.items() if k != "event"}
 
     @classmethod
     def clear_kyc_hold(
@@ -223,16 +246,20 @@ class IdentityMatchService:
         if not rows:
             raise NotFoundError(f"Application {application_id} not found")
 
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE applicants
                SET kyc_status = 'CLEARED',
                    status     = 'ELIGIBILITY_SCREENING'
              WHERE id = %s AND org_id = %s
                AND kyc_status = 'KYC_RECONCILIATION'
             """,
-            (application_id, org_id),
-        )])
+                    (application_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -242,11 +269,15 @@ class IdentityMatchService:
             resource_type="application",
             resource_id=application_id,
             detail={
-                "event":           "kyc_hold_cleared",
+                "event": "kyc_hold_cleared",
                 "resolution_note": resolution_note,
             },
         )
-        logger.info("EC-ADM-01: KYC hold cleared for application %s by %s", application_id, actor_id)
+        logger.info(
+            "EC-ADM-01: KYC hold cleared for application %s by %s",
+            application_id,
+            actor_id,
+        )
         return {"application_id": application_id, "kyc_status": "CLEARED"}
 
     @classmethod
@@ -266,12 +297,43 @@ class IdentityMatchService:
         col_map = {"aadhaar": "aadhaar_name", "entrance_scorecard": "jee_name"}
         col = col_map.get(source)
         if not col:
-            raise ValueError(f"Unknown name source '{source}'. Must be: {list(col_map)}")
+            raise ValueError(
+                f"Unknown name source '{source}'. Must be: {list(col_map)}"
+            )
 
-        execute_transaction([(
-            f"UPDATE applicants SET {col} = %s WHERE id = %s AND org_id = %s",  # noqa: S608
-            (name.strip(), application_id, org_id),
-        )])
+        queries = [
+            (
+                f"UPDATE applicants SET {col} = %s WHERE id = %s AND org_id = %s",  # noqa: S608
+                (name.strip(), application_id, org_id),
+            )
+        ]
 
-        # Re-run check now that a new source is available
-        return cls.check(application_id, org_id, actor_id)
+        result, check_queries = cls._check_internal(application_id, org_id)
+        queries.extend(check_queries)
+
+        execute_transaction(queries)
+
+        if "event" in result:
+            if result.get("kyc_status") == "KYC_RECONCILIATION":
+                logger.warning(
+                    "EC-ADM-01: application %s routed to KYC_RECONCILIATION (min_score=%.3f)",
+                    application_id,
+                    result["min_score"],
+                )
+
+            AuditLog.log(
+                org_id=org_id,
+                actor_id=actor_id,
+                actor_type="system",
+                action=AuditAction.UPDATE,
+                resource_type="application",
+                resource_id=application_id,
+                detail={
+                    "event": result.get("event"),
+                    "kyc_status": result["kyc_status"],
+                    "min_score": result["min_score"],
+                    "pairs": result["pairs"],
+                },
+            )
+
+        return {k: v for k, v in result.items() if k != "event"}

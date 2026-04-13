@@ -28,25 +28,26 @@ Endpoints:
            GET    /exams/analytics/student/{student_id}/trend
            GET    /exams/analytics/semester/ai-insights
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-
 from server.core.rbac import Permission, require_permission
-
-from server.examinations.schedule    import ExamScheduleService
+from server.examinations.analytics import GradeAnalyticsService
+from server.examinations.grades import GradeService
 from server.examinations.hall_ticket import HallTicketService
-from server.examinations.grades      import GradeService
-from server.examinations.transcript  import TranscriptService
-from server.examinations.reeval      import ReEvalService
-from server.examinations.analytics   import GradeAnalyticsService
-from server.examinations.models      import (
-    ExamScheduleCreate, GradesBulkEntry, ReEvalRequest, ReEvalDecision,
+from server.examinations.models import (
+    ExamScheduleCreate,
+    GradesBulkEntry,
+    ReEvalDecision,
+    ReEvalRequest,
 )
+from server.examinations.reeval import ReEvalService
+from server.examinations.schedule import ExamScheduleService
+from server.examinations.transcript import TranscriptService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/exams", tags=["examinations"])
@@ -55,14 +56,17 @@ router = APIRouter(prefix="/api/v1/exams", tags=["examinations"])
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
 
+
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
 
 
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from datetime import date, datetime
+    from datetime import time as _time
     from decimal import Decimal
-    from datetime import datetime, date, time as _time
+
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -80,6 +84,7 @@ def _jsonify(obj):
 # E06-S01 — Exam Schedules
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/schedules", status_code=201)
 @require_permission(Permission.EXAM_PAPER_CREATE)
 async def create_schedule(request: Request, body: ExamScheduleCreate) -> JSONResponse:
@@ -92,8 +97,8 @@ async def create_schedule(request: Request, body: ExamScheduleCreate) -> JSONRes
 async def list_schedules(
     request: Request,
     academic_year: str = Query(...),
-    semester: Optional[int] = Query(None),
-    exam_type: Optional[str] = Query(None),
+    semester: int | None = Query(None),
+    exam_type: str | None = Query(None),
 ) -> JSONResponse:
     items = ExamScheduleService.list(_org(request), academic_year, semester, exam_type)
     return JSONResponse(content=_jsonify({"schedules": items, "total": len(items)}))
@@ -102,12 +107,16 @@ async def list_schedules(
 @router.get("/schedules/{schedule_id}")
 @require_permission(Permission.EXAM_PAPER_READ)
 async def get_schedule(request: Request, schedule_id: str) -> JSONResponse:
-    return JSONResponse(content=_jsonify(ExamScheduleService.get(_org(request), schedule_id)))
+    return JSONResponse(
+        content=_jsonify(ExamScheduleService.get(_org(request), schedule_id))
+    )
 
 
 @router.patch("/schedules/{schedule_id}/status")
 @require_permission(Permission.EXAM_PAPER_CREATE)
-async def update_schedule_status(request: Request, schedule_id: str, body: dict) -> JSONResponse:
+async def update_schedule_status(
+    request: Request, schedule_id: str, body: dict
+) -> JSONResponse:
     result = ExamScheduleService.update_status(
         _org(request), schedule_id, body["status"], _actor(request)
     )
@@ -117,6 +126,7 @@ async def update_schedule_status(request: Request, schedule_id: str, body: dict)
 # ──────────────────────────────────────────────────────────────
 # E06-S02 — Hall Tickets
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/hall-tickets/issue", status_code=201)
 @require_permission(Permission.HALL_TICKET_GENERATE)
@@ -144,6 +154,7 @@ async def get_hall_tickets(
 # E06-S03 — Grade Entry
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/grades/bulk", status_code=201)
 @require_permission(Permission.MARKS_ENTRY)
 async def enter_grades(request: Request, body: GradesBulkEntry) -> JSONResponse:
@@ -157,15 +168,18 @@ async def get_student_grades(
     request: Request,
     student_id: str,
     academic_year: str = Query(...),
-    semester: Optional[int] = Query(None),
+    semester: int | None = Query(None),
 ) -> JSONResponse:
-    items = GradeService.get_student_grades(_org(request), student_id, academic_year, semester)
+    items = GradeService.get_student_grades(
+        _org(request), student_id, academic_year, semester
+    )
     return JSONResponse(content=_jsonify({"grades": items, "total": len(items)}))
 
 
 # ──────────────────────────────────────────────────────────────
 # E06-S04 — GPA / CGPA Computation
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/results/compute")
 @require_permission(Permission.MARKS_FINALIZE)
@@ -184,6 +198,7 @@ async def compute_result(request: Request, body: dict) -> JSONResponse:
 # E06-S05 — Publish Results
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/results/publish")
 @require_permission(Permission.RESULT_PUBLISH)
 async def publish_results(request: Request, body: dict) -> JSONResponse:
@@ -200,6 +215,7 @@ async def publish_results(request: Request, body: dict) -> JSONResponse:
 @require_permission(Permission.MARKS_READ)
 async def get_student_results(request: Request, student_id: str) -> JSONResponse:
     from server.db_service import execute_query
+
     rows = execute_query(
         "SELECT * FROM semester_results WHERE student_id = %s AND org_id = %s ORDER BY academic_year, semester",
         (student_id, _org(request)),
@@ -211,6 +227,7 @@ async def get_student_results(request: Request, student_id: str) -> JSONResponse
 # ──────────────────────────────────────────────────────────────
 # E06-S06 — Transcripts
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/transcripts/generate", status_code=201)
 @require_permission(Permission.MARKS_READ)
@@ -235,6 +252,7 @@ async def list_transcripts(request: Request, student_id: str) -> JSONResponse:
 # E06-S07 — Re-evaluation
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/reeval", status_code=201)
 @require_permission(Permission.MARKS_READ)
 async def submit_reeval(request: Request, body: ReEvalRequest) -> JSONResponse:
@@ -251,7 +269,9 @@ async def submit_reeval(request: Request, body: ReEvalRequest) -> JSONResponse:
 @require_permission(Permission.MARKS_FINALIZE)
 async def list_pending_reeval(request: Request) -> JSONResponse:
     items = ReEvalService.list_pending(_org(request))
-    return JSONResponse(content=_jsonify({"reeval_requests": items, "total": len(items)}))
+    return JSONResponse(
+        content=_jsonify({"reeval_requests": items, "total": len(items)})
+    )
 
 
 @router.get("/reeval/student/{student_id}")
@@ -274,11 +294,14 @@ async def decide_reeval(
 # E06-S08 — Analytics
 # ──────────────────────────────────────────────────────────────
 
+
 @router.get("/analytics/course/{exam_schedule_id}")
 @require_permission(Permission.MARKS_READ)
 async def course_analytics(request: Request, exam_schedule_id: str) -> JSONResponse:
     return JSONResponse(
-        content=_jsonify(GradeAnalyticsService.get_course_statistics(_org(request), exam_schedule_id))
+        content=_jsonify(
+            GradeAnalyticsService.get_course_statistics(_org(request), exam_schedule_id)
+        )
     )
 
 
@@ -290,14 +313,20 @@ async def semester_analytics(
     semester: int = Query(...),
 ) -> JSONResponse:
     return JSONResponse(
-        content=_jsonify(GradeAnalyticsService.get_semester_statistics(_org(request), academic_year, semester))
+        content=_jsonify(
+            GradeAnalyticsService.get_semester_statistics(
+                _org(request), academic_year, semester
+            )
+        )
     )
 
 
 @router.get("/analytics/student/{student_id}/trend")
 @require_permission(Permission.MARKS_READ)
 async def student_performance_trend(request: Request, student_id: str) -> JSONResponse:
-    items = GradeAnalyticsService.get_student_performance_trend(_org(request), student_id)
+    items = GradeAnalyticsService.get_student_performance_trend(
+        _org(request), student_id
+    )
     return JSONResponse(content=_jsonify({"trend": items}))
 
 
@@ -309,7 +338,11 @@ async def semester_ai_insights(
     semester: int = Query(...),
 ) -> JSONResponse:
     return JSONResponse(
-        content=_jsonify(GradeAnalyticsService.generate_ai_insights(_org(request), academic_year, semester))
+        content=_jsonify(
+            GradeAnalyticsService.generate_ai_insights(
+                _org(request), academic_year, semester
+            )
+        )
     )
 
 
@@ -317,14 +350,16 @@ async def semester_ai_insights(
 # E06-S05 — AI Evaluation Faculty Review Queue
 # ──────────────────────────────────────────────────────────────
 
+
 @router.get("/ai-eval/faculty-review-queue")
 @require_permission(Permission.MARKS_READ)
 async def get_ai_faculty_review_queue(
     request: Request,
-    faculty_id: Optional[str] = Query(None),
+    faculty_id: str | None = Query(None),
 ) -> JSONResponse:
     """Return AI evaluation records pending faculty confirmation (confidence < threshold)."""
     from server.examinations.ai_evaluation_guard import AIEvaluationGuard
+
     fid = faculty_id or _actor(request)
     items = AIEvaluationGuard.get_faculty_review_queue(_org(request), fid)
     return JSONResponse(content=_jsonify({"items": items, "total": len(items)}))

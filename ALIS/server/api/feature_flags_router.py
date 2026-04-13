@@ -13,15 +13,15 @@ RBAC:
 
 Reference: ALIS-skills/references/architecture.md §12
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-
 from server.core.feature_flags import feature_flags
 from server.core.rbac import Permission, require_permission
 
@@ -41,20 +41,22 @@ def _actor(r: Request) -> str:
 # Pydantic schemas
 # ---------------------------------------------------------------------------
 
+
 class FlagUpdate(BaseModel):
     enabled: bool
-    config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    config: dict[str, Any] | None = Field(default_factory=dict)
 
 
 class FlagResponse(BaseModel):
     flag_key: str
     enabled: bool
-    config: Dict[str, Any]
+    config: dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 
 @router.get("")
 @require_permission(Permission.FEATURE_FLAG_READ)
@@ -62,13 +64,15 @@ async def list_flags(request: Request):
     """Return all feature flags for the calling tenant."""
     try:
         flags = feature_flags.get_all(_org(request))
-        return JSONResponse(content={
-            "flags": [
-                {"flag_key": k, "enabled": v["enabled"], "config": v["config"]}
-                for k, v in flags.items()
-            ],
-            "total": len(flags),
-        })
+        return JSONResponse(
+            content={
+                "flags": [
+                    {"flag_key": k, "enabled": v["enabled"], "config": v["config"]}
+                    for k, v in flags.items()
+                ],
+                "total": len(flags),
+            }
+        )
     except Exception as exc:
         logger.error("feature_flags list: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -82,11 +86,13 @@ async def get_flag(flag_key: str, request: Request):
         org_id = _org(request)
         enabled = feature_flags.is_enabled(flag_key, org_id)
         config = feature_flags.get_config(flag_key, org_id, default={})
-        return JSONResponse(content={
-            "flag_key": flag_key,
-            "enabled": enabled,
-            "config": config or {},
-        })
+        return JSONResponse(
+            content={
+                "flag_key": flag_key,
+                "enabled": enabled,
+                "config": config or {},
+            }
+        )
     except Exception as exc:
         logger.error("feature_flags get %s: %s", flag_key, exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -104,12 +110,14 @@ async def update_flag(flag_key: str, body: FlagUpdate, request: Request):
             config=body.config or {},
             actor_id=_actor(request),
         )
-        return JSONResponse(content={
-            "flag_key": flag_key,
-            "enabled": body.enabled,
-            "config": body.config or {},
-            "updated_by": _actor(request),
-        })
+        return JSONResponse(
+            content={
+                "flag_key": flag_key,
+                "enabled": body.enabled,
+                "config": body.config or {},
+                "updated_by": _actor(request),
+            }
+        )
     except Exception as exc:
         logger.error("feature_flags update %s: %s", flag_key, exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -126,11 +134,13 @@ async def seed_defaults(request: Request):
     try:
         org_id = _org(request)
         created = feature_flags.seed_defaults(org_id, actor_id=_actor(request))
-        return JSONResponse(content={
-            "org_id": org_id,
-            "flags_created": created,
-            "message": f"Seeded {created} default flags (skipped existing).",
-        })
+        return JSONResponse(
+            content={
+                "org_id": org_id,
+                "flags_created": created,
+                "message": f"Seeded {created} default flags (skipped existing).",
+            }
+        )
     except Exception as exc:
         logger.error("feature_flags seed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

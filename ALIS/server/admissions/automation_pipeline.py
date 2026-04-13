@@ -17,7 +17,6 @@ This module contains the pure orchestration logic (no Celery coupling).
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
@@ -26,7 +25,6 @@ from server.core.state_registry import StudentState
 from server.db_service import execute_query
 
 from .policy_engine import PolicyEvaluator, PolicyOutcome
-from .policy_store import PolicyKey, PolicyStore
 from .review_queue import ReviewQueue, ReviewStatus
 
 logger = logging.getLogger(__name__)
@@ -34,8 +32,9 @@ logger = logging.getLogger(__name__)
 
 class PipelineResult:
     """Outcome of one pipeline step."""
-    def __init__(self, status: str, next_step: Optional[str] = None, message: str = ""):
-        self.status = status       # "advanced" | "blocked" | "completed" | "rejected"
+
+    def __init__(self, status: str, next_step: str | None = None, message: str = ""):
+        self.status = status  # "advanced" | "blocked" | "completed" | "rejected"
         self.next_step = next_step
         self.message = message
 
@@ -53,7 +52,9 @@ class AdmissionsPipeline:
     """
 
     @classmethod
-    def advance(cls, applicant_id: str, org_id: str, actor_id: str = "system") -> PipelineResult:
+    def advance(
+        cls, applicant_id: str, org_id: str, actor_id: str = "system"
+    ) -> PipelineResult:
         """
         Route to the correct pipeline step based on current applicant status.
         Entry point for the Celery task.
@@ -71,10 +72,10 @@ class AdmissionsPipeline:
         logger.info("Pipeline.advance: applicant=%s status=%s", applicant_id, status)
 
         step_map = {
-            StudentState.APPLIED.value:                 cls._step_evaluate_eligibility,
-            StudentState.ELIGIBLE.value:                cls._step_assign_counsellor,
-            StudentState.PROVISIONALLY_ELIGIBLE.value:  cls._step_check_review_outcome,
-            StudentState.ADMITTED.value:                cls._step_enroll,
+            StudentState.APPLIED.value: cls._step_evaluate_eligibility,
+            StudentState.ELIGIBLE.value: cls._step_assign_counsellor,
+            StudentState.PROVISIONALLY_ELIGIBLE.value: cls._step_check_review_outcome,
+            StudentState.ADMITTED.value: cls._step_enroll,
         }
 
         handler = step_map.get(status)
@@ -96,10 +97,9 @@ class AdmissionsPipeline:
     ) -> PipelineResult:
         """Run policy evaluation; transition applicant to ELIGIBLE or flag for review."""
         from .service import ApplicantService
-        from .document_verification import DocumentVerificationService
 
-        academic_pct    = metadata.get("academic_percentage")
-        entrance_score  = metadata.get("entrance_score")
+        academic_pct = metadata.get("academic_percentage")
+        entrance_score = metadata.get("entrance_score")
 
         # Check doc completeness
         docs = execute_query(
@@ -110,8 +110,12 @@ class AdmissionsPipeline:
 
         decision = PolicyEvaluator.evaluate(
             org_id=org_id,
-            academic_percentage=float(academic_pct) if academic_pct is not None else None,
-            entrance_score=float(entrance_score) if entrance_score is not None else None,
+            academic_percentage=float(academic_pct)
+            if academic_pct is not None
+            else None,
+            entrance_score=float(entrance_score)
+            if entrance_score is not None
+            else None,
             docs_complete=docs_complete,
         )
 
@@ -132,12 +136,21 @@ class AdmissionsPipeline:
         )
 
         if decision.outcome == PolicyOutcome.AUTO_REJECT:
-            ApplicantService.transition_state(applicant_id, StudentState.NOT_ELIGIBLE.value, org_id, actor_id)
-            cls._publish(org_id, "ApplicantRejected", applicant_id, {"reason": decision.reason})
+            ApplicantService.transition_state(
+                applicant_id, StudentState.NOT_ELIGIBLE.value, org_id, actor_id
+            )
+            cls._publish(
+                org_id, "ApplicantRejected", applicant_id, {"reason": decision.reason}
+            )
             return PipelineResult(status="rejected", message=decision.reason)
 
         if decision.outcome == PolicyOutcome.REVIEW_REQUIRED:
-            ApplicantService.transition_state(applicant_id, StudentState.PROVISIONALLY_ELIGIBLE.value, org_id, actor_id)
+            ApplicantService.transition_state(
+                applicant_id,
+                StudentState.PROVISIONALLY_ELIGIBLE.value,
+                org_id,
+                actor_id,
+            )
             ReviewQueue.enqueue(
                 org_id=org_id,
                 entity_type="applicant",
@@ -145,12 +158,25 @@ class AdmissionsPipeline:
                 decision=decision,
                 actor_id=actor_id,
             )
-            cls._publish(org_id, "ApplicantFlaggedForReview", applicant_id, {"reason": decision.reason, "flags": decision.flags})
-            return PipelineResult(status="blocked", message="Flagged for staff review", next_step="await_review")
+            cls._publish(
+                org_id,
+                "ApplicantFlaggedForReview",
+                applicant_id,
+                {"reason": decision.reason, "flags": decision.flags},
+            )
+            return PipelineResult(
+                status="blocked",
+                message="Flagged for staff review",
+                next_step="await_review",
+            )
 
         # AUTO_PROCEED
-        ApplicantService.transition_state(applicant_id, StudentState.ELIGIBLE.value, org_id, actor_id)
-        cls._publish(org_id, "ApplicantEligible", applicant_id, {"flags": decision.flags})
+        ApplicantService.transition_state(
+            applicant_id, StudentState.ELIGIBLE.value, org_id, actor_id
+        )
+        cls._publish(
+            org_id, "ApplicantEligible", applicant_id, {"flags": decision.flags}
+        )
         return PipelineResult(status="advanced", next_step="assign_counsellor")
 
     # ------------------------------------------------------------------
@@ -169,20 +195,35 @@ class AdmissionsPipeline:
             (applicant_id, org_id),
         )
         if not rows:
-            return PipelineResult(status="blocked", message="No review item found — awaiting staff")
+            return PipelineResult(
+                status="blocked", message="No review item found — awaiting staff"
+            )
 
         review_status = rows[0]["status"]
         if review_status == ReviewStatus.PENDING:
-            return PipelineResult(status="blocked", message="Awaiting staff review decision")
+            return PipelineResult(
+                status="blocked", message="Awaiting staff review decision"
+            )
 
         if review_status == ReviewStatus.REJECTED:
-            ApplicantService.transition_state(applicant_id, StudentState.NOT_ELIGIBLE.value, org_id, actor_id)
-            cls._publish(org_id, "ApplicantRejected", applicant_id, {"reason": "Staff review rejected"})
+            ApplicantService.transition_state(
+                applicant_id, StudentState.NOT_ELIGIBLE.value, org_id, actor_id
+            )
+            cls._publish(
+                org_id,
+                "ApplicantRejected",
+                applicant_id,
+                {"reason": "Staff review rejected"},
+            )
             return PipelineResult(status="rejected", message="Rejected by staff review")
 
         # APPROVED → move to ELIGIBLE and continue
-        ApplicantService.transition_state(applicant_id, StudentState.ELIGIBLE.value, org_id, actor_id)
-        cls._publish(org_id, "ApplicantEligible", applicant_id, {"via": "staff_review_approved"})
+        ApplicantService.transition_state(
+            applicant_id, StudentState.ELIGIBLE.value, org_id, actor_id
+        )
+        cls._publish(
+            org_id, "ApplicantEligible", applicant_id, {"via": "staff_review_approved"}
+        )
         return PipelineResult(status="advanced", next_step="assign_counsellor")
 
     # ------------------------------------------------------------------
@@ -194,11 +235,11 @@ class AdmissionsPipeline:
         cls, applicant_id: str, org_id: str, actor_id: str, metadata: dict
     ) -> PipelineResult:
         """Auto-assign counsellor and generate offer letter for eligible applicants."""
-        from .counsellor_allocation import CounsellorAllocationService
-        from .models import CounsellorAssignRequest
-        from .offer_letter import OfferLetterService
-        from .models import OfferLetterGenerateRequest
         from server.db_service import execute_query as eq
+
+        from .counsellor_allocation import CounsellorAllocationService
+        from .models import CounsellorAssignRequest, OfferLetterGenerateRequest
+        from .offer_letter import OfferLetterService
 
         # Skip if already assigned
         existing_assign = eq(
@@ -214,7 +255,9 @@ class AdmissionsPipeline:
                     actor_role="SYSTEM",
                 )
             except Exception as exc:
-                logger.warning("Pipeline: counsellor assign failed (non-fatal): %s", exc)
+                logger.warning(
+                    "Pipeline: counsellor assign failed (non-fatal): %s", exc
+                )
 
         # Skip if offer already generated
         existing_offer = eq(
@@ -225,13 +268,16 @@ class AdmissionsPipeline:
             applicant = eq("SELECT * FROM applicants WHERE id = %s", (applicant_id,))
             if applicant:
                 from datetime import date
+
                 year = date.today().year
-                academic_year = f"{year}-{year+1}"
+                academic_year = f"{year}-{year + 1}"
                 try:
                     OfferLetterService.generate(
                         request=OfferLetterGenerateRequest(
                             applicant_id=applicant_id,
-                            program_name=applicant[0].get("intended_program", "General"),
+                            program_name=applicant[0].get(
+                                "intended_program", "General"
+                            ),
                             academic_year=academic_year,
                         ),
                         org_id=org_id,
@@ -266,10 +312,18 @@ class AdmissionsPipeline:
                 actor_id=actor_id,
             )
             cls._publish(
-                org_id, "StudentEnrolled", applicant_id,
-                {"student_id": student.id, "roll_number": student.roll_number, "program": student.program},
+                org_id,
+                "StudentEnrolled",
+                applicant_id,
+                {
+                    "student_id": student.id,
+                    "roll_number": student.roll_number,
+                    "program": student.program,
+                },
             )
-            return PipelineResult(status="completed", message=f"Student enrolled: {student.roll_number}")
+            return PipelineResult(
+                status="completed", message=f"Student enrolled: {student.roll_number}"
+            )
         except Exception as exc:
             logger.error("Pipeline: enrollment failed for %s: %s", applicant_id, exc)
             return PipelineResult(status="blocked", message=str(exc))
@@ -279,15 +333,19 @@ class AdmissionsPipeline:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _publish(cls, org_id: str, event_type: str, applicant_id: str, payload: dict) -> None:
+    def _publish(
+        cls, org_id: str, event_type: str, applicant_id: str, payload: dict
+    ) -> None:
         try:
-            DomainEventBus.publish(DomainEvent(
-                event_type=event_type,
-                entity_type="applicant",
-                entity_id=applicant_id,
-                org_id=org_id,
-                payload=payload,
-                actor_id="system",
-            ))
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type=event_type,
+                    entity_type="applicant",
+                    entity_id=applicant_id,
+                    org_id=org_id,
+                    payload=payload,
+                    actor_id="system",
+                )
+            )
         except Exception as exc:
             logger.warning("Pipeline: event publish failed (non-fatal): %s", exc)

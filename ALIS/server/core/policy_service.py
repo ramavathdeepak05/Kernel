@@ -39,21 +39,21 @@ Acceptance Criteria (E00-S09):
   - [x] Every policy version hash stored
   - [ ] Diff viewer available in admin UI (frontend — separate task)
 """
+
 from __future__ import annotations
 
 import hashlib
 import json
 import logging
-from uuid import uuid4
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Dict, Any, List
-from dataclasses import dataclass, field
+from typing import Any
+from uuid import uuid4
 
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .events import EventBus
+from .rbac import Permission, Role, verify_access
 from .schema import Event
-from .rbac import Role, Permission, verify_access, AccessResult
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +61,7 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # POLICY LIFECYCLE STATES  (Layer 3 — State Machine)
 # ============================================================================
+
 
 class PolicyStatus(str, Enum):
     """
@@ -72,6 +73,7 @@ class PolicyStatus(str, Enum):
         APPROVED   → ACTIVATED
         ACTIVATED  → SUPERSEDED  (only by system when new version activates)
     """
+
     DRAFT = "DRAFT"
     SUBMITTED = "SUBMITTED"
     APPROVED = "APPROVED"
@@ -80,7 +82,7 @@ class PolicyStatus(str, Enum):
 
 
 # Layer 3: Allowed state transitions (forward-only)
-POLICY_TRANSITIONS: Dict[PolicyStatus, set] = {
+POLICY_TRANSITIONS: dict[PolicyStatus, set] = {
     PolicyStatus.DRAFT: {PolicyStatus.SUBMITTED},
     PolicyStatus.SUBMITTED: {PolicyStatus.APPROVED},
     PolicyStatus.APPROVED: {PolicyStatus.ACTIVATED},
@@ -98,21 +100,24 @@ def _validate_transition(current: PolicyStatus, target: PolicyStatus) -> bool:
 # POLICY VERSION HASH  (Layer 4 — Immutable Locking)
 # ============================================================================
 
-def compute_policy_hash(policy_data: Dict[str, Any]) -> str:
+
+def compute_policy_hash(policy_data: dict[str, Any]) -> str:
     """
     Compute SHA-256 hash of the policy payload for immutability verification.
 
     The hash covers: policy_id, version, parameters, effective_from,
     effective_to, and the full structured payload.
     """
-    canonical = json.dumps(policy_data, sort_keys=True, separators=(",", ":"),
-                           default=str)
+    canonical = json.dumps(
+        policy_data, sort_keys=True, separators=(",", ":"), default=str
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 # ============================================================================
 # POLICY SERVICE  (Core Business Logic)
 # ============================================================================
+
 
 class PolicyService:
     """
@@ -136,14 +141,14 @@ class PolicyService:
         policy_type: str,
         name: str,
         description: str,
-        parameters: Dict[str, Any],
+        parameters: dict[str, Any],
         effective_from: datetime,
-        effective_to: Optional[datetime],
+        effective_to: datetime | None,
         created_by: str,
         actor_role: str,
         tenant_id: str,
-        module: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        module: str | None = None,
+    ) -> dict[str, Any]:
         """
         Create a new policy draft.
 
@@ -204,13 +209,28 @@ class PolicyService:
             )
         """
         execute_transaction(
-            [(insert_sql, (
-                policy_id, tenant_id, policy_type, name, description,
-                json.dumps(parameters), version, PolicyStatus.DRAFT.value,
-                effective_from, effective_to,
-                content_hash, created_by, now, now,
-                module,
-            ))],
+            [
+                (
+                    insert_sql,
+                    (
+                        policy_id,
+                        tenant_id,
+                        policy_type,
+                        name,
+                        description,
+                        json.dumps(parameters),
+                        version,
+                        PolicyStatus.DRAFT.value,
+                        effective_from,
+                        effective_to,
+                        content_hash,
+                        created_by,
+                        now,
+                        now,
+                        module,
+                    ),
+                )
+            ],
             tenant_id=tenant_id,
         )
 
@@ -232,7 +252,10 @@ class PolicyService:
 
         logger.info(
             "Policy draft created [id=%s type=%s version=%d tenant=%s]",
-            policy_id, policy_type, version, tenant_id,
+            policy_id,
+            policy_type,
+            version,
+            tenant_id,
         )
 
         return {
@@ -254,7 +277,7 @@ class PolicyService:
         submitted_by: str,
         actor_role: str,
         tenant_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Transition a DRAFT policy to SUBMITTED.
 
@@ -280,13 +303,21 @@ class PolicyService:
 
         now = datetime.now(timezone.utc)
         execute_transaction(
-            [(
-                "UPDATE policy_registry "
-                "SET status = %s, submitted_by = %s, submitted_at = %s, updated_at = %s "
-                "WHERE id = %s AND tenant_id = %s",
-                (PolicyStatus.SUBMITTED.value, submitted_by, now, now,
-                 policy_id, tenant_id),
-            )],
+            [
+                (
+                    "UPDATE policy_registry "
+                    "SET status = %s, submitted_by = %s, submitted_at = %s, updated_at = %s "
+                    "WHERE id = %s AND tenant_id = %s",
+                    (
+                        PolicyStatus.SUBMITTED.value,
+                        submitted_by,
+                        now,
+                        now,
+                        policy_id,
+                        tenant_id,
+                    ),
+                )
+            ],
             tenant_id=tenant_id,
         )
 
@@ -316,7 +347,7 @@ class PolicyService:
         approved_by: str,
         actor_role: str,
         tenant_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Transition a SUBMITTED policy to APPROVED.
 
@@ -356,28 +387,49 @@ class PolicyService:
         effective_from = rows[0]["effective_from"]
 
         # If effective_from is now or in the past, auto-activate
-        should_activate = (
-            effective_from is not None
-            and effective_from <= now
-        )
+        should_activate = effective_from is not None and effective_from <= now
 
         new_status = (
-            PolicyStatus.ACTIVATED if should_activate
-            else PolicyStatus.APPROVED
+            PolicyStatus.ACTIVATED if should_activate else PolicyStatus.APPROVED
         )
 
-        execute_transaction(
-            [(
+        queries = [
+            (
                 "UPDATE policy_registry "
                 "SET status = %s, approved_by = %s, approved_at = %s, "
                 "    activated_at = %s, updated_at = %s "
                 "WHERE id = %s AND tenant_id = %s",
-                (new_status.value, approved_by, now,
-                 now if should_activate else None, now,
-                 policy_id, tenant_id),
-            )],
-            tenant_id=tenant_id,
-        )
+                (
+                    new_status.value,
+                    approved_by,
+                    now,
+                    now if should_activate else None,
+                    now,
+                    policy_id,
+                    tenant_id,
+                ),
+            )
+        ]
+
+        if should_activate:
+            queries.append(
+                (
+                    "UPDATE policy_registry "
+                    "SET status = %s, updated_at = %s "
+                    "WHERE policy_type = %s AND tenant_id = %s "
+                    "  AND status = %s AND id != %s",
+                    (
+                        PolicyStatus.SUPERSEDED.value,
+                        datetime.now(timezone.utc),
+                        rows[0]["policy_type"],
+                        tenant_id,
+                        PolicyStatus.ACTIVATED.value,
+                        policy_id,
+                    ),
+                )
+            )
+
+        execute_transaction(queries, tenant_id=tenant_id)
 
         AuditLog.log(
             action=AuditAction.POLICY_APPROVED,
@@ -416,8 +468,8 @@ class PolicyService:
     def get_policy(
         policy_id: str,
         tenant_id: str,
-        as_of_date: Optional[datetime] = None,
-    ) -> Optional[Dict[str, Any]]:
+        as_of_date: datetime | None = None,
+    ) -> dict[str, Any] | None:
         """
         Retrieve a policy by ID.
 
@@ -451,15 +503,19 @@ class PolicyService:
                 "  AND effective_from <= %s "
                 "  AND (effective_to IS NULL OR effective_to >= %s) "
                 "ORDER BY version DESC LIMIT 1",
-                (policy_type, tenant_id,
-                 PolicyStatus.ACTIVATED.value, PolicyStatus.SUPERSEDED.value,
-                 as_of_date, as_of_date),
+                (
+                    policy_type,
+                    tenant_id,
+                    PolicyStatus.ACTIVATED.value,
+                    PolicyStatus.SUPERSEDED.value,
+                    as_of_date,
+                    as_of_date,
+                ),
                 tenant_id=tenant_id,
             )
         else:
             rows = execute_query(
-                "SELECT * FROM policy_registry "
-                "WHERE id = %s AND tenant_id = %s",
+                "SELECT * FROM policy_registry WHERE id = %s AND tenant_id = %s",
                 (policy_id, tenant_id),
                 tenant_id=tenant_id,
             )
@@ -481,8 +537,8 @@ class PolicyService:
     def get_active_policy_by_type(
         policy_type: str,
         tenant_id: str,
-        as_of_date: Optional[datetime] = None,
-    ) -> Optional[Dict[str, Any]]:
+        as_of_date: datetime | None = None,
+    ) -> dict[str, Any] | None:
         """
         Retrieve the currently active policy for a given type.
 
@@ -500,9 +556,7 @@ class PolicyService:
             "  AND effective_from <= %s "
             "  AND (effective_to IS NULL OR effective_to >= %s) "
             "ORDER BY version DESC LIMIT 1",
-            (policy_type, tenant_id,
-             PolicyStatus.ACTIVATED.value,
-             ref_date, ref_date),
+            (policy_type, tenant_id, PolicyStatus.ACTIVATED.value, ref_date, ref_date),
             tenant_id=tenant_id,
         )
 
@@ -521,11 +575,11 @@ class PolicyService:
     @staticmethod
     def list_policies(
         tenant_id: str,
-        policy_type: Optional[str] = None,
-        status: Optional[PolicyStatus] = None,
+        policy_type: str | None = None,
+        status: PolicyStatus | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List policies with optional filters."""
         from server.db_service import execute_query
 
@@ -543,7 +597,7 @@ class PolicyService:
         params.extend([limit, offset])
 
         rows = execute_query(
-            f"SELECT * FROM policy_registry "
+            f"SELECT * FROM policy_registry "  # noqa: S608
             f"WHERE {where} ORDER BY created_at DESC "
             f"LIMIT %s OFFSET %s",
             tuple(params),
@@ -566,7 +620,7 @@ class PolicyService:
     def get_version_history(
         policy_type: str,
         tenant_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Return all versions of a given policy_type, ordered by version
         ascending.  Used by the admin UI diff viewer.
@@ -597,6 +651,7 @@ class PolicyService:
 # INTERNAL HELPERS
 # ============================================================================
 
+
 def _on_policy_activated(
     policy_id: str,
     policy_type: str,
@@ -611,22 +666,8 @@ def _on_policy_activated(
       2. Emit PolicyActivated event to the Event Bus.
       3. Log activation to audit ledger.
     """
-    from server.db_service import execute_transaction
 
-    # 1. Supersede previous active versions
-    execute_transaction(
-        [(
-            "UPDATE policy_registry "
-            "SET status = %s, updated_at = %s "
-            "WHERE policy_type = %s AND tenant_id = %s "
-            "  AND status = %s AND id != %s",
-            (PolicyStatus.SUPERSEDED.value,
-             datetime.now(timezone.utc),
-             policy_type, tenant_id,
-             PolicyStatus.ACTIVATED.value, policy_id),
-        )],
-        tenant_id=tenant_id,
-    )
+    # 1. (Supersede query now runs as part of approve_policy transaction)
 
     # 2. Emit event
     event = Event(
@@ -659,5 +700,8 @@ def _on_policy_activated(
 
     logger.info(
         "Policy activated [id=%s type=%s version=%d tenant=%s]",
-        policy_id, policy_type, version, tenant_id,
+        policy_id,
+        policy_type,
+        version,
+        tenant_id,
     )

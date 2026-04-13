@@ -27,10 +27,9 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation, GlobalLockViolationError
 from server.core.state_registry import StudentState
 from server.db_service import execute_query, execute_transaction
@@ -117,25 +116,28 @@ class AdmissionConfirmationService:
         record_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO admission_records
                     (id, org_id, applicant_id, registration_number,
                      payment_reference, fee_amount, admitted_at, admitted_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    record_id, org_id,
-                    request.applicant_id,
-                    reg_number,
-                    request.payment_reference,
-                    request.fee_amount,
-                    now,
-                    actor_id,
-                ),
-            )
-        ])
+                    (
+                        record_id,
+                        org_id,
+                        request.applicant_id,
+                        reg_number,
+                        request.payment_reference,
+                        request.fee_amount,
+                        now,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
         # --- Layer 3: Execute ELIGIBLE → ADMITTED transition ---
         ApplicantService.transition_state(
@@ -171,7 +173,9 @@ class AdmissionConfirmationService:
 
         logger.info(
             "E04-S07: Admission confirmed [applicant=%s, reg=%s, org=%s]",
-            request.applicant_id, reg_number, org_id,
+            request.applicant_id,
+            reg_number,
+            org_id,
         )
 
         return AdmissionRecordRead(

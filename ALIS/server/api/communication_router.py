@@ -27,25 +27,25 @@ Endpoints:
            GET   /comms/bulk
            GET   /comms/bulk/{id}
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-
-from server.core.rbac import Permission, require_permission
-
-from server.communication.notif_templates   import NotifTemplateService
-from server.communication.notification_log  import NotificationLogService
-from server.communication.in_app            import InAppNotificationService
-from server.communication.announcements     import AnnouncementService
-from server.communication.bulk              import BulkMessagingService
-from server.communication.models            import (
-    TemplateCreate, TemplateUpdate,
-    AnnouncementCreate, BulkMessageCreate,
+from server.communication.announcements import AnnouncementService
+from server.communication.bulk import BulkMessagingService
+from server.communication.in_app import InAppNotificationService
+from server.communication.models import (
+    AnnouncementCreate,
+    BulkMessageCreate,
+    TemplateCreate,
+    TemplateUpdate,
 )
+from server.communication.notif_templates import NotifTemplateService
+from server.communication.notification_log import NotificationLogService
+from server.core.rbac import Permission, require_permission
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/comms", tags=["communication"])
@@ -54,12 +54,17 @@ router = APIRouter(prefix="/api/v1/comms", tags=["communication"])
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
 
+
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
+
+
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from datetime import date, datetime
+    from datetime import time as _time
     from decimal import Decimal
-    from datetime import datetime, date, time as _time
+
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -77,6 +82,7 @@ def _jsonify(obj):
 # E10-S01 — Notification Templates
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/templates", status_code=201)
 @require_permission(Permission.NOTIFICATION_MANAGE)
 async def create_template(request: Request, body: TemplateCreate) -> JSONResponse:
@@ -88,7 +94,7 @@ async def create_template(request: Request, body: TemplateCreate) -> JSONRespons
 @require_permission(Permission.NOTIFICATION_MANAGE)
 async def list_templates(
     request: Request,
-    channel: Optional[str] = Query(None),
+    channel: str | None = Query(None),
 ) -> JSONResponse:
     items = NotifTemplateService.list(_org(request), channel)
     return JSONResponse(content={"templates": items, "total": len(items)})
@@ -102,14 +108,19 @@ async def get_template(request: Request, template_id: str) -> JSONResponse:
 
 @router.patch("/templates/{template_id}")
 @require_permission(Permission.NOTIFICATION_MANAGE)
-async def update_template(request: Request, template_id: str, body: TemplateUpdate) -> JSONResponse:
-    result = NotifTemplateService.update(_org(request), template_id, body, _actor(request))
+async def update_template(
+    request: Request, template_id: str, body: TemplateUpdate
+) -> JSONResponse:
+    result = NotifTemplateService.update(
+        _org(request), template_id, body, _actor(request)
+    )
     return JSONResponse(content=result)
 
 
 # ──────────────────────────────────────────────────────────────
 # E10-S02/S03 — Delivery Logs
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/logs/me")
 @require_permission(Permission.NOTIFICATION_READ)
@@ -135,6 +146,7 @@ async def retry_notification(request: Request, log_id: str) -> JSONResponse:
 # ──────────────────────────────────────────────────────────────
 # E10-S04 — In-App Notifications
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/notifications/me")
 @require_permission(Permission.NOTIFICATION_READ)
@@ -176,9 +188,12 @@ async def mark_all_read(request: Request) -> JSONResponse:
 # E10-S05 — Announcements
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/announcements", status_code=201)
 @require_permission(Permission.ANNOUNCEMENT_CREATE)
-async def create_announcement(request: Request, body: AnnouncementCreate) -> JSONResponse:
+async def create_announcement(
+    request: Request, body: AnnouncementCreate
+) -> JSONResponse:
     result = AnnouncementService.create(_org(request), body, _actor(request))
     return JSONResponse(status_code=201, content=result)
 
@@ -187,7 +202,7 @@ async def create_announcement(request: Request, body: AnnouncementCreate) -> JSO
 @require_permission(Permission.NOTIFICATION_READ)
 async def list_announcements(
     request: Request,
-    audience: Optional[str] = Query(None),
+    audience: str | None = Query(None),
     active_only: bool = Query(True),
 ) -> JSONResponse:
     items = AnnouncementService.list(_org(request), audience, active_only)
@@ -196,21 +211,30 @@ async def list_announcements(
 
 @router.post("/announcements/{announcement_id}/read")
 @require_permission(Permission.NOTIFICATION_READ)
-async def mark_announcement_read(request: Request, announcement_id: str) -> JSONResponse:
-    result = AnnouncementService.mark_read(_org(request), announcement_id, _actor(request))
+async def mark_announcement_read(
+    request: Request, announcement_id: str
+) -> JSONResponse:
+    result = AnnouncementService.mark_read(
+        _org(request), announcement_id, _actor(request)
+    )
     return JSONResponse(content=result)
 
 
 @router.delete("/announcements/{announcement_id}")
 @require_permission(Permission.ANNOUNCEMENT_CREATE)
-async def deactivate_announcement(request: Request, announcement_id: str) -> JSONResponse:
-    result = AnnouncementService.deactivate(_org(request), announcement_id, _actor(request))
+async def deactivate_announcement(
+    request: Request, announcement_id: str
+) -> JSONResponse:
+    result = AnnouncementService.deactivate(
+        _org(request), announcement_id, _actor(request)
+    )
     return JSONResponse(content=result)
 
 
 # ──────────────────────────────────────────────────────────────
 # E10-S06 — Parent/Guardian Portal (read-only view of child's feed)
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/parent/{student_id}/notifications")
 @require_permission(Permission.NOTIFICATION_READ)
@@ -233,6 +257,7 @@ async def parent_view(
 # ──────────────────────────────────────────────────────────────
 # E10-S07 — Bulk Messaging
 # ──────────────────────────────────────────────────────────────
+
 
 @router.post("/bulk", status_code=201)
 @require_permission(Permission.BULK_MESSAGE)

@@ -1,6 +1,8 @@
 # ALIS OS — Frontend Rebuild Specification
 ## Role-Based Shell, Navigation & Dashboards
-**For Claude Code | QUAICU Solutions Private Limited | Confidential**
+**QUAICU Solutions Private Limited | Confidential**
+
+> **🧑‍💻 Frontend Intern**: Before working on any frontend code, read [CONTRIBUTING.md](../CONTRIBUTING.md) for PR rules, [ONBOARDING.md](./ONBOARDING.md) for setup, and [CODEBASE_MAP.md](./CODEBASE_MAP.md) § Frontend for the file map.
 
 ---
 

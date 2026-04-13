@@ -3,12 +3,13 @@
 Degree audit automation, gold medal computation, seating generation.
 Gold medal computed on CGPA WITHOUT grace marks (policy-controlled).
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from server.core.domain_events import DomainEvent, DomainEventBus
@@ -23,18 +24,20 @@ logger = logging.getLogger(__name__)
 # State Machine
 # ---------------------------------------------------------------------------
 
+
 class ConvocationStatus(str, Enum):
-    PLANNED             = "PLANNED"
-    AUDIT_RUNNING       = "AUDIT_RUNNING"
-    AUDIT_COMPLETE      = "AUDIT_COMPLETE"
-    SEATING_GENERATED   = "SEATING_GENERATED"
-    COMPLETED           = "COMPLETED"
-    CANCELLED           = "CANCELLED"
+    PLANNED = "PLANNED"
+    AUDIT_RUNNING = "AUDIT_RUNNING"
+    AUDIT_COMPLETE = "AUDIT_COMPLETE"
+    SEATING_GENERATED = "SEATING_GENERATED"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
 
 
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
 
 class ConvocationService:
     """E18 — Convocation lifecycle: creation → degree audit → gold medals → seating."""
@@ -50,55 +53,63 @@ class ConvocationService:
         ceremony_date: str,
         academic_year: str,
         batch_year: int,
-        venue: Optional[str] = None,
-        chief_guest: Optional[str] = None,
-        created_by: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        venue: str | None = None,
+        chief_guest: str | None = None,
+        created_by: str | None = None,
+    ) -> dict[str, Any]:
         """Create a new convocation event in PLANNED status."""
         convocation_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO convocation_events
                     (id, org_id, title, ceremony_date, academic_year, batch_year,
                      venue, chief_guest, status, created_by, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    convocation_id,
-                    org_id,
-                    title,
-                    ceremony_date,
-                    academic_year,
-                    batch_year,
-                    venue,
-                    chief_guest,
-                    ConvocationStatus.PLANNED,
-                    created_by,
-                    now,
-                    now,
-                ),
+                    (
+                        convocation_id,
+                        org_id,
+                        title,
+                        ceremony_date,
+                        academic_year,
+                        batch_year,
+                        venue,
+                        chief_guest,
+                        ConvocationStatus.PLANNED,
+                        created_by,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
+
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="convocation.created",
+                org_id=org_id,
+                entity_type="convocation_event",
+                entity_id=convocation_id,
+                actor_id=created_by or "system",
+                payload={
+                    "convocation_id": convocation_id,
+                    "title": title,
+                    "ceremony_date": ceremony_date,
+                    "academic_year": academic_year,
+                    "batch_year": batch_year,
+                },
             )
-        ])
+        )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="convocation.created",
-            org_id=org_id,
-            entity_type="convocation_event",
-            entity_id=convocation_id,
-            actor_id=created_by or "system",
-            payload={
-                "convocation_id": convocation_id,
-                "title": title,
-                "ceremony_date": ceremony_date,
-                "academic_year": academic_year,
-                "batch_year": batch_year,
-            },
-        ))
-
-        logger.info("ConvocationService: created convocation %s for org %s", convocation_id, org_id)
+        logger.info(
+            "ConvocationService: created convocation %s for org %s",
+            convocation_id,
+            org_id,
+        )
 
         return {
             "convocation_id": convocation_id,
@@ -123,7 +134,7 @@ class ConvocationService:
         convocation_id: str,
         org_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run the degree eligibility audit for all students in the convocation batch.
 
@@ -150,12 +161,18 @@ class ConvocationService:
         batch_year = convocation["batch_year"]
 
         # Mark as AUDIT_RUNNING
-        execute_transaction([
-            (
-                "UPDATE convocation_events SET status = %s, updated_at = %s WHERE id = %s",
-                (ConvocationStatus.AUDIT_RUNNING, datetime.now(timezone.utc), convocation_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE convocation_events SET status = %s, updated_at = %s WHERE id = %s",
+                    (
+                        ConvocationStatus.AUDIT_RUNNING,
+                        datetime.now(timezone.utc),
+                        convocation_id,
+                    ),
+                )
+            ]
+        )
 
         # Policy thresholds (R1 — no hardcoded thresholds)
         distinction_threshold = float(
@@ -201,8 +218,9 @@ class ConvocationService:
                 ineligible_count += 1
 
             audit_id = str(uuid4())
-            audit_inserts.append((
-                """
+            audit_inserts.append(
+                (
+                    """
                 INSERT INTO convocation_degree_audits
                     (id, convocation_id, student_id, program_id,
                      cgpa, cgpa_without_grace, backlogs_pending,
@@ -221,21 +239,22 @@ class ConvocationService:
                         distinction_threshold_used = EXCLUDED.distinction_threshold_used,
                         audited_at = EXCLUDED.audited_at
                 """,
-                (
-                    audit_id,
-                    convocation_id,
-                    student["student_id"],
-                    student["program_id"],
-                    cgpa,
-                    cgpa_without_grace,
-                    backlogs_pending,
-                    eligible_for_degree,
-                    eligible_for_distinction,
-                    distinction_threshold,
-                    now,
-                    now,
-                ),
-            ))
+                    (
+                        audit_id,
+                        convocation_id,
+                        student["student_id"],
+                        student["program_id"],
+                        cgpa,
+                        cgpa_without_grace,
+                        backlogs_pending,
+                        eligible_for_degree,
+                        eligible_for_distinction,
+                        distinction_threshold,
+                        now,
+                        now,
+                    ),
+                )
+            )
 
         if audit_inserts:
             execute_transaction(audit_inserts)
@@ -243,30 +262,40 @@ class ConvocationService:
         total_audited = len(student_rows)
 
         # Mark AUDIT_COMPLETE
-        execute_transaction([
-            (
-                "UPDATE convocation_events SET status = %s, updated_at = %s WHERE id = %s",
-                (ConvocationStatus.AUDIT_COMPLETE, datetime.now(timezone.utc), convocation_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE convocation_events SET status = %s, updated_at = %s WHERE id = %s",
+                    (
+                        ConvocationStatus.AUDIT_COMPLETE,
+                        datetime.now(timezone.utc),
+                        convocation_id,
+                    ),
+                )
+            ]
+        )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="convocation.audit_complete",
-            org_id=org_id,
-            entity_type="convocation_event",
-            entity_id=convocation_id,
-            actor_id=actor_id,
-            payload={
-                "convocation_id": convocation_id,
-                "eligible_count": eligible_count,
-                "ineligible_count": ineligible_count,
-                "total_audited": total_audited,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="convocation.audit_complete",
+                org_id=org_id,
+                entity_type="convocation_event",
+                entity_id=convocation_id,
+                actor_id=actor_id,
+                payload={
+                    "convocation_id": convocation_id,
+                    "eligible_count": eligible_count,
+                    "ineligible_count": ineligible_count,
+                    "total_audited": total_audited,
+                },
+            )
+        )
 
         logger.info(
             "ConvocationService: audit complete for %s — %d eligible / %d ineligible",
-            convocation_id, eligible_count, ineligible_count,
+            convocation_id,
+            eligible_count,
+            ineligible_count,
         )
 
         return {
@@ -285,7 +314,7 @@ class ConvocationService:
         convocation_id: str,
         org_id: str,
         actor_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Compute gold medal winners per program.
 
@@ -343,8 +372,9 @@ class ConvocationService:
                 else float(winner["cgpa"] or 0)
             )
 
-            medal_inserts.append((
-                """
+            medal_inserts.append(
+                (
+                    """
                 INSERT INTO gold_medal_computations
                     (id, convocation_id, student_id, program_id,
                      cgpa_used, cgpa_without_grace, exclude_grace_applied,
@@ -357,44 +387,50 @@ class ConvocationService:
                         exclude_grace_applied = EXCLUDED.exclude_grace_applied,
                         computed_at = EXCLUDED.computed_at
                 """,
-                (
-                    medal_id,
-                    convocation_id,
-                    winner["student_id"],
-                    winner["program_id"],
-                    effective_cgpa,
-                    float(winner["cgpa_without_grace"] or 0),
-                    gold_medal_exclude_grace,
-                    now,
-                    now,
-                ),
-            ))
+                    (
+                        medal_id,
+                        convocation_id,
+                        winner["student_id"],
+                        winner["program_id"],
+                        effective_cgpa,
+                        float(winner["cgpa_without_grace"] or 0),
+                        gold_medal_exclude_grace,
+                        now,
+                        now,
+                    ),
+                )
+            )
 
-            audit_updates.append((
-                """
+            audit_updates.append(
+                (
+                    """
                 UPDATE convocation_degree_audits
                 SET eligible_for_gold_medal = TRUE
                 WHERE convocation_id = %s AND student_id = %s
                 """,
-                (convocation_id, winner["student_id"]),
-            ))
+                    (convocation_id, winner["student_id"]),
+                )
+            )
 
-            medal_records.append({
-                "medal_id": medal_id,
-                "convocation_id": convocation_id,
-                "student_id": winner["student_id"],
-                "program_id": winner["program_id"],
-                "cgpa_used": effective_cgpa,
-                "cgpa_without_grace": float(winner["cgpa_without_grace"] or 0),
-                "exclude_grace_applied": gold_medal_exclude_grace,
-                "computed_at": now.isoformat(),
-            })
+            medal_records.append(
+                {
+                    "medal_id": medal_id,
+                    "convocation_id": convocation_id,
+                    "student_id": winner["student_id"],
+                    "program_id": winner["program_id"],
+                    "cgpa_used": effective_cgpa,
+                    "cgpa_without_grace": float(winner["cgpa_without_grace"] or 0),
+                    "exclude_grace_applied": gold_medal_exclude_grace,
+                    "computed_at": now.isoformat(),
+                }
+            )
 
         execute_transaction(medal_inserts + audit_updates)
 
         logger.info(
             "ConvocationService: computed %d gold medals for convocation %s",
-            len(medal_records), convocation_id,
+            len(medal_records),
+            convocation_id,
         )
 
         return medal_records
@@ -408,7 +444,7 @@ class ConvocationService:
         convocation_id: str,
         org_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Generate sequential seat assignments for all eligible graduates.
 
@@ -457,16 +493,18 @@ class ConvocationService:
         seating_inserts = []
 
         # Delete any existing seating for idempotent re-generation
-        execute_transaction([
-            (
-                "DELETE FROM convocation_seating WHERE convocation_id = %s",
-                (convocation_id,),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM convocation_seating WHERE convocation_id = %s",
+                    (convocation_id,),
+                )
+            ]
+        )
 
         for idx, student in enumerate(eligible):
             overall_seat = idx + 1  # 1-based
-            row_index = (overall_seat - 1) // seats_per_row       # 0-based row
+            row_index = (overall_seat - 1) // seats_per_row  # 0-based row
             seat_in_row = ((overall_seat - 1) % seats_per_row) + 1  # 1-based within row
 
             # Row label: A–Z, then AA, AB … (simple alphabetic)
@@ -479,54 +517,67 @@ class ConvocationService:
 
             seat_number = f"{row_label}{seat_in_row:02d}"
             seat_id = str(uuid4())
-            program_code = student.get("program_code") or student["program_id"][:8].upper()
+            program_code = (
+                student.get("program_code") or student["program_id"][:8].upper()
+            )
 
-            seating_inserts.append((
-                """
+            seating_inserts.append(
+                (
+                    """
                 INSERT INTO convocation_seating
                     (id, convocation_id, student_id, program_id,
                      seat_number, program_code, overall_position,
                      assigned_at, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (
-                    seat_id,
-                    convocation_id,
-                    student["student_id"],
-                    student["program_id"],
-                    seat_number,
-                    program_code,
-                    overall_seat,
-                    now,
-                    now,
-                ),
-            ))
+                    (
+                        seat_id,
+                        convocation_id,
+                        student["student_id"],
+                        student["program_id"],
+                        seat_number,
+                        program_code,
+                        overall_seat,
+                        now,
+                        now,
+                    ),
+                )
+            )
 
         if seating_inserts:
             execute_transaction(seating_inserts)
 
-        execute_transaction([
-            (
-                "UPDATE convocation_events SET status = %s, updated_at = %s WHERE id = %s",
-                (ConvocationStatus.SEATING_GENERATED, datetime.now(timezone.utc), convocation_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE convocation_events SET status = %s, updated_at = %s WHERE id = %s",
+                    (
+                        ConvocationStatus.SEATING_GENERATED,
+                        datetime.now(timezone.utc),
+                        convocation_id,
+                    ),
+                )
+            ]
+        )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="convocation.seating_generated",
-            org_id=org_id,
-            entity_type="convocation_event",
-            entity_id=convocation_id,
-            actor_id=actor_id,
-            payload={
-                "convocation_id": convocation_id,
-                "seats_generated": len(seating_inserts),
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="convocation.seating_generated",
+                org_id=org_id,
+                entity_type="convocation_event",
+                entity_id=convocation_id,
+                actor_id=actor_id,
+                payload={
+                    "convocation_id": convocation_id,
+                    "seats_generated": len(seating_inserts),
+                },
+            )
+        )
 
         logger.info(
             "ConvocationService: seating generated — %d seats for convocation %s",
-            len(seating_inserts), convocation_id,
+            len(seating_inserts),
+            convocation_id,
         )
 
         return {
@@ -539,7 +590,7 @@ class ConvocationService:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def get_convocation(convocation_id: str, org_id: str) -> Dict[str, Any]:
+    def get_convocation(convocation_id: str, org_id: str) -> dict[str, Any]:
         """Fetch a convocation with audit summary stats and gold medal count."""
         rows = execute_query(
             "SELECT * FROM convocation_events WHERE id = %s AND org_id = %s",
@@ -579,7 +630,7 @@ class ConvocationService:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def list_convocations(org_id: str) -> List[Dict[str, Any]]:
+    def list_convocations(org_id: str) -> list[dict[str, Any]]:
         """List all convocation events for the organisation."""
         rows = execute_query(
             """

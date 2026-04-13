@@ -20,11 +20,12 @@ Hard Constraints:
     - Read-only. Never mutates state.
     - Gap report is a Draft — IQAC Coordinator reviews before submission.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -40,8 +41,8 @@ _HIGH_TIER_DEFAULT = 3 / 4
 
 def execute_compliance_auditor(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Compliance Auditor.
@@ -73,15 +74,15 @@ def execute_compliance_auditor(
             prompt_name="regulatory.compliance_audit",
             prompt_version=1,
             variables={
-                "framework":             input_data.get("framework", "NAAC"),
-                "avg_attendance_pct":    input_data.get("avg_attendance_pct", 0),
-                "pass_rate_pct":         input_data.get("pass_rate_pct", 0),
-                "phd_faculty_pct":       input_data.get("phd_faculty_pct", 0),
-                "research_papers_py":    input_data.get("research_papers_py", 0),
+                "framework": input_data.get("framework", "NAAC"),
+                "avg_attendance_pct": input_data.get("avg_attendance_pct", 0),
+                "pass_rate_pct": input_data.get("pass_rate_pct", 0),
+                "phd_faculty_pct": input_data.get("phd_faculty_pct", 0),
+                "research_papers_py": input_data.get("research_papers_py", 0),
                 "student_faculty_ratio": input_data.get("student_faculty_ratio", 0),
-                "infrastructure_score":  input_data.get("infrastructure_score", 0),
-                "placement_rate_pct":    input_data.get("placement_rate_pct", 0),
-                "accreditation_cycle":   input_data.get("accreditation_cycle", ""),
+                "infrastructure_score": input_data.get("infrastructure_score", 0),
+                "placement_rate_pct": input_data.get("placement_rate_pct", 0),
+                "accreditation_cycle": input_data.get("accreditation_cycle", ""),
             },
             validate_schema=True,
         )
@@ -90,7 +91,9 @@ def execute_compliance_auditor(
             vo = result.validated_output
             score = vo.confidence_score
             high_threshold = float(
-                PolicyStore.get(context.org_id or "", "ai.regulatory.compliance_critical_threshold")
+                PolicyStore.get(
+                    context.org_id or "", "ai.regulatory.compliance_critical_threshold"
+                )
                 or _HIGH_TIER_DEFAULT
             )
             if score >= high_threshold:
@@ -108,26 +111,31 @@ def execute_compliance_auditor(
 
             return AIInvocationResult(
                 success=True,
-                content=json.dumps({
-                    "overall_risk": risk,
-                    "risk_score": round(score, 3),
-                    "gap_summary": vo.reasoning or result.content or "",
-                    "criterion_gaps": [],
-                    "recommended_action": action,
-                }),
+                content=json.dumps(
+                    {
+                        "overall_risk": risk,
+                        "risk_score": round(score, 3),
+                        "gap_summary": vo.reasoning or result.content or "",
+                        "criterion_gaps": [],
+                        "recommended_action": action,
+                    }
+                ),
                 request_id=context.request_id,
                 model=model_override or result.model or "qwen2.5",
             )
 
         return AIInvocationResult(
             success=True,
-            content=result.content or json.dumps({
-                "overall_risk": "MINOR",
-                "risk_score": 0.0,
-                "gap_summary": "Insufficient institutional data for full audit.",
-                "criterion_gaps": [],
-                "recommended_action": "Provide complete metrics before re-running the compliance audit.",
-            }),
+            content=result.content
+            or json.dumps(
+                {
+                    "overall_risk": "MINOR",
+                    "risk_score": 0.0,
+                    "gap_summary": "Insufficient institutional data for full audit.",
+                    "criterion_gaps": [],
+                    "recommended_action": "Provide complete metrics before re-running the compliance audit.",
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "qwen2.5",
         )

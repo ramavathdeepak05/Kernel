@@ -14,12 +14,12 @@ The fallback guarantee ensures that upgrading an existing single-tenant ALIS
 deployment to S1 requires *zero* config changes — the system continues to use
 the existing `settings.db_url` for all queries.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +39,11 @@ class TenantRecord:
     tenant_id: str
     subdomain: str
     region: str = "in-central"
-    db_url: str = ""         # asyncpg postgresql+asyncpg:// DSN
-    db_url_sync: str = ""    # psycopg2 postgresql:// DSN
-    plan: str = "starter"    # starter | growth | enterprise
+    db_url: str = ""  # asyncpg postgresql+asyncpg:// DSN
+    db_url_sync: str = ""  # psycopg2 postgresql:// DSN
+    plan: str = "starter"  # starter | growth | enterprise
     feature_flags: dict = field(default_factory=dict)
-    status: str = "active"   # active | suspended | deleted
+    status: str = "active"  # active | suspended | deleted
 
 
 class TenantRegistry:
@@ -60,9 +60,10 @@ class TenantRegistry:
 
     @staticmethod
     def _get_redis():
-        """Reuse the same Redis factory as the security module."""
-        from server.core.security import _get_redis as _sec_get_redis
-        return _sec_get_redis()
+        """Reuse the same Redis factory as the perf module."""
+        from server.core.perf import _get_redis as _perf_get_redis
+
+        return _perf_get_redis()
 
     @staticmethod
     def _to_dict(r: TenantRecord) -> dict:
@@ -99,6 +100,7 @@ class TenantRegistry:
         preserving full backward compatibility with pre-SaaS deployments.
         """
         from server.core.settings import settings
+
         return TenantRecord(
             tenant_id=tenant_id,
             subdomain=tenant_id,
@@ -115,6 +117,7 @@ class TenantRegistry:
     def _cache_record(cls, record: TenantRecord) -> None:
         """Persist record + subdomain index to Redis. Fails silently — cache is advisory."""
         from server.core.settings import settings
+
         ttl = settings.tenant_db_cache_ttl_seconds
         try:
             r = cls._get_redis()
@@ -130,12 +133,14 @@ class TenantRegistry:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def _cp_fetch_by_id(cls, tenant_id: str) -> Optional[TenantRecord]:
+    async def _cp_fetch_by_id(cls, tenant_id: str) -> TenantRecord | None:
         from server.core.settings import settings
+
         if not settings.control_plane_url:
             return None
         try:
             import httpx
+
             url = f"{settings.control_plane_url}/internal/tenants/{tenant_id}/db-config"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(
@@ -146,16 +151,22 @@ class TenantRegistry:
                 resp.raise_for_status()
                 return cls._from_dict(resp.json())
         except Exception as exc:
-            logger.warning("TenantRegistry: control-plane fetch failed tenant=%s: %s", tenant_id, exc)
+            logger.warning(
+                "TenantRegistry: control-plane fetch failed tenant=%s: %s",
+                tenant_id,
+                exc,
+            )
             return None
 
     @classmethod
-    async def _cp_fetch_by_subdomain(cls, subdomain: str) -> Optional[TenantRecord]:
+    async def _cp_fetch_by_subdomain(cls, subdomain: str) -> TenantRecord | None:
         from server.core.settings import settings
+
         if not settings.control_plane_url:
             return None
         try:
             import httpx
+
             url = f"{settings.control_plane_url}/internal/tenants/by-subdomain/{subdomain}"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 resp = await client.get(
@@ -166,7 +177,11 @@ class TenantRegistry:
                 resp.raise_for_status()
                 return cls._from_dict(resp.json())
         except Exception as exc:
-            logger.warning("TenantRegistry: subdomain control-plane fetch failed sub=%s: %s", subdomain, exc)
+            logger.warning(
+                "TenantRegistry: subdomain control-plane fetch failed sub=%s: %s",
+                subdomain,
+                exc,
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -174,12 +189,14 @@ class TenantRegistry:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _cp_fetch_by_id_sync(cls, tenant_id: str) -> Optional[TenantRecord]:
+    def _cp_fetch_by_id_sync(cls, tenant_id: str) -> TenantRecord | None:
         from server.core.settings import settings
+
         if not settings.control_plane_url:
             return None
         try:
             import httpx
+
             url = f"{settings.control_plane_url}/internal/tenants/{tenant_id}/db-config"
             resp = httpx.get(
                 url,
@@ -191,7 +208,11 @@ class TenantRegistry:
             resp.raise_for_status()
             return cls._from_dict(resp.json())
         except Exception as exc:
-            logger.warning("TenantRegistry: sync control-plane fetch failed tenant=%s: %s", tenant_id, exc)
+            logger.warning(
+                "TenantRegistry: sync control-plane fetch failed tenant=%s: %s",
+                tenant_id,
+                exc,
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -227,7 +248,7 @@ class TenantRegistry:
         return record
 
     @classmethod
-    async def get_by_subdomain(cls, subdomain: str) -> Optional[TenantRecord]:
+    async def get_by_subdomain(cls, subdomain: str) -> TenantRecord | None:
         """
         Resolve tenant by subdomain slug.
 
@@ -283,7 +304,7 @@ class TenantRegistry:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def invalidate(cls, tenant_id: str, subdomain: Optional[str] = None) -> None:
+    async def invalidate(cls, tenant_id: str, subdomain: str | None = None) -> None:
         """
         Evict cached tenant record from Redis.
 

@@ -35,44 +35,42 @@ Acceptance Criteria (E00-S06):
 - [x] AI output validated against mandatory schema
 - [x] Forbidden STATE_IMPACT values rejected
 """
+
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, field
-from enum import Enum
-from uuid import uuid4
-from datetime import datetime, timezone
-import json
-import re
-import logging
 import hashlib
+import json
+import logging
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from enum import Enum
+from typing import Any
+from uuid import uuid4
 
-from pydantic import BaseModel, Field as PydanticField, field_validator
-
-from langchain_ollama import OllamaLLM
 from langchain_core.language_models.base import BaseLanguageModel
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_ollama import OllamaLLM
+from pydantic import BaseModel, field_validator
+from pydantic import Field as PydanticField
 
 # External LLM support (OpenAI-compatible: NVIDIA NIM, OpenAI, etc.)
 try:
     from langchain_openai import ChatOpenAI
+
     _OPENAI_AVAILABLE = True
 except ImportError:
     _OPENAI_AVAILABLE = False
 
-from .rbac import Role, Permission, verify_access, AccessResult
-from .audit import AuditLog, AuditAction
+from .audit import AuditAction, AuditLog
 from .config import ConfigRegistry
-from .model_registry import ModelRegistry
 from .exceptions import (
+    AISchemaViolationError,
+    GuardrailViolationError,
     PermissionDeniedError,
     PromptInjectionError,
-    AISchemaViolationError,
-    PromptNotFoundError,
-    PromptResolutionError,
-    GuardrailViolationError,
 )
-
+from .model_registry import ModelRegistry
+from .rbac import AccessResult, Permission, Role, verify_access
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +79,10 @@ logger = logging.getLogger(__name__)
 # E00-S06: AI RESPONSE SCHEMA (Mandatory Output Contract)
 # =============================================================================
 
+
 class ConfidenceTier(str, Enum):
     """Confidence tier classification per ALIS AI Governance Sec. 6."""
+
     HIGH = "HIGH"
     MEDIUM = "MEDIUM"
     LOW = "LOW"
@@ -95,6 +95,7 @@ class StateImpact(str, Enum):
     FORBIDDEN values (Final, Commit, Override) are intentionally absent.
     If the LLM outputs them, validation will reject immediately.
     """
+
     NONE = "None"
     DRAFT = "Draft"
     PROVISIONAL_ONLY = "ProvisionalOnly"
@@ -116,27 +117,22 @@ class AIResponseSchema(BaseModel):
 
     This model is used to parse and validate the raw LLM text output.
     """
+
     decision: str = PydanticField(
-        ...,
-        description="The AI's proposed decision or recommendation"
+        ..., description="The AI's proposed decision or recommendation"
     )
     confidence_score: float = PydanticField(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score between 0.0 and 1.0"
+        ..., ge=0.0, le=1.0, description="Confidence score between 0.0 and 1.0"
     )
     confidence_tier: ConfidenceTier = PydanticField(
-        ...,
-        description="Confidence tier: HIGH, MEDIUM, or LOW"
+        ..., description="Confidence tier: HIGH, MEDIUM, or LOW"
     )
     state_impact: str = PydanticField(
         default="Draft",
-        description="State impact declaration: None, Draft, or ProvisionalOnly"
+        description="State impact declaration: None, Draft, or ProvisionalOnly",
     )
-    reasoning: Optional[str] = PydanticField(
-        default=None,
-        description="Optional reasoning or justification"
+    reasoning: str | None = PydanticField(
+        default=None, description="Optional reasoning or justification"
     )
 
     @field_validator("state_impact")
@@ -161,6 +157,7 @@ class AIResponseSchema(BaseModel):
 # E00-S06: PROMPT INJECTION DETECTOR
 # =============================================================================
 
+
 class PromptInjectionDetector:
     """
     Deterministic heuristic-based prompt injection detector.
@@ -175,36 +172,39 @@ class PromptInjectionDetector:
     """
 
     # Known injection patterns (case-insensitive)
-    _INJECTION_PATTERNS: List[re.Pattern] = [
+    _INJECTION_PATTERNS: list[re.Pattern] = [
         # Direct instruction override
         re.compile(r"ignore\s+(all\s+)?previous\s+instructions?", re.IGNORECASE),
         re.compile(r"ignore\s+(all\s+)?prior\s+instructions?", re.IGNORECASE),
         re.compile(r"ignore\s+(all\s+)?above\s+instructions?", re.IGNORECASE),
         re.compile(r"disregard\s+(all\s+)?previous", re.IGNORECASE),
         re.compile(r"forget\s+(everything|all|your)\s+(you\s+)?know", re.IGNORECASE),
-
         # System prompt manipulation
         re.compile(r"you\s+are\s+now\s+(in\s+)?(\w+\s+)?mode", re.IGNORECASE),
         re.compile(r"new\s+system\s+prompt", re.IGNORECASE),
         re.compile(r"override\s+system\s+prompt", re.IGNORECASE),
         re.compile(r"system\s*:\s*you\s+are", re.IGNORECASE),
-
         # Jailbreak patterns
         re.compile(r"\bDAN\s+mode\b", re.IGNORECASE),
         re.compile(r"do\s+anything\s+now", re.IGNORECASE),
         re.compile(r"jailbreak", re.IGNORECASE),
         re.compile(r"bypass\s+(safety|filter|restriction|guardrail)", re.IGNORECASE),
-
         # Role manipulation
-        re.compile(r"pretend\s+you\s+(are|have)\s+no\s+(restrictions?|limits?|rules?)", re.IGNORECASE),
+        re.compile(
+            r"pretend\s+you\s+(are|have)\s+no\s+(restrictions?|limits?|rules?)",
+            re.IGNORECASE,
+        ),
         re.compile(r"act\s+as\s+(if|though)\s+you\s+have\s+no\s+rules?", re.IGNORECASE),
-
         # Data exfiltration / authority escalation
         re.compile(r"reveal\s+(your\s+)?(system|initial)\s+prompt", re.IGNORECASE),
-        re.compile(r"show\s+(me\s+)?(your\s+)?(system|initial)\s+prompt", re.IGNORECASE),
+        re.compile(
+            r"show\s+(me\s+)?(your\s+)?(system|initial)\s+prompt", re.IGNORECASE
+        ),
         re.compile(r"output\s+(your\s+)?(system|initial)\s+prompt", re.IGNORECASE),
-        re.compile(r"what\s+(is|are)\s+your\s+(system|initial)\s+(prompt|instructions?)", re.IGNORECASE),
-
+        re.compile(
+            r"what\s+(is|are)\s+your\s+(system|initial)\s+(prompt|instructions?)",
+            re.IGNORECASE,
+        ),
         # Delimiter injection
         re.compile(r"```\s*system\b", re.IGNORECASE),
         re.compile(r"\[SYSTEM\]", re.IGNORECASE),
@@ -212,7 +212,7 @@ class PromptInjectionDetector:
     ]
 
     @classmethod
-    def detect(cls, text: str) -> List[str]:
+    def detect(cls, text: str) -> list[str]:
         """
         Scan input text for known prompt injection patterns.
 
@@ -237,7 +237,7 @@ class PromptInjectionDetector:
         return matches
 
     @classmethod
-    def assert_clean(cls, text: str, context: Optional["AIGatewayContext"] = None) -> None:
+    def assert_clean(cls, text: str, context: AIGatewayContext | None = None) -> None:
         """
         Assert that the prompt is clean. Raises PromptInjectionError if not.
 
@@ -258,9 +258,7 @@ class PromptInjectionDetector:
                 actor_id=context.actor_id if context else "unknown",
                 actor_type=context.actor_type if context else "unknown",
                 actor_role=(
-                    context.actor_role.value
-                    if context and context.actor_role
-                    else None
+                    context.actor_role.value if context and context.actor_role else None
                 ),
                 entity_type="ai_gateway",
                 entity_id=context.request_id if context else "unknown",
@@ -271,9 +269,7 @@ class PromptInjectionDetector:
                 wizard=context.wizard if context else None,
                 metadata={
                     "injection_patterns": matches,
-                    "prompt_hash": hashlib.sha256(
-                        text.encode("utf-8")
-                    ).hexdigest(),
+                    "prompt_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 },
             )
 
@@ -290,6 +286,7 @@ class PromptInjectionDetector:
 # E00-S06: OUTPUT SCHEMA VALIDATOR
 # =============================================================================
 
+
 class AIOutputValidator:
     """
     Validates AI output against the mandatory AIResponseSchema.
@@ -304,7 +301,7 @@ class AIOutputValidator:
     def validate(
         cls,
         raw_output: str,
-        context: Optional["AIGatewayContext"] = None,
+        context: AIGatewayContext | None = None,
     ) -> AIResponseSchema:
         """
         Parse and validate raw LLM text output.
@@ -362,7 +359,9 @@ class AIOutputValidator:
             raise AISchemaViolationError(
                 message=f"AI output failed schema validation: {e}",
                 details={
-                    "parsed_keys": list(parsed.keys()) if isinstance(parsed, dict) else [],
+                    "parsed_keys": list(parsed.keys())
+                    if isinstance(parsed, dict)
+                    else [],
                     "error": str(e),
                 },
             )
@@ -370,7 +369,7 @@ class AIOutputValidator:
         return validated
 
     @staticmethod
-    def _extract_json(text: str) -> Optional[str]:
+    def _extract_json(text: str) -> str | None:
         """
         Extract a JSON object from LLM output.
 
@@ -428,7 +427,7 @@ class AIOutputValidator:
         cls,
         reason: str,
         raw_output: str,
-        context: Optional["AIGatewayContext"] = None,
+        context: AIGatewayContext | None = None,
     ) -> None:
         """Log a schema validation rejection to the audit ledger."""
         AuditLog.log(
@@ -436,9 +435,7 @@ class AIOutputValidator:
             actor_id=context.actor_id if context else "unknown",
             actor_type=context.actor_type if context else "unknown",
             actor_role=(
-                context.actor_role.value
-                if context and context.actor_role
-                else None
+                context.actor_role.value if context and context.actor_role else None
             ),
             entity_type="ai_gateway",
             entity_id=context.request_id if context else "unknown",
@@ -449,9 +446,7 @@ class AIOutputValidator:
             wizard=context.wizard if context else None,
             metadata={
                 "output_length": len(raw_output),
-                "output_hash": hashlib.sha256(
-                    raw_output.encode("utf-8")
-                ).hexdigest(),
+                "output_hash": hashlib.sha256(raw_output.encode("utf-8")).hexdigest(),
             },
         )
 
@@ -459,6 +454,7 @@ class AIOutputValidator:
 # =============================================================================
 # GATEWAY CONTEXT
 # =============================================================================
+
 
 @dataclass
 class AIGatewayContext:
@@ -470,42 +466,45 @@ class AIGatewayContext:
     - Audit logging
     - Tenant isolation
     """
+
     actor_id: str
     actor_type: str = "system"  # human, ai_agent, system
     actor_role: Role = Role.SYSTEM
 
     # Tenant/Organization context
-    org_id: Optional[str] = None
+    org_id: str | None = None
 
     # Module/Wizard context
-    module: Optional[str] = None  # M1, M2, etc.
-    wizard: Optional[str] = None
+    module: str | None = None  # M1, M2, etc.
+    wizard: str | None = None
 
     # Request tracing
     request_id: str = field(default_factory=lambda: str(uuid4()))
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
 
     # Additional metadata
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: dict[str, Any] | None = None
 
 
 # =============================================================================
 # GATEWAY INVOCATION RESULT
 # =============================================================================
 
+
 @dataclass
 class AIInvocationResult:
     """Result of an AI Gateway invocation."""
+
     success: bool
-    content: Optional[str] = None
-    error: Optional[str] = None
+    content: str | None = None
+    error: str | None = None
     request_id: str = ""
     model: str = ""
     latency_ms: float = 0.0
-    token_count: Optional[int] = None
+    token_count: int | None = None
 
     # E00-S06: Validated structured output (populated when validate_schema=True)
-    validated_output: Optional[AIResponseSchema] = None
+    validated_output: AIResponseSchema | None = None
 
     # E03-S08: Guardrail result (always populated on successful invocation)
     guardrail_violations: int = 0
@@ -518,6 +517,7 @@ class AIInvocationResult:
 # =============================================================================
 # INSTRUMENTED LLM WRAPPER
 # =============================================================================
+
 
 class InstrumentedLLM:
     """
@@ -535,10 +535,7 @@ class InstrumentedLLM:
     """
 
     def __init__(
-        self,
-        llm: BaseLanguageModel,
-        context: AIGatewayContext,
-        model_name: str
+        self, llm: BaseLanguageModel, context: AIGatewayContext, model_name: str
     ):
         self._llm = llm
         self._context = context
@@ -576,13 +573,14 @@ class InstrumentedLLM:
         # --- Step 0: Lockdown Check (E00-S05) ---
         # During lockdown ALL AI invocations are blocked regardless of role.
         from .lockdown import LockdownManager
+
         LockdownManager.assert_ai_allowed(actor_id=self._context.actor_id)
 
         # --- Step 1: RBAC Check ---
         access_result = verify_access(
             actor_role=self._context.actor_role,
             permission=Permission.AI_INVOKE,
-            context={"action": "invoke", "module": self._context.module}
+            context={"action": "invoke", "module": self._context.module},
         )
 
         if not access_result.allowed:
@@ -591,7 +589,9 @@ class InstrumentedLLM:
                 action=AuditAction.ACCESS_DENIED,
                 actor_id=self._context.actor_id,
                 actor_type=self._context.actor_type,
-                actor_role=self._context.actor_role.value if self._context.actor_role else None,
+                actor_role=self._context.actor_role.value
+                if self._context.actor_role
+                else None,
                 entity_type="ai_gateway",
                 entity_id=request_id,
                 success=False,
@@ -601,12 +601,12 @@ class InstrumentedLLM:
                 wizard=self._context.wizard,
                 metadata={
                     "permission": Permission.AI_INVOKE.value,
-                    "violations": access_result.context_violations
-                }
+                    "violations": access_result.context_violations,
+                },
             )
             raise PermissionDeniedError(
                 message=f"AI Gateway access denied: {access_result.reason}",
-                details={"violations": access_result.context_violations}
+                details={"violations": access_result.context_violations},
             )
 
         # --- Step 1.5: E00-S01 — AI Context Scrubbing ---
@@ -614,6 +614,7 @@ class InstrumentedLLM:
         _sensitive_fields_scrubbed = False
         if self._context.metadata:
             from .data_classification import DataMasker
+
             entity_type = self._context.metadata.get("entity_type", "")
             if entity_type:
                 self._context.metadata = DataMasker.mask_for_ai_context(
@@ -649,14 +650,14 @@ class InstrumentedLLM:
         guardrail_blocked = False
         if success and content:
             from .guardrails import AIGuardrails
+
             gr_result = AIGuardrails.check_output(
                 output=content,
                 input_context=input_text,
                 tenant_id=self._context.org_id or "default",
                 actor_id=self._context.actor_id,
                 actor_role=(
-                    self._context.actor_role.value
-                    if self._context.actor_role else None
+                    self._context.actor_role.value if self._context.actor_role else None
                 ),
                 module=self._context.module,
                 wizard=self._context.wizard,
@@ -698,8 +699,7 @@ class InstrumentedLLM:
                 actor_id=self._context.actor_id,
                 actor_type=self._context.actor_type,
                 actor_role=(
-                    self._context.actor_role.value
-                    if self._context.actor_role else None
+                    self._context.actor_role.value if self._context.actor_role else None
                 ),
                 entity_type="ai_gateway",
                 entity_id=request_id,
@@ -724,7 +724,7 @@ class InstrumentedLLM:
         # --- Step 4: Audit Log ---
         # Per AI Governance Sec. 10: log output_json and confidence_score
         # for replay capability. We log the sanitized parsed JSON, not raw text.
-        audit_metadata: Dict[str, Any] = {
+        audit_metadata: dict[str, Any] = {
             "model": self._model_name,
             "latency_ms": latency_ms,
             "prompt_length": len(input_text),
@@ -745,7 +745,9 @@ class InstrumentedLLM:
         AuditLog.log_deferred(
             action=AuditAction.AI_INVOCATION,
             actor_id=self._context.actor_id,
-            actor_role=self._context.actor_role.value if self._context.actor_role else None,
+            actor_role=self._context.actor_role.value
+            if self._context.actor_role
+            else None,
             entity_type="ai_gateway",
             entity_id=request_id,
             tenant_id=self._context.org_id,
@@ -769,7 +771,7 @@ class InstrumentedLLM:
         self,
         prompt_name: str,
         prompt_version: int,
-        variables: Dict[str, Any],
+        variables: dict[str, Any],
         validate_schema: bool = False,
         **kwargs,
     ) -> AIInvocationResult:
@@ -825,9 +827,7 @@ class InstrumentedLLM:
         )
 
         # --- Step 3: Compute input hash for replay verification ---
-        input_hash = hashlib.sha256(
-            rendered_prompt.encode("utf-8")
-        ).hexdigest()
+        input_hash = hashlib.sha256(rendered_prompt.encode("utf-8")).hexdigest()
 
         # --- Step 4: Invoke via existing invoke() method ---
         # This handles RBAC, lockdown, injection detection, schema
@@ -847,9 +847,7 @@ class InstrumentedLLM:
             actor_id=self._context.actor_id,
             actor_type=self._context.actor_type,
             actor_role=(
-                self._context.actor_role.value
-                if self._context.actor_role
-                else None
+                self._context.actor_role.value if self._context.actor_role else None
             ),
             entity_type="ai_invocation_contract",
             entity_id=result.request_id,
@@ -879,6 +877,7 @@ class InstrumentedLLM:
 # =============================================================================
 # AI GATEWAY SERVICE
 # =============================================================================
+
 
 class AIGateway:
     """
@@ -916,9 +915,9 @@ class AIGateway:
     def get_llm(
         cls,
         context: AIGatewayContext,
-        capability: Optional[str] = None,
-        model_name: Optional[str] = None,
-        temperature: float = 0.0
+        capability: str | None = None,
+        model_name: str | None = None,
+        temperature: float = 0.0,
     ) -> InstrumentedLLM:
         """
         Get an instrumented LLM instance for AI operations.
@@ -946,8 +945,7 @@ class AIGateway:
         """
         # Get base config
         base_url = ConfigRegistry.get(
-            ConfigRegistry.LLM_BASE_URL,
-            "http://localhost:11434"
+            ConfigRegistry.LLM_BASE_URL, "http://localhost:11434"
         )
 
         # --- E03-S02: Model Resolution ---
@@ -963,36 +961,30 @@ class AIGateway:
                 if resolved:
                     model = resolved.ollama_model_tag
                     # Use per-model temperature if configured
-                    temperature = resolved.config.get(
-                        "temperature", temperature
-                    )
+                    temperature = resolved.config.get("temperature", temperature)
                     logger.info(
                         f"E03-S02: Resolved model from registry — "
                         f"{resolved.ollama_model_tag} for {capability}"
                     )
             except Exception as e:
                 logger.warning(
-                    f"E03-S02: ModelRegistry lookup failed, "
-                    f"falling back to config: {e}"
+                    f"E03-S02: ModelRegistry lookup failed, falling back to config: {e}"
                 )
 
         if model is None:
             # Priority 3: Fallback to ConfigRegistry
-            model = ConfigRegistry.get(
-                ConfigRegistry.LLM_MODEL_NAME,
-                "llama3"
-            )
+            model = ConfigRegistry.get(ConfigRegistry.LLM_MODEL_NAME, "llama3")
 
         # --- Resource Limit Parameters (E03-S02) ---
         # Extracted from the resolved model's config JSONB.
         # Only known OllamaLLM resource params are forwarded — unknown
         # keys are ignored to avoid breaking the constructor.
         _RESOURCE_LIMIT_KEYS = {
-            "num_ctx",     # Context window size (tokens)
-            "num_gpu",     # Number of GPU layers to offload
+            "num_ctx",  # Context window size (tokens)
+            "num_gpu",  # Number of GPU layers to offload
             "num_thread",  # CPU threads for inference
             "keep_alive",  # Duration to keep model loaded (e.g. "5m")
-            "timeout",     # Request timeout (seconds)
+            "timeout",  # Request timeout (seconds)
         }
         resource_kwargs: dict = {}
         if capability and context.org_id:
@@ -1008,7 +1000,7 @@ class AIGateway:
                         for k, v in resolved_for_limits.config.items()
                         if k in _RESOURCE_LIMIT_KEYS
                     }
-            except Exception:
+            except Exception:  # noqa: S110
                 pass  # Non-fatal; gateway falls back to Ollama defaults
 
         # --- LLM Backend Selection ---
@@ -1021,6 +1013,7 @@ class AIGateway:
         # Priority 0: Per-tenant AI provider (client brought their own key)
         if context.org_id:
             from .ai_providers import resolve_llm_for_tenant
+
             tenant_llm = resolve_llm_for_tenant(
                 tenant_id=context.org_id,
                 capability=capability,
@@ -1034,6 +1027,7 @@ class AIGateway:
                 )
 
         from .settings import get_settings
+
         _settings = get_settings()
 
         if _settings.ai_service_url:
@@ -1042,15 +1036,22 @@ class AIGateway:
             logger.info(
                 "AI Gateway: routing via AI Service at %s", _settings.ai_service_url
             )
-            from .ai_service_provider import AIServiceLLM
             from server.core.llm_router import LLMTaskClass
+
+            from .ai_service_provider import AIServiceLLM
+
             # Determine task class from capability name (best-effort mapping)
             _task_class = "extraction"
             if capability:
                 _cap_lower = capability.lower()
-                if any(k in _cap_lower for k in ("draft", "generat", "summar", "compos")):
+                if any(
+                    k in _cap_lower for k in ("draft", "generat", "summar", "compos")
+                ):
                     _task_class = "generation"
-                elif any(k in _cap_lower for k in ("reason", "score", "eligib", "risk", "plan")):
+                elif any(
+                    k in _cap_lower
+                    for k in ("reason", "score", "eligib", "risk", "plan")
+                ):
                     _task_class = "reasoning"
             llm = AIServiceLLM(
                 ai_service_url=_settings.ai_service_url,
@@ -1078,14 +1079,22 @@ class AIGateway:
             # Local Ollama (default — pre-S3 single-tenant path)
             # Apply per-task-class timeout so slow models don't block fast tasks.
             from server.core.llm_router import LLMTaskClass, get_timeout_for_task
+
             _task_cls: LLMTaskClass = LLMTaskClass.EXTRACTION  # conservative default
             if capability:
                 _cap_lower = capability.lower()
-                if any(k in _cap_lower for k in ("draft", "generat", "summar", "compos")):
+                if any(
+                    k in _cap_lower for k in ("draft", "generat", "summar", "compos")
+                ):
                     _task_cls = LLMTaskClass.GENERATION
-                elif any(k in _cap_lower for k in ("reason", "score", "eligib", "risk", "plan")):
+                elif any(
+                    k in _cap_lower
+                    for k in ("reason", "score", "eligib", "risk", "plan")
+                ):
                     _task_cls = LLMTaskClass.REASONING
-            _task_timeout = resource_kwargs.pop("timeout", get_timeout_for_task(_task_cls))
+            _task_timeout = resource_kwargs.pop(
+                "timeout", get_timeout_for_task(_task_cls)
+            )
             llm = OllamaLLM(
                 base_url=base_url,
                 model=model,
@@ -1095,11 +1104,7 @@ class AIGateway:
             )
 
         # Wrap with instrumentation
-        return InstrumentedLLM(
-            llm=llm,
-            context=context,
-            model_name=model
-        )
+        return InstrumentedLLM(llm=llm, context=context, model_name=model)
 
     @classmethod
     def check_access(cls, context: AIGatewayContext) -> AccessResult:
@@ -1111,11 +1116,11 @@ class AIGateway:
         return verify_access(
             actor_role=context.actor_role,
             permission=Permission.AI_INVOKE,
-            context={"action": "invoke", "module": context.module}
+            context={"action": "invoke", "module": context.module},
         )
 
     @classmethod
-    def validate_no_cloud_imports(cls) -> List[str]:
+    def validate_no_cloud_imports(cls) -> list[str]:
         """
         Static validation helper to detect forbidden cloud LLM imports.
 
@@ -1123,6 +1128,7 @@ class AIGateway:
         This is intended for use in CI/CD pipelines.
         """
         import sys
+
         violations = []
         for forbidden in cls._FORBIDDEN_IMPORTS:
             if forbidden in sys.modules:

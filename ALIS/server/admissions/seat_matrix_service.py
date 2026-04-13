@@ -16,14 +16,13 @@ Rules
 The DB trigger `decrement_seat_counter()` handles real-time counter updates
 on enrollment confirmation.  This service handles business-level orchestration.
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Optional
 
 from pydantic import BaseModel, model_validator
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -38,6 +37,7 @@ VALID_QUOTAS = {"GENERAL", "MANAGEMENT", "NRI", "SPORTS"}
 # ---------------------------------------------------------------------------
 # Input / output models
 # ---------------------------------------------------------------------------
+
 
 class SeatMatrixConfig(BaseModel):
     program_id: str
@@ -60,8 +60,12 @@ class SeatMatrixConfig(BaseModel):
     @model_validator(mode="after")
     def validate_seat_sum(self):
         category_total = (
-            self.general_seats + self.sc_seats + self.st_seats
-            + self.obc_ncl_seats + self.ews_seats + self.pwd_seats
+            self.general_seats
+            + self.sc_seats
+            + self.st_seats
+            + self.obc_ncl_seats
+            + self.ews_seats
+            + self.pwd_seats
         )
         if category_total != self.total_intake:
             raise ValueError(
@@ -86,8 +90,8 @@ class CategoryConversionRequest(BaseModel):
 # Service
 # ---------------------------------------------------------------------------
 
-class SeatMatrixService:
 
+class SeatMatrixService:
     # ------------------------------------------------------------------
     # Create matrix
     # ------------------------------------------------------------------
@@ -102,7 +106,10 @@ class SeatMatrixService:
         """Create or replace the seat matrix for a program-year combination."""
         matrix_id = str(uuid.uuid4())
 
-        execute_transaction([("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO seat_matrix (
                 id, tenant_id, program_id, intake_year, total_intake,
                 available_seats, filled_seats,
@@ -132,13 +139,27 @@ class SeatMatrixService:
                 nri_quota        = EXCLUDED.nri_quota,
                 sports_quota     = EXCLUDED.sports_quota,
                 last_updated_at  = NOW()
-        """, (
-            matrix_id, org_id, config.program_id, config.intake_year, config.total_intake,
-            config.total_intake,
-            config.general_seats, config.sc_seats, config.st_seats,
-            config.obc_ncl_seats, config.ews_seats, config.pwd_seats,
-            config.management_quota, config.nri_quota, config.sports_quota,
-        ))])
+        """,
+                    (
+                        matrix_id,
+                        org_id,
+                        config.program_id,
+                        config.intake_year,
+                        config.total_intake,
+                        config.total_intake,
+                        config.general_seats,
+                        config.sc_seats,
+                        config.st_seats,
+                        config.obc_ncl_seats,
+                        config.ews_seats,
+                        config.pwd_seats,
+                        config.management_quota,
+                        config.nri_quota,
+                        config.sports_quota,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -163,7 +184,8 @@ class SeatMatrixService:
         intake_year: int,
     ) -> dict:
         """Return filled/total per category and waitlist depth per category."""
-        rows = execute_query("""
+        rows = execute_query(
+            """
             SELECT
                 sm.*,
                 -- Waitlist depths per category
@@ -201,7 +223,9 @@ class SeatMatrixService:
             WHERE sm.tenant_id = %s
               AND sm.program_id = %s
               AND sm.intake_year = %s
-        """, (org_id, program_id, intake_year))
+        """,
+            (org_id, program_id, intake_year),
+        )
 
         if not rows:
             raise NotFoundError(
@@ -238,15 +262,20 @@ class SeatMatrixService:
             "PWD": ("pwd_seats", None),  # PWD is cross-category; check total
         }
 
-        total_col, filled_col = col_map.get(category, ("general_seats", "filled_general"))
+        total_col, filled_col = col_map.get(
+            category, ("general_seats", "filled_general")
+        )
 
         if category == "PWD":
             # PWD seats are cross-cutting — compare pwd_seats vs overall filled
-            rows = execute_query("""
+            rows = execute_query(
+                """
                 SELECT pwd_seats, filled_seats
                 FROM seat_matrix
                 WHERE tenant_id = %s AND program_id = %s AND intake_year = %s
-            """, (org_id, program_id, intake_year))
+            """,
+                (org_id, program_id, intake_year),
+            )
             if not rows:
                 return False
             row = rows[0]
@@ -258,21 +287,29 @@ class SeatMatrixService:
                 "NRI": ("nri_quota", "filled_nri"),
                 "SPORTS": ("sports_quota", None),
             }
-            q_total_col, q_filled_col = quota_col_map.get(quota, ("management_quota", "filled_management"))
-            rows = execute_query(f"""
+            q_total_col, q_filled_col = quota_col_map.get(
+                quota, ("management_quota", "filled_management")
+            )
+            rows = execute_query(
+                f"""  # noqa: S608
                 SELECT {q_total_col} AS total, COALESCE({q_filled_col}, 0) AS filled
                 FROM seat_matrix
                 WHERE tenant_id = %s AND program_id = %s AND intake_year = %s
-            """, (org_id, program_id, intake_year))
+            """,
+                (org_id, program_id, intake_year),
+            )
             if not rows:
                 return False
             return int(rows[0]["total"]) > int(rows[0]["filled"])
 
-        rows = execute_query(f"""
+        rows = execute_query(
+            f"""  # noqa: S608
             SELECT {total_col} AS total, COALESCE({filled_col}, 0) AS filled
             FROM seat_matrix
             WHERE tenant_id = %s AND program_id = %s AND intake_year = %s
-        """, (org_id, program_id, intake_year))
+        """,
+            (org_id, program_id, intake_year),
+        )
 
         if not rows:
             return False
@@ -290,7 +327,7 @@ class SeatMatrixService:
         intake_year: int,
         released_category: str,
         released_quota: str = "GENERAL",
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Activate next waitlist candidate in the SAME category/quota bucket.
 
         Returns the activated candidate record, or None if waitlist is empty.
@@ -299,7 +336,8 @@ class SeatMatrixService:
         released_quota = released_quota.upper()
 
         # Find next in same category/quota — ordered by waitlist_rank
-        candidates = execute_query("""
+        candidates = execute_query(
+            """
             SELECT id, application_id, student_id, rank AS waitlist_rank
             FROM admission_waitlist
             WHERE org_id = %s
@@ -310,12 +348,17 @@ class SeatMatrixService:
               AND status = 'WAITING'
             ORDER BY rank ASC
             LIMIT 1
-        """, (org_id, program_id, intake_year, released_category, released_quota))
+        """,
+            (org_id, program_id, intake_year, released_category, released_quota),
+        )
 
         if not candidates:
             logger.info(
                 "Waitlist empty for %s/%s category=%s quota=%s",
-                program_id, intake_year, released_category, released_quota,
+                program_id,
+                intake_year,
+                released_category,
+                released_quota,
             )
             return None
 
@@ -324,29 +367,51 @@ class SeatMatrixService:
         application_id = str(candidate["application_id"])
 
         # Transition candidate to OFFER_ISSUED
-        execute_transaction([("""
+        execute_transaction(
+            [
+                (
+                    """
             UPDATE admission_waitlist
             SET status = 'OFFER_ISSUED', activated_at = NOW()
             WHERE id = %s
-        """, (waitlist_id,))])
+        """,
+                    (waitlist_id,),
+                )
+            ]
+        )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.waitlist_candidate_activated",
-            org_id=org_id,
-            payload={
-                "waitlist_id": waitlist_id,
-                "application_id": application_id,
-                "category": released_category,
-                "quota": released_quota,
-                "program_id": program_id,
-                "intake_year": intake_year,
-            },
-        ))
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="waitlist_candidate",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "activate_waitlist_candidate"},
+        )
+
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.waitlist_candidate_activated",
+                org_id=org_id,
+                payload={
+                    "waitlist_id": waitlist_id,
+                    "application_id": application_id,
+                    "category": released_category,
+                    "quota": released_quota,
+                    "program_id": program_id,
+                    "intake_year": intake_year,
+                },
+            )
+        )
 
         logger.info(
             "Waitlist candidate %s activated for %s/%s [%s/%s]",
-            application_id, program_id, intake_year,
-            released_category, released_quota,
+            application_id,
+            program_id,
+            intake_year,
+            released_category,
+            released_quota,
         )
         return dict(candidate)
 
@@ -392,7 +457,9 @@ class SeatMatrixService:
         }
 
         from_total_col, from_filled_col = from_col_map[from_category]
-        available = int(matrix.get(from_total_col, 0)) - int(matrix.get(from_filled_col or "filled_seats", 0))
+        available = int(matrix.get(from_total_col, 0)) - int(
+            matrix.get(from_filled_col or "filled_seats", 0)
+        )
 
         if available < seats_count:
             raise BusinessRuleViolation(
@@ -402,13 +469,20 @@ class SeatMatrixService:
         to_total_col = from_col_map[to_category][0]
 
         # Adjust seat counts (never modify filled counters)
-        execute_transaction([(f"""
+        execute_transaction(
+            [
+                (
+                    f"""  # noqa: S608
             UPDATE seat_matrix
             SET {from_total_col} = {from_total_col} - %s,
                 {to_total_col}   = {to_total_col}   + %s,
                 last_updated_at  = NOW()
             WHERE tenant_id = %s AND program_id = %s AND intake_year = %s
-        """, (seats_count, seats_count, org_id, program_id, intake_year))])
+        """,
+                    (seats_count, seats_count, org_id, program_id, intake_year),
+                )
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -424,18 +498,20 @@ class SeatMatrixService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.seat_category_converted",
-            org_id=org_id,
-            payload={
-                "program_id": program_id,
-                "intake_year": intake_year,
-                "from_category": from_category,
-                "to_category": to_category,
-                "seats_count": seats_count,
-                "actor_id": actor_id,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.seat_category_converted",
+                org_id=org_id,
+                payload={
+                    "program_id": program_id,
+                    "intake_year": intake_year,
+                    "from_category": from_category,
+                    "to_category": to_category,
+                    "seats_count": seats_count,
+                    "actor_id": actor_id,
+                },
+            )
+        )
 
         return await cls.get_matrix(org_id, program_id, intake_year)
 
@@ -446,7 +522,8 @@ class SeatMatrixService:
     @classmethod
     async def get_dashboard(cls, org_id: str) -> list:
         """All programs summary for pilot overview."""
-        return execute_query("""
+        return execute_query(
+            """
             SELECT
                 sm.program_id,
                 sm.intake_year,
@@ -468,4 +545,6 @@ class SeatMatrixService:
             FROM seat_matrix sm
             WHERE sm.tenant_id = %s
             ORDER BY sm.intake_year DESC, sm.program_id
-        """, (org_id,))
+        """,
+            (org_id,),
+        )

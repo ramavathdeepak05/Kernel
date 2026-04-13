@@ -17,15 +17,15 @@ this module handles institution-administered tests only.
 
 from __future__ import annotations
 
+import builtins
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.exceptions import BusinessRuleViolation
 from server.db_service import execute_query, execute_transaction
 
@@ -46,20 +46,22 @@ _VALID_TEST_TRANSITIONS = {
 # Pydantic Models
 # =============================================================================
 
+
 class AdmissionsTestCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=200)
     test_type: str = Field(
-        ..., description="WRITTEN | ONLINE_PROCTORED | INTERVIEW_PI | INTERVIEW_GD | PORTFOLIO_REVIEW | EXTERNAL_SCORE_ONLY"
+        ...,
+        description="WRITTEN | ONLINE_PROCTORED | INTERVIEW_PI | INTERVIEW_GD | PORTFOLIO_REVIEW | EXTERNAL_SCORE_ONLY",
     )
-    program_name: Optional[str] = None
+    program_name: str | None = None
     intake_batch: str = Field(..., min_length=2, max_length=50)
     mode: str = Field(default="OFFLINE", description="ONLINE | OFFLINE | HYBRID")
-    duration_minutes: Optional[int] = Field(default=None, ge=5, le=480)
-    total_marks: Optional[int] = Field(default=None, ge=1)
-    passing_marks: Optional[int] = Field(default=None, ge=0)
-    sections: List[Dict[str, Any]] = Field(default_factory=list)
-    instructions: Optional[str] = None
-    proctoring_tool: Optional[str] = None
+    duration_minutes: int | None = Field(default=None, ge=5, le=480)
+    total_marks: int | None = Field(default=None, ge=1)
+    passing_marks: int | None = Field(default=None, ge=0)
+    sections: list[dict[str, Any]] = Field(default_factory=list)
+    instructions: str | None = None
+    proctoring_tool: str | None = None
     external_test: bool = False
 
 
@@ -68,20 +70,20 @@ class AdmissionsTestRead(BaseModel):
     org_id: str
     name: str
     test_type: str
-    program_name: Optional[str] = None
+    program_name: str | None = None
     intake_batch: str
     mode: str
-    duration_minutes: Optional[int] = None
-    total_marks: Optional[int] = None
-    passing_marks: Optional[int] = None
-    sections: Optional[List[Any]] = None
-    instructions: Optional[str] = None
-    proctoring_tool: Optional[str] = None
+    duration_minutes: int | None = None
+    total_marks: int | None = None
+    passing_marks: int | None = None
+    sections: list[Any] | None = None
+    instructions: str | None = None
+    proctoring_tool: str | None = None
     external_test: bool = False
     status: str
     created_by: str
     created_at: datetime
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
 
 class TestSlotCreate(BaseModel):
@@ -90,8 +92,8 @@ class TestSlotCreate(BaseModel):
     start_time: str = Field(..., description="HH:MM")
     end_time: str = Field(..., description="HH:MM")
     capacity: int = Field(..., ge=1, le=1000)
-    venue: Optional[str] = None
-    online_link: Optional[str] = None
+    venue: str | None = None
+    online_link: str | None = None
 
 
 class TestSlotRead(BaseModel):
@@ -103,8 +105,8 @@ class TestSlotRead(BaseModel):
     end_time: Any  # time
     capacity: int
     booked_count: int
-    venue: Optional[str] = None
-    online_link: Optional[str] = None
+    venue: str | None = None
+    online_link: str | None = None
     status: str
     created_at: datetime
 
@@ -119,10 +121,10 @@ class TestRegistrationRead(BaseModel):
     id: str
     org_id: str
     test_id: str
-    slot_id: Optional[str] = None
+    slot_id: str | None = None
     applicant_id: str
-    admit_card_path: Optional[str] = None
-    admit_card_sent_at: Optional[datetime] = None
+    admit_card_path: str | None = None
+    admit_card_sent_at: datetime | None = None
     attendance_status: str
     registered_at: datetime
 
@@ -130,11 +132,11 @@ class TestRegistrationRead(BaseModel):
 class TestScoreCreate(BaseModel):
     test_id: str
     applicant_id: str
-    total_score: Optional[float] = None
-    section_scores: Dict[str, Any] = Field(default_factory=dict)
-    percentile: Optional[float] = Field(default=None, ge=0, le=100)
-    rank_in_test: Optional[int] = Field(default=None, ge=1)
-    remarks: Optional[str] = None
+    total_score: float | None = None
+    section_scores: dict[str, Any] = Field(default_factory=dict)
+    percentile: float | None = Field(default=None, ge=0, le=100)
+    rank_in_test: int | None = Field(default=None, ge=1)
+    remarks: str | None = None
 
 
 class TestScoreRead(BaseModel):
@@ -142,11 +144,11 @@ class TestScoreRead(BaseModel):
     org_id: str
     test_id: str
     applicant_id: str
-    total_score: Optional[float] = None
-    section_scores: Optional[Dict[str, Any]] = None
-    percentile: Optional[float] = None
-    rank_in_test: Optional[int] = None
-    remarks: Optional[str] = None
+    total_score: float | None = None
+    section_scores: dict[str, Any] | None = None
+    percentile: float | None = None
+    rank_in_test: int | None = None
+    remarks: str | None = None
     entered_by: str
     entered_at: datetime
 
@@ -155,8 +157,8 @@ class TestScoreRead(BaseModel):
 # ADMISSIONS TEST SERVICE
 # =============================================================================
 
-class AdmissionsTestService:
 
+class AdmissionsTestService:
     @classmethod
     def create(
         cls,
@@ -167,9 +169,10 @@ class AdmissionsTestService:
         test_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO admissions_tests (
                     id, org_id, name, test_type, program_name, intake_batch,
                     mode, duration_minutes, total_marks, passing_marks,
@@ -177,18 +180,29 @@ class AdmissionsTestService:
                     status, created_by, created_at, updated_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    test_id, org_id,
-                    request.name, request.test_type,
-                    request.program_name, request.intake_batch,
-                    request.mode,
-                    request.duration_minutes, request.total_marks, request.passing_marks,
-                    json.dumps(request.sections),
-                    request.instructions, request.proctoring_tool, request.external_test,
-                    "DRAFT", actor_id, now, now,
-                ),
-            )
-        ])
+                    (
+                        test_id,
+                        org_id,
+                        request.name,
+                        request.test_type,
+                        request.program_name,
+                        request.intake_batch,
+                        request.mode,
+                        request.duration_minutes,
+                        request.total_marks,
+                        request.passing_marks,
+                        json.dumps(request.sections),
+                        request.instructions,
+                        request.proctoring_tool,
+                        request.external_test,
+                        "DRAFT",
+                        actor_id,
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -210,17 +224,19 @@ class AdmissionsTestService:
             (test_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Admissions test '{test_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Admissions test '{test_id}' not found."
+            )
         return AdmissionsTestRead(**rows[0])
 
     @classmethod
     def list(
         cls,
         org_id: str,
-        intake_batch: Optional[str] = None,
-        program_name: Optional[str] = None,
-        status: Optional[str] = None,
-    ) -> List[AdmissionsTestRead]:
+        intake_batch: str | None = None,
+        program_name: str | None = None,
+        status: str | None = None,
+    ) -> builtins.list[AdmissionsTestRead]:
         conditions = ["org_id = %s"]
         params: list = [org_id]
         if intake_batch:
@@ -234,7 +250,7 @@ class AdmissionsTestService:
             params.append(status)
 
         rows = execute_query(
-            f"SELECT * FROM admissions_tests WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM admissions_tests WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY created_at DESC",
             tuple(params),
         )
@@ -253,7 +269,9 @@ class AdmissionsTestService:
             (test_id, org_id),
         )
         if not rows:
-            raise BusinessRuleViolation(message=f"Admissions test '{test_id}' not found.")
+            raise BusinessRuleViolation(
+                message=f"Admissions test '{test_id}' not found."
+            )
 
         current = rows[0]["status"]
         allowed = _VALID_TEST_TRANSITIONS.get(current, set())
@@ -264,13 +282,15 @@ class AdmissionsTestService:
             )
 
         now = datetime.now(timezone.utc)
-        execute_transaction([
-            (
-                "UPDATE admissions_tests SET status = %s, updated_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (new_status, now, test_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE admissions_tests SET status = %s, updated_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (new_status, now, test_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.STATE_TRANSITION,
@@ -290,8 +310,8 @@ class AdmissionsTestService:
 # TEST SLOT SERVICE
 # =============================================================================
 
-class TestSlotService:
 
+class TestSlotService:
     @classmethod
     def add_slot(
         cls,
@@ -309,29 +329,38 @@ class TestSlotService:
         if rows[0]["status"] not in ("DRAFT", "PUBLISHED"):
             raise BusinessRuleViolation(
                 message=f"Slots can only be added to DRAFT or PUBLISHED tests. "
-                        f"Current: {rows[0]['status']}"
+                f"Current: {rows[0]['status']}"
             )
 
         slot_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO test_slots (
                     id, org_id, test_id, slot_date, start_time, end_time,
                     capacity, booked_count, venue, online_link, status, created_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    slot_id, org_id, request.test_id,
-                    request.slot_date, request.start_time, request.end_time,
-                    request.capacity, 0,
-                    request.venue, request.online_link,
-                    "OPEN", now,
-                ),
-            )
-        ])
+                    (
+                        slot_id,
+                        org_id,
+                        request.test_id,
+                        request.slot_date,
+                        request.start_time,
+                        request.end_time,
+                        request.capacity,
+                        0,
+                        request.venue,
+                        request.online_link,
+                        "OPEN",
+                        now,
+                    ),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.CREATE,
             actor_id=actor_id,
@@ -356,7 +385,7 @@ class TestSlotService:
         return TestSlotRead(**rows[0])
 
     @classmethod
-    def list_for_test(cls, test_id: str, org_id: str) -> List[TestSlotRead]:
+    def list_for_test(cls, test_id: str, org_id: str) -> list[TestSlotRead]:
         rows = execute_query(
             "SELECT * FROM test_slots WHERE test_id = %s AND org_id = %s "
             "ORDER BY slot_date ASC, start_time ASC",
@@ -369,8 +398,8 @@ class TestSlotService:
 # TEST REGISTRATION SERVICE
 # =============================================================================
 
-class TestRegistrationService:
 
+class TestRegistrationService:
     @classmethod
     def register(
         cls,
@@ -416,28 +445,34 @@ class TestRegistrationService:
         reg_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO test_registrations (
                     id, org_id, test_id, slot_id, applicant_id,
                     attendance_status, registered_at
                 ) VALUES (%s,%s,%s,%s,%s,%s,%s)
                 """,
-                (
-                    reg_id, org_id,
-                    request.test_id, request.slot_id, request.applicant_id,
-                    "REGISTERED", now,
+                    (
+                        reg_id,
+                        org_id,
+                        request.test_id,
+                        request.slot_id,
+                        request.applicant_id,
+                        "REGISTERED",
+                        now,
+                    ),
                 ),
-            ),
-            # Atomic increment
-            (
-                "UPDATE test_slots SET booked_count = booked_count + 1, "
-                "status = CASE WHEN booked_count + 1 >= capacity THEN 'FULL' ELSE 'OPEN' END "
-                "WHERE id = %s AND org_id = %s",
-                (request.slot_id, org_id),
-            ),
-        ])
+                # Atomic increment
+                (
+                    "UPDATE test_slots SET booked_count = booked_count + 1, "
+                    "status = CASE WHEN booked_count + 1 >= capacity THEN 'FULL' ELSE 'OPEN' END "
+                    "WHERE id = %s AND org_id = %s",
+                    (request.slot_id, org_id),
+                ),
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -463,9 +498,7 @@ class TestRegistrationService:
         return TestRegistrationRead(**rows[0])
 
     @classmethod
-    def list_for_test(
-        cls, test_id: str, org_id: str
-    ) -> List[TestRegistrationRead]:
+    def list_for_test(cls, test_id: str, org_id: str) -> list[TestRegistrationRead]:
         rows = execute_query(
             "SELECT * FROM test_registrations WHERE test_id = %s AND org_id = %s "
             "ORDER BY registered_at ASC",
@@ -476,7 +509,7 @@ class TestRegistrationService:
     @classmethod
     def list_for_applicant(
         cls, applicant_id: str, org_id: str
-    ) -> List[TestRegistrationRead]:
+    ) -> list[TestRegistrationRead]:
         rows = execute_query(
             "SELECT * FROM test_registrations WHERE applicant_id = %s AND org_id = %s "
             "ORDER BY registered_at ASC",
@@ -499,13 +532,15 @@ class TestRegistrationService:
                 message=f"Invalid attendance status: {attendance_status}",
                 details={"valid": list(valid)},
             )
-        execute_transaction([
-            (
-                "UPDATE test_registrations SET attendance_status = %s "
-                "WHERE id = %s AND org_id = %s",
-                (attendance_status, reg_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE test_registrations SET attendance_status = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (attendance_status, reg_id, org_id),
+                )
+            ]
+        )
         AuditLog.log(
             action=AuditAction.UPDATE,
             actor_id=actor_id,
@@ -546,19 +581,19 @@ class TestRegistrationService:
             return cls.get(reg_id, org_id)
 
         # Build admit card path (placeholder — replace with PDF service in prod)
-        admit_card_path = (
-            f"admit_cards/{org_id}/{reg['test_id']}/{reg['applicant_id']}_admit_card.pdf"
-        )
+        admit_card_path = f"admit_cards/{org_id}/{reg['test_id']}/{reg['applicant_id']}_admit_card.pdf"
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "UPDATE test_registrations "
-                "SET admit_card_path = %s, admit_card_sent_at = %s "
-                "WHERE id = %s AND org_id = %s",
-                (admit_card_path, now, reg_id, org_id),
-            )
-        ])
+        execute_transaction(
+            [
+                (
+                    "UPDATE test_registrations "
+                    "SET admit_card_path = %s, admit_card_sent_at = %s "
+                    "WHERE id = %s AND org_id = %s",
+                    (admit_card_path, now, reg_id, org_id),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -578,8 +613,8 @@ class TestRegistrationService:
 # TEST SCORE SERVICE
 # =============================================================================
 
-class TestScoreService:
 
+class TestScoreService:
     @classmethod
     def enter_score(
         cls,
@@ -595,32 +630,37 @@ class TestScoreService:
         score_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                "DELETE FROM test_scores "
-                "WHERE test_id = %s AND applicant_id = %s AND org_id = %s",
-                (request.test_id, request.applicant_id, org_id),
-            ),
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    "DELETE FROM test_scores "
+                    "WHERE test_id = %s AND applicant_id = %s AND org_id = %s",
+                    (request.test_id, request.applicant_id, org_id),
+                ),
+                (
+                    """
                 INSERT INTO test_scores (
                     id, org_id, test_id, applicant_id,
                     total_score, section_scores, percentile, rank_in_test,
                     remarks, entered_by, entered_at
                 ) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s)
                 """,
-                (
-                    score_id, org_id,
-                    request.test_id, request.applicant_id,
-                    request.total_score,
-                    json.dumps(request.section_scores or {}),
-                    request.percentile,
-                    request.rank_in_test,
-                    request.remarks,
-                    actor_id, now,
+                    (
+                        score_id,
+                        org_id,
+                        request.test_id,
+                        request.applicant_id,
+                        request.total_score,
+                        json.dumps(request.section_scores or {}),
+                        request.percentile,
+                        request.rank_in_test,
+                        request.remarks,
+                        actor_id,
+                        now,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -655,7 +695,7 @@ class TestScoreService:
         return TestScoreRead(**rows[0])
 
     @classmethod
-    def list_for_test(cls, test_id: str, org_id: str) -> List[TestScoreRead]:
+    def list_for_test(cls, test_id: str, org_id: str) -> list[TestScoreRead]:
         rows = execute_query(
             "SELECT * FROM test_scores WHERE test_id = %s AND org_id = %s "
             "ORDER BY rank_in_test ASC NULLS LAST, total_score DESC NULLS LAST",

@@ -23,93 +23,132 @@ Endpoints:
     POST /api/v1/admissions/intake/score               — E04-S08: Intake quality score
     POST /api/v1/admissions/enroll                     — E04-S09: Enrollment handover
 """
+
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-
-from server.core.exceptions import ALISError
-from server.core.rbac import Permission, require_permission
-
+from server.admissions.application_form import (
+    AcademicQualificationRequest,
+    AddressRequest,
+    ApplicationFeeRequest,
+    ApplicationFormService,
+    DeclarationRequest,
+    EntranceScoreRequest,
+    PersonalDetailsRequest,
+    ProgramPreferencesRequest,
+)
+from server.admissions.confirmation import AdmissionConfirmationService
+from server.admissions.counsellor_allocation import CounsellorAllocationService
+from server.admissions.counsellor_service import CounsellorService
+from server.admissions.deduplication import LeadDeduplicationService
+from server.admissions.document_verification import DocumentVerificationService
+from server.admissions.eligibility_criteria import (
+    EligibilityCriteria,
+    EligibilityCriteriaService,
+)
+from server.admissions.eligibility_service import EligibilityService
+from server.admissions.enrollment_handover import EnrollmentHandoverService
+from server.admissions.enrollment_provisioning import (
+    EmailProvisionRequest,
+    EnrollmentInitiateRequest,
+    EnrollmentProvisioningService,
+    ERPSyncRequest,
+    LibraryProvisionRequest,
+    LMSProvisionRequest,
+)
+from server.admissions.entrance_test import (
+    AdmissionsTestCreate,
+    AdmissionsTestService,
+    TestRegistrationCreate,
+    TestRegistrationService,
+    TestScoreCreate,
+    TestScoreService,
+    TestSlotCreate,
+    TestSlotService,
+)
+from server.admissions.final_verification import (
+    DiscrepancyCreate,
+    DiscrepancyService,
+    FinalVerificationCreate,
+    FinalVerificationService,
+    VerificationItemCreate,
+)
+from server.admissions.intake_quality import IntakeQualityService
+from server.admissions.interview import (
+    InterviewPanelCreate,
+    InterviewPanelService,
+    InterviewScheduleCreate,
+    InterviewScheduleService,
+    InterviewScorecardCreate,
+    InterviewScorecardService,
+)
+from server.admissions.lead_service import (
+    ConsultantService,
+    LeadService,
+    ReferralCodeService,
+)
+from server.admissions.merit_list import (
+    MeritListGenerateRequest,
+    MeritListPolicyCreate,
+    MeritListPolicyService,
+    MeritListService,
+    SeatMatrixCreate,
+    SeatMatrixService,
+)
 from server.admissions.models import (
+    AdmissionConfirmRequest,
     ApplicantCreate,
-    CounsellorAssignRequest,
     ConsultantCreate,
+    CounsellorAssignRequest,
     DocumentUploadRequest,
     EnrollmentHandoverRequest,
     IntakeScoreRequest,
-    LeadCreate,
+    LeadActivityCreate,
     LeadConvertRequest,
+    LeadCreate,
     LeadMergeRequest,
     LeadUpdateRequest,
-    LeadActivityCreate,
-    OfferLetterGenerateRequest,
     OfferAcceptRequest,
     OfferDeclineRequest,
+    OfferLetterGenerateRequest,
     OfferRevokeRequest,
-    AdmissionConfirmRequest,
     ReferralCodeCreate,
 )
-from server.admissions.service import ApplicantService
-from server.admissions.merit_list import (
-    SeatMatrixService, SeatMatrixCreate,
-    MeritListPolicyService, MeritListPolicyCreate,
-    MeritListService, MeritListGenerateRequest,
-)
-from server.admissions.entrance_test import (
-    AdmissionsTestService, AdmissionsTestCreate,
-    TestSlotService, TestSlotCreate,
-    TestRegistrationService, TestRegistrationCreate,
-    TestScoreService, TestScoreCreate,
-)
-from server.admissions.interview import (
-    InterviewPanelService, InterviewPanelCreate,
-    InterviewScheduleService, InterviewScheduleCreate,
-    InterviewScorecardService, InterviewScorecardCreate,
-)
-from server.admissions.application_form import (
-    ApplicationFormService,
-    PersonalDetailsRequest,
-    AddressRequest,
-    AcademicQualificationRequest,
-    EntranceScoreRequest,
-    ProgramPreferencesRequest,
-    DeclarationRequest,
-    ApplicationFeeRequest,
-)
-from server.admissions.lead_service import LeadService, ConsultantService, ReferralCodeService
-from server.admissions.eligibility_criteria import EligibilityCriteriaService, EligibilityCriteria
-from server.admissions.deduplication import LeadDeduplicationService
-from server.admissions.eligibility_service import EligibilityService
-from server.admissions.document_verification import DocumentVerificationService
-from server.admissions.counsellor_allocation import CounsellorAllocationService
-from server.admissions.counsellor_service import CounsellorService
 from server.admissions.offer_letter import OfferLetterService
-from server.admissions.confirmation import AdmissionConfirmationService
-from server.admissions.intake_quality import IntakeQualityService
-from server.admissions.enrollment_handover import EnrollmentHandoverService
 from server.admissions.payment_v2 import (
-    DemandDraftService, DemandDraftCreate,
-    RefundRequestService, RefundRequestCreate,
+    DemandDraftCreate,
+    DemandDraftService,
+    RefundRequestCreate,
+    RefundRequestService,
 )
-from server.admissions.final_verification import (
-    FinalVerificationService, FinalVerificationCreate,
-    VerificationItemCreate,
-    DiscrepancyService, DiscrepancyCreate,
-)
-from server.admissions.enrollment_provisioning import (
-    EnrollmentProvisioningService,
-    EnrollmentInitiateRequest,
-    LMSProvisionRequest,
-    EmailProvisionRequest,
-    LibraryProvisionRequest,
-    ERPSyncRequest,
-)
+from server.admissions.service import ApplicantService
+from server.core.rbac import Permission, require_permission
 
 logger = logging.getLogger(__name__)
+
+
+def _jsonify(rows):
+    """Convert query rows to JSON-serializable dicts."""
+    from datetime import date, datetime
+    from decimal import Decimal
+    from uuid import UUID
+
+    result = []
+    for row in rows:
+        d = dict(row) if hasattr(row, "keys") else row
+        for k, v in d.items():
+            if isinstance(v, (datetime, date)):
+                d[k] = v.isoformat()
+            elif isinstance(v, Decimal):
+                d[k] = float(v)
+            elif isinstance(v, UUID):
+                d[k] = str(v)
+        result.append(d)
+    return result
+
 
 router = APIRouter(prefix="/api/v1/admissions", tags=["admissions"])
 
@@ -123,13 +162,14 @@ def _actor(request: Request) -> str:
     return getattr(request.state, "user_id", "anonymous")
 
 
-def _role(request: Request) -> Optional[str]:
+def _role(request: Request) -> str | None:
     return getattr(request.state, "user_role", None)
 
 
 # =============================================================================
 # E04-S01: APPLICANT WIZARD
 # =============================================================================
+
 
 @router.post("/applicants")
 @require_permission(Permission.STUDENT_CREATE)
@@ -154,7 +194,7 @@ async def get_applicant(request: Request, applicant_id: str) -> JSONResponse:
 @require_permission(Permission.STUDENT_READ)
 async def list_applicants(
     request: Request,
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ) -> JSONResponse:
@@ -170,6 +210,7 @@ async def list_applicants(
 # =============================================================================
 # E04-S02: LEAD DE-DUPLICATION WIZARD
 # =============================================================================
+
 
 @router.post("/leads/merge")
 @require_permission(Permission.STUDENT_CREATE)
@@ -203,6 +244,7 @@ async def find_duplicates(
 # E04-S03: ELIGIBILITY EVALUATION WIZARD
 # =============================================================================
 
+
 @router.post("/eligibility/evaluate")
 @require_permission(Permission.AI_INVOKE)
 async def evaluate_eligibility(request: Request, body: dict) -> JSONResponse:
@@ -217,8 +259,7 @@ async def evaluate_eligibility(request: Request, body: dict) -> JSONResponse:
     applicant_id = body.get("applicant_id")
     marksheet_text = body.get("marksheet_text", "")
     admission_criteria = body.get(
-        "admission_criteria",
-        "Minimum 50% aggregate in qualifying examination"
+        "admission_criteria", "Minimum 50% aggregate in qualifying examination"
     )
 
     if not applicant_id:
@@ -241,6 +282,7 @@ async def evaluate_eligibility(request: Request, body: dict) -> JSONResponse:
 # =============================================================================
 # E04-S04: DOCUMENT VERIFICATION WIZARD
 # =============================================================================
+
 
 @router.post("/documents/upload")
 @require_permission(Permission.STUDENT_CREATE)
@@ -289,6 +331,7 @@ async def list_documents(request: Request, applicant_id: str) -> JSONResponse:
 # P5: DOCUMENT REVIEW WORKFLOW (Stage 3 — additional endpoints)
 # =============================================================================
 
+
 @router.post("/documents/{doc_id}/review/start")
 @require_permission(Permission.STUDENT_CREATE)
 async def submit_document_for_review(request: Request, doc_id: str) -> JSONResponse:
@@ -334,12 +377,15 @@ async def reject_document(request: Request, doc_id: str, body: dict) -> JSONResp
 async def reupload_document(request: Request, doc_id: str, body: dict) -> JSONResponse:
     """Re-upload a rejected document (resets to PENDING, increments reupload_count)."""
     import base64
+
     file_content_b64 = body.get("file_content_base64", "")
     file_name = body.get("file_name", "document")
     try:
         file_bytes = base64.b64decode(file_content_b64)
     except Exception:
-        return JSONResponse(status_code=422, content={"detail": "Invalid base64 file content"})
+        return JSONResponse(
+            status_code=422, content={"detail": "Invalid base64 file content"}
+        )
 
     doc = DocumentVerificationService.reupload_document(
         doc_id=doc_id,
@@ -355,7 +401,8 @@ async def reupload_document(request: Request, doc_id: str, body: dict) -> JSONRe
 # P0-S10: COUNSELLOR MANAGEMENT (CRUD + embedding ETL trigger)
 # =============================================================================
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field  # noqa: E402
+
 
 class CounsellorCreateRequest(BaseModel):
     name: str
@@ -363,17 +410,20 @@ class CounsellorCreateRequest(BaseModel):
     specializations: list[str] = []
     programs: list[str] = []
     bio: str = ""
-    phone: Optional[str] = None
+    phone: str | None = None
+
 
 class CounsellorUpdateRequest(BaseModel):
-    specializations: Optional[list[str]] = None
-    programs: Optional[list[str]] = None
-    bio: Optional[str] = None
+    specializations: list[str] | None = None
+    programs: list[str] | None = None
+    bio: str | None = None
 
 
 @router.post("/counsellors", status_code=201)
 @require_permission(Permission.STUDENT_CREATE)
-async def create_counsellor(request: Request, body: CounsellorCreateRequest) -> JSONResponse:
+async def create_counsellor(
+    request: Request, body: CounsellorCreateRequest
+) -> JSONResponse:
     """Register a counsellor account and index their profile into PGVector."""
     result = CounsellorService.create(
         org_id=_org(request),
@@ -425,6 +475,7 @@ async def update_counsellor(
 # E04-S05: COUNSELLOR ALLOCATION WIZARD
 # =============================================================================
 
+
 @router.post("/counsellors/assign")
 @require_permission(Permission.STUDENT_CREATE)
 async def assign_counsellor(
@@ -443,6 +494,7 @@ async def assign_counsellor(
 # =============================================================================
 # P9: OFFER LETTER v2 (Stage 7)
 # =============================================================================
+
 
 @router.post("/offers/generate")
 @require_permission(Permission.STUDENT_CREATE)
@@ -553,7 +605,9 @@ async def mark_offer_reminder(
         reminder_type=reminder_type,
         actor_id=_actor(request),
     )
-    return JSONResponse(content={"letter_id": letter_id, "reminder_type": reminder_type})
+    return JSONResponse(
+        content={"letter_id": letter_id, "reminder_type": reminder_type}
+    )
 
 
 @router.post("/offers/expire-overdue")
@@ -570,6 +624,7 @@ async def expire_overdue_offers(request: Request) -> JSONResponse:
 # =============================================================================
 # E04-S07: ADMISSION CONFIRMATION WIZARD
 # =============================================================================
+
 
 @router.post("/confirm")
 @require_permission(Permission.STUDENT_CREATE)
@@ -589,6 +644,7 @@ async def confirm_admission(
 # E04-S08: INTAKE QUALITY SCORING WIZARD
 # =============================================================================
 
+
 @router.post("/intake/score")
 @require_permission(Permission.STUDENT_READ)
 async def score_intake(request: Request, body: IntakeScoreRequest) -> JSONResponse:
@@ -604,6 +660,7 @@ async def score_intake(request: Request, body: IntakeScoreRequest) -> JSONRespon
 # =============================================================================
 # E04-S09: ENROLLMENT HANDOVER WIZARD
 # =============================================================================
+
 
 @router.post("/enroll")
 @require_permission(Permission.STUDENT_CREATE)
@@ -622,6 +679,7 @@ async def enroll_student(
 # =============================================================================
 # P4: APPLICATION FORM WIZARD (Stage 2)
 # =============================================================================
+
 
 @router.post("/applications/{applicant_id}/start")
 @require_permission(Permission.STUDENT_CREATE)
@@ -694,7 +752,9 @@ async def list_academic_qualifications(
     request: Request, applicant_id: str
 ) -> JSONResponse:
     """Get all academic qualifications for an applicant."""
-    quals = ApplicationFormService.list_academic_qualifications(applicant_id, _org(request))
+    quals = ApplicationFormService.list_academic_qualifications(
+        applicant_id, _org(request)
+    )
     return JSONResponse(
         status_code=200,
         content={"qualifications": [q.model_dump(mode="json") for q in quals]},
@@ -718,9 +778,7 @@ async def add_entrance_score(
 
 @router.get("/applications/{applicant_id}/entrance-scores")
 @require_permission(Permission.STUDENT_READ)
-async def list_entrance_scores(
-    request: Request, applicant_id: str
-) -> JSONResponse:
+async def list_entrance_scores(request: Request, applicant_id: str) -> JSONResponse:
     scores = ApplicationFormService.list_entrance_scores(applicant_id, _org(request))
     return JSONResponse(
         status_code=200,
@@ -728,7 +786,11 @@ async def list_entrance_scores(
     )
 
 
-@router.delete("/applications/{applicant_id}/entrance-scores/{score_id}", status_code=204, response_model=None)
+@router.delete(
+    "/applications/{applicant_id}/entrance-scores/{score_id}",
+    status_code=204,
+    response_model=None,
+)
 @require_permission(Permission.STUDENT_CREATE)
 async def delete_entrance_score(
     request: Request, applicant_id: str, score_id: str
@@ -758,9 +820,7 @@ async def set_program_preferences(
 
 @router.get("/applications/{applicant_id}/preferences")
 @require_permission(Permission.STUDENT_READ)
-async def get_program_preferences(
-    request: Request, applicant_id: str
-) -> JSONResponse:
+async def get_program_preferences(request: Request, applicant_id: str) -> JSONResponse:
     prefs = ApplicationFormService.get_program_preferences(applicant_id, _org(request))
     return JSONResponse(status_code=200, content={"preferences": prefs})
 
@@ -811,11 +871,14 @@ async def record_application_fee(
 # P8: SEAT MATRIX + MERIT LIST ENGINE (Stage 6)
 # =============================================================================
 
+
 @router.post("/seats")
 @require_permission(Permission.OVERRIDE_APPROVE)
 async def create_seat_matrix(request: Request, body: SeatMatrixCreate) -> JSONResponse:
     """Define seat counts for a program/batch/category combination."""
-    seat = SeatMatrixService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    seat = SeatMatrixService.create(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=seat.model_dump(mode="json"))
 
 
@@ -823,35 +886,47 @@ async def create_seat_matrix(request: Request, body: SeatMatrixCreate) -> JSONRe
 @require_permission(Permission.STUDENT_READ)
 async def list_seat_matrix(
     request: Request,
-    program_name: Optional[str] = Query(default=None),
-    intake_batch: Optional[str] = Query(default=None),
+    program_name: str | None = Query(default=None),
+    intake_batch: str | None = Query(default=None),
 ) -> JSONResponse:
     seats = SeatMatrixService.list(
         org_id=_org(request), program_name=program_name, intake_batch=intake_batch
     )
-    return JSONResponse(status_code=200, content={"seats": [s.model_dump(mode="json") for s in seats]})
+    return JSONResponse(
+        status_code=200, content={"seats": [s.model_dump(mode="json") for s in seats]}
+    )
 
 
 @router.post("/merit-policies")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def create_merit_policy(request: Request, body: MeritListPolicyCreate) -> JSONResponse:
+async def create_merit_policy(
+    request: Request, body: MeritListPolicyCreate
+) -> JSONResponse:
     """Create or update the merit scoring formula for a program/batch."""
-    policy = MeritListPolicyService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    policy = MeritListPolicyService.create(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=policy.model_dump(mode="json"))
 
 
 @router.get("/merit-policies/{program_name}/{intake_batch}")
 @require_permission(Permission.STUDENT_READ)
-async def get_merit_policy(request: Request, program_name: str, intake_batch: str) -> JSONResponse:
+async def get_merit_policy(
+    request: Request, program_name: str, intake_batch: str
+) -> JSONResponse:
     policy = MeritListPolicyService.get(_org(request), program_name, intake_batch)
     return JSONResponse(status_code=200, content=policy.model_dump(mode="json"))
 
 
 @router.post("/merit-lists/generate")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def generate_merit_list(request: Request, body: MeritListGenerateRequest) -> JSONResponse:
+async def generate_merit_list(
+    request: Request, body: MeritListGenerateRequest
+) -> JSONResponse:
     """Generate a ranked merit list for a program/batch/category."""
-    result = MeritListService.generate(request=body, org_id=_org(request), actor_id=_actor(request))
+    result = MeritListService.generate(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=result)
 
 
@@ -866,23 +941,33 @@ async def get_merit_list(request: Request, merit_list_id: str) -> JSONResponse:
 @require_permission(Permission.STUDENT_READ)
 async def list_merit_entries(request: Request, merit_list_id: str) -> JSONResponse:
     entries = MeritListService.list_entries(merit_list_id, _org(request))
-    return JSONResponse(status_code=200, content={"entries": [e.model_dump(mode="json") for e in entries]})
+    return JSONResponse(
+        status_code=200,
+        content={"entries": [e.model_dump(mode="json") for e in entries]},
+    )
 
 
 @router.get("/merit-lists/{merit_list_id}/waitlist")
 @require_permission(Permission.STUDENT_READ)
 async def list_waitlist(request: Request, merit_list_id: str) -> JSONResponse:
     waitlist = MeritListService.list_waitlist(merit_list_id, _org(request))
-    return JSONResponse(status_code=200, content={"waitlist": [w.model_dump(mode="json") for w in waitlist]})
+    return JSONResponse(
+        status_code=200,
+        content={"waitlist": [w.model_dump(mode="json") for w in waitlist]},
+    )
 
 
 @router.patch("/merit-lists/{merit_list_id}/status")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def update_merit_list_status(request: Request, merit_list_id: str, body: dict) -> JSONResponse:
+async def update_merit_list_status(
+    request: Request, merit_list_id: str, body: dict
+) -> JSONResponse:
     """Advance merit list: DRAFT → UNDER_REVIEW → APPROVED → PUBLISHED."""
     ml = MeritListService.update_status(
-        merit_list_id=merit_list_id, org_id=_org(request),
-        new_status=body.get("status", ""), actor_id=_actor(request),
+        merit_list_id=merit_list_id,
+        org_id=_org(request),
+        new_status=body.get("status", ""),
+        actor_id=_actor(request),
     )
     return JSONResponse(status_code=200, content=ml.model_dump(mode="json"))
 
@@ -906,12 +991,15 @@ async def activate_waitlist_entry(
 # P7: ENTRANCE TESTS (Stage 5A)
 # =============================================================================
 
+
 @router.post("/tests")
 @require_permission(Permission.STUDENT_CREATE)
 async def create_admissions_test(
     request: Request, body: AdmissionsTestCreate
 ) -> JSONResponse:
-    test = AdmissionsTestService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+    test = AdmissionsTestService.create(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=test.model_dump(mode="json"))
 
 
@@ -919,38 +1007,55 @@ async def create_admissions_test(
 @require_permission(Permission.STUDENT_READ)
 async def list_admissions_tests(
     request: Request,
-    intake_batch: Optional[str] = Query(default=None),
-    program_name: Optional[str] = Query(default=None),
-    status: Optional[str] = Query(default=None),
+    intake_batch: str | None = Query(default=None),
+    program_name: str | None = Query(default=None),
+    status: str | None = Query(default=None),
 ) -> JSONResponse:
     tests = AdmissionsTestService.list(
-        org_id=_org(request), intake_batch=intake_batch,
-        program_name=program_name, status=status,
+        org_id=_org(request),
+        intake_batch=intake_batch,
+        program_name=program_name,
+        status=status,
     )
-    return JSONResponse(status_code=200, content={"tests": [t.model_dump(mode="json") for t in tests]})
+    return JSONResponse(
+        status_code=200, content={"tests": [t.model_dump(mode="json") for t in tests]}
+    )
 
 
 @router.get("/tests/{test_id}")
 @require_permission(Permission.STUDENT_READ)
 async def get_admissions_test(request: Request, test_id: str) -> JSONResponse:
-    return JSONResponse(status_code=200, content=AdmissionsTestService.get(test_id, _org(request)).model_dump(mode="json"))
+    return JSONResponse(
+        status_code=200,
+        content=AdmissionsTestService.get(test_id, _org(request)).model_dump(
+            mode="json"
+        ),
+    )
 
 
 @router.patch("/tests/{test_id}/status")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def update_test_status(request: Request, test_id: str, body: dict) -> JSONResponse:
+async def update_test_status(
+    request: Request, test_id: str, body: dict
+) -> JSONResponse:
     test = AdmissionsTestService.update_status(
-        test_id=test_id, org_id=_org(request),
-        new_status=body.get("status", ""), actor_id=_actor(request),
+        test_id=test_id,
+        org_id=_org(request),
+        new_status=body.get("status", ""),
+        actor_id=_actor(request),
     )
     return JSONResponse(status_code=200, content=test.model_dump(mode="json"))
 
 
 @router.post("/tests/{test_id}/slots")
 @require_permission(Permission.STUDENT_CREATE)
-async def add_test_slot(request: Request, test_id: str, body: TestSlotCreate) -> JSONResponse:
+async def add_test_slot(
+    request: Request, test_id: str, body: TestSlotCreate
+) -> JSONResponse:
     body.test_id = test_id
-    slot = TestSlotService.add_slot(request=body, org_id=_org(request), actor_id=_actor(request))
+    slot = TestSlotService.add_slot(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=slot.model_dump(mode="json"))
 
 
@@ -958,13 +1063,19 @@ async def add_test_slot(request: Request, test_id: str, body: TestSlotCreate) ->
 @require_permission(Permission.STUDENT_READ)
 async def list_test_slots(request: Request, test_id: str) -> JSONResponse:
     slots = TestSlotService.list_for_test(test_id, _org(request))
-    return JSONResponse(status_code=200, content={"slots": [s.model_dump(mode="json") for s in slots]})
+    return JSONResponse(
+        status_code=200, content={"slots": [s.model_dump(mode="json") for s in slots]}
+    )
 
 
 @router.post("/tests/registrations")
 @require_permission(Permission.STUDENT_CREATE)
-async def register_for_test(request: Request, body: TestRegistrationCreate) -> JSONResponse:
-    reg = TestRegistrationService.register(request=body, org_id=_org(request), actor_id=_actor(request))
+async def register_for_test(
+    request: Request, body: TestRegistrationCreate
+) -> JSONResponse:
+    reg = TestRegistrationService.register(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=reg.model_dump(mode="json"))
 
 
@@ -972,19 +1083,26 @@ async def register_for_test(request: Request, body: TestRegistrationCreate) -> J
 @require_permission(Permission.STUDENT_READ)
 async def list_test_registrations(request: Request, test_id: str) -> JSONResponse:
     regs = TestRegistrationService.list_for_test(test_id, _org(request))
-    return JSONResponse(status_code=200, content={"registrations": [r.model_dump(mode="json") for r in regs]})
+    return JSONResponse(
+        status_code=200,
+        content={"registrations": [r.model_dump(mode="json") for r in regs]},
+    )
 
 
 @router.post("/tests/registrations/{reg_id}/admit-card")
 @require_permission(Permission.STUDENT_CREATE)
 async def generate_admit_card(request: Request, reg_id: str) -> JSONResponse:
-    reg = TestRegistrationService.generate_admit_card(reg_id, _org(request), _actor(request))
+    reg = TestRegistrationService.generate_admit_card(
+        reg_id, _org(request), _actor(request)
+    )
     return JSONResponse(status_code=200, content=reg.model_dump(mode="json"))
 
 
 @router.patch("/tests/registrations/{reg_id}/attendance")
 @require_permission(Permission.STUDENT_CREATE)
-async def record_test_attendance(request: Request, reg_id: str, body: dict) -> JSONResponse:
+async def record_test_attendance(
+    request: Request, reg_id: str, body: dict
+) -> JSONResponse:
     reg = TestRegistrationService.record_attendance(
         reg_id, _org(request), body.get("attendance_status", ""), _actor(request)
     )
@@ -994,7 +1112,9 @@ async def record_test_attendance(request: Request, reg_id: str, body: dict) -> J
 @router.post("/tests/scores")
 @require_permission(Permission.STUDENT_CREATE)
 async def enter_test_score(request: Request, body: TestScoreCreate) -> JSONResponse:
-    score = TestScoreService.enter_score(request=body, org_id=_org(request), actor_id=_actor(request))
+    score = TestScoreService.enter_score(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=score.model_dump(mode="json"))
 
 
@@ -1002,17 +1122,24 @@ async def enter_test_score(request: Request, body: TestScoreCreate) -> JSONRespo
 @require_permission(Permission.STUDENT_READ)
 async def list_test_scores(request: Request, test_id: str) -> JSONResponse:
     scores = TestScoreService.list_for_test(test_id, _org(request))
-    return JSONResponse(status_code=200, content={"scores": [s.model_dump(mode="json") for s in scores]})
+    return JSONResponse(
+        status_code=200, content={"scores": [s.model_dump(mode="json") for s in scores]}
+    )
 
 
 # =============================================================================
 # P7: INTERVIEW MANAGEMENT (Stage 5B)
 # =============================================================================
 
+
 @router.post("/interviews/panels")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def create_interview_panel(request: Request, body: InterviewPanelCreate) -> JSONResponse:
-    panel = InterviewPanelService.create(request=body, org_id=_org(request), actor_id=_actor(request))
+async def create_interview_panel(
+    request: Request, body: InterviewPanelCreate
+) -> JSONResponse:
+    panel = InterviewPanelService.create(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=panel.model_dump(mode="json"))
 
 
@@ -1020,39 +1147,55 @@ async def create_interview_panel(request: Request, body: InterviewPanelCreate) -
 @require_permission(Permission.STUDENT_READ)
 async def list_interview_panels(
     request: Request,
-    intake_batch: Optional[str] = Query(default=None),
-    program_name: Optional[str] = Query(default=None),
+    intake_batch: str | None = Query(default=None),
+    program_name: str | None = Query(default=None),
 ) -> JSONResponse:
     panels = InterviewPanelService.list(
         org_id=_org(request), intake_batch=intake_batch, program_name=program_name
     )
-    return JSONResponse(status_code=200, content={"panels": [p.model_dump(mode="json") for p in panels]})
+    return JSONResponse(
+        status_code=200, content={"panels": [p.model_dump(mode="json") for p in panels]}
+    )
 
 
 @router.post("/interviews/schedules")
 @require_permission(Permission.STUDENT_CREATE)
-async def schedule_interview(request: Request, body: InterviewScheduleCreate) -> JSONResponse:
-    schedule = InterviewScheduleService.schedule(request=body, org_id=_org(request), actor_id=_actor(request))
+async def schedule_interview(
+    request: Request, body: InterviewScheduleCreate
+) -> JSONResponse:
+    schedule = InterviewScheduleService.schedule(
+        request=body, org_id=_org(request), actor_id=_actor(request)
+    )
     return JSONResponse(status_code=201, content=schedule.model_dump(mode="json"))
 
 
 @router.get("/interviews/schedules/applicant/{applicant_id}")
 @require_permission(Permission.STUDENT_READ)
-async def list_interviews_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+async def list_interviews_for_applicant(
+    request: Request, applicant_id: str
+) -> JSONResponse:
     schedules = InterviewScheduleService.list_for_applicant(applicant_id, _org(request))
-    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(mode="json") for s in schedules]})
+    return JSONResponse(
+        status_code=200,
+        content={"schedules": [s.model_dump(mode="json") for s in schedules]},
+    )
 
 
 @router.get("/interviews/schedules/panel/{panel_id}")
 @require_permission(Permission.STUDENT_READ)
 async def list_interviews_for_panel(request: Request, panel_id: str) -> JSONResponse:
     schedules = InterviewScheduleService.list_for_panel(panel_id, _org(request))
-    return JSONResponse(status_code=200, content={"schedules": [s.model_dump(mode="json") for s in schedules]})
+    return JSONResponse(
+        status_code=200,
+        content={"schedules": [s.model_dump(mode="json") for s in schedules]},
+    )
 
 
 @router.patch("/interviews/schedules/{schedule_id}/attendance")
 @require_permission(Permission.STUDENT_CREATE)
-async def update_interview_attendance(request: Request, schedule_id: str, body: dict) -> JSONResponse:
+async def update_interview_attendance(
+    request: Request, schedule_id: str, body: dict
+) -> JSONResponse:
     schedule = InterviewScheduleService.update_attendance(
         schedule_id, _org(request), body.get("attendance_status", ""), _actor(request)
     )
@@ -1061,7 +1204,9 @@ async def update_interview_attendance(request: Request, schedule_id: str, body: 
 
 @router.post("/interviews/scorecards")
 @require_permission(Permission.STUDENT_CREATE)
-async def submit_scorecard(request: Request, body: InterviewScorecardCreate) -> JSONResponse:
+async def submit_scorecard(
+    request: Request, body: InterviewScorecardCreate
+) -> JSONResponse:
     """Submit an evaluator's interview scorecard."""
     scorecard = InterviewScorecardService.submit(
         request=body, org_id=_org(request), evaluator_id=_actor(request)
@@ -1073,7 +1218,10 @@ async def submit_scorecard(request: Request, body: InterviewScorecardCreate) -> 
 @require_permission(Permission.STUDENT_READ)
 async def list_scorecards(request: Request, schedule_id: str) -> JSONResponse:
     scorecards = InterviewScorecardService.list_for_schedule(schedule_id, _org(request))
-    return JSONResponse(status_code=200, content={"scorecards": [s.model_dump(mode="json") for s in scorecards]})
+    return JSONResponse(
+        status_code=200,
+        content={"scorecards": [s.model_dump(mode="json") for s in scorecards]},
+    )
 
 
 @router.get("/interviews/schedules/{schedule_id}/aggregate")
@@ -1086,6 +1234,7 @@ async def get_interview_aggregate(request: Request, schedule_id: str) -> JSONRes
 # =============================================================================
 # P3: LEAD CRM (Stage 1)
 # =============================================================================
+
 
 @router.post("/leads")
 @require_permission(Permission.STUDENT_CREATE)
@@ -1103,9 +1252,9 @@ async def create_lead(request: Request, body: LeadCreate) -> JSONResponse:
 @require_permission(Permission.STUDENT_READ)
 async def list_leads(
     request: Request,
-    status: Optional[str] = Query(default=None),
-    counsellor_id: Optional[str] = Query(default=None),
-    source_type: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
+    counsellor_id: str | None = Query(default=None),
+    source_type: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ) -> JSONResponse:
@@ -1119,7 +1268,10 @@ async def list_leads(
     )
     return JSONResponse(
         status_code=200,
-        content={"leads": [l.model_dump(mode="json") for l in leads], "total": len(leads)},
+        content={
+            "leads": [item.model_dump(mode="json") for item in leads],
+            "total": len(leads),
+        },
     )
 
 
@@ -1186,11 +1338,10 @@ async def convert_lead(request: Request, body: LeadConvertRequest) -> JSONRespon
 # P3: CONSULTANTS
 # =============================================================================
 
+
 @router.post("/consultants")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def create_consultant(
-    request: Request, body: ConsultantCreate
-) -> JSONResponse:
+async def create_consultant(request: Request, body: ConsultantCreate) -> JSONResponse:
     """Register a third-party education consultant."""
     consultant = ConsultantService.create(
         request=body,
@@ -1204,7 +1355,7 @@ async def create_consultant(
 @require_permission(Permission.STUDENT_READ)
 async def list_consultants_ext(
     request: Request,
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ) -> JSONResponse:
@@ -1244,6 +1395,7 @@ async def update_consultant_status(
 # P3: REFERRAL CODES
 # =============================================================================
 
+
 @router.post("/referral-codes")
 @require_permission(Permission.STUDENT_CREATE)
 async def create_referral_code(
@@ -1275,7 +1427,8 @@ async def deactivate_referral_code(request: Request, code: str) -> None:
 # E04-S10: INSTITUTION POLICY STORE
 # =============================================================================
 
-from server.admissions.policy_store import PolicyStore
+from server.admissions.policy_store import PolicyStore  # noqa: E402
+
 
 class PolicyUpsertRequest(BaseModel):
     key: str
@@ -1286,21 +1439,25 @@ class PolicyUpsertRequest(BaseModel):
 
 @router.get("/policies")
 @require_permission(Permission.STUDENT_READ)
-async def list_policies(request: Request, category: Optional[str] = None) -> JSONResponse:
+async def list_policies(request: Request, category: str | None = None) -> JSONResponse:
     """List all institution policies for this org."""
-    import json
     from datetime import datetime
+
     rows = PolicyStore.get_all(org_id=_org(request), category=category)
     # Serialize datetime fields to ISO strings
     clean = []
     for r in rows:
-        clean.append({k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in r.items()})
+        clean.append(
+            {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in r.items()}
+        )
     return JSONResponse(content={"policies": clean, "total": len(clean)})
 
 
 @router.put("/policies/{key:path}")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def upsert_policy(request: Request, key: str, body: PolicyUpsertRequest) -> JSONResponse:
+async def upsert_policy(
+    request: Request, key: str, body: PolicyUpsertRequest
+) -> JSONResponse:
     """Create or update an institution policy."""
     result = PolicyStore.upsert(
         org_id=_org(request),
@@ -1324,9 +1481,12 @@ async def deactivate_policy(request: Request, key: str) -> None:
 # P6: ELIGIBILITY CRITERIA MANAGEMENT (Stage 4)
 # =============================================================================
 
+
 @router.post("/eligibility/criteria")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def set_eligibility_criteria(request: Request, body: EligibilityCriteria) -> JSONResponse:
+async def set_eligibility_criteria(
+    request: Request, body: EligibilityCriteria
+) -> JSONResponse:
     """Create or replace eligibility criteria for a program (and optional batch)."""
     result = EligibilityCriteriaService.set_criteria(
         criteria=body,
@@ -1341,7 +1501,9 @@ async def set_eligibility_criteria(request: Request, body: EligibilityCriteria) 
 async def list_eligibility_criteria(request: Request) -> JSONResponse:
     """List all eligibility criteria for this org."""
     results = EligibilityCriteriaService.list_criteria(org_id=_org(request))
-    return JSONResponse(content={"criteria": [c.model_dump() for c in results], "total": len(results)})
+    return JSONResponse(
+        content={"criteria": [c.model_dump() for c in results], "total": len(results)}
+    )
 
 
 @router.get("/eligibility/criteria/{program_name}")
@@ -1349,7 +1511,7 @@ async def list_eligibility_criteria(request: Request) -> JSONResponse:
 async def get_eligibility_criteria(
     request: Request,
     program_name: str,
-    intake_batch: Optional[str] = None,
+    intake_batch: str | None = None,
 ) -> JSONResponse:
     """Get eligibility criteria for a specific program (and optional batch)."""
     criteria = EligibilityCriteriaService.get_criteria(
@@ -1365,12 +1527,14 @@ async def get_eligibility_criteria(
     return JSONResponse(content=criteria.model_dump())
 
 
-@router.delete("/eligibility/criteria/{program_name}", status_code=204, response_model=None)
+@router.delete(
+    "/eligibility/criteria/{program_name}", status_code=204, response_model=None
+)
 @require_permission(Permission.OVERRIDE_APPROVE)
 async def delete_eligibility_criteria(
     request: Request,
     program_name: str,
-    intake_batch: Optional[str] = None,
+    intake_batch: str | None = None,
 ) -> None:
     """Deactivate eligibility criteria for a program (soft delete)."""
     EligibilityCriteriaService.delete_criteria(
@@ -1385,16 +1549,19 @@ async def delete_eligibility_criteria(
 # E04-S12: REVIEW QUEUE
 # =============================================================================
 
-from server.admissions.review_queue import ReviewQueue
+from server.admissions.review_queue import ReviewQueue  # noqa: E402
+
 
 class ReviewDecisionRequest(BaseModel):
-    decision: str   # "APPROVED" | "REJECTED"
-    note: Optional[str] = None
+    decision: str  # "APPROVED" | "REJECTED"
+    note: str | None = None
 
 
 @router.get("/review")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def list_review_items(request: Request, entity_type: Optional[str] = None) -> JSONResponse:
+async def list_review_items(
+    request: Request, entity_type: str | None = None
+) -> JSONResponse:
     """List pending review items requiring staff decision."""
     items = ReviewQueue.list_pending(org_id=_org(request), entity_type=entity_type)
     return JSONResponse(content={"items": items, "total": len(items)})
@@ -1427,14 +1594,16 @@ async def decide_review_item(
         note=body.note,
     )
     # Fire event so pipeline resumes (E04-S16 handler picks this up)
-    DomainEventBus.publish(DomainEvent(
-        event_type="ReviewItemDecided",
-        entity_type=item["entity_type"],
-        entity_id=item["entity_id"],
-        org_id=_org(request),
-        payload={"decision": body.decision, "item_id": item_id},
-        actor_id=_actor(request),
-    ))
+    DomainEventBus.publish(
+        DomainEvent(
+            event_type="ReviewItemDecided",
+            entity_type=item["entity_type"],
+            entity_id=item["entity_id"],
+            org_id=_org(request),
+            payload={"decision": body.decision, "item_id": item_id},
+            actor_id=_actor(request),
+        )
+    )
     return JSONResponse(content=item)
 
 
@@ -1442,13 +1611,14 @@ async def decide_review_item(
 # P10: PAYMENT v2 — Demand Draft & Refunds (Stage 8)
 # =============================================================================
 
+
 class DDRejectRequest(BaseModel):
     reason: str = Field(..., min_length=5, max_length=500)
 
 
 class RefundReviewRequest(BaseModel):
     decision: str = Field(..., description="APPROVED | REJECTED")
-    notes: Optional[str] = Field(default=None, max_length=2000)
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 class RefundProcessRequest(BaseModel):
@@ -1457,9 +1627,12 @@ class RefundProcessRequest(BaseModel):
 
 # --- Demand Draft ---
 
+
 @router.post("/payments/dd")
 @require_permission(Permission.STUDENT_CREATE)
-async def submit_demand_draft(request: Request, body: DemandDraftCreate) -> JSONResponse:
+async def submit_demand_draft(
+    request: Request, body: DemandDraftCreate
+) -> JSONResponse:
     """Applicant submits DD details as proof of fee payment."""
     dd = DemandDraftService.submit(body, _org(request), _actor(request))
     return JSONResponse(content=dd.model_dump(mode="json"), status_code=201)
@@ -1470,11 +1643,13 @@ async def submit_demand_draft(request: Request, body: DemandDraftCreate) -> JSON
 async def list_demand_drafts(
     request: Request,
     applicant_id: str,
-    status: Optional[str] = None,
+    status: str | None = None,
 ) -> JSONResponse:
     """List all DDs submitted by an applicant."""
     dds = DemandDraftService.list_for_applicant(applicant_id, _org(request), status)
-    return JSONResponse(content={"dds": [d.model_dump(mode="json") for d in dds], "total": len(dds)})
+    return JSONResponse(
+        content={"dds": [d.model_dump(mode="json") for d in dds], "total": len(dds)}
+    )
 
 
 @router.get("/payments/dd/{dd_id}")
@@ -1495,7 +1670,9 @@ async def verify_demand_draft(request: Request, dd_id: str) -> JSONResponse:
 
 @router.post("/payments/dd/{dd_id}/reject")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def reject_demand_draft(request: Request, dd_id: str, body: DDRejectRequest) -> JSONResponse:
+async def reject_demand_draft(
+    request: Request, dd_id: str, body: DDRejectRequest
+) -> JSONResponse:
     """Staff rejects a DD with a reason. Applicant must resubmit."""
     dd = DemandDraftService.reject(dd_id, _org(request), _actor(request), body.reason)
     return JSONResponse(content=dd.model_dump(mode="json"))
@@ -1503,9 +1680,12 @@ async def reject_demand_draft(request: Request, dd_id: str, body: DDRejectReques
 
 # --- Refund Requests ---
 
+
 @router.post("/payments/refunds")
 @require_permission(Permission.STUDENT_CREATE)
-async def submit_refund_request(request: Request, body: RefundRequestCreate) -> JSONResponse:
+async def submit_refund_request(
+    request: Request, body: RefundRequestCreate
+) -> JSONResponse:
     """Applicant submits a refund request. Amount calculated from policy slabs."""
     ref = RefundRequestService.submit(body, _org(request), _actor(request))
     return JSONResponse(content=ref.model_dump(mode="json"), status_code=201)
@@ -1516,15 +1696,27 @@ async def submit_refund_request(request: Request, body: RefundRequestCreate) -> 
 async def list_pending_refunds(request: Request) -> JSONResponse:
     """List all REQUESTED / UNDER_REVIEW refund requests for staff."""
     refs = RefundRequestService.list_pending_review(_org(request))
-    return JSONResponse(content={"refunds": [r.model_dump(mode="json") for r in refs], "total": len(refs)})
+    return JSONResponse(
+        content={
+            "refunds": [r.model_dump(mode="json") for r in refs],
+            "total": len(refs),
+        }
+    )
 
 
 @router.get("/payments/refunds/applicant/{applicant_id}")
 @require_permission(Permission.STUDENT_READ)
-async def list_refunds_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+async def list_refunds_for_applicant(
+    request: Request, applicant_id: str
+) -> JSONResponse:
     """List refund requests for a specific applicant."""
     refs = RefundRequestService.list_for_applicant(applicant_id, _org(request))
-    return JSONResponse(content={"refunds": [r.model_dump(mode="json") for r in refs], "total": len(refs)})
+    return JSONResponse(
+        content={
+            "refunds": [r.model_dump(mode="json") for r in refs],
+            "total": len(refs),
+        }
+    )
 
 
 @router.get("/payments/refunds/{request_id}")
@@ -1570,12 +1762,13 @@ async def process_refund(
 # P11: FINAL VERIFICATION (Stage 9)
 # =============================================================================
 
+
 class VerificationStartRequest(BaseModel):
-    assigned_officer: Optional[str] = None
+    assigned_officer: str | None = None
 
 
 class VerificationClearRequest(BaseModel):
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class VerificationUndertakingRequest(BaseModel):
@@ -1615,12 +1808,16 @@ async def initiate_verification(
 
 @router.get("/verification/applicant/{applicant_id}")
 @require_permission(Permission.STUDENT_READ)
-async def get_verification_for_applicant(request: Request, applicant_id: str) -> JSONResponse:
+async def get_verification_for_applicant(
+    request: Request, applicant_id: str
+) -> JSONResponse:
     """Get the verification record for an applicant."""
     ver = FinalVerificationService.get_for_applicant(applicant_id, _org(request))
     if not ver:
         return JSONResponse(
-            content={"detail": f"No verification record for applicant '{applicant_id}'."},
+            content={
+                "detail": f"No verification record for applicant '{applicant_id}'."
+            },
             status_code=404,
         )
     return JSONResponse(content=ver.model_dump(mode="json"))
@@ -1659,9 +1856,16 @@ async def check_document(
 
 @router.get("/verification/{verification_id}/items")
 @require_permission(Permission.STUDENT_READ)
-async def list_verification_items(request: Request, verification_id: str) -> JSONResponse:
+async def list_verification_items(
+    request: Request, verification_id: str
+) -> JSONResponse:
     items = FinalVerificationService.list_items(verification_id, _org(request))
-    return JSONResponse(content={"items": [i.model_dump(mode="json") for i in items], "total": len(items)})
+    return JSONResponse(
+        content={
+            "items": [i.model_dump(mode="json") for i in items],
+            "total": len(items),
+        }
+    )
 
 
 @router.post("/verification/{verification_id}/clear")
@@ -1715,10 +1919,17 @@ async def raise_discrepancy(
 @router.get("/verification/{verification_id}/discrepancies")
 @require_permission(Permission.STUDENT_READ)
 async def list_discrepancies(
-    request: Request, verification_id: str, status: Optional[str] = None
+    request: Request, verification_id: str, status: str | None = None
 ) -> JSONResponse:
-    discs = DiscrepancyService.list_discrepancies(verification_id, _org(request), status)
-    return JSONResponse(content={"discrepancies": [d.model_dump(mode="json") for d in discs], "total": len(discs)})
+    discs = DiscrepancyService.list_discrepancies(
+        verification_id, _org(request), status
+    )
+    return JSONResponse(
+        content={
+            "discrepancies": [d.model_dump(mode="json") for d in discs],
+            "total": len(discs),
+        }
+    )
 
 
 @router.post("/verification/discrepancies/{discrepancy_id}/resolve")
@@ -1747,6 +1958,7 @@ async def escalate_discrepancy(
 # P12 — Enrollment Provisioning (Stage 10)
 # =============================================================================
 
+
 @router.post("/enrollment")
 @require_permission(Permission.STUDENT_CREATE)
 async def initiate_enrollment(
@@ -1764,15 +1976,15 @@ async def get_enrollment_for_applicant(
 ) -> JSONResponse:
     prov = EnrollmentProvisioningService.get_for_applicant(applicant_id, _org(request))
     if not prov:
-        return JSONResponse(content={"detail": "No provisioning record found."}, status_code=404)
+        return JSONResponse(
+            content={"detail": "No provisioning record found."}, status_code=404
+        )
     return JSONResponse(content=prov.model_dump(mode="json"))
 
 
 @router.get("/enrollment/{provisioning_id}")
 @require_permission(Permission.STUDENT_READ)
-async def get_enrollment(
-    request: Request, provisioning_id: str
-) -> JSONResponse:
+async def get_enrollment(request: Request, provisioning_id: str) -> JSONResponse:
     prov = EnrollmentProvisioningService.get(provisioning_id, _org(request))
     return JSONResponse(content=prov.model_dump(mode="json"))
 
@@ -1815,9 +2027,7 @@ async def provision_library(
 
 @router.post("/enrollment/{provisioning_id}/id-card")
 @require_permission(Permission.STUDENT_CREATE)
-async def dispatch_id_card(
-    request: Request, provisioning_id: str
-) -> JSONResponse:
+async def dispatch_id_card(request: Request, provisioning_id: str) -> JSONResponse:
     """Mark ID card as dispatched."""
     prov = EnrollmentProvisioningService.dispatch_id_card(
         provisioning_id, _org(request), _actor(request)
@@ -1851,9 +2061,7 @@ async def mark_welcome_email(
 
 @router.post("/enrollment/{provisioning_id}/complete")
 @require_permission(Permission.STUDENT_CREATE)
-async def complete_enrollment(
-    request: Request, provisioning_id: str
-) -> JSONResponse:
+async def complete_enrollment(request: Request, provisioning_id: str) -> JSONResponse:
     """Complete enrollment — create student record, transition to ENROLLED."""
     student = EnrollmentProvisioningService.complete(
         provisioning_id, _org(request), _actor(request)
@@ -1863,9 +2071,7 @@ async def complete_enrollment(
 
 @router.get("/students/{student_id}")
 @require_permission(Permission.STUDENT_READ)
-async def get_student(
-    request: Request, student_id: str
-) -> JSONResponse:
+async def get_student(request: Request, student_id: str) -> JSONResponse:
     student = EnrollmentProvisioningService.get_student(student_id, _org(request))
     return JSONResponse(content=student.model_dump(mode="json"))
 
@@ -1873,6 +2079,7 @@ async def get_student(
 # =============================================================================
 # DASHBOARD AGGREGATES
 # =============================================================================
+
 
 @router.get("/pipeline-summary")
 @require_permission(Permission.STUDENT_READ)
@@ -1907,16 +2114,67 @@ async def get_pipeline_summary(request: Request) -> JSONResponse:
     app_counts: dict = {r["status"]: int(r["cnt"]) for r in (app_rows or [])}
 
     stages = [
-        {"stage": "leads",        "label": "Leads",            "count": sum(lead_counts.values()),            "color": "#6366f1"},
-        {"stage": "contacted",    "label": "Contacted",        "count": lead_counts.get("CONTACTED", 0),      "color": "#8b5cf6"},
-        {"stage": "interested",   "label": "Interested",       "count": lead_counts.get("INTERESTED", 0),     "color": "#a78bfa"},
-        {"stage": "applied",      "label": "Applied",          "count": app_counts.get("APPLIED", 0),         "color": "#3b82f6"},
-        {"stage": "documents",    "label": "Docs Review",      "count": app_counts.get("DOCUMENTS_PENDING", 0) + app_counts.get("DOCUMENTS_UNDER_REVIEW", 0), "color": "#06b6d4"},
-        {"stage": "eligibility",  "label": "Eligibility",      "count": app_counts.get("ELIGIBILITY_CHECK", 0), "color": "#10b981"},
-        {"stage": "entrance_test","label": "Entrance Test",    "count": app_counts.get("ENTRANCE_TEST", 0),    "color": "#f59e0b"},
-        {"stage": "interview",    "label": "Interview",        "count": app_counts.get("INTERVIEW", 0),        "color": "#f97316"},
-        {"stage": "offer",        "label": "Offer Issued",     "count": app_counts.get("OFFER_ISSUED", 0),     "color": "#ef4444"},
-        {"stage": "enrolled",     "label": "Enrolled",         "count": app_counts.get("ENROLLED", 0),         "color": "#22c55e"},
+        {
+            "stage": "leads",
+            "label": "Leads",
+            "count": sum(lead_counts.values()),
+            "color": "#6366f1",
+        },
+        {
+            "stage": "contacted",
+            "label": "Contacted",
+            "count": lead_counts.get("CONTACTED", 0),
+            "color": "#8b5cf6",
+        },
+        {
+            "stage": "interested",
+            "label": "Interested",
+            "count": lead_counts.get("INTERESTED", 0),
+            "color": "#a78bfa",
+        },
+        {
+            "stage": "applied",
+            "label": "Applied",
+            "count": app_counts.get("APPLIED", 0),
+            "color": "#3b82f6",
+        },
+        {
+            "stage": "documents",
+            "label": "Docs Review",
+            "count": app_counts.get("DOCUMENTS_PENDING", 0)
+            + app_counts.get("DOCUMENTS_UNDER_REVIEW", 0),
+            "color": "#06b6d4",
+        },
+        {
+            "stage": "eligibility",
+            "label": "Eligibility",
+            "count": app_counts.get("ELIGIBILITY_CHECK", 0),
+            "color": "#10b981",
+        },
+        {
+            "stage": "entrance_test",
+            "label": "Entrance Test",
+            "count": app_counts.get("ENTRANCE_TEST", 0),
+            "color": "#f59e0b",
+        },
+        {
+            "stage": "interview",
+            "label": "Interview",
+            "count": app_counts.get("INTERVIEW", 0),
+            "color": "#f97316",
+        },
+        {
+            "stage": "offer",
+            "label": "Offer Issued",
+            "count": app_counts.get("OFFER_ISSUED", 0),
+            "color": "#ef4444",
+        },
+        {
+            "stage": "enrolled",
+            "label": "Enrolled",
+            "count": app_counts.get("ENROLLED", 0),
+            "color": "#22c55e",
+        },
     ]
     return JSONResponse(content=stages)
 
@@ -1952,29 +2210,31 @@ async def get_review_queue(request: Request) -> JSONResponse:
 
     STATUS_URGENCY = {
         "DOCUMENTS_UNDER_REVIEW": "high",
-        "ELIGIBILITY_CHECK":      "high",
-        "OFFER_ISSUED":           "high",
-        "INTERVIEW":              "medium",
-        "ENTRANCE_TEST":          "medium",
-        "DOCUMENTS_PENDING":      "low",
-        "APPLIED":                "low",
-        "OFFER_ACCEPTED":         "low",
+        "ELIGIBILITY_CHECK": "high",
+        "OFFER_ISSUED": "high",
+        "INTERVIEW": "medium",
+        "ENTRANCE_TEST": "medium",
+        "DOCUMENTS_PENDING": "low",
+        "APPLIED": "low",
+        "OFFER_ACCEPTED": "low",
     }
 
     items = []
-    for r in (rows or []):
+    for r in rows or []:
         status = r["status"]
-        items.append({
-            "id":             str(r["id"]),
-            "type":           "application",
-            "title":          r["title"] or "Applicant",
-            "subtitle":       r["subtitle"] or "",
-            "confidence":     0.85,
-            "urgency":        STATUS_URGENCY.get(status, "low"),
-            "application_id": str(r["id"]),
-            "status":         status,
-            "created_at":     r["created_at"].isoformat() if r["created_at"] else None,
-        })
+        items.append(
+            {
+                "id": str(r["id"]),
+                "type": "application",
+                "title": r["title"] or "Applicant",
+                "subtitle": r["subtitle"] or "",
+                "confidence": 0.85,
+                "urgency": STATUS_URGENCY.get(status, "low"),
+                "application_id": str(r["id"]),
+                "status": status,
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+        )
     return JSONResponse(content=items)
 
 
@@ -1982,11 +2242,13 @@ async def get_review_queue(request: Request) -> JSONResponse:
 # E17 — Re-admission & Credit Transfer Routes (P22)
 # ---------------------------------------------------------------------------
 
+
 @router.post("/readmission")
 @require_permission(Permission.STUDENT_CREATE)
 async def submit_readmission(request: Request, body: dict) -> JSONResponse:
     """Submit a re-admission application."""
     from server.admissions.readmission_service import ReadmissionService
+
     try:
         result = ReadmissionService.submit_application(
             org_id=_org(request),
@@ -2010,11 +2272,14 @@ async def submit_readmission(request: Request, body: dict) -> JSONResponse:
 @require_permission(Permission.STUDENT_READ)
 async def list_readmissions(
     request: Request,
-    status: Optional[str] = None,
-    program_id: Optional[str] = None,
+    status: str | None = None,
+    program_id: str | None = None,
 ) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
-    result = ReadmissionService.list_applications(_org(request), status=status, program_id=program_id)
+
+    result = ReadmissionService.list_applications(
+        _org(request), status=status, program_id=program_id
+    )
     return JSONResponse(content={"applications": result, "total": len(result)})
 
 
@@ -2022,31 +2287,50 @@ async def list_readmissions(
 @require_permission(Permission.STUDENT_READ)
 async def get_readmission(request: Request, application_id: str) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
+
     result = ReadmissionService.get_application(application_id, _org(request))
     return JSONResponse(content=result)
 
 
 @router.post("/readmission/{application_id}/review")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def start_readmission_review(request: Request, application_id: str) -> JSONResponse:
+async def start_readmission_review(
+    request: Request, application_id: str
+) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
-    result = ReadmissionService.start_review(application_id, _org(request), _actor(request))
+
+    result = ReadmissionService.start_review(
+        application_id, _org(request), _actor(request)
+    )
     return JSONResponse(content=result)
 
 
 @router.post("/readmission/{application_id}/approve")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def approve_readmission(request: Request, application_id: str, body: dict) -> JSONResponse:
+async def approve_readmission(
+    request: Request, application_id: str, body: dict
+) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
-    result = ReadmissionService.approve(application_id, _org(request), _actor(request), review_notes=body.get("notes"))
+
+    result = ReadmissionService.approve(
+        application_id, _org(request), _actor(request), review_notes=body.get("notes")
+    )
     return JSONResponse(content=result)
 
 
 @router.post("/readmission/{application_id}/reject")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def reject_readmission(request: Request, application_id: str, body: dict) -> JSONResponse:
+async def reject_readmission(
+    request: Request, application_id: str, body: dict
+) -> JSONResponse:
     from server.admissions.readmission_service import ReadmissionService
-    result = ReadmissionService.reject(application_id, _org(request), _actor(request), review_notes=body.get("notes", ""))
+
+    result = ReadmissionService.reject(
+        application_id,
+        _org(request),
+        _actor(request),
+        review_notes=body.get("notes", ""),
+    )
     return JSONResponse(content=result)
 
 
@@ -2055,6 +2339,7 @@ async def reject_readmission(request: Request, application_id: str, body: dict) 
 async def submit_credit_transfer(request: Request, body: dict) -> JSONResponse:
     """Submit a credit transfer request."""
     from server.admissions.credit_transfer_service import CreditTransferService
+
     result = CreditTransferService.submit_request(
         org_id=_org(request),
         student_id=body["student_id"],
@@ -2069,16 +2354,24 @@ async def submit_credit_transfer(request: Request, body: dict) -> JSONResponse:
 
 @router.post("/credit-transfer/{request_id}/ai-draft")
 @require_permission(Permission.STUDENT_CREATE)
-async def generate_credit_transfer_ai_draft(request: Request, request_id: str) -> JSONResponse:
+async def generate_credit_transfer_ai_draft(
+    request: Request, request_id: str
+) -> JSONResponse:
     from server.admissions.credit_transfer_service import CreditTransferService
-    result = await CreditTransferService.generate_ai_draft(request_id, _org(request), _actor(request))
+
+    result = await CreditTransferService.generate_ai_draft(
+        request_id, _org(request), _actor(request)
+    )
     return JSONResponse(content=result)
 
 
 @router.post("/credit-transfer/{request_id}/decide")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def decide_credit_transfer(request: Request, request_id: str, body: dict) -> JSONResponse:
+async def decide_credit_transfer(
+    request: Request, request_id: str, body: dict
+) -> JSONResponse:
     from server.admissions.credit_transfer_service import CreditTransferService
+
     result = await CreditTransferService.review_and_decide(
         request_id=request_id,
         org_id=_org(request),
@@ -2095,13 +2388,17 @@ async def decide_credit_transfer(request: Request, request_id: str, body: dict) 
 @require_permission(Permission.STUDENT_READ)
 async def list_credit_transfers(
     request: Request,
-    student_id: Optional[str] = None,
-    readmission_id: Optional[str] = None,
-    status: Optional[str] = None,
+    student_id: str | None = None,
+    readmission_id: str | None = None,
+    status: str | None = None,
 ) -> JSONResponse:
     from server.admissions.credit_transfer_service import CreditTransferService
+
     result = CreditTransferService.list_requests(
-        _org(request), student_id=student_id, readmission_id=readmission_id, status=status
+        _org(request),
+        student_id=student_id,
+        readmission_id=readmission_id,
+        status=status,
     )
     return JSONResponse(content={"requests": result, "total": len(result)})
 
@@ -2114,6 +2411,7 @@ async def list_credit_transfers(
 # EC-ADM-01 — Identity Mismatch Check (cross-document name consistency)
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 @router.post("/applications/{application_id}/identity-check")
 @require_permission(Permission.STUDENT_READ)
 async def run_identity_check(request: Request, application_id: str) -> JSONResponse:
@@ -2125,6 +2423,7 @@ async def run_identity_check(request: Request, application_id: str) -> JSONRespo
     Safe to call multiple times — idempotent.
     """
     from server.admissions.identity_match import IdentityMatchService
+
     result = IdentityMatchService.check(
         application_id=application_id,
         org_id=_org(request),
@@ -2150,6 +2449,7 @@ async def update_identity_source(
       - NTA/JEE score import pipeline after scorecard ingestion
     """
     from server.admissions.identity_match import IdentityMatchService
+
     result = IdentityMatchService.update_name_source(
         application_id=application_id,
         org_id=_org(request),
@@ -2162,7 +2462,9 @@ async def update_identity_source(
 
 @router.post("/applications/{application_id}/kyc-clear")
 @require_permission(Permission.OVERRIDE_APPROVE)
-async def clear_kyc_hold(request: Request, application_id: str, body: dict) -> JSONResponse:
+async def clear_kyc_hold(
+    request: Request, application_id: str, body: dict
+) -> JSONResponse:
     """
     Admissions officer clears the KYC_RECONCILIATION hold after manual review.
 
@@ -2170,6 +2472,7 @@ async def clear_kyc_hold(request: Request, application_id: str, body: dict) -> J
     Sets kyc_status = CLEARED, restores application status to ELIGIBILITY_SCREENING.
     """
     from server.admissions.identity_match import IdentityMatchService
+
     result = IdentityMatchService.clear_kyc_hold(
         application_id=application_id,
         org_id=_org(request),
@@ -2187,6 +2490,7 @@ async def list_kyc_queue(request: Request) -> JSONResponse:
     Used by the Admissions Officer dashboard.
     """
     from server.db_service import execute_query as _eq
+
     rows = _eq(
         """
         SELECT id, applicant_name, aadhaar_name, jee_name,
@@ -2208,7 +2512,10 @@ async def find_student_duplicates(
 ) -> JSONResponse:
     """Find potential duplicate student records using Jaro-Winkler composite scoring."""
     from server.admissions.deduplication_service import StudentDeduplicationService
-    result = StudentDeduplicationService.find_duplicates(_org(request), threshold=threshold)
+
+    result = StudentDeduplicationService.find_duplicates(
+        _org(request), threshold=threshold
+    )
     return JSONResponse(content={"duplicates": result, "total": len(result)})
 
 
@@ -2217,6 +2524,7 @@ async def find_student_duplicates(
 async def initiate_student_merge(request: Request, body: dict) -> JSONResponse:
     """Initiate dual-auth merge workflow (Registrar + Super Admin required)."""
     from server.admissions.deduplication_service import StudentDeduplicationService
+
     result = StudentDeduplicationService.initiate_merge(
         primary_id=body["primary_id"],
         duplicate_id=body["duplicate_id"],
@@ -2231,6 +2539,7 @@ async def initiate_student_merge(request: Request, body: dict) -> JSONResponse:
 async def execute_student_merge(request: Request, body: dict) -> JSONResponse:
     """Execute the student merge (called after dual-auth approval)."""
     from server.admissions.deduplication_service import StudentDeduplicationService
+
     result = StudentDeduplicationService.execute_merge(
         primary_id=body["primary_id"],
         duplicate_id=body["duplicate_id"],

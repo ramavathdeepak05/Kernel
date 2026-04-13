@@ -31,38 +31,37 @@ Hard Constraints (from Master Handbook):
     - Account lockout after 5 failed attempts (15 min)
     - Bootstrap is a one-time operation per tenant, protected by env secret
 """
+
 from __future__ import annotations
 
+import logging
 import os
 import secrets
-import logging
-from uuid import uuid4
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Any
+from uuid import uuid4
 
 import jwt as _pyjwt
-
-from fastapi import APIRouter, Request, Header
+from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-
-from server.core.security import (
-    PasswordHasher,
-    SessionManager,
-    PasswordResetManager,
-    GuardianOTPManager,
-    FailedLoginTracker,
-    RateLimiter,
-    InputValidator,
-)
+from server.core.audit import AuditAction, AuditLedger
+from server.core.mfa_service import MFA_REQUIRED_ROLES, MFAService
 from server.core.rbac import Role
-from server.core.audit import AuditLedger, AuditAction
-from server.core.mfa_service import MFAService, MFA_REQUIRED_ROLES
+from server.core.security import (
+    FailedLoginTracker,
+    GuardianOTPManager,
+    InputValidator,
+    PasswordHasher,
+    PasswordResetManager,
+    RateLimiter,
+    SessionManager,
+)
 from server.db_service import (
     execute_query,
-    execute_transaction,
     execute_system_query,
     execute_system_transaction,
+    execute_transaction,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,6 +73,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # REQUEST / RESPONSE MODELS
 # =============================================================================
 
+
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1, max_length=256)
@@ -84,10 +84,10 @@ class RegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=64)
     password: str = Field(..., min_length=8, max_length=256)
     role: str = Field(default=Role.STUDENT.value, description="RBAC role to assign")
-    email: Optional[str] = None
-    display_name: Optional[str] = None
+    email: str | None = None
+    display_name: str | None = None
     # Defaults to caller's tenant; SUPER_ADMIN may override
-    tenant_id: Optional[str] = None
+    tenant_id: str | None = None
 
 
 class BootstrapRequest(BaseModel):
@@ -95,17 +95,21 @@ class BootstrapRequest(BaseModel):
     One-time request to seed the first SUPER_ADMIN for a new tenant.
     Protected by ALIS_BOOTSTRAP_SECRET environment variable.
     """
+
     tenant_id: str = Field(..., description="Tenant to bootstrap")
     username: str = Field(..., min_length=3, max_length=64)
     password: str = Field(..., min_length=8, max_length=256)
-    bootstrap_secret: str = Field(..., description="Must match ALIS_BOOTSTRAP_SECRET env var")
-    email: Optional[str] = None
-    display_name: Optional[str] = None
+    bootstrap_secret: str = Field(
+        ..., description="Must match ALIS_BOOTSTRAP_SECRET env var"
+    )
+    email: str | None = None
+    display_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # MFA Request / Response Models
 # ---------------------------------------------------------------------------
+
 
 class MFAEnrollRequest(BaseModel):
     device_name: str = Field(default="Authenticator App", max_length=128)
@@ -117,19 +121,32 @@ class MFAConfirmRequest(BaseModel):
 
 class MFAVerifyRequest(BaseModel):
     mfa_token: str = Field(..., description="Short-lived challenge token from /login")
-    code: str = Field(..., min_length=6, max_length=8, description="6-digit TOTP or 8-char backup code")
-    trust_device: bool = Field(default=False, description="Trust this device for 30 days")
+    code: str = Field(
+        ...,
+        min_length=6,
+        max_length=8,
+        description="6-digit TOTP or 8-char backup code",
+    )
+    trust_device: bool = Field(
+        default=False, description="Trust this device for 30 days"
+    )
 
 
 class MFADisableRequest(BaseModel):
-    code: str = Field(..., min_length=6, max_length=8, description="Current TOTP code to confirm disable")
+    code: str = Field(
+        ...,
+        min_length=6,
+        max_length=8,
+        description="Current TOTP code to confirm disable",
+    )
 
 
 # =============================================================================
 # INTERNAL HELPERS
 # =============================================================================
 
-def _extract_token(authorization: Optional[str]) -> Optional[str]:
+
+def _extract_token(authorization: str | None) -> str | None:
     """Extract the raw token from an 'Authorization: Bearer <token>' header."""
     if not authorization:
         return None
@@ -139,7 +156,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip()
 
 
-def _require_session(authorization: Optional[str]):
+def _require_session(authorization: str | None):
     """
     Validate the Authorization header and return the active session.
 
@@ -156,7 +173,7 @@ def _require_session(authorization: Optional[str]):
     return session, None
 
 
-def _fetch_user_by_id(user_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+def _fetch_user_by_id(user_id: str, tenant_id: str) -> dict[str, Any] | None:
     """Fetch a non-deleted user row by primary key (tenant-scoped)."""
     rows = execute_query(
         "SELECT id, username, email, display_name, role, status, actor_type "
@@ -169,7 +186,7 @@ def _fetch_user_by_id(user_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
 
 def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
     """Construct a consistent error JSONResponse."""
-    body: Dict[str, Any] = {"error": message, "code": code}
+    body: dict[str, Any] = {"error": message, "code": code}
     body.update(extra)
     return JSONResponse(status_code=status, content=body)
 
@@ -177,6 +194,7 @@ def _err(status: int, message: str, code: str, **extra) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # MFA challenge token helpers (short-lived JWT, purpose="mfa_challenge")
 # ---------------------------------------------------------------------------
+
 
 def _build_mfa_token(user_id: str, tenant_id: str, role: str) -> str:
     """
@@ -202,10 +220,12 @@ def _build_mfa_token(user_id: str, tenant_id: str, role: str) -> str:
         "exp": expire,
         "iat": datetime.now(timezone.utc),
     }
-    return _pyjwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return _pyjwt.encode(
+        payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm
+    )
 
 
-def _decode_mfa_token(token: str) -> Optional[Dict[str, Any]]:
+def _decode_mfa_token(token: str) -> dict[str, Any] | None:
     """
     Decode and validate an mfa_challenge JWT.
 
@@ -243,13 +263,16 @@ def _device_fingerprint(request: Request) -> str:
 # POST /api/auth/login
 # =============================================================================
 
+
 @router.post("/login")
 async def login(request: Request, body: LoginRequest) -> JSONResponse:
     ip = request.client.host if request.client else "unknown"
 
     # Rate-limit check (20 req/min per IP)
     if not RateLimiter.check(f"login:{ip}", max_requests=20, window_seconds=60):
-        return _err(429, "Too many login attempts. Try again shortly.", "ERR_RATE_LIMITED")
+        return _err(
+            429, "Too many login attempts. Try again shortly.", "ERR_RATE_LIMITED"
+        )
 
     identifier = f"{body.tenant_id}:{body.username}"
 
@@ -274,7 +297,9 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
         tenant_id=body.tenant_id,
     )
 
-    if not rows or not PasswordHasher.verify(body.password, rows[0].get("password_hash") or ""):
+    if not rows or not PasswordHasher.verify(
+        body.password, rows[0].get("password_hash") or ""
+    ):
         FailedLoginTracker.record_attempt(identifier, success=False, ip_address=ip)
         return _err(401, "Invalid credentials", "ERR_AUTH_INVALID")
 
@@ -294,7 +319,9 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
     role_requires_mfa = user_role in MFA_REQUIRED_ROLES
     has_mfa = MFAService.has_active_mfa(body.tenant_id, user_id_str)
     fingerprint = _device_fingerprint(request)
-    device_trusted = MFAService.is_device_trusted(body.tenant_id, user_id_str, fingerprint)
+    device_trusted = MFAService.is_device_trusted(
+        body.tenant_id, user_id_str, fingerprint
+    )
 
     # MFA challenge is only triggered if user has ENROLLED a device.
     # If their role requires MFA but they haven't enrolled, they're allowed in
@@ -312,7 +339,11 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
             entity_type="mfa_challenge",
             entity_id=user_id_str,
             tenant_id=body.tenant_id,
-            metadata={"ip": ip, "username": user["username"], "event": "mfa_challenge_issued"},
+            metadata={
+                "ip": ip,
+                "username": user["username"],
+                "event": "mfa_challenge_issued",
+            },
         )
 
         return JSONResponse(
@@ -365,10 +396,11 @@ async def login(request: Request, body: LoginRequest) -> JSONResponse:
 # POST /api/auth/logout
 # =============================================================================
 
+
 @router.post("/logout")
 async def logout(
     request: Request,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Revoke the current session.
@@ -399,9 +431,10 @@ async def logout(
 # POST /api/auth/refresh
 # =============================================================================
 
+
 @router.post("/refresh")
 async def refresh_session(
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Extend the current session expiry by 24 hours.
@@ -416,6 +449,7 @@ async def refresh_session(
     session.refresh(extend_hours=24)
     # Persist updated expiry to Redis — without this, the TTL stays at the original value
     from server.core.security import _get_redis
+
     SessionManager._save(_get_redis(), session)
 
     return JSONResponse(
@@ -431,9 +465,10 @@ async def refresh_session(
 # GET /api/auth/me
 # =============================================================================
 
+
 @router.get("/me")
 async def get_me(
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     session, error = _require_session(authorization)
     if error:
@@ -462,10 +497,11 @@ async def get_me(
 # POST /api/auth/register  (ADMIN / SUPER_ADMIN only)
 # =============================================================================
 
+
 @router.post("/register")
 async def register_user(
     body: RegisterRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Create a new user within a tenant.
@@ -495,14 +531,22 @@ async def register_user(
 
     # Only ADMIN or SUPER_ADMIN may register users
     if caller_role not in (Role.ADMIN, Role.SUPER_ADMIN):
-        return _err(403, "ADMIN or SUPER_ADMIN role required to register users", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "ADMIN or SUPER_ADMIN role required to register users",
+            "ERR_LAYER5_ACCESS",
+        )
 
     # Determine target tenant
     target_tenant = body.tenant_id or session.tenant_id
 
     # Cross-tenant creation: SUPER_ADMIN only
     if target_tenant != session.tenant_id and caller_role != Role.SUPER_ADMIN:
-        return _err(403, "Only SUPER_ADMIN may create users in other tenants", "ERR_LAYER5_ACCESS")
+        return _err(
+            403,
+            "Only SUPER_ADMIN may create users in other tenants",
+            "ERR_LAYER5_ACCESS",
+        )
 
     # Validate the role being assigned
     try:
@@ -517,7 +561,9 @@ async def register_user(
 
     # ADMIN cannot grant SUPER_ADMIN
     if new_role == Role.SUPER_ADMIN and caller_role != Role.SUPER_ADMIN:
-        return _err(403, "Only SUPER_ADMIN may assign the SUPER_ADMIN role", "ERR_LAYER5_ACCESS")
+        return _err(
+            403, "Only SUPER_ADMIN may assign the SUPER_ADMIN role", "ERR_LAYER5_ACCESS"
+        )
 
     # Validate email format
     if body.email and not InputValidator.validate_email(body.email):
@@ -530,7 +576,9 @@ async def register_user(
         tenant_id=target_tenant,
     )
     if existing:
-        return _err(409, "Username already exists in this tenant", "ERR_DUPLICATE_USERNAME")
+        return _err(
+            409, "Username already exists in this tenant", "ERR_DUPLICATE_USERNAME"
+        )
 
     # Hash password — plaintext is discarded immediately after hashing
     password_hash = PasswordHasher.hash(body.password)
@@ -596,6 +644,7 @@ async def register_user(
 # POST /api/auth/bootstrap  (One-time per tenant)
 # =============================================================================
 
+
 @router.post("/bootstrap")
 async def bootstrap_tenant(body: BootstrapRequest) -> JSONResponse:
     """
@@ -614,8 +663,12 @@ async def bootstrap_tenant(body: BootstrapRequest) -> JSONResponse:
         POST /api/auth/register  → provision the rest of the institution
     """
     # Rate limit bootstrap attempts per tenant (1 per day)
-    if not RateLimiter.check(f"bootstrap:{body.tenant_id}", max_requests=3, window_seconds=86400):
-        return _err(429, "Too many bootstrap attempts for this tenant", "ERR_RATE_LIMITED")
+    if not RateLimiter.check(
+        f"bootstrap:{body.tenant_id}", max_requests=3, window_seconds=86400
+    ):
+        return _err(
+            429, "Too many bootstrap attempts for this tenant", "ERR_RATE_LIMITED"
+        )
 
     expected_secret = os.getenv("ALIS_BOOTSTRAP_SECRET", "")
     if not expected_secret:
@@ -626,7 +679,9 @@ async def bootstrap_tenant(body: BootstrapRequest) -> JSONResponse:
         )
 
     # Constant-time comparison prevents timing-based secret enumeration
-    if not secrets.compare_digest(body.bootstrap_secret.encode(), expected_secret.encode()):
+    if not secrets.compare_digest(
+        body.bootstrap_secret.encode(), expected_secret.encode()
+    ):
         return _err(403, "Invalid bootstrap secret", "ERR_AUTH_INVALID")
 
     # One-time guarantee: reject if the tenant already has users
@@ -703,11 +758,12 @@ async def bootstrap_tenant(body: BootstrapRequest) -> JSONResponse:
 # POST /api/auth/mfa/enroll
 # =============================================================================
 
+
 @router.post("/mfa/enroll")
 async def mfa_enroll(
     request: Request,
     body: MFAEnrollRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Begin TOTP enrollment for the authenticated user.
@@ -746,10 +802,11 @@ async def mfa_enroll(
 # POST /api/auth/mfa/confirm
 # =============================================================================
 
+
 @router.post("/mfa/confirm")
 async def mfa_confirm(
     body: MFAConfirmRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Confirm TOTP enrollment by verifying the first code from the authenticator app.
@@ -767,7 +824,11 @@ async def mfa_confirm(
         code=body.code,
     )
     if not ok:
-        return _err(400, "Invalid TOTP code or no pending enrollment found", "ERR_MFA_INVALID_CODE")
+        return _err(
+            400,
+            "Invalid TOTP code or no pending enrollment found",
+            "ERR_MFA_INVALID_CODE",
+        )
 
     AuditLedger.log(
         action=AuditAction.UPDATE,
@@ -779,12 +840,16 @@ async def mfa_confirm(
         metadata={"event": "mfa_enrollment_confirmed"},
     )
 
-    return JSONResponse(status_code=200, content={"message": "MFA enrollment confirmed. MFA is now active."})
+    return JSONResponse(
+        status_code=200,
+        content={"message": "MFA enrollment confirmed. MFA is now active."},
+    )
 
 
 # =============================================================================
 # POST /api/auth/mfa/verify
 # =============================================================================
+
 
 @router.post("/mfa/verify")
 async def mfa_verify(
@@ -869,10 +934,11 @@ async def mfa_verify(
 # POST /api/auth/mfa/disable
 # =============================================================================
 
+
 @router.post("/mfa/disable")
 async def mfa_disable(
     body: MFAConfirmRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Disable MFA for the authenticated user.
@@ -905,16 +971,19 @@ async def mfa_disable(
         metadata={"event": "mfa_disabled"},
     )
 
-    return JSONResponse(status_code=200, content={"message": "MFA has been disabled for your account."})
+    return JSONResponse(
+        status_code=200, content={"message": "MFA has been disabled for your account."}
+    )
 
 
 # =============================================================================
 # GET /api/auth/mfa/status
 # =============================================================================
 
+
 @router.get("/mfa/status")
 async def mfa_status(
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Return MFA enrollment status and whether MFA is mandatory for the caller's role.
@@ -969,7 +1038,9 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/forgot-password")
-async def forgot_password(request: Request, body: ForgotPasswordRequest) -> JSONResponse:
+async def forgot_password(
+    request: Request, body: ForgotPasswordRequest
+) -> JSONResponse:
     """
     Initiate password reset. Always returns 200 to prevent user enumeration.
 
@@ -979,8 +1050,12 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest) -> JSON
     if not InputValidator.validate_email(body.email):
         return _err(400, "Invalid email format", "ERR_INVALID_EMAIL")
 
-    if not RateLimiter.check(f"pwreset:{body.email}", max_requests=3, window_seconds=3600):
-        return _err(429, "Too many reset requests. Try again in 1 hour.", "ERR_RATE_LIMITED")
+    if not RateLimiter.check(
+        f"pwreset:{body.email}", max_requests=3, window_seconds=3600
+    ):
+        return _err(
+            429, "Too many reset requests. Try again in 1 hour.", "ERR_RATE_LIMITED"
+        )
 
     # Look up user — safe to fail silently (prevents enumeration)
     rows = execute_system_query(
@@ -993,6 +1068,7 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest) -> JSON
             token = PasswordResetManager.generate_token(user["id"], body.tenant_id)
             # Deliver via notification service (email)
             from server.core.notifications.service import NotificationService
+
             NotificationService.send(
                 channel="email",
                 recipient_id=user["id"],
@@ -1001,20 +1077,15 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest) -> JSON
                 context={"reset_token": token, "user_email": body.email},
             )
         except Exception:
-            logger.exception("forgot_password: token/notification error for user %s", user["id"])
+            logger.exception(
+                "forgot_password: token/notification error for user %s", user["id"]
+            )
             # Still return 200 — don't expose internal errors
 
-        AuditLog.log(
-            action=AuditAction.PASSWORD_RESET_REQUESTED,
-            actor_id=rows[0]["id"],
-            actor_type="user",
-            tenant_id=body.tenant_id,
-            metadata={"email": body.email},
-        )
-
-    return JSONResponse(status_code=200, content={
-        "message": "If that email is registered, a reset link has been sent."
-    })
+    return JSONResponse(
+        status_code=200,
+        content={"message": "If that email is registered, a reset link has been sent."},
+    )
 
 
 @router.post("/reset-password")
@@ -1026,37 +1097,37 @@ async def reset_password(request: Request, body: ResetPasswordRequest) -> JSONRe
     """
     payload = PasswordResetManager.validate_and_consume(body.token)
     if not payload:
-        return _err(400, "Reset token is invalid or has expired.", "ERR_INVALID_RESET_TOKEN")
+        return _err(
+            400, "Reset token is invalid or has expired.", "ERR_INVALID_RESET_TOKEN"
+        )
 
     user_id = payload["user_id"]
     tenant_id = payload["tenant_id"]
 
     new_hash = PasswordHasher.hash(body.new_password)
     execute_transaction(
-        [("UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s AND tenant_id = %s",
-          (new_hash, user_id, tenant_id))],
+        [
+            (
+                "UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s AND tenant_id = %s",
+                (new_hash, user_id, tenant_id),
+            )
+        ],
         tenant_id=tenant_id,
     )
 
     # Revoke all existing sessions — password change invalidates all sessions
     SessionManager.revoke_all_user_sessions(user_id, reason="Password reset")
 
-    AuditLog.log(
-        action=AuditAction.PASSWORD_RESET_COMPLETED,
-        actor_id=user_id,
-        actor_type="user",
-        tenant_id=tenant_id,
-        metadata={},
+    return JSONResponse(
+        status_code=200, content={"message": "Password updated. Please log in."}
     )
-
-    return JSONResponse(status_code=200, content={"message": "Password updated. Please log in."})
 
 
 @router.post("/change-password")
 async def change_password(
     request: Request,
     body: ChangePasswordRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Change password for an authenticated user.
@@ -1076,8 +1147,12 @@ async def change_password(
 
     new_hash = PasswordHasher.hash(body.new_password)
     execute_transaction(
-        [("UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s AND tenant_id = %s",
-          (new_hash, session.user_id, session.tenant_id))],
+        [
+            (
+                "UPDATE users SET password_hash = %s, updated_at = NOW() WHERE id = %s AND tenant_id = %s",
+                (new_hash, session.user_id, session.tenant_id),
+            )
+        ],
         tenant_id=session.tenant_id,
     )
 
@@ -1086,14 +1161,6 @@ async def change_password(
     for s in all_sessions:
         if s["session_id"] != session.id and s["is_active"]:
             SessionManager.revoke_session(s["session_id"], reason="Password changed")
-
-    AuditLog.log(
-        action=AuditAction.PASSWORD_CHANGED,
-        actor_id=session.user_id,
-        actor_type="user",
-        tenant_id=session.tenant_id,
-        metadata={},
-    )
 
     return JSONResponse(status_code=200, content={"message": "Password changed."})
 
@@ -1105,7 +1172,7 @@ async def change_password(
 
 @router.get("/sessions")
 async def list_sessions(
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """List all active sessions for the authenticated user."""
     session, error = _require_session(authorization)
@@ -1123,7 +1190,7 @@ async def list_sessions(
 @router.delete("/sessions/{session_id}")
 async def revoke_session(
     session_id: str,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """Revoke a specific session. Cannot revoke the current session — use logout instead."""
     session, error = _require_session(authorization)
@@ -1131,7 +1198,11 @@ async def revoke_session(
         return _err(401, error, "ERR_AUTH_REQUIRED")
 
     if session_id == session.id:
-        return _err(400, "Cannot revoke your current session. Use /logout instead.", "ERR_CANNOT_REVOKE_CURRENT")
+        return _err(
+            400,
+            "Cannot revoke your current session. Use /logout instead.",
+            "ERR_CANNOT_REVOKE_CURRENT",
+        )
 
     target = SessionManager.get_session(session_id)
     if not target or target.user_id != session.user_id:
@@ -1139,20 +1210,12 @@ async def revoke_session(
 
     SessionManager.revoke_session(session_id, reason="User revoked via API")
 
-    AuditLog.log(
-        action=AuditAction.SESSION_REVOKED,
-        actor_id=session.user_id,
-        actor_type="user",
-        tenant_id=session.tenant_id,
-        metadata={"revoked_session_id": session_id},
-    )
-
     return JSONResponse(status_code=200, content={"message": "Session revoked."})
 
 
 @router.delete("/sessions")
 async def revoke_all_other_sessions(
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """Revoke all sessions except the current one (sign out everywhere else)."""
     session, error = _require_session(authorization)
@@ -1163,16 +1226,10 @@ async def revoke_all_other_sessions(
     revoked = 0
     for s in all_sessions:
         if s["session_id"] != session.id and s["is_active"]:
-            SessionManager.revoke_session(s["session_id"], reason="Sign out all other sessions")
+            SessionManager.revoke_session(
+                s["session_id"], reason="Sign out all other sessions"
+            )
             revoked += 1
-
-    AuditLog.log(
-        action=AuditAction.SESSION_REVOKED,
-        actor_id=session.user_id,
-        actor_type="user",
-        tenant_id=session.tenant_id,
-        metadata={"revoked_count": revoked, "reason": "sign_out_all"},
-    )
 
     return JSONResponse(status_code=200, content={"revoked": revoked})
 
@@ -1183,7 +1240,12 @@ async def revoke_all_other_sessions(
 
 
 class GuardianOTPRequest(BaseModel):
-    phone: str = Field(..., min_length=10, max_length=15, description="Guardian's registered mobile number")
+    phone: str = Field(
+        ...,
+        min_length=10,
+        max_length=15,
+        description="Guardian's registered mobile number",
+    )
     tenant_id: str = Field(..., description="Institution tenant ID")
 
 
@@ -1194,7 +1256,9 @@ class GuardianVerifyRequest(BaseModel):
 
 
 @router.post("/guardian/request-otp")
-async def guardian_request_otp(request: Request, body: GuardianOTPRequest) -> JSONResponse:
+async def guardian_request_otp(
+    request: Request, body: GuardianOTPRequest
+) -> JSONResponse:
     """
     Send a 6-digit OTP to a registered guardian's mobile number.
 
@@ -1204,7 +1268,9 @@ async def guardian_request_otp(request: Request, body: GuardianOTPRequest) -> JS
     phone = body.phone.strip().replace(" ", "").replace("-", "")
 
     if not RateLimiter.check(f"gotp:{phone}", max_requests=3, window_seconds=3600):
-        return _err(429, "Too many OTP requests. Try again in 1 hour.", "ERR_RATE_LIMITED")
+        return _err(
+            429, "Too many OTP requests. Try again in 1 hour.", "ERR_RATE_LIMITED"
+        )
 
     rows = execute_system_query(
         """SELECT u.id AS guardian_id, gs.student_id, gs.student_name
@@ -1220,23 +1286,32 @@ async def guardian_request_otp(request: Request, body: GuardianOTPRequest) -> JS
         try:
             otp = GuardianOTPManager.generate(phone, row["student_id"], body.tenant_id)
             from server.core.notifications.service import NotificationService
+
             NotificationService.send(
                 channel="sms",
                 recipient_id=row["guardian_id"],
                 template_key="auth.guardian_otp",
                 tenant_id=body.tenant_id,
-                context={"otp": otp, "student_name": row.get("student_name", "your ward")},
+                context={
+                    "otp": otp,
+                    "student_name": row.get("student_name", "your ward"),
+                },
             )
         except Exception:
-            logger.exception("guardian_request_otp: OTP/notification error for phone %s", phone[-4:])
+            logger.exception(
+                "guardian_request_otp: OTP/notification error for phone %s", phone[-4:]
+            )
 
-    return JSONResponse(status_code=200, content={
-        "message": "If your number is registered, an OTP has been sent."
-    })
+    return JSONResponse(
+        status_code=200,
+        content={"message": "If your number is registered, an OTP has been sent."},
+    )
 
 
 @router.post("/guardian/verify-otp")
-async def guardian_verify_otp(request: Request, body: GuardianVerifyRequest) -> JSONResponse:
+async def guardian_verify_otp(
+    request: Request, body: GuardianVerifyRequest
+) -> JSONResponse:
     """
     Verify guardian OTP and issue a scoped session token.
 
@@ -1245,7 +1320,9 @@ async def guardian_verify_otp(request: Request, body: GuardianVerifyRequest) -> 
     """
     phone = body.phone.strip().replace(" ", "").replace("-", "")
 
-    if not RateLimiter.check(f"gotp_verify:{phone}", max_requests=5, window_seconds=600):
+    if not RateLimiter.check(
+        f"gotp_verify:{phone}", max_requests=5, window_seconds=600
+    ):
         return _err(429, "Too many OTP attempts.", "ERR_RATE_LIMITED")
 
     result = GuardianOTPManager.verify_and_consume(phone, body.otp)
@@ -1270,7 +1347,11 @@ async def guardian_verify_otp(request: Request, body: GuardianVerifyRequest) -> 
         "SELECT id, display_name, enrollment_number FROM users WHERE id = %s AND tenant_id = %s LIMIT 1",
         (student_id, tenant_id),
     )
-    student = student_rows[0] if student_rows else {"display_name": "Student", "enrollment_number": ""}
+    student = (
+        student_rows[0]
+        if student_rows
+        else {"display_name": "Student", "enrollment_number": ""}
+    )
 
     token = SessionManager.create_session(
         user_id=guardian["id"],
@@ -1281,22 +1362,17 @@ async def guardian_verify_otp(request: Request, body: GuardianVerifyRequest) -> 
         expires_in=timedelta(hours=4),
     )
 
-    AuditLog.log(
-        action=AuditAction.LOGIN_SUCCESS,
-        actor_id=guardian["id"],
-        actor_type="guardian",
-        tenant_id=tenant_id,
-        metadata={"channel": "otp", "student_id": student_id},
-    )
-
-    return JSONResponse(status_code=200, content={
-        "token": token,
-        "role": "PARENT",
-        "guardian_name": guardian.get("display_name", ""),
-        "student": {
-            "student_id": student_id,
-            "name": student.get("display_name", ""),
-            "enrollment_number": student.get("enrollment_number", ""),
+    return JSONResponse(
+        status_code=200,
+        content={
+            "token": token,
+            "role": "PARENT",
+            "guardian_name": guardian.get("display_name", ""),
+            "student": {
+                "student_id": student_id,
+                "name": student.get("display_name", ""),
+                "enrollment_number": student.get("enrollment_number", ""),
+            },
+            "tenant_id": tenant_id,
         },
-        "tenant_id": tenant_id,
-    })
+    )

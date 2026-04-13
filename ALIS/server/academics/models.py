@@ -1,45 +1,48 @@
 from __future__ import annotations
+
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class DegreeType(str, Enum):
-    UG          = "UG"
-    PG          = "PG"
-    DIPLOMA     = "DIPLOMA"
+    UG = "UG"
+    PG = "PG"
+    DIPLOMA = "DIPLOMA"
     CERTIFICATE = "CERTIFICATE"
 
 
 class CourseType(str, Enum):
-    THEORY   = "THEORY"
-    LAB      = "LAB"
-    PROJECT  = "PROJECT"
+    THEORY = "THEORY"
+    LAB = "LAB"
+    PROJECT = "PROJECT"
     ELECTIVE = "ELECTIVE"
 
 
 class AttendanceStatus(str, Enum):
     PRESENT = "PRESENT"
-    ABSENT  = "ABSENT"
-    LATE    = "LATE"
+    ABSENT = "ABSENT"
+    LATE = "LATE"
     EXCUSED = "EXCUSED"
 
 
 class EnrollmentStatus(str, Enum):
-    ENROLLED  = "ENROLLED"
-    DROPPED   = "DROPPED"
+    ENROLLED = "ENROLLED"
+    DROPPED = "DROPPED"
     COMPLETED = "COMPLETED"
 
 
 # --- Request models ---
+
 
 class ProgramCreate(BaseModel):
     name: str
     code: str
     degree_type: DegreeType
     duration_years: float = Field(..., gt=0)
-    total_credits: Optional[int] = None
-    metadata: Dict[str, Any] = {}
+    total_credits: int | None = None
+    metadata: dict[str, Any] = {}
 
 
 class CourseCreate(BaseModel):
@@ -49,7 +52,7 @@ class CourseCreate(BaseModel):
     semester: int = Field(..., ge=1, le=10)
     credits: int = Field(default=3, ge=1)
     course_type: CourseType = CourseType.THEORY
-    metadata: Dict[str, Any] = {}
+    metadata: dict[str, Any] = {}
 
 
 class FacultyAssignRequest(BaseModel):
@@ -61,25 +64,25 @@ class FacultyAssignRequest(BaseModel):
 
 class TimetableSlotCreate(BaseModel):
     course_id: str
-    faculty_id: Optional[str] = None
+    faculty_id: str | None = None
     academic_year: str
     day_of_week: int = Field(..., ge=1, le=7)
-    start_time: str   # "HH:MM"
-    end_time: str     # "HH:MM"
-    room: Optional[str] = None
+    start_time: str  # "HH:MM"
+    end_time: str  # "HH:MM"
+    room: str | None = None
     slot_type: str = "LECTURE"
 
 
 class AttendanceMarkRequest(BaseModel):
     course_id: str
     academic_year: str
-    session_date: str   # "YYYY-MM-DD"
+    session_date: str  # "YYYY-MM-DD"
     slot_type: str = "LECTURE"
-    records: List[Dict[str, str]]  # [{"student_id": "...", "status": "PRESENT"}]
+    records: list[dict[str, str]]  # [{"student_id": "...", "status": "PRESENT"}]
 
 
 class StudentEnrollRequest(BaseModel):
     student_id: str
-    course_ids: List[str]
+    course_ids: list[str]
     academic_year: str
     semester: int

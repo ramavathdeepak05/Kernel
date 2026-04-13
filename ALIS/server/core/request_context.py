@@ -16,19 +16,21 @@ Thread-safety:
   ContextVar is coroutine-safe and thread-local by default.
   Each FastAPI request handler gets its own context.
 """
+
 from __future__ import annotations
 
 import time
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Request-scoped context — set by middleware, read by db_service
-_request_ctx: ContextVar["RequestContext"] = ContextVar("_request_ctx")
+_request_ctx: ContextVar[RequestContext] = ContextVar("_request_ctx")
 
 
 @dataclass
 class RequestContext:
     """Request-scoped state for smart DB routing and optimization."""
+
     tenant_id: str = ""
     has_write: bool = False
     last_write_at: float = 0.0  # time.monotonic() of last write

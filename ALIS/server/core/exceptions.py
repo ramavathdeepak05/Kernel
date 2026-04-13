@@ -17,27 +17,29 @@ Hierarchy matches the ALIS Layered Architecture:
   - Layer 5: AuthorityError (PermissionDenied, QuotaExceeded, EscalationDenied, DualControlRequired)
   - Layer 6: ResilienceError (ProvisionalWarning)
 """
+
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, List
+from typing import Any
 
 
 class ALISError(Exception):
     """
     Base class for all ALIS functional errors.
-    
+
     Attributes:
         message: User-safe error message.
         code: Machine-readable error code (e.g., ERR_AUTH_DENIED).
         details: Optional dictionary of debug/context info.
         http_status: Suggested HTTP status code for API responses.
     """
+
     def __init__(
-        self, 
-        message: str, 
+        self,
+        message: str,
         code: str = "ERR_GENERIC",
-        details: Optional[Dict[str, Any]] = None,
-        http_status: int = 400
+        details: dict[str, Any] | None = None,
+        http_status: int = 400,
     ):
         super().__init__(message)
         self.message = message
@@ -48,24 +50,28 @@ class ALISError(Exception):
 
 # --- Layer 1: Module Authority ---
 
+
 class ModuleAuthorityError(ALISError):
     """
     Raised when a module attempts to decide an outcome locally
     that belongs to another module (Layer 1 violation).
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="ERR_LAYER1_AUTHORITY",
             details=details,
-            http_status=500  # This is a code/architecture bug, not user error
+            http_status=500,  # This is a code/architecture bug, not user error
         )
 
 
 # --- Layer 2: Decisions & Logic ---
 
+
 class DecisionError(ALISError):
     """Base class for errors during Wizard execution."""
+
     pass
 
 
@@ -74,46 +80,48 @@ class BusinessRuleViolation(DecisionError):
     Raised when input data violates a domain business rule.
     Example: "Applicant cannot be under 18 years old."
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
-            message=message,
-            code="ERR_LAYER2_RULE",
-            details=details,
-            http_status=422
+            message=message, code="ERR_LAYER2_RULE", details=details, http_status=422
         )
 
 
 # --- Layer 3: State Machines ---
+
 
 class IllegalStateTransitionError(ALISError):
     """
     Raised when a state transition is not allowed by the central registry.
     Example: ENROLLED -> APPLIED
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="ERR_LAYER3_STATE",
             details=details,
-            http_status=409  # Conflict
+            http_status=409,  # Conflict
         )
 
 
 # --- Layer 4: Global Locks ---
+
 
 class GlobalLockViolationError(ALISError):
     """
     Raised when a Global Lock prevents an action.
     Example: "Cannot generate Hall Ticket: Dues Pending"
     """
-    def __init__(self, violations: List[str], details: Optional[Dict] = None):
+
+    def __init__(self, violations: list[str], details: dict | None = None):
         details = details or {}
         details["violations"] = violations
         super().__init__(
             message=f"Global locks active: {', '.join(violations)}",
             code="ERR_LAYER4_LOCK",
             details=details,
-            http_status=423  # Locked
+            http_status=423,  # Locked
         )
 
 
@@ -126,12 +134,13 @@ class TenantIsolationError(ALISError):
     - Cross-tenant data access attempt
     - Tenant context mismatch in DB query
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="ERR_LAYER4_TENANT",
             details=details,
-            http_status=403  # Forbidden
+            http_status=403,  # Forbidden
         )
 
 
@@ -145,12 +154,13 @@ class LockdownActiveError(ALISError):
     - AI invocation attempt during lockdown
     - Session creation for non-admin during lockdown
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="ERR_LAYER4_LOCKDOWN",
             details=details,
-            http_status=423  # Locked
+            http_status=423,  # Locked
         )
 
 
@@ -167,16 +177,18 @@ class PolicyResolutionError(ALISError):
     - Policy effective_from/effective_to does not cover the decision date
     - Tenant has no policies configured for the requested type
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="ERR_E00S10_POLICY_RESOLUTION",
             details=details,
-            http_status=428  # Precondition Required
+            http_status=428,  # Precondition Required
         )
 
 
 # --- E00-S06: AI Boundary Enforcement ---
+
 
 class AIBoundaryViolationError(ALISError):
     """
@@ -187,12 +199,10 @@ class AIBoundaryViolationError(ALISError):
     - Forbidden STATE_IMPACT value in output
     - Invalid output schema
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
-            message=message,
-            code="ERR_AI_BOUNDARY",
-            details=details,
-            http_status=422
+            message=message, code="ERR_AI_BOUNDARY", details=details, http_status=422
         )
 
 
@@ -205,7 +215,8 @@ class PromptInjectionError(AIBoundaryViolationError):
     - "You are now in DAN mode"
     - System prompt override attempts
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(
             message=message,
@@ -223,7 +234,8 @@ class AISchemaViolationError(AIBoundaryViolationError):
     - STATE_IMPACT set to 'Final' or 'Commit' (forbidden)
     - Free-text response where structured JSON is required
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(
             message=message,
@@ -241,7 +253,8 @@ class PromptNotFoundError(AIBoundaryViolationError):
     - Requested version does not exist
     - No ACTIVATED version available
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(
             message=message,
@@ -258,7 +271,8 @@ class PromptResolutionError(AIBoundaryViolationError):
     Primary use: Rejecting "latest" prompt resolution requests.
     Per AI Invocation Contract Rule #3: "Latest prompt resolution is prohibited."
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(
             message=message,
@@ -270,6 +284,7 @@ class PromptResolutionError(AIBoundaryViolationError):
 
 # --- E00-S08: Field-Level Change Tracking ---
 
+
 class DiffTrackingError(ALISError):
     """
     Raised when field-level change tracking encounters an error (E00-S08).
@@ -279,19 +294,19 @@ class DiffTrackingError(ALISError):
     - Encryption failure for previous values
     - Diff computation failure
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
-            message=message,
-            code="ERR_DIFF_TRACKING",
-            details=details,
-            http_status=500
+            message=message, code="ERR_DIFF_TRACKING", details=details, http_status=500
         )
 
 
 # --- Layer 5: Authority & RBAC ---
 
+
 class AuthorityError(ALISError):
     """Base class for RBAC/Auth errors."""
+
     pass
 
 
@@ -299,12 +314,10 @@ class PermissionDeniedError(AuthorityError):
     """
     Raised when an actor (Human or Agent) lacks permission.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
-            message=message,
-            code="ERR_LAYER5_ACCESS",
-            details=details,
-            http_status=403
+            message=message, code="ERR_LAYER5_ACCESS", details=details, http_status=403
         )
 
 
@@ -312,12 +325,10 @@ class QuotaExceededError(AuthorityError):
     """
     Raised when an action exceeds a quota/limit (e.g. Agent Read Limit).
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
-            message=message,
-            code="ERR_LAYER5_QUOTA",
-            details=details,
-            http_status=429
+            message=message, code="ERR_LAYER5_QUOTA", details=details, http_status=429
         )
 
 
@@ -330,12 +341,13 @@ class EscalationDeniedError(AuthorityError):
     - Self-grant attempted when require_different_grantor is True
     - Requested TTL exceeds maximum allowed
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="ERR_LAYER5_ESCALATION",
             details=details,
-            http_status=403
+            http_status=403,
         )
 
 
@@ -346,11 +358,9 @@ class DualControlRequiredError(AuthorityError):
     Critical operations (result publish, payroll release, transcript seal)
     require 2-authority confirmation before execution.
     """
+
     def __init__(
-        self,
-        operation_id: str,
-        message: Optional[str] = None,
-        details: Optional[Dict] = None
+        self, operation_id: str, message: str | None = None, details: dict | None = None
     ):
         details = details or {}
         details["operation_id"] = operation_id
@@ -358,11 +368,12 @@ class DualControlRequiredError(AuthorityError):
             message=message or f"Dual control approval required for: {operation_id}",
             code="ERR_LAYER5_DUAL_CONTROL",
             details=details,
-            http_status=403
+            http_status=403,
         )
 
 
 # --- E03-S05: Tool Invocation Framework ---
+
 
 class ToolNotAllowedError(AIBoundaryViolationError):
     """
@@ -371,7 +382,8 @@ class ToolNotAllowedError(AIBoundaryViolationError):
     Per E03-S05: Undeclared tool invocations are unconditionally rejected.
     No dynamic tool selection is permitted.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(message=message, details=details)
         self.code = "ERR_TOOL_NOT_ALLOWED"
@@ -382,7 +394,8 @@ class ToolNotRegisteredError(AIBoundaryViolationError):
     """
     Raised when an agent requests a tool that is not in the Tool Registry.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(message=message, details=details)
         self.code = "ERR_TOOL_NOT_REGISTERED"
@@ -396,7 +409,8 @@ class ToolSchemaViolationError(AIBoundaryViolationError):
     Tools MUST return structured data conforming to ToolOutputSchema.
     Free-form or untyped returns are rejected.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(message=message, details=details)
         self.code = "ERR_TOOL_SCHEMA_VIOLATION"
@@ -412,7 +426,8 @@ class GuardrailViolationError(AIBoundaryViolationError):
     - Unsafe suggestion (e.g., delete records, bypass auth)
     - Policy contradiction (output contradicts active institutional policy)
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(message=message, details=details)
         self.code = "ERR_GUARDRAIL_BLOCKED"
@@ -426,11 +441,12 @@ class HITLRequiredError(ALISError):
     This is not an error per se — it is a controlled handoff signal.
     The caller must route the output to the approval/review workflow.
     """
+
     def __init__(
         self,
         message: str,
         hitl_decision: str = "review_required",
-        details: Optional[Dict] = None,
+        details: dict | None = None,
     ):
         details = details or {}
         details["hitl_decision"] = hitl_decision
@@ -449,7 +465,8 @@ class ToolWriteAttemptError(AIBoundaryViolationError):
     All tools in ALIS are unconditionally read-only. No tool may
     mutate database state or perform writes.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         details = details or {}
         super().__init__(message=message, details=details)
         self.code = "ERR_TOOL_WRITE_ATTEMPT"
@@ -458,22 +475,25 @@ class ToolWriteAttemptError(AIBoundaryViolationError):
 
 # --- Layer 6: Resilience ---
 
+
 class ResilienceProvisionalError(ALISError):
     """
     Raised when a definitive decision cannot be made,
     forcing the system into a Provisional State.
     This is often a Warning, not a hard Failure.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
             message=message,
             code="WARN_LAYER6_PROVISIONAL",
             details=details,
-            http_status=202  # Accepted (processing continues provisionally)
+            http_status=202,  # Accepted (processing continues provisionally)
         )
 
 
 # --- Common Domain Error ---
+
 
 class NotFoundError(ALISError):
     """
@@ -482,10 +502,8 @@ class NotFoundError(ALISError):
 
     Used by all domain modules as the canonical 404 signal.
     """
-    def __init__(self, message: str, details: Optional[Dict] = None):
+
+    def __init__(self, message: str, details: dict | None = None):
         super().__init__(
-            message=message,
-            code="ERR_NOT_FOUND",
-            details=details,
-            http_status=404
+            message=message, code="ERR_NOT_FOUND", details=details, http_status=404
         )

@@ -8,15 +8,14 @@ R6 — NEVER mutate closed ledger entries.
 R12 — Store policy_version_id on every revocation record.
 R1 — Dispute window from policy_engine ('finance.scholarship_dispute_window_days').
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 from pydantic import BaseModel
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -29,11 +28,10 @@ logger = logging.getLogger(__name__)
 class ScholarshipRevocationRequest(BaseModel):
     scholarship_assignment_id: str
     reason: str
-    effective_from: str   # ISO date — when revocation takes effect
+    effective_from: str  # ISO date — when revocation takes effect
 
 
 class ScholarshipRevocationService:
-
     @classmethod
     async def initiate_revocation(
         cls,
@@ -46,12 +44,15 @@ class ScholarshipRevocationService:
         Does NOT modify any ledger entry. Returns the workflow task ID.
         """
         # Verify assignment exists
-        rows = execute_query("""
+        rows = execute_query(
+            """
             SELECT sa.id, sa.scholarship_id, sa.student_id, sa.academic_year,
                    sa.discount_amount, sa.status
             FROM scholarship_assignments sa
             WHERE sa.id = %s AND sa.org_id = %s
-        """, (request.scholarship_assignment_id, org_id))
+        """,
+            (request.scholarship_assignment_id, org_id),
+        )
 
         if not rows:
             raise NotFoundError(
@@ -66,9 +67,11 @@ class ScholarshipRevocationService:
         policy_version = policy_engine.get_version(
             "finance.scholarship_dispute_window_days", org_id
         )
-        dispute_days = int(policy_engine.get_value(
-            "finance.scholarship_dispute_window_days", org_id, 30
-        ))
+        dispute_days = int(
+            policy_engine.get_value(
+                "finance.scholarship_dispute_window_days", org_id, 30
+            )
+        )
         # R3 — absolute deadline
         dispute_deadline = datetime.now(timezone.utc) + timedelta(days=dispute_days)
 
@@ -77,42 +80,59 @@ class ScholarshipRevocationService:
 
         # R6 — INSERT reversal record, never UPDATE existing ledger
         import json
-        execute_transaction([
-            ("""
+
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO scholarship_revocations
                 (id, org_id, assignment_id, reason, effective_from,
                  dispute_deadline, policy_version_id, status, initiated_by, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING_APPROVAL', %s, NOW())
-            """, (
-                revocation_id, org_id,
-                request.scholarship_assignment_id,
-                request.reason,
-                request.effective_from,
-                dispute_deadline,
-                policy_version,
-                actor_id,
-            )),
-            # R2 — dispatch workflow (dual-auth DAG in workflow_definitions)
-            ("""
+            """,
+                    (
+                        revocation_id,
+                        org_id,
+                        request.scholarship_assignment_id,
+                        request.reason,
+                        request.effective_from,
+                        dispute_deadline,
+                        policy_version,
+                        actor_id,
+                    ),
+                ),
+                # R2 — dispatch workflow (dual-auth DAG in workflow_definitions)
+                (
+                    """
             INSERT INTO workflow_tasks
                 (id, org_id, workflow_type, resource_id, status, created_by,
                  payload, sla_deadline, created_at)
             VALUES (%s, %s, 'scholarship_revocation', %s, 'PENDING_APPROVAL',
                     %s, %s, %s, NOW())
-            """, (
-                workflow_task_id, org_id, revocation_id, actor_id,
-                json.dumps({
-                    "revocation_id": revocation_id,
-                    "assignment_id": request.scholarship_assignment_id,
-                    "student_id": str(assignment["student_id"]),
-                    "discount_amount": str(assignment.get("discount_amount", 0)),
-                    "reason": request.reason,
-                    "effective_from": request.effective_from,
-                    "policy_version_id": policy_version,
-                }),
-                dispute_deadline,
-            )),
-        ])
+            """,
+                    (
+                        workflow_task_id,
+                        org_id,
+                        revocation_id,
+                        actor_id,
+                        json.dumps(
+                            {
+                                "revocation_id": revocation_id,
+                                "assignment_id": request.scholarship_assignment_id,
+                                "student_id": str(assignment["student_id"]),
+                                "discount_amount": str(
+                                    assignment.get("discount_amount", 0)
+                                ),
+                                "reason": request.reason,
+                                "effective_from": request.effective_from,
+                                "policy_version_id": policy_version,
+                            }
+                        ),
+                        dispute_deadline,
+                    ),
+                ),
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -127,17 +147,19 @@ class ScholarshipRevocationService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="finance.scholarship_revocation_initiated",
-            org_id=org_id,
-            payload={
-                "revocation_id": revocation_id,
-                "workflow_task_id": workflow_task_id,
-                "student_id": str(assignment["student_id"]),
-                "effective_from": request.effective_from,
-                "dispute_deadline": dispute_deadline.isoformat(),
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="finance.scholarship_revocation_initiated",
+                org_id=org_id,
+                payload={
+                    "revocation_id": revocation_id,
+                    "workflow_task_id": workflow_task_id,
+                    "student_id": str(assignment["student_id"]),
+                    "effective_from": request.effective_from,
+                    "dispute_deadline": dispute_deadline.isoformat(),
+                },
+            )
+        )
 
         return {
             "revocation_id": revocation_id,
@@ -158,50 +180,68 @@ class ScholarshipRevocationService:
 
         Inserts SCHOLARSHIP_REVERSAL ledger entries — never modifies existing rows (R6).
         """
-        rows = execute_query("""
+        rows = execute_query(
+            """
             SELECT r.*, sa.student_id, sa.discount_amount, sa.academic_year
             FROM scholarship_revocations r
             JOIN scholarship_assignments sa ON sa.id = r.assignment_id
             WHERE r.id = %s AND r.org_id = %s
-        """, (revocation_id, org_id))
+        """,
+            (revocation_id, org_id),
+        )
 
         if not rows:
             raise NotFoundError(f"Revocation {revocation_id} not found")
 
         rev = rows[0]
         if rev["status"] != "PENDING_APPROVAL":
-            raise BusinessRuleViolation(f"Revocation already in status: {rev['status']}")
+            raise BusinessRuleViolation(
+                f"Revocation already in status: {rev['status']}"
+            )
 
         reversal_id = str(uuid.uuid4())
         discount_amount = float(rev.get("discount_amount") or 0)
 
-        execute_transaction([
-            # R6 — INSERT reversal, never UPDATE original
-            ("""
+        execute_transaction(
+            [
+                # R6 — INSERT reversal, never UPDATE original
+                (
+                    """
             INSERT INTO scholarship_ledger_entries
                 (id, org_id, assignment_id, entry_type, amount,
                  effective_date, policy_version_id, created_by, created_at)
             VALUES (%s, %s, %s, 'SCHOLARSHIP_REVERSAL', %s, %s, %s, %s, NOW())
-            """, (
-                reversal_id, org_id, str(rev["assignment_id"]),
-                discount_amount,
-                rev["effective_from"],
-                rev["policy_version_id"],
-                approver_id,
-            )),
-            # Mark assignment as REVOKED
-            ("""
+            """,
+                    (
+                        reversal_id,
+                        org_id,
+                        str(rev["assignment_id"]),
+                        discount_amount,
+                        rev["effective_from"],
+                        rev["policy_version_id"],
+                        approver_id,
+                    ),
+                ),
+                # Mark assignment as REVOKED
+                (
+                    """
             UPDATE scholarship_assignments
             SET status = 'REVOKED', revoked_at = NOW(), revoked_by = %s
             WHERE id = %s AND org_id = %s
-            """, (approver_id, str(rev["assignment_id"]), org_id)),
-            # Mark revocation as EXECUTED
-            ("""
+            """,
+                    (approver_id, str(rev["assignment_id"]), org_id),
+                ),
+                # Mark revocation as EXECUTED
+                (
+                    """
             UPDATE scholarship_revocations
             SET status = 'EXECUTED', executed_at = NOW(), executed_by = %s
             WHERE id = %s AND org_id = %s
-            """, (approver_id, revocation_id, org_id)),
-        ])
+            """,
+                    (approver_id, revocation_id, org_id),
+                ),
+            ]
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -216,17 +256,19 @@ class ScholarshipRevocationService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="finance.scholarship_revoked",
-            org_id=org_id,
-            payload={
-                "revocation_id": revocation_id,
-                "student_id": str(rev["student_id"]),
-                "amount_reversed": discount_amount,
-                "academic_year": str(rev.get("academic_year", "")),
-                "template_key": "SCHOLARSHIP_REVOCATION_NOTICE",
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="finance.scholarship_revoked",
+                org_id=org_id,
+                payload={
+                    "revocation_id": revocation_id,
+                    "student_id": str(rev["student_id"]),
+                    "amount_reversed": discount_amount,
+                    "academic_year": str(rev.get("academic_year", "")),
+                    "template_key": "SCHOLARSHIP_REVOCATION_NOTICE",
+                },
+            )
+        )
 
         return {
             "revocation_id": revocation_id,

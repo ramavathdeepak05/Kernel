@@ -1,3 +1,6 @@
+from __future__ import annotations
+from server.core.rbac import Permission, require_permission  # noqa: E402
+
 """E21 — DPDP Consent Management API Router
 
 MODULE: Consent Management (E21)
@@ -16,17 +19,15 @@ All endpoints require a valid Bearer token (session validated via SessionManager
 The user's identity is read from the validated session (not from query params).
 The tenant (org_id) is read from request.state.tenant_id set by TenantMiddleware.
 """
-from __future__ import annotations
 
-import logging
-from typing import List, Optional
 
-from fastapi import APIRouter, Header, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+import logging  # noqa: E402
 
-from server.core.security import SessionManager
-from server.core.rbac import Role
+from fastapi import APIRouter, Header, Request  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
+from server.core.rbac import Role  # noqa: E402
+from server.core.security import SessionManager  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +38,21 @@ router = APIRouter(prefix="/api/v1/consent", tags=["consent"])
 # REQUEST MODELS
 # =============================================================================
 
+
 class GiveConsentRequest(BaseModel):
-    purposes: List[str] = Field(..., min_length=1, description="Consent purposes to grant")
+    purposes: list[str] = Field(
+        ..., min_length=1, description="Consent purposes to grant"
+    )
 
 
 class WithdrawConsentRequest(BaseModel):
-    purposes: List[str] = Field(..., min_length=1, description="Consent purposes to withdraw")
+    purposes: list[str] = Field(
+        ..., min_length=1, description="Consent purposes to withdraw"
+    )
 
 
 class ErasureRequest(BaseModel):
-    reason: Optional[str] = Field(default=None, max_length=2000)
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 class RejectErasureRequest(BaseModel):
@@ -57,7 +63,8 @@ class RejectErasureRequest(BaseModel):
 # HELPERS
 # =============================================================================
 
-def _extract_token(authorization: Optional[str]) -> Optional[str]:
+
+def _extract_token(authorization: str | None) -> str | None:
     if not authorization:
         return None
     parts = authorization.split(" ", 1)
@@ -66,7 +73,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
     return parts[1].strip()
 
 
-def _require_auth(authorization: Optional[str]):
+def _require_auth(authorization: str | None):
     """
     Validate the Bearer token and return (session, None) or (None, error_json).
     """
@@ -74,13 +81,19 @@ def _require_auth(authorization: Optional[str]):
     if not token:
         return None, JSONResponse(
             status_code=401,
-            content={"error": "Missing or malformed Authorization header", "code": "ERR_AUTH_REQUIRED"},
+            content={
+                "error": "Missing or malformed Authorization header",
+                "code": "ERR_AUTH_REQUIRED",
+            },
         )
     session = SessionManager.validate_token(token)
     if not session:
         return None, JSONResponse(
             status_code=401,
-            content={"error": "Token is invalid, expired, or revoked", "code": "ERR_AUTH_REQUIRED"},
+            content={
+                "error": "Token is invalid, expired, or revoked",
+                "code": "ERR_AUTH_REQUIRED",
+            },
         )
     return session, None
 
@@ -93,10 +106,12 @@ def _org(request: Request) -> str:
 # GET /api/v1/consent/
 # =============================================================================
 
+
 @router.get("/")
+@require_permission(Permission.COMPLIANCE_READ)
 async def list_consents(
     request: Request,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """Return all consent records for the authenticated user."""
     session, err = _require_auth(authorization)
@@ -106,20 +121,24 @@ async def list_consents(
     org_id = _org(request)
 
     from server.consent.consent_service import ConsentService
+
     records = ConsentService.get_consents(org_id, session.user_id)
 
-    return JSONResponse(status_code=200, content={"consents": records, "total": len(records)})
+    return JSONResponse(
+        status_code=200, content={"consents": records, "total": len(records)}
+    )
 
 
 # =============================================================================
 # POST /api/v1/consent/give
 # =============================================================================
 
+
 @router.post("/give")
 async def give_consent(
     request: Request,
     body: GiveConsentRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Give consent for one or more purposes.
@@ -135,6 +154,7 @@ async def give_consent(
     user_agent = request.headers.get("user-agent")
 
     from server.consent.consent_service import ConsentService
+
     try:
         records = ConsentService.give_consent(
             org_id=org_id,
@@ -144,7 +164,9 @@ async def give_consent(
             user_agent=user_agent,
         )
     except ValueError as exc:
-        return JSONResponse(status_code=422, content={"error": str(exc), "code": "ERR_INVALID_PURPOSE"})
+        return JSONResponse(
+            status_code=422, content={"error": str(exc), "code": "ERR_INVALID_PURPOSE"}
+        )
 
     return JSONResponse(
         status_code=200,
@@ -156,11 +178,12 @@ async def give_consent(
 # POST /api/v1/consent/withdraw
 # =============================================================================
 
+
 @router.post("/withdraw")
 async def withdraw_consent(
     request: Request,
     body: WithdrawConsentRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Withdraw consent for one or more purposes.
@@ -174,6 +197,7 @@ async def withdraw_consent(
     org_id = _org(request)
 
     from server.consent.consent_service import ConsentService
+
     try:
         records = ConsentService.withdraw_consent(
             org_id=org_id,
@@ -181,7 +205,9 @@ async def withdraw_consent(
             purposes=body.purposes,
         )
     except ValueError as exc:
-        return JSONResponse(status_code=422, content={"error": str(exc), "code": "ERR_INVALID_PURPOSE"})
+        return JSONResponse(
+            status_code=422, content={"error": str(exc), "code": "ERR_INVALID_PURPOSE"}
+        )
 
     return JSONResponse(
         status_code=200,
@@ -193,11 +219,12 @@ async def withdraw_consent(
 # POST /api/v1/consent/erasure
 # =============================================================================
 
+
 @router.post("/erasure")
 async def request_erasure(
     request: Request,
     body: ErasureRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Submit a right-to-erasure request (DPDP Act 2023, Section 12).
@@ -214,6 +241,7 @@ async def request_erasure(
     org_id = _org(request)
 
     from server.consent.consent_service import ConsentService
+
     erasure = ConsentService.request_erasure(
         org_id=org_id,
         user_id=session.user_id,
@@ -231,10 +259,11 @@ async def request_erasure(
 # GET /api/v1/consent/erasure
 # =============================================================================
 
+
 @router.get("/erasure")
 async def get_erasure_status(
     request: Request,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """Return the most recent erasure request status for the authenticated user."""
     session, err = _require_auth(authorization)
@@ -244,6 +273,7 @@ async def get_erasure_status(
     org_id = _org(request)
 
     from server.consent.consent_service import ConsentService
+
     erasure = ConsentService.get_erasure_status(org_id, session.user_id)
 
     if erasure is None:
@@ -259,12 +289,13 @@ async def get_erasure_status(
 # POST /api/v1/consent/erasure/{erasure_id}/reject  (ADMIN only)
 # =============================================================================
 
+
 @router.post("/erasure/{erasure_id}/reject")
 async def reject_erasure(
     erasure_id: str,
     request: Request,
     body: RejectErasureRequest,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Reject an erasure request.  ADMIN or SUPER_ADMIN role required.
@@ -279,6 +310,7 @@ async def reject_erasure(
 
     # --- RBAC: ADMIN or SUPER_ADMIN only ---
     from server.db_service import execute_query
+
     user_rows = execute_query(
         "SELECT role FROM users WHERE id = %s::uuid AND is_deleted = FALSE",
         (session.user_id,),
@@ -300,6 +332,7 @@ async def reject_erasure(
         )
 
     from server.consent.consent_service import ConsentService
+
     try:
         erasure = ConsentService.reject_erasure(
             erasure_id=erasure_id,
@@ -322,10 +355,12 @@ async def reject_erasure(
 # GET /api/v1/consent/admin/stats  (ADMIN/SUPER_ADMIN — DPO dashboard)
 # =============================================================================
 
+
 @router.get("/admin/stats")
+@require_permission(Permission.COMPLIANCE_READ)
 async def consent_admin_stats(
     request: Request,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Aggregate consent rates by purpose for the DPO dashboard.
@@ -344,8 +379,14 @@ async def consent_admin_stats(
         (session.user_id,),
         tenant_id=org_id,
     )
-    if not user_rows or user_rows[0].get("role") not in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
-        return JSONResponse(status_code=403, content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"})
+    if not user_rows or user_rows[0].get("role") not in (
+        Role.ADMIN.value,
+        Role.SUPER_ADMIN.value,
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"},
+        )
 
     rows = execute_query(
         """
@@ -366,13 +407,15 @@ async def consent_admin_stats(
     for r in rows:
         total = (r["given"] or 0) + (r["revoked"] or 0)
         rate = round((r["given"] / total * 100) if total > 0 else 0, 1)
-        stats.append({
-            "purpose": r["purpose"],
-            "given": r["given"] or 0,
-            "revoked": r["revoked"] or 0,
-            "total": total,
-            "rate": rate,
-        })
+        stats.append(
+            {
+                "purpose": r["purpose"],
+                "given": r["given"] or 0,
+                "revoked": r["revoked"] or 0,
+                "total": total,
+                "rate": rate,
+            }
+        )
 
     return JSONResponse(status_code=200, content={"stats": stats})
 
@@ -381,11 +424,13 @@ async def consent_admin_stats(
 # GET /api/v1/consent/admin/events  (ADMIN/SUPER_ADMIN — DPO dashboard)
 # =============================================================================
 
+
 @router.get("/admin/events")
+@require_permission(Permission.COMPLIANCE_READ)
 async def consent_admin_events(
     request: Request,
     limit: int = 50,
-    authorization: Optional[str] = Header(default=None),
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Recent GIVEN/WITHDRAWN consent events for the DPO activity feed.
@@ -404,8 +449,14 @@ async def consent_admin_events(
         (session.user_id,),
         tenant_id=org_id,
     )
-    if not user_rows or user_rows[0].get("role") not in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
-        return JSONResponse(status_code=403, content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"})
+    if not user_rows or user_rows[0].get("role") not in (
+        Role.ADMIN.value,
+        Role.SUPER_ADMIN.value,
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"},
+        )
 
     rows = execute_query(
         """
@@ -435,18 +486,22 @@ async def consent_admin_events(
         for r in rows
     ]
 
-    return JSONResponse(status_code=200, content={"events": events, "total": len(events)})
+    return JSONResponse(
+        status_code=200, content={"events": events, "total": len(events)}
+    )
 
 
 # =============================================================================
 # GET /api/v1/consent/admin/dsr  (ADMIN/SUPER_ADMIN — DPO dashboard)
 # =============================================================================
 
+
 @router.get("/admin/dsr")
+@require_permission(Permission.COMPLIANCE_READ)
 async def consent_admin_dsr(
     request: Request,
-    status: Optional[str] = None,
-    authorization: Optional[str] = Header(default=None),
+    status: str | None = None,
+    authorization: str | None = Header(default=None),
 ) -> JSONResponse:
     """
     Erasure / DSR request queue for the DPO.
@@ -459,16 +514,23 @@ async def consent_admin_dsr(
 
     org_id = _org(request)
 
-    from server.db_service import execute_query
     from datetime import datetime, timezone
+
+    from server.db_service import execute_query
 
     user_rows = execute_query(
         "SELECT role FROM users WHERE id = %s::uuid AND is_deleted = FALSE",
         (session.user_id,),
         tenant_id=org_id,
     )
-    if not user_rows or user_rows[0].get("role") not in (Role.ADMIN.value, Role.SUPER_ADMIN.value):
-        return JSONResponse(status_code=403, content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"})
+    if not user_rows or user_rows[0].get("role") not in (
+        Role.ADMIN.value,
+        Role.SUPER_ADMIN.value,
+    ):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Admin access required", "code": "ERR_LAYER5_ACCESS"},
+        )
 
     sql = """
         SELECT er.id, er.status, er.reason, er.due_by,
@@ -503,10 +565,14 @@ async def consent_admin_dsr(
             "status": r["status"],
             "reason": r["reason"] or "",
             "user_name": r["user_name"] or "Unknown",
-            "requested_at": r["requested_at"].isoformat() if r["requested_at"] else None,
+            "requested_at": r["requested_at"].isoformat()
+            if r["requested_at"]
+            else None,
             "due_by": r["due_by"].isoformat() if r["due_by"] else None,
             "sla_hours_remaining": _sla_hours(r["due_by"]),
-            "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
+            "completed_at": r["completed_at"].isoformat()
+            if r["completed_at"]
+            else None,
             "rejected_at": r["rejected_at"].isoformat() if r["rejected_at"] else None,
             "rejection_reason": r["rejection_reason"] or "",
         }

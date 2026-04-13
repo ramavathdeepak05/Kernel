@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 WiFi Attendance Router — E05-WiFi
 
@@ -13,16 +15,17 @@ This requires both devices to be on the same NAT gateway (campus WiFi hotspot).
 Feature flag: academics.offline_attendance_pwa (controls whether the desktop app button is shown in UI,
 but the API itself is always available for authorized faculty).
 """
-from __future__ import annotations
-import logging
-import secrets
-from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel
+from server.core.rbac import Permission, require_permission  # noqa: E402
 
-from server.db_service import execute_query, execute_transaction
-from server.core.domain_events import DomainEventBus
+import logging  # noqa: E402
+import secrets  # noqa: E402
+
+from fastapi import APIRouter, HTTPException, Request, status  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+from server.core.audit import AuditAction, AuditLedger  # noqa: E402
+from server.core.domain_events import DomainEventBus  # noqa: E402
+from server.db_service import execute_query, execute_transaction  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ router = APIRouter(prefix="/api/v1/attendance/wifi", tags=["WiFi Attendance"])
 
 
 # ── Pydantic models ──────────────────────────────────────────────────────────
+
 
 class StartSessionRequest(BaseModel):
     course_id: str
@@ -44,6 +48,7 @@ class VerifyRequest(BaseModel):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _get_client_ip(request: Request) -> str:
     """Extract public IP from request. Respects X-Forwarded-For for reverse-proxy deployments."""
@@ -63,13 +68,18 @@ def _get_faculty_course(tenant_id: str, course_id: str, faculty_id: str) -> dict
         (course_id, tenant_id, faculty_id),
     )
     if not rows:
-        raise HTTPException(status_code=404, detail="Course not found or you are not the assigned faculty")
+        raise HTTPException(
+            status_code=404,
+            detail="Course not found or you are not the assigned faculty",
+        )
     return dict(rows[0])
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
+
 @router.post("/start", status_code=status.HTTP_201_CREATED)
+@require_permission(Permission.ACADEMICS_MANAGE)
 def start_wifi_session(
     body: StartSessionRequest,
     request: Request,
@@ -87,16 +97,38 @@ def start_wifi_session(
     # Generate a short, memorable session token
     session_token = secrets.token_hex(4).upper()  # e.g. "A3F9B2C1"
 
-    execute_transaction([(
-        """
+    execute_transaction(
+        [
+            (
+                """
         INSERT INTO attendance_wifi_sessions
             (tenant_id, course_id, faculty_id, session_token, ssid, wifi_password,
              faculty_public_ip, duration_minutes)
         VALUES ($1,$2,$3,$4,$5,$6,$7::inet,$8)
         """,
-        (tenant_id, body.course_id, faculty_id, session_token,
-         body.ssid, body.wifi_password, faculty_ip, body.duration_minutes),
-    )])
+                (
+                    tenant_id,
+                    body.course_id,
+                    faculty_id,
+                    session_token,
+                    body.ssid,
+                    body.wifi_password,
+                    faculty_ip,
+                    body.duration_minutes,
+                ),
+            )
+        ]
+    )
+
+    AuditLedger.log(
+        action=AuditAction.UPDATE,
+        actor_id="system",
+        actor_role="system",
+        entity_type="start_wifi_session",
+        entity_id="",
+        tenant_id=tenant_id,
+        metadata={"source": "start_wifi_session"},
+    )
 
     row = execute_query(
         """
@@ -111,7 +143,10 @@ def start_wifi_session(
 
     logger.info(
         "wifi_session_started course=%s faculty=%s token=%s ip=%s",
-        body.course_id, faculty_id, session_token, faculty_ip,
+        body.course_id,
+        faculty_id,
+        session_token,
+        faculty_ip,
     )
     return {
         "session_id": str(session["id"]),
@@ -126,6 +161,7 @@ def start_wifi_session(
 
 
 @router.get("/sessions/{session_id}")
+@require_permission(Permission.ACADEMICS_READ)
 def get_session_status(
     session_id: str,
     request: Request,
@@ -193,7 +229,9 @@ def get_session_status(
                 "full_name": r["full_name"],
                 "roll_number": r["roll_number"],
                 "status": r["verification_status"] or "PENDING",
-                "verified_at": r["verified_at"].isoformat() if r["verified_at"] else None,
+                "verified_at": r["verified_at"].isoformat()
+                if r["verified_at"]
+                else None,
                 "ip_matched": r["ip_matched"],
             }
             for r in roster_rows
@@ -202,6 +240,7 @@ def get_session_status(
 
 
 @router.post("/verify", status_code=status.HTTP_200_OK)
+@require_permission(Permission.STUDENT_READ)
 def verify_student_presence(
     body: VerifyRequest,
     request: Request,
@@ -226,7 +265,9 @@ def verify_student_presence(
         (body.session_token, tenant_id),
     )
     if not session_rows:
-        raise HTTPException(status_code=404, detail="Session not found or already ended")
+        raise HTTPException(
+            status_code=404, detail="Session not found or already ended"
+        )
 
     session = dict(session_rows[0])
     session_id = str(session["id"])
@@ -244,34 +285,65 @@ def verify_student_presence(
     ip_matched = student_ip == faculty_ip
     verif_status = "PRESENT" if ip_matched else "IP_MISMATCH"
 
-    execute_transaction([(
-        """
+    execute_transaction(
+        [
+            (
+                """
         INSERT INTO attendance_wifi_verifications
             (session_id, student_id, tenant_id, student_public_ip, ip_matched, status, verified_at)
         VALUES ($1,$2,$3,$4::inet,$5,$6,NOW())
         """,
-        (session_id, student_id, tenant_id, student_ip, ip_matched, verif_status),
-    )])
+                (
+                    session_id,
+                    student_id,
+                    tenant_id,
+                    student_ip,
+                    ip_matched,
+                    verif_status,
+                ),
+            )
+        ]
+    )
+
+    AuditLedger.log(
+        action=AuditAction.UPDATE,
+        actor_id="system",
+        actor_role="system",
+        entity_type="student_presence",
+        entity_id="",
+        tenant_id=tenant_id,
+        metadata={"source": "verify_student_presence"},
+    )
 
     # Update session present_count
     if ip_matched:
-        execute_transaction([(
-            "UPDATE attendance_wifi_sessions SET present_count=present_count+1 WHERE id=$1",
-            (session_id,),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE attendance_wifi_sessions SET present_count=present_count+1 WHERE id=$1",
+                    (session_id,),
+                )
+            ]
+        )
 
     logger.info(
         "wifi_verify student=%s session=%s ip_matched=%s status=%s",
-        student_id, session_id, ip_matched, verif_status,
+        student_id,
+        session_id,
+        ip_matched,
+        verif_status,
     )
     return {
         "status": verif_status,
         "ip_matched": ip_matched,
-        "message": "Marked PRESENT" if ip_matched else "IP mismatch — faculty can manually override",
+        "message": "Marked PRESENT"
+        if ip_matched
+        else "IP mismatch — faculty can manually override",
     }
 
 
 @router.post("/sessions/{session_id}/end", status_code=status.HTTP_200_OK)
+@require_permission(Permission.ACADEMICS_MANAGE)
 def end_wifi_session(
     session_id: str,
     request: Request,
@@ -321,26 +393,44 @@ def end_wifi_session(
     absent_count = len(unverified)
 
     # Close the session
-    execute_transaction([(
-        """
+    execute_transaction(
+        [
+            (
+                """
         UPDATE attendance_wifi_sessions
         SET status='ENDED', ended_at=NOW(), absent_count=$1
         WHERE id=$2
         """,
-        (absent_count, session_id),
-    )])
+                (absent_count, session_id),
+            )
+        ]
+    )
+
+    AuditLedger.log(
+        action=AuditAction.UPDATE,
+        actor_id="system",
+        actor_role="system",
+        entity_type="end_wifi_session",
+        entity_id="",
+        tenant_id=tenant_id,
+        metadata={"source": "end_wifi_session"},
+    )
 
     # Insert ABSENT records for unverified students
     for student in unverified:
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO attendance_wifi_verifications
                 (session_id, student_id, tenant_id, ip_matched, status, verified_at)
             VALUES ($1,$2,$3,FALSE,'ABSENT',NOW())
             ON CONFLICT (session_id, student_id) DO NOTHING
             """,
-            (session_id, str(student["student_id"]), tenant_id),
-        )])
+                    (session_id, str(student["student_id"]), tenant_id),
+                )
+            ]
+        )
 
     DomainEventBus.publish(
         "attendance.wifi_session_ended",
@@ -357,7 +447,9 @@ def end_wifi_session(
 
     logger.info(
         "wifi_session_ended session=%s present=%s absent=%s",
-        session_id, session["present_count"], absent_count,
+        session_id,
+        session["present_count"],
+        absent_count,
     )
     return {
         "session_id": session_id,

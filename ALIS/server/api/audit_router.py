@@ -18,19 +18,18 @@ Must Align With:
     - Layer 5: Only ADMIN / SUPER_ADMIN may access these endpoints
       (enforced via RBAC+ Permission.AUDIT_LOG_READ)
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
 from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse
-
-from server.core.audit import AuditLedger, AuditAction
-from server.core.rbac import require_permission, Permission
-from server.core.security import get_current_tenant_id
+from server.core.audit import AuditLedger
+from server.core.rbac import Permission, require_permission
 from server.core.schema import TimelineEvent
+from server.core.security import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +39,7 @@ router = APIRouter(prefix="/api/v1/audit", tags=["audit"])
 # ============================================================================
 # GET /api/v1/audit/verify  —  Hash Chain Verification
 # ============================================================================
+
 
 @router.get("/verify")
 @require_permission(Permission.AUDIT_LOG_READ)
@@ -66,6 +66,7 @@ async def verify_audit_chain(request: Request) -> JSONResponse:
 # GET /api/v1/audit/export  —  Admin Ledger Export
 # ============================================================================
 
+
 @router.get("/export")
 @require_permission(Permission.AUDIT_LOG_READ)
 async def export_audit_ledger(
@@ -75,11 +76,11 @@ async def export_audit_ledger(
         description="Export format: 'json' or 'csv'.",
         pattern="^(json|csv)$",
     ),
-    start_time: Optional[str] = Query(
+    start_time: str | None = Query(
         default=None,
         description="ISO-8601 lower-bound filter (e.g. 2025-01-01T00:00:00Z).",
     ),
-    end_time: Optional[str] = Query(
+    end_time: str | None = Query(
         default=None,
         description="ISO-8601 upper-bound filter.",
     ),
@@ -133,14 +134,17 @@ async def export_audit_ledger(
 # GET /api/v1/audit/logs  —  Audit Ledger Query
 # ============================================================================
 
+
 @router.get("/logs")
 @require_permission(Permission.AUDIT_LOG_READ)
 async def get_audit_logs(
     request: Request,
-    actor_id: Optional[str] = Query(None, description="Filter by actor ID"),
-    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
-    entity_id: Optional[str] = Query(None, description="Filter by entity ID"),
-    action: Optional[str] = Query(None, description="Filter by action (e.g. login, create)"),
+    actor_id: str | None = Query(None, description="Filter by actor ID"),
+    entity_type: str | None = Query(None, description="Filter by entity type"),
+    entity_id: str | None = Query(None, description="Filter by entity ID"),
+    action: str | None = Query(
+        None, description="Filter by action (e.g. login, create)"
+    ),
     limit: int = Query(50, le=500, description="Max entries to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
 ) -> JSONResponse:
@@ -154,7 +158,7 @@ async def get_audit_logs(
         Requires ``audit_log:read`` permission (ADMIN, SUPER_ADMIN).
     """
     tenant_id = get_current_tenant_id()
-    
+
     logs = AuditLedger.query(
         tenant_id=tenant_id,
         actor_id=actor_id,
@@ -168,19 +172,21 @@ async def get_audit_logs(
     # Convert AuditEntry objects to dicts for JSON serialization
     serialized = []
     for entry in logs:
-        serialized.append({
-            "id": entry.id,
-            "tenant_id": entry.tenant_id,
-            "actor_id": entry.actor_id,
-            "actor_role": entry.actor_role,
-            "action": entry.action,
-            "entity_type": entry.entity_type,
-            "entity_id": entry.entity_id,
-            "metadata": entry.metadata,
-            "timestamp": entry.timestamp.isoformat(),
-            "previous_hash": entry.previous_hash,
-            "hash": entry.hash,
-        })
+        serialized.append(
+            {
+                "id": entry.id,
+                "tenant_id": entry.tenant_id,
+                "actor_id": entry.actor_id,
+                "actor_role": entry.actor_role,
+                "action": entry.action,
+                "entity_type": entry.entity_type,
+                "entity_id": entry.entity_id,
+                "metadata": entry.metadata,
+                "timestamp": entry.timestamp.isoformat(),
+                "previous_hash": entry.previous_hash,
+                "hash": entry.hash,
+            }
+        )
 
     return JSONResponse(content=serialized)
 
@@ -192,53 +198,53 @@ async def get_audit_logs(
 # Map AuditAction values → (human label, color, icon)
 _ACTION_STYLE: dict = {
     # Auth
-    "login":                  ("Logged In",                        "blue",  "user"),
-    "logout":                 ("Logged Out",                       "muted", "user"),
-    "access_denied":          ("Access Denied",                    "red",   "lock"),
+    "login": ("Logged In", "blue", "user"),
+    "logout": ("Logged Out", "muted", "user"),
+    "access_denied": ("Access Denied", "red", "lock"),
     # CRUD
-    "create":                 ("Record Created",                   "green", "check"),
-    "update":                 ("Record Updated",                   "blue",  "edit"),
-    "delete":                 ("Record Deleted",                   "red",   "trash"),
+    "create": ("Record Created", "green", "check"),
+    "update": ("Record Updated", "blue", "edit"),
+    "delete": ("Record Deleted", "red", "trash"),
     # State & Events
-    "state_transition":       ("Status Changed",                   "blue",  "arrow"),
-    "event_published":        ("Event Published",                  "muted", "broadcast"),
+    "state_transition": ("Status Changed", "blue", "arrow"),
+    "event_published": ("Event Published", "muted", "broadcast"),
     # AI
-    "ai_invocation":          ("AI Analysis Run",                  "blue",  "ai"),
-    "agent_execution":        ("Agent Executed",                   "blue",  "ai"),
-    "agent_decision":         ("Agent Decision Made",              "blue",  "ai"),
-    "ai_prompt_injection":    ("Injection Attempt Blocked",        "red",   "shield"),
-    "ai_schema_rejected":     ("AI Output Rejected",               "amber", "alert"),
-    "guardrail_blocked":      ("Guardrail Blocked Output",         "red",   "shield"),
-    "guardrail_warning":      ("Guardrail Warning",                "amber", "alert"),
-    "hitl_review_required":   ("Sent for Human Review",           "amber", "clock"),
-    "hitl_auto_proceed":      ("Auto-Proceeded (HITL Waived)",     "green", "check"),
+    "ai_invocation": ("AI Analysis Run", "blue", "ai"),
+    "agent_execution": ("Agent Executed", "blue", "ai"),
+    "agent_decision": ("Agent Decision Made", "blue", "ai"),
+    "ai_prompt_injection": ("Injection Attempt Blocked", "red", "shield"),
+    "ai_schema_rejected": ("AI Output Rejected", "amber", "alert"),
+    "guardrail_blocked": ("Guardrail Blocked Output", "red", "shield"),
+    "guardrail_warning": ("Guardrail Warning", "amber", "alert"),
+    "hitl_review_required": ("Sent for Human Review", "amber", "clock"),
+    "hitl_auto_proceed": ("Auto-Proceeded (HITL Waived)", "green", "check"),
     # Policy Engine (Phase A)
-    "policy_evaluated":       ("Policy Evaluated",                 "blue",  "balance"),
-    "policy_drafted":         ("Policy Drafted",                   "muted", "edit"),
-    "policy_submitted":       ("Policy Submitted for Approval",    "amber", "clock"),
-    "policy_approved":        ("Policy Approved",                  "green", "check"),
-    "policy_activated":       ("Policy Activated",                 "green", "check"),
+    "policy_evaluated": ("Policy Evaluated", "blue", "balance"),
+    "policy_drafted": ("Policy Drafted", "muted", "edit"),
+    "policy_submitted": ("Policy Submitted for Approval", "amber", "clock"),
+    "policy_approved": ("Policy Approved", "green", "check"),
+    "policy_activated": ("Policy Activated", "green", "check"),
     # Approvals
-    "override_requested":     ("Override Requested",               "amber", "alert"),
-    "override_approved":      ("Override Approved",                "amber", "alert"),
-    "override_rejected":      ("Override Rejected",                "red",   "alert"),
-    "override_executed":      ("Override Executed",                "amber", "alert"),
+    "override_requested": ("Override Requested", "amber", "alert"),
+    "override_approved": ("Override Approved", "amber", "alert"),
+    "override_rejected": ("Override Rejected", "red", "alert"),
+    "override_executed": ("Override Executed", "amber", "alert"),
     # Escalation
-    "escalation_requested":   ("Escalation Requested",             "amber", "arrow"),
-    "escalation_granted":     ("Escalation Granted",               "amber", "arrow"),
-    "escalation_denied":      ("Escalation Denied",                "red",   "lock"),
+    "escalation_requested": ("Escalation Requested", "amber", "arrow"),
+    "escalation_granted": ("Escalation Granted", "amber", "arrow"),
+    "escalation_denied": ("Escalation Denied", "red", "lock"),
     # Lockdown
-    "lockdown_activated":     ("System Lockdown Activated",        "red",   "lock"),
-    "lockdown_deactivated":   ("Lockdown Lifted",                  "green", "check"),
+    "lockdown_activated": ("System Lockdown Activated", "red", "lock"),
+    "lockdown_deactivated": ("Lockdown Lifted", "green", "check"),
     # Selective auto-execution (Phase D)
-    "auto_executed":          ("Auto-Executed by Policy",          "green", "zap"),
+    "auto_executed": ("Auto-Executed by Policy", "green", "zap"),
     # Prompts
-    "prompt_created":         ("Prompt Created",                   "muted", "edit"),
-    "prompt_activated":       ("Prompt Activated",                 "green", "check"),
+    "prompt_created": ("Prompt Created", "muted", "edit"),
+    "prompt_activated": ("Prompt Activated", "green", "check"),
     # Data
-    "field_change":           ("Field Changed",                    "muted", "edit"),
-    "archive":                ("Record Archived",                  "muted", "trash"),
-    "sensitive_access":       ("Sensitive Data Accessed",          "amber", "shield"),
+    "field_change": ("Field Changed", "muted", "edit"),
+    "archive": ("Record Archived", "muted", "trash"),
+    "sensitive_access": ("Sensitive Data Accessed", "amber", "shield"),
 }
 
 _DEFAULT_STYLE = ("Activity Recorded", "muted", "clock")
@@ -316,18 +322,20 @@ async def get_entity_timeline(
     for entry in entries_sorted:
         _, color, icon = _ACTION_STYLE.get(entry.action, _DEFAULT_STYLE)
         meta = entry.metadata or {}
-        events.append(TimelineEvent(
-            id=entry.id,
-            timestamp=entry.timestamp.isoformat(),
-            action=entry.action,
-            label=_format_label(entry),
-            actor_id=entry.actor_id,
-            actor_role=entry.actor_role,
-            color=color,
-            icon=icon,
-            metadata=meta,
-            formatted_detail=meta.get("formatted"),
-        ).model_dump())
+        events.append(
+            TimelineEvent(
+                id=entry.id,
+                timestamp=entry.timestamp.isoformat(),
+                action=entry.action,
+                label=_format_label(entry),
+                actor_id=entry.actor_id,
+                actor_role=entry.actor_role,
+                color=color,
+                icon=icon,
+                metadata=meta,
+                formatted_detail=meta.get("formatted"),
+            ).model_dump()
+        )
 
     return JSONResponse(content=events)
 
@@ -336,10 +344,11 @@ async def get_entity_timeline(
 # HELPERS
 # ============================================================================
 
+
 def _parse_iso(value: str) -> datetime:
     """Parse an ISO-8601 string into a timezone-aware datetime."""
-    if value.endswith('Z'):
-        value = value[:-1] + '+00:00'
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)

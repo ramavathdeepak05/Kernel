@@ -11,19 +11,19 @@ Flow:
      Drillbit and calls record_result() when COMPLETE.
   3. record_result() — writes similarity_pct + PASSED/FAILED, fires domain event.
 """
+
 from __future__ import annotations
 
 import logging
 import os
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Optional
 from uuid import uuid4
 
 import httpx
 from minio import Minio
 from minio.error import S3Error
-
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import NotFoundError
 from server.core.policy_engine import policy_engine
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _minio_client() -> Minio:
     """Return a configured MinIO client."""
@@ -58,7 +59,9 @@ def _fetch_file_bytes(document_url: str) -> tuple[bytes, str]:
     Returns ``(file_bytes, filename)``.
     """
     # If it looks like a MinIO object key (no scheme), fetch directly.
-    if not document_url.startswith("http://") and not document_url.startswith("https://"):
+    if not document_url.startswith("http://") and not document_url.startswith(
+        "https://"
+    ):
         try:
             client = _minio_client()
             response = client.get_object(settings.minio_bucket, document_url)
@@ -66,7 +69,9 @@ def _fetch_file_bytes(document_url: str) -> tuple[bytes, str]:
             filename = os.path.basename(document_url)
             return file_bytes, filename
         except S3Error as exc:
-            logger.warning("MinIO fetch failed for %s: %s — trying HTTP", document_url, exc)
+            logger.warning(
+                "MinIO fetch failed for %s: %s — trying HTTP", document_url, exc
+            )
 
     # Fall back: treat as a pre-signed URL or public URL.
     with httpx.Client(timeout=settings.drillbit_timeout_seconds) as client:
@@ -83,6 +88,7 @@ def _drillbit_headers() -> dict:
 def _publish_event(event: DomainEvent) -> None:
     """Fire-and-forget domain event (works inside sync Celery tasks too)."""
     import asyncio
+
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
@@ -97,8 +103,8 @@ def _publish_event(event: DomainEvent) -> None:
 # Service
 # ---------------------------------------------------------------------------
 
-class PlagiarismService:
 
+class PlagiarismService:
     @classmethod
     def submit_check(
         cls,
@@ -120,7 +126,7 @@ class PlagiarismService:
 
         report_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        drillbit_submission_id: Optional[str] = None
+        drillbit_submission_id: str | None = None
 
         # ------------------------------------------------------------------
         # Attempt Drillbit submission when the integration is enabled
@@ -140,7 +146,9 @@ class PlagiarismService:
                     """,
                     (phd_id, org_id),
                 )
-                author = author_rows[0]["full_name"] if author_rows else "Unknown Author"
+                author = (
+                    author_rows[0]["full_name"] if author_rows else "Unknown Author"
+                )
 
                 content_type = (
                     "application/pdf"
@@ -172,7 +180,9 @@ class PlagiarismService:
             except httpx.HTTPStatusError as exc:
                 logger.error(
                     "Drillbit API HTTP error for phd_id=%s: %s %s",
-                    phd_id, exc.response.status_code, exc.response.text,
+                    phd_id,
+                    exc.response.status_code,
+                    exc.response.text,
                 )
             except httpx.RequestError as exc:
                 logger.error(
@@ -180,7 +190,9 @@ class PlagiarismService:
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
-                    "Unexpected error submitting to Drillbit for phd_id=%s: %s", phd_id, exc
+                    "Unexpected error submitting to Drillbit for phd_id=%s: %s",
+                    phd_id,
+                    exc,
                 )
         else:
             logger.warning(
@@ -192,19 +204,38 @@ class PlagiarismService:
         # ------------------------------------------------------------------
         # Persist the PENDING report (with or without submission_id)
         # ------------------------------------------------------------------
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO phd_plagiarism_reports
                 (id, phd_id, org_id, document_url, status,
                  threshold_pct, provider, submitted_by, created_at,
                  drillbit_submission_id)
             VALUES (%s, %s, %s, %s, 'PENDING', %s, 'DRILLBIT', %s, %s, %s)
             """,
-            (
-                report_id, phd_id, org_id, document_url,
-                threshold, actor_id, now, drillbit_submission_id,
-            ),
-        )])
+                    (
+                        report_id,
+                        phd_id,
+                        org_id,
+                        document_url,
+                        threshold,
+                        actor_id,
+                        now,
+                        drillbit_submission_id,
+                    ),
+                )
+            ]
+        )
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="plagiarism_check",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "submit_check"},
+        )
 
         # Fire domain event
         event = DomainEvent(
@@ -260,7 +291,8 @@ class PlagiarismService:
         if not rows:
             logger.warning(
                 "poll_result: no local report found for drillbit_submission_id=%s org_id=%s",
-                drillbit_submission_id, org_id,
+                drillbit_submission_id,
+                org_id,
             )
             return {"status": "NOT_FOUND"}
 
@@ -282,20 +314,24 @@ class PlagiarismService:
         except httpx.HTTPStatusError as exc:
             logger.error(
                 "Drillbit poll HTTP error for submission_id=%s: %s %s",
-                drillbit_submission_id, exc.response.status_code, exc.response.text,
+                drillbit_submission_id,
+                exc.response.status_code,
+                exc.response.text,
             )
             return {"status": "POLL_ERROR", "detail": str(exc)}
         except httpx.RequestError as exc:
             logger.error(
                 "Drillbit poll request error for submission_id=%s: %s",
-                drillbit_submission_id, exc,
+                drillbit_submission_id,
+                exc,
             )
             return {"status": "POLL_ERROR", "detail": str(exc)}
 
         drillbit_status = data.get("status", "UNKNOWN")
         logger.info(
             "Drillbit poll: submission_id=%s status=%s",
-            drillbit_submission_id, drillbit_status,
+            drillbit_submission_id,
+            drillbit_status,
         )
 
         if drillbit_status != "COMPLETE":
@@ -304,22 +340,31 @@ class PlagiarismService:
 
         # COMPLETE — extract scores and persist.
         similarity_score: float = float(data.get("similarity_score", 0.0))
-        report_url: Optional[str] = data.get("report_url")
-        details: Optional[dict] = data.get("details")
+        report_url: str | None = data.get("report_url")
+        details: dict | None = data.get("details")
 
         # Persist the extra fields (report_url, similarity_details) before
         # calling record_result so they are available in the final row.
+        extra_queries = []
         if report_url or details:
             import json
-            execute_transaction([(
-                """
+
+            extra_queries.append(
+                (
+                    """
                 UPDATE phd_plagiarism_reports
                 SET report_url = %s,
                     similarity_details = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (report_url, json.dumps(details) if details else None, report_id, org_id),
-            )])
+                    (
+                        report_url,
+                        json.dumps(details) if details else None,
+                        report_id,
+                        org_id,
+                    ),
+                )
+            )
 
         # Delegate status/event logic to record_result (single source of truth).
         # Use a system actor UUID (zeros) since this is an automated task.
@@ -329,6 +374,7 @@ class PlagiarismService:
             org_id=org_id,
             similarity_pct=similarity_score,
             actor_id=system_actor,
+            extra_queries=extra_queries,
         )
 
     @classmethod
@@ -338,6 +384,7 @@ class PlagiarismService:
         org_id: str,
         similarity_pct: float,
         actor_id: str,
+        extra_queries: list = None,
     ) -> dict:
         rows = execute_query(
             "SELECT * FROM phd_plagiarism_reports WHERE id = %s AND org_id = %s",
@@ -362,8 +409,10 @@ class PlagiarismService:
         status = "PASSED" if similarity_pct <= threshold else "FAILED"
         now = datetime.now(timezone.utc).isoformat()
 
-        execute_transaction([(
-            """
+        queries = list(extra_queries) if extra_queries else []
+        queries.append(
+            (
+                """
             UPDATE phd_plagiarism_reports
             SET similarity_pct = %s,
                 status = %s,
@@ -373,11 +422,28 @@ class PlagiarismService:
                 checked_by = %s
             WHERE id = %s AND org_id = %s
             """,
-            (
-                similarity_pct, status, now, policy_version_id,
-                threshold, actor_id, report_id, org_id,
-            ),
-        )])
+                (
+                    similarity_pct,
+                    status,
+                    now,
+                    policy_version_id,
+                    threshold,
+                    actor_id,
+                    report_id,
+                    org_id,
+                ),
+            )
+        )
+        execute_transaction(queries)
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="plagiarism_check",
+            entity_id="",
+            tenant_id="",
+            metadata={"source": "record_result"},
+        )
 
         # Fire pass/fail event
         event_type = (
@@ -409,7 +475,7 @@ class PlagiarismService:
         cls,
         phd_id: str,
         org_id: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         rows = execute_query(
             """
             SELECT * FROM phd_plagiarism_reports

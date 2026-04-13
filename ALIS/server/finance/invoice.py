@@ -5,16 +5,15 @@ Generates invoices from fee structures. Supports:
 - Bulk invoice generation for all enrolled students in a program/semester
 - Automatic discount application (scholarships + approved waivers)
 """
+
 from __future__ import annotations
 
-import json
 import logging
 import uuid
-from datetime import datetime
 
-from server.core.audit import AuditAction, AuditLog
+from server.core.audit import AuditAction, AuditLedger
 from server.core.domain_events import DomainEvent, DomainEventBus
-from server.core.exceptions import BusinessRuleViolation, NotFoundError
+from server.core.exceptions import NotFoundError
 from server.db_service import execute_query, execute_transaction
 
 from .models import InvoiceBulkCreate, InvoiceCreate
@@ -33,7 +32,6 @@ def _invoice_number(org_id: str, student_id: str, year: str) -> str:
 
 
 class InvoiceService:
-
     @classmethod
     def create_for_student(cls, org_id: str, req: InvoiceCreate, actor_id: str) -> dict:
         # Validate student
@@ -68,33 +66,63 @@ class InvoiceService:
 
         inv_num = _invoice_number(org_id, req.student_id, req.academic_year)
         iid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO student_invoices
                 (id, org_id, student_id, fee_structure_id, academic_year, semester,
                  invoice_number, amount_due, discount, currency, due_date, generated_by, notes)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (iid, org_id, req.student_id, req.fee_structure_id,
-             req.academic_year, req.semester,
-             inv_num, struct["total_amount"], discount,
-             struct["currency"], req.due_date, actor_id, req.notes),
-        )])
+                    (
+                        iid,
+                        org_id,
+                        req.student_id,
+                        req.fee_structure_id,
+                        req.academic_year,
+                        req.semester,
+                        inv_num,
+                        struct["total_amount"],
+                        discount,
+                        struct["currency"],
+                        req.due_date,
+                        actor_id,
+                        req.notes,
+                    ),
+                )
+            ]
+        )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="InvoiceGenerated",
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="InvoiceGenerated",
+                entity_type="student_invoice",
+                entity_id=iid,
+                org_id=org_id,
+                payload={
+                    "student_id": req.student_id,
+                    "amount_due": float(struct["total_amount"]),
+                    "invoice_number": inv_num,
+                    "due_date": req.due_date,
+                },
+                actor_id=actor_id,
+            )
+        )
+
+        AuditLedger.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
             entity_type="student_invoice",
             entity_id=iid,
             org_id=org_id,
-            payload={"student_id": req.student_id, "amount_due": float(struct["total_amount"]),
-                     "invoice_number": inv_num, "due_date": req.due_date},
-            actor_id=actor_id,
-        ))
-
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-                     entity_type="student_invoice", entity_id=iid, org_id=org_id,
-                     module="E07-S02",
-                     metadata={"invoice_number": inv_num, "amount_due": float(struct["total_amount"])})
+            module="E07-S02",
+            metadata={
+                "invoice_number": inv_num,
+                "amount_due": float(struct["total_amount"]),
+            },
+        )
 
         return cls.get(org_id, iid)
 
@@ -131,7 +159,7 @@ class InvoiceService:
             student_ids = [str(r["student_id"]) for r in enrolled]
 
         generated = 0
-        skipped   = 0
+        skipped = 0
         for student_id in student_ids:
             existing = execute_query(
                 "SELECT id FROM student_invoices WHERE student_id = %s AND fee_structure_id = %s AND org_id = %s",
@@ -146,22 +174,55 @@ class InvoiceService:
             )
             inv_num = _invoice_number(org_id, student_id, req.academic_year)
             iid = str(uuid.uuid4())
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO student_invoices
                     (id, org_id, student_id, fee_structure_id, academic_year, semester,
                      invoice_number, amount_due, discount, currency, due_date, generated_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (iid, org_id, student_id, req.fee_structure_id,
-                 req.academic_year, req.semester,
-                 inv_num, struct["total_amount"], discount,
-                 struct["currency"], req.due_date, actor_id),
-            )])
+                        (
+                            iid,
+                            org_id,
+                            student_id,
+                            req.fee_structure_id,
+                            req.academic_year,
+                            req.semester,
+                            inv_num,
+                            struct["total_amount"],
+                            discount,
+                            struct["currency"],
+                            req.due_date,
+                            actor_id,
+                        ),
+                    )
+                ]
+            )
+
+            AuditLedger.log(
+                action=AuditAction.UPDATE,
+                actor_id=actor_id,
+                actor_role="system",
+                entity_type="bulk_generate",
+                entity_id="",
+                tenant_id=org_id,
+                metadata={"source": "bulk_generate"},
+            )
             generated += 1
 
-        logger.info("Bulk invoice: generated=%d skipped=%d for %s", generated, skipped, req.academic_year)
-        return {"generated": generated, "skipped": skipped, "academic_year": req.academic_year}
+        logger.info(
+            "Bulk invoice: generated=%d skipped=%d for %s",
+            generated,
+            skipped,
+            req.academic_year,
+        )
+        return {
+            "generated": generated,
+            "skipped": skipped,
+            "academic_year": req.academic_year,
+        }
 
     @classmethod
     def get(cls, org_id: str, invoice_id: str) -> dict:
@@ -174,8 +235,9 @@ class InvoiceService:
         return dict(rows[0])
 
     @classmethod
-    def list_for_student(cls, org_id: str, student_id: str,
-                          academic_year: str | None = None) -> list[dict]:
+    def list_for_student(
+        cls, org_id: str, student_id: str, academic_year: str | None = None
+    ) -> list[dict]:
         sql = "SELECT * FROM student_invoices WHERE student_id = %s AND org_id = %s"
         params: list = [student_id, org_id]
         if academic_year:
@@ -187,20 +249,44 @@ class InvoiceService:
     @classmethod
     def mark_overdue(cls, org_id: str) -> int:
         """Called by Celery beat daily. Marks unpaid invoices past due_date as OVERDUE."""
-        result = execute_query(
+        # Fetch IDs first so we can count them, then UPDATE atomically
+        overdue_ids = execute_query(
             """
-            UPDATE student_invoices
-            SET status = 'OVERDUE'
+            SELECT id FROM student_invoices
             WHERE org_id = %s AND status = 'UNPAID' AND due_date < CURRENT_DATE
-            RETURNING id
             """,
             (org_id,),
         )
-        return len(result)
+        if not overdue_ids:
+            return 0
+        execute_transaction(
+            [
+                (
+                    """
+            UPDATE student_invoices
+            SET status = 'OVERDUE'
+            WHERE org_id = %s AND status = 'UNPAID' AND due_date < CURRENT_DATE
+            """,
+                    (org_id,),
+                )
+            ]
+        )
+
+        AuditLedger.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="overdue",
+            entity_id=str(overdue_ids),
+            tenant_id=org_id,
+            metadata={"source": "mark_overdue"},
+        )
+        return len(overdue_ids)
 
     @classmethod
-    def _compute_scholarship_discount(cls, org_id: str, student_id: str,
-                                       academic_year: str, total: float) -> float:
+    def _compute_scholarship_discount(
+        cls, org_id: str, student_id: str, academic_year: str, total: float
+    ) -> float:
         """Sum up all active scholarship discounts for this student."""
         assignments = execute_query(
             """

@@ -5,6 +5,7 @@ Celery tasks for async notification delivery. The heavy lifting is done by
 NotificationDispatcher (channels.py + service.py). These tasks just ensure
 delivery happens off the request thread with retries.
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,9 @@ from server.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
-@celery_app.task(name="notifications.send_email", bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(
+    name="notifications.send_email", bind=True, max_retries=3, default_retry_delay=60
+)
 def send_email(self, recipient: str, subject: str, body: str, org_id: str) -> dict:
     """
     Send an email notification via SMTP.
@@ -28,14 +31,27 @@ def send_email(self, recipient: str, subject: str, body: str, org_id: str) -> di
     result = channel.send(recipient=recipient, subject=subject, body=body)
 
     if not result.success:
-        logger.warning("notifications.send_email failed (attempt %s): %s", self.request.retries + 1, result.error_message)
+        logger.warning(
+            "notifications.send_email failed (attempt %s): %s",
+            self.request.retries + 1,
+            result.error_message,
+        )
         raise self.retry(exc=Exception(result.error_message))
 
     logger.info("notifications.send_email OK → %s", recipient)
-    return {"status": "sent", "recipient": recipient, "provider_response": result.provider_response}
+    return {
+        "status": "sent",
+        "recipient": recipient,
+        "provider_response": result.provider_response,
+    }
 
 
-@celery_app.task(name="notifications.send_templated", bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(
+    name="notifications.send_templated",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+)
 def send_templated(
     self,
     template_id: str,
@@ -56,8 +72,8 @@ def send_templated(
         org_id: Tenant identifier
         channels: List of channel names (default: ["EMAIL"])
     """
-    from server.core.notifications.service import get_dispatcher
     from server.core.models import NotificationChannel
+    from server.core.notifications.service import get_dispatcher
 
     channel_enums = [NotificationChannel(c) for c in (channels or ["EMAIL"])]
     dispatcher = get_dispatcher()
@@ -71,17 +87,19 @@ def send_templated(
             channels=channel_enums,
             org_id=org_id,
         )
-        failed = [l for l in logs if l.status.value == "FAILED"]
+        failed = [item for item in logs if item.status.value == "FAILED"]
         if failed:
             raise self.retry(exc=Exception(f"{len(failed)} channel(s) failed"))
 
-        return {"status": "sent", "log_ids": [l.id for l in logs]}
+        return {"status": "sent", "log_ids": [item.id for item in logs]}
 
     except Exception as exc:
         raise self.retry(exc=exc)
 
 
-@celery_app.task(name="notifications.send_sms", bind=True, max_retries=3, default_retry_delay=60)
+@celery_app.task(
+    name="notifications.send_sms", bind=True, max_retries=3, default_retry_delay=60
+)
 def send_sms(self, phone: str, message: str, org_id: str) -> dict:
     """
     Send an SMS notification.
@@ -113,6 +131,7 @@ def send_pending_reminders() -> dict:
 # ---------------------------------------------------------------------------
 # E10 tasks
 # ---------------------------------------------------------------------------
+
 
 @celery_app.task(name="notifications.fanout_announcement", bind=True, max_retries=2)
 def task_fanout_announcement(self, org_id: str, announcement_id: str) -> dict:
@@ -146,9 +165,13 @@ def task_fanout_announcement(self, org_id: str, announcement_id: str) -> dict:
                 )
                 sent += 1
             except Exception as exc:
-                logger.warning("fanout_announcement: failed for user %s: %s", user_id, exc)
+                logger.warning(
+                    "fanout_announcement: failed for user %s: %s", user_id, exc
+                )
 
-        logger.info("fanout_announcement: %s sent %d notifications", announcement_id, sent)
+        logger.info(
+            "fanout_announcement: %s sent %d notifications", announcement_id, sent
+        )
         return {"status": "done", "sent": sent}
     except Exception as exc:
         raise self.retry(exc=exc)
@@ -159,6 +182,7 @@ def task_process_bulk_message(self, org_id: str, job_id: str) -> dict:
     """Process a bulk message job asynchronously."""
     try:
         from server.communication.bulk import BulkMessagingService
+
         BulkMessagingService.process_job(org_id, job_id)
         return {"status": "done", "job_id": job_id}
     except Exception as exc:

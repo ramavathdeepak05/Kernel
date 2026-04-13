@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from .policy_store import PolicyKey, PolicyStore
 
@@ -31,10 +31,11 @@ logger = logging.getLogger(__name__)
 # Decision types
 # ---------------------------------------------------------------------------
 
+
 class PolicyOutcome(str, Enum):
-    AUTO_PROCEED    = "AUTO_PROCEED"
+    AUTO_PROCEED = "AUTO_PROCEED"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
-    AUTO_REJECT     = "AUTO_REJECT"
+    AUTO_REJECT = "AUTO_REJECT"
 
 
 @dataclass
@@ -43,9 +44,9 @@ class PolicyDecision:
     reason: str
     flags: list[str] = field(default_factory=list)
     # Which policy key triggered the decision (for the review queue)
-    trigger_key: Optional[str] = None
-    trigger_value: Optional[Any] = None   # the configured threshold
-    actual_value: Optional[Any] = None    # the applicant's actual value
+    trigger_key: str | None = None
+    trigger_value: Any | None = None  # the configured threshold
+    actual_value: Any | None = None  # the applicant's actual value
 
     @property
     def is_auto(self) -> bool:
@@ -63,6 +64,7 @@ class PolicyDecision:
 # ---------------------------------------------------------------------------
 # Evaluator
 # ---------------------------------------------------------------------------
+
 
 class PolicyEvaluator:
     """
@@ -85,9 +87,9 @@ class PolicyEvaluator:
     def evaluate(
         cls,
         org_id: str,
-        academic_percentage: Optional[float] = None,
-        entrance_score: Optional[float] = None,
-        docs_complete: Optional[bool] = None,
+        academic_percentage: float | None = None,
+        entrance_score: float | None = None,
+        docs_complete: bool | None = None,
     ) -> PolicyDecision:
         """
         Evaluate applicant eligibility criteria against org policies.
@@ -100,10 +102,16 @@ class PolicyEvaluator:
         # ------------------------------------------------------------------
         # Load policy thresholds for this org
         # ------------------------------------------------------------------
-        min_academic    = float(PolicyStore.get(org_id, PolicyKey.MIN_ACADEMIC_PCT) or 55.0)
-        review_lower    = float(PolicyStore.get(org_id, PolicyKey.REVIEW_BAND_LOWER) or 50.0)
-        min_entrance    = float(PolicyStore.get(org_id, PolicyKey.MIN_ENTRANCE_SCORE) or 40.0)
-        docs_required   = bool(PolicyStore.get(org_id, PolicyKey.DOCS_REQUIRED_FOR_OFFER))
+        min_academic = float(
+            PolicyStore.get(org_id, PolicyKey.MIN_ACADEMIC_PCT) or 55.0
+        )
+        review_lower = float(
+            PolicyStore.get(org_id, PolicyKey.REVIEW_BAND_LOWER) or 50.0
+        )
+        min_entrance = float(
+            PolicyStore.get(org_id, PolicyKey.MIN_ENTRANCE_SCORE) or 40.0
+        )
+        docs_required = bool(PolicyStore.get(org_id, PolicyKey.DOCS_REQUIRED_FOR_OFFER))
 
         # ------------------------------------------------------------------
         # 1. Hard REJECT — below the review band entirely

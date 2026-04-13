@@ -19,26 +19,26 @@ Layer Compliance:
 - Layer 5: RBAC+ enforced for all access
 - Audit: All operations logged
 """
+
 from __future__ import annotations
 
 import hashlib
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Optional, Dict, Any, List
+from typing import Any
 
 from minio import Minio
 from minio.error import S3Error
 from pydantic import BaseModel, Field
-
-from server.core.audit import AuditLog, AuditAction
-from server.core.rbac import verify_access, Role, Permission
+from server.core.audit import AuditAction, AuditLog
+from server.core.rbac import Permission, Role, verify_access
 from server.core.settings import settings
-
 
 # =============================================================================
 # EXCEPTIONS
 # =============================================================================
+
 
 class FileStorageError(Exception):
     """Base exception for file storage errors."""
@@ -60,8 +60,10 @@ class AccessDeniedError(FileStorageError):
 # MODELS
 # =============================================================================
 
+
 class FileVersion(BaseModel):
     """Represents a specific version of a file. Immutable after creation."""
+
     version: int = Field(..., ge=1)
     storage_path: str = Field(..., description="MinIO object key")
     file_hash: str = Field(..., description="SHA-256 hash of file content")
@@ -75,18 +77,19 @@ class FileVersion(BaseModel):
 
 class FileMetadata(BaseModel):
     """Represents a file entity with all its versions."""
+
     file_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     filename: str
-    content_type: Optional[str] = None
+    content_type: str | None = None
     owner_id: str
-    entity_id: Optional[str] = None
-    entity_type: Optional[str] = None
+    entity_id: str | None = None
+    entity_type: str | None = None
     current_version: int = Field(default=1, ge=1)
-    versions: List[FileVersion] = Field(default_factory=list)
+    versions: list[FileVersion] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: Optional[datetime] = None
+    updated_at: datetime | None = None
 
-    def get_version(self, version: Optional[int] = None) -> Optional[FileVersion]:
+    def get_version(self, version: int | None = None) -> FileVersion | None:
         target = version if version is not None else self.current_version
         for v in self.versions:
             if v.version == target:
@@ -98,15 +101,16 @@ class FileMetadata(BaseModel):
 # IN-MEMORY METADATA STORE (replaced by DB in a future story)
 # =============================================================================
 
+
 class _FileMetadataStore:
-    _files: Dict[str, FileMetadata] = {}
+    _files: dict[str, FileMetadata] = {}
 
     @classmethod
     def save(cls, metadata: FileMetadata) -> None:
         cls._files[metadata.file_id] = metadata
 
     @classmethod
-    def get(cls, file_id: str) -> Optional[FileMetadata]:
+    def get(cls, file_id: str) -> FileMetadata | None:
         return cls._files.get(file_id)
 
     @classmethod
@@ -117,6 +121,7 @@ class _FileMetadataStore:
 # =============================================================================
 # FILE STORAGE SERVICE
 # =============================================================================
+
 
 class FileStorageService:
     """
@@ -131,7 +136,9 @@ class FileStorageService:
 
     def _minio(self) -> Minio:
         """Return a configured MinIO client."""
-        endpoint = settings.minio_endpoint.replace("http://", "").replace("https://", "")
+        endpoint = settings.minio_endpoint.replace("http://", "").replace(
+            "https://", ""
+        )
         secure = settings.minio_endpoint.startswith("https://")
         return Minio(
             endpoint,
@@ -148,16 +155,20 @@ class FileStorageService:
         self,
         file_id: str,
         version: int,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[str] = None,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
     ) -> str:
-        prefix = f"{entity_type}/{entity_id}" if entity_type and entity_id else "uploads"
+        prefix = (
+            f"{entity_type}/{entity_id}" if entity_type and entity_id else "uploads"
+        )
         return f"{prefix}/{file_id}_v{version}"
 
     def _compute_hash(self, data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
-    def _check_access(self, actor_role: Role, permission: Permission, context: Optional[Dict] = None) -> None:
+    def _check_access(
+        self, actor_role: Role, permission: Permission, context: dict | None = None
+    ) -> None:
         result = verify_access(actor_role, permission, context)
         if not result.allowed:
             raise AccessDeniedError(f"Access denied: {result.reason}")
@@ -171,10 +182,10 @@ class FileStorageService:
         file_content: bytes,
         filename: str,
         owner_id: str,
-        context: Dict[str, Any],
-        entity_id: Optional[str] = None,
-        entity_type: Optional[str] = None,
-        content_type: Optional[str] = None,
+        context: dict[str, Any],
+        entity_id: str | None = None,
+        entity_type: str | None = None,
+        content_type: str | None = None,
     ) -> FileMetadata:
         """Upload a new file (creates v1) to MinIO."""
         actor_role = context.get("role", Role.STUDENT)
@@ -240,7 +251,7 @@ class FileStorageService:
         file_id: str,
         file_content: bytes,
         updated_by: str,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> FileVersion:
         """Create a new version of an existing file."""
         actor_role = context.get("role", Role.STUDENT)
@@ -253,7 +264,9 @@ class FileStorageService:
         new_version_num = metadata.current_version + 1
         file_hash = self._compute_hash(file_content)
         size_bytes = len(file_content)
-        object_key = self._object_key(file_id, new_version_num, metadata.entity_type, metadata.entity_id)
+        object_key = self._object_key(
+            file_id, new_version_num, metadata.entity_type, metadata.entity_id
+        )
 
         client = self._minio()
         self._ensure_bucket(client)
@@ -296,7 +309,11 @@ class FileStorageService:
             module="E02",
             previous_state=f"v{metadata.current_version}",
             new_state=f"v{new_version_num}",
-            metadata={"filename": metadata.filename, "version": new_version_num, "file_hash": file_hash},
+            metadata={
+                "filename": metadata.filename,
+                "version": new_version_num,
+                "file_hash": file_hash,
+            },
         )
         return new_version
 
@@ -304,8 +321,8 @@ class FileStorageService:
         self,
         file_id: str,
         user_id: str,
-        context: Dict[str, Any],
-        version: Optional[int] = None,
+        context: dict[str, Any],
+        version: int | None = None,
     ) -> bytes:
         """Retrieve file content from MinIO with integrity check."""
         actor_role = context.get("role", Role.STUDENT)
@@ -317,14 +334,20 @@ class FileStorageService:
 
         file_version = metadata.get_version(version)
         if file_version is None:
-            raise VersionNotFoundError(f"Version {version} not found for file {file_id}")
+            raise VersionNotFoundError(
+                f"Version {version} not found for file {file_id}"
+            )
 
         client = self._minio()
         try:
-            response = client.get_object(settings.minio_bucket, file_version.storage_path)
+            response = client.get_object(
+                settings.minio_bucket, file_version.storage_path
+            )
             content = response.read()
         except S3Error as e:
-            raise FileNotFoundError(f"Object not found in MinIO: {file_version.storage_path}") from e
+            raise FileNotFoundError(
+                f"Object not found in MinIO: {file_version.storage_path}"
+            ) from e
 
         actual_hash = self._compute_hash(content)
         if actual_hash != file_version.file_hash:
@@ -337,9 +360,14 @@ class FileStorageService:
                 success=False,
                 failure_reason="Integrity check failed: hash mismatch",
                 module="E02",
-                metadata={"expected_hash": file_version.file_hash, "actual_hash": actual_hash},
+                metadata={
+                    "expected_hash": file_version.file_hash,
+                    "actual_hash": actual_hash,
+                },
             )
-            raise FileStorageError(f"File integrity check failed for {file_id} v{file_version.version}")
+            raise FileStorageError(
+                f"File integrity check failed for {file_id} v{file_version.version}"
+            )
 
         AuditLog.log(
             action=AuditAction.READ,
@@ -353,7 +381,9 @@ class FileStorageService:
         )
         return content
 
-    def get_metadata(self, file_id: str, user_id: str, context: Dict[str, Any]) -> FileMetadata:
+    def get_metadata(
+        self, file_id: str, user_id: str, context: dict[str, Any]
+    ) -> FileMetadata:
         """Get file metadata (all versions)."""
         actor_role = context.get("role", Role.STUDENT)
         self._check_access(actor_role, self.FILE_READ_PERMISSION, context)
@@ -362,11 +392,13 @@ class FileStorageService:
             raise FileNotFoundError(f"File not found: {file_id}")
         return metadata
 
-    def list_versions(self, file_id: str, user_id: str, context: Dict[str, Any]) -> List[FileVersion]:
+    def list_versions(
+        self, file_id: str, user_id: str, context: dict[str, Any]
+    ) -> list[FileVersion]:
         """List all versions of a file."""
         return list(self.get_metadata(file_id, user_id, context).versions)
 
-    def verify_integrity(self, file_id: str, version: Optional[int] = None) -> bool:
+    def verify_integrity(self, file_id: str, version: int | None = None) -> bool:
         """Verify file integrity against stored hash."""
         metadata = _FileMetadataStore.get(file_id)
         if metadata is None:
@@ -376,7 +408,9 @@ class FileStorageService:
             return False
         client = self._minio()
         try:
-            response = client.get_object(settings.minio_bucket, file_version.storage_path)
+            response = client.get_object(
+                settings.minio_bucket, file_version.storage_path
+            )
             actual_hash = self._compute_hash(response.read())
             return actual_hash == file_version.file_hash
         except S3Error:

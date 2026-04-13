@@ -10,10 +10,10 @@ Registered tools:
     tool.rubric.validator     — RubricValidatorTool
     tool.scoring.structured   — StructuredScoringTool
 """
+
 from __future__ import annotations
 
 import logging
-import os
 
 from server.core.tool_registry import ToolRegistry
 
@@ -52,6 +52,7 @@ def _inject_pgvector_backend() -> None:
     """
     try:
         from server.core.config import ConfigRegistry
+
         from .backends.pgvector_backend import PGVectorBackend
 
         ollama_url = ConfigRegistry.get(
@@ -71,12 +72,14 @@ def _inject_pgvector_backend() -> None:
         logger.info(
             "E03-S06: PGVectorBackend injected into RAGRetrieverTool "
             "(model=%s, ollama=%s)",
-            embedding_model, ollama_url,
+            embedding_model,
+            ollama_url,
         )
     except Exception as e:
         logger.warning(
             "E03-S06: PGVectorBackend injection failed — using stub backend. "
-            "RAG will return empty results until resolved. Error: %s", e,
+            "RAG will return empty results until resolved. Error: %s",
+            e,
         )
 
 

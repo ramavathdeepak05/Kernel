@@ -19,11 +19,12 @@ Hard Constraints:
     - Read-only. Never mutates state.
     - Anomaly report is a Draft — COE confirms before any moderation action.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -39,8 +40,8 @@ _HIGH_TIER_DEFAULT = 3 / 4
 
 def execute_result_analyzer(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Result Analyzer.
@@ -71,15 +72,15 @@ def execute_result_analyzer(
             prompt_name="examinations.result_analysis",
             prompt_version=1,
             variables={
-                "exam_id":         input_data.get("exam_id", "unknown"),
-                "course_name":     input_data.get("course_name", ""),
-                "total_students":  input_data.get("total_students", 0),
-                "mean_score":      input_data.get("mean_score", 0),
-                "std_dev":         input_data.get("std_dev", 0),
-                "pass_pct":        input_data.get("pass_pct", 0),
+                "exam_id": input_data.get("exam_id", "unknown"),
+                "course_name": input_data.get("course_name", ""),
+                "total_students": input_data.get("total_students", 0),
+                "mean_score": input_data.get("mean_score", 0),
+                "std_dev": input_data.get("std_dev", 0),
+                "pass_pct": input_data.get("pass_pct", 0),
                 "distinction_pct": input_data.get("distinction_pct", 0),
-                "below_40_pct":    input_data.get("below_40_pct", 0),
-                "score_buckets":   json.dumps(input_data.get("score_buckets", {})),
+                "below_40_pct": input_data.get("below_40_pct", 0),
+                "score_buckets": json.dumps(input_data.get("score_buckets", {})),
             },
             validate_schema=True,
         )
@@ -88,7 +89,9 @@ def execute_result_analyzer(
             vo = result.validated_output
             score = vo.confidence_score
             high_threshold = float(
-                PolicyStore.get(context.org_id or "", "ai.examinations.anomaly_high_threshold")
+                PolicyStore.get(
+                    context.org_id or "", "ai.examinations.anomaly_high_threshold"
+                )
                 or _HIGH_TIER_DEFAULT
             )
             if score >= high_threshold:
@@ -103,24 +106,29 @@ def execute_result_analyzer(
 
             return AIInvocationResult(
                 success=True,
-                content=json.dumps({
-                    "anomaly_level": level,
-                    "anomaly_score": round(score, 3),
-                    "findings": vo.reasoning or result.content or "",
-                    "recommended_action": action,
-                }),
+                content=json.dumps(
+                    {
+                        "anomaly_level": level,
+                        "anomaly_score": round(score, 3),
+                        "findings": vo.reasoning or result.content or "",
+                        "recommended_action": action,
+                    }
+                ),
                 request_id=context.request_id,
                 model=model_override or result.model or "qwen2.5",
             )
 
         return AIInvocationResult(
             success=True,
-            content=result.content or json.dumps({
-                "anomaly_level": "NORMAL",
-                "anomaly_score": 0.0,
-                "findings": "Insufficient data for analysis.",
-                "recommended_action": "Collect complete score data before re-running.",
-            }),
+            content=result.content
+            or json.dumps(
+                {
+                    "anomaly_level": "NORMAL",
+                    "anomaly_score": 0.0,
+                    "findings": "Insufficient data for analysis.",
+                    "recommended_action": "Collect complete score data before re-running.",
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "qwen2.5",
         )

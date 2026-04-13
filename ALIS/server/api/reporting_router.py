@@ -39,24 +39,22 @@ Endpoints:
            GET  /reports/ai/admissions
            GET  /reports/ai/finance
 """
+
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
-
 from server.core.rbac import Permission, require_permission
-
-from server.reporting.dashboard        import DashboardService
+from server.reporting.academics_report import AcademicsReportService
 from server.reporting.admissions_report import AdmissionsReportService
-from server.reporting.academics_report  import AcademicsReportService
-from server.reporting.finance_report    import FinanceReportService
-from server.reporting.custom_reports    import CustomReportService
-from server.reporting.export_engine     import ExportEngine
-from server.reporting.ai_insights       import AIInsightsService
-from server.reporting.models            import SavedReportCreate, ExportRequest
+from server.reporting.ai_insights import AIInsightsService
+from server.reporting.custom_reports import CustomReportService
+from server.reporting.dashboard import DashboardService
+from server.reporting.export_engine import ExportEngine
+from server.reporting.finance_report import FinanceReportService
+from server.reporting.models import ExportRequest, SavedReportCreate
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/reports", tags=["reporting"])
@@ -65,12 +63,17 @@ router = APIRouter(prefix="/api/v1/reports", tags=["reporting"])
 def _org(r: Request) -> str:
     return getattr(r.state, "tenant_id", "default")
 
+
 def _actor(r: Request) -> str:
     return getattr(r.state, "user_id", "anonymous")
+
+
 def _jsonify(obj):
     """Recursively convert Decimal/date/datetime/time to JSON-safe types."""
+    from datetime import date, datetime
+    from datetime import time as _time
     from decimal import Decimal
-    from datetime import datetime, date, time as _time
+
     if isinstance(obj, dict):
         return {k: _jsonify(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -87,6 +90,7 @@ def _jsonify(obj):
 # ──────────────────────────────────────────────────────────────
 # E11-S01 — Dashboard KPIs
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/dashboard/kpis")
 @require_permission(Permission.REPORT_READ)
@@ -111,6 +115,7 @@ async def get_kpi_trend(
 # ──────────────────────────────────────────────────────────────
 # E11-S02 — Admissions Reports
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/admissions/funnel")
 @require_permission(Permission.REPORT_READ)
@@ -162,15 +167,18 @@ async def admissions_monthly(
 # E11-S03 — Academic Reports
 # ──────────────────────────────────────────────────────────────
 
+
 @router.get("/academics/enrollment")
 @require_permission(Permission.REPORT_READ)
 async def enrollment_summary(
     request: Request,
     academic_year: str = Query(...),
-    semester: Optional[int] = Query(None),
+    semester: int | None = Query(None),
 ) -> JSONResponse:
     return JSONResponse(
-        content=AcademicsReportService.enrollment_summary(_org(request), academic_year, semester)
+        content=AcademicsReportService.enrollment_summary(
+            _org(request), academic_year, semester
+        )
     )
 
 
@@ -179,9 +187,11 @@ async def enrollment_summary(
 async def attendance_summary(
     request: Request,
     academic_year: str = Query(...),
-    semester: Optional[int] = Query(None),
+    semester: int | None = Query(None),
 ) -> JSONResponse:
-    items = AcademicsReportService.attendance_summary(_org(request), academic_year, semester)
+    items = AcademicsReportService.attendance_summary(
+        _org(request), academic_year, semester
+    )
     return JSONResponse(content={"courses": items})
 
 
@@ -215,7 +225,9 @@ async def timetable_conflicts(
     academic_year: str = Query(...),
     semester: int = Query(...),
 ) -> JSONResponse:
-    items = AcademicsReportService.timetable_conflicts(_org(request), academic_year, semester)
+    items = AcademicsReportService.timetable_conflicts(
+        _org(request), academic_year, semester
+    )
     return JSONResponse(content={"conflicts": items, "total": len(items)})
 
 
@@ -227,7 +239,9 @@ async def academics_ai_insights(
     semester: int = Query(...),
 ) -> JSONResponse:
     return JSONResponse(
-        content=AIInsightsService.academics_insights(_org(request), academic_year, semester)
+        content=AIInsightsService.academics_insights(
+            _org(request), academic_year, semester
+        )
     )
 
 
@@ -235,11 +249,12 @@ async def academics_ai_insights(
 # E11-S04 — Financial Reports
 # ──────────────────────────────────────────────────────────────
 
+
 @router.get("/finance/year-over-year")
 @require_permission(Permission.REPORT_READ)
 async def year_over_year(
     request: Request,
-    years: List[str] = Query(...),
+    years: list[str] = Query(...),
 ) -> JSONResponse:
     items = FinanceReportService.year_over_year(_org(request), years)
     return JSONResponse(content={"years": items})
@@ -297,9 +312,12 @@ async def finance_ai_insights(
 # E11-S05 — Custom / Saved Reports
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/saved", status_code=201)
 @require_permission(Permission.REPORT_CREATE)
-async def create_saved_report(request: Request, body: SavedReportCreate) -> JSONResponse:
+async def create_saved_report(
+    request: Request, body: SavedReportCreate
+) -> JSONResponse:
     result = CustomReportService.create(_org(request), body, _actor(request))
     return JSONResponse(status_code=201, content=result)
 
@@ -308,7 +326,7 @@ async def create_saved_report(request: Request, body: SavedReportCreate) -> JSON
 @require_permission(Permission.REPORT_READ)
 async def list_saved_reports(
     request: Request,
-    module: Optional[str] = Query(None),
+    module: str | None = Query(None),
 ) -> JSONResponse:
     items = CustomReportService.list(_org(request), module)
     return JSONResponse(content={"reports": items, "total": len(items)})
@@ -343,6 +361,7 @@ async def report_schema(request: Request, module: str) -> JSONResponse:
 # E11-S06 — Export Engine
 # ──────────────────────────────────────────────────────────────
 
+
 @router.post("/exports", status_code=201)
 @require_permission(Permission.REPORT_EXPORT)
 async def request_export(request: Request, body: ExportRequest) -> JSONResponse:
@@ -366,6 +385,7 @@ async def get_export(request: Request, job_id: str) -> JSONResponse:
 # ──────────────────────────────────────────────────────────────
 # E11-S07 — AI Narrative Insights
 # ──────────────────────────────────────────────────────────────
+
 
 @router.get("/ai/institution-summary")
 @require_permission(Permission.REPORT_READ)

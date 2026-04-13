@@ -1,4 +1,5 @@
 """E10-S05 — Announcements"""
+
 from __future__ import annotations
 
 import logging
@@ -14,34 +15,52 @@ logger = logging.getLogger(__name__)
 
 
 class AnnouncementService:
-
     @classmethod
     def create(cls, org_id: str, req: AnnouncementCreate, actor_id: str) -> dict:
         aid = str(uuid.uuid4())
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO announcements
                 (id, org_id, title, body, target_audience, priority, expires_at, created_by)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (
-                aid, org_id, req.title, req.body,
-                req.target_audience.value, req.priority.value,
-                req.expires_at, actor_id,
-            ),
-        )])
+                    (
+                        aid,
+                        org_id,
+                        req.title,
+                        req.body,
+                        req.target_audience.value,
+                        req.priority.value,
+                        req.expires_at,
+                        actor_id,
+                    ),
+                )
+            ]
+        )
 
         # Also create an in-app notification for all affected users (fan-out via Celery task)
         try:
-            from server.tasks.notifications import task_fanout_announcement
-            task_fanout_announcement.delay(org_id, aid)
+            from server.worker import celery_app
+
+            celery_app.send_task(
+                "notifications.fanout_announcement", args=[org_id, aid]
+            )
         except Exception as exc:
-            logger.warning("Announcement: fanout task queue failed (non-fatal): %s", exc)
+            logger.warning(
+                "Announcement: fanout task queue failed (non-fatal): %s", exc
+            )
 
         AuditLog.log(
-            action=AuditAction.CREATE, actor_id=actor_id, actor_type="human",
-            entity_type="announcement", entity_id=aid, org_id=org_id,
-            module="E10-S05", metadata={"title": req.title, "audience": req.target_audience.value},
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="human",
+            entity_type="announcement",
+            entity_id=aid,
+            org_id=org_id,
+            module="E10-S05",
+            metadata={"title": req.title, "audience": req.target_audience.value},
         )
         return cls.get(org_id, aid)
 
@@ -69,7 +88,9 @@ class AnnouncementService:
         """
         params: list = [org_id]
         if active_only:
-            sql += " AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())"
+            sql += (
+                " AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())"
+            )
         if audience and audience != "ALL":
             sql += " AND (target_audience = %s OR target_audience = 'ALL')"
             params.append(audience)
@@ -80,23 +101,51 @@ class AnnouncementService:
     @classmethod
     def mark_read(cls, org_id: str, announcement_id: str, user_id: str) -> dict:
         cls.get(org_id, announcement_id)
-        execute_transaction([(
-            """
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO announcement_reads (id, announcement_id, user_id)
             VALUES (%s, %s, %s)
             ON CONFLICT (announcement_id, user_id) DO NOTHING
             """,
-            (str(uuid.uuid4()), announcement_id, user_id),
-        )])
+                    (str(uuid.uuid4()), announcement_id, user_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="read",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "mark_read"},
+        )
         return {"status": "ok"}
 
     @classmethod
     def deactivate(cls, org_id: str, announcement_id: str, actor_id: str) -> dict:
         cls.get(org_id, announcement_id)
-        execute_transaction([(
-            "UPDATE announcements SET is_active = FALSE WHERE id = %s AND org_id = %s",
-            (announcement_id, org_id),
-        )])
+        execute_transaction(
+            [
+                (
+                    "UPDATE announcements SET is_active = FALSE WHERE id = %s AND org_id = %s",
+                    (announcement_id, org_id),
+                )
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.DELETE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="deactivate",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "deactivate"},
+        )
         return {"status": "deactivated", "id": announcement_id}
 
     @classmethod
@@ -115,11 +164,13 @@ class AnnouncementService:
 
         if audience == "ALL":
             user_rows = execute_query(
-                "SELECT id FROM users WHERE org_id = %s AND status = 'ACTIVE'", (org_id,)
+                "SELECT id FROM users WHERE org_id = %s AND status = 'ACTIVE'",
+                (org_id,),
             )
         elif audience == "STUDENTS":
             user_rows = execute_query(
-                "SELECT id FROM students WHERE org_id = %s AND status = 'ENROLLED'", (org_id,)
+                "SELECT id FROM students WHERE org_id = %s AND status = 'ENROLLED'",
+                (org_id,),
             )
         elif audience in ("STAFF", "FACULTY"):
             user_rows = execute_query(

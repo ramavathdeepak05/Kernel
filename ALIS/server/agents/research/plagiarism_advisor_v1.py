@@ -21,11 +21,12 @@ Hard Constraints:
     - Advice is a Draft — Supervisor must review and confirm the remediation plan.
     - Does not make conclusions about academic misconduct — that is a human decision.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Any
 
 from server.core.ai_gateway import (
     AIGateway,
@@ -38,8 +39,8 @@ logger = logging.getLogger(__name__)
 
 def execute_plagiarism_advisor(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Plagiarism Advisor.
@@ -77,15 +78,17 @@ def execute_plagiarism_advisor(
             prompt_name="research.plagiarism_advice",
             prompt_version=1,
             variables={
-                "thesis_id":              input_data.get("thesis_id", "unknown"),
-                "scholar_name":           input_data.get("scholar_name", ""),
-                "similarity_pct":         similarity_pct,
-                "self_citation_pct":      input_data.get("self_citation_pct", 0),
-                "internet_match_pct":     input_data.get("internet_match_pct", 0),
-                "publication_match_pct":  input_data.get("publication_match_pct", 0),
-                "top_matched_sections":   json.dumps(input_data.get("top_matched_sections", [])),
-                "chapter_count":          input_data.get("chapter_count", 0),
-                "detector_tool":          input_data.get("detector_tool", "unknown"),
+                "thesis_id": input_data.get("thesis_id", "unknown"),
+                "scholar_name": input_data.get("scholar_name", ""),
+                "similarity_pct": similarity_pct,
+                "self_citation_pct": input_data.get("self_citation_pct", 0),
+                "internet_match_pct": input_data.get("internet_match_pct", 0),
+                "publication_match_pct": input_data.get("publication_match_pct", 0),
+                "top_matched_sections": json.dumps(
+                    input_data.get("top_matched_sections", [])
+                ),
+                "chapter_count": input_data.get("chapter_count", 0),
+                "detector_tool": input_data.get("detector_tool", "unknown"),
             },
             validate_schema=True,
         )
@@ -107,21 +110,29 @@ def execute_plagiarism_advisor(
             vo = result.validated_output
             remediation_plan = vo.reasoning or result.content or ""
         else:
-            remediation_plan = result.content or "Review each matched section and either paraphrase or add proper citations."
+            remediation_plan = (
+                result.content
+                or "Review each matched section and either paraphrase or add proper citations."
+            )
 
         return AIInvocationResult(
             success=True,
-            content=json.dumps({
-                "severity": severity,
-                "similarity_pct": round(similarity_pct, 2),
-                "submission_blocked": submission_blocked,
-                "remediation_plan": remediation_plan,
-                "section_advice": [],
-                "estimated_effort": "2–4 weeks" if severity in ("CRITICAL", "HIGH") else "3–5 days",
-                "recommended_action": action,
-            }),
+            content=json.dumps(
+                {
+                    "severity": severity,
+                    "similarity_pct": round(similarity_pct, 2),
+                    "submission_blocked": submission_blocked,
+                    "remediation_plan": remediation_plan,
+                    "section_advice": [],
+                    "estimated_effort": "2–4 weeks"
+                    if severity in ("CRITICAL", "HIGH")
+                    else "3–5 days",
+                    "recommended_action": action,
+                }
+            ),
             request_id=context.request_id,
-            model=model_override or (result.model if result.validated_output else "qwen2.5"),
+            model=model_override
+            or (result.model if result.validated_output else "qwen2.5"),
         )
 
     except Exception as exc:

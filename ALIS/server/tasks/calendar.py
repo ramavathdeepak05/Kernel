@@ -12,25 +12,26 @@ Domain events fired:
     ExamPeriodStarted    → when EXAM_PERIOD phase begins
     ResultWindowOpen     → when RESULTS phase begins
 """
+
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 
-from server.worker import celery_app
-from server.db_service import execute_query, execute_transaction
 from server.core.domain_events import DomainEvent, DomainEventBus
+from server.db_service import execute_query
+from server.worker import celery_app
 
 logger = logging.getLogger(__name__)
 
 # Map phase name → domain event type
 _PHASE_EVENTS = {
-    "CLASSES":            "SemesterStarted",
-    "ATTENDANCE_LOCK":    "AttendanceFinalized",
-    "EXAM_REGISTRATION":  "ExamRegistrationOpen",
-    "EXAM_PERIOD":        "ExamPeriodStarted",
-    "RESULTS":            "ResultWindowOpen",
-    "SEMESTER_BREAK":     "SemesterEnded",
+    "CLASSES": "SemesterStarted",
+    "ATTENDANCE_LOCK": "AttendanceFinalized",
+    "EXAM_REGISTRATION": "ExamRegistrationOpen",
+    "EXAM_PERIOD": "ExamPeriodStarted",
+    "RESULTS": "ResultWindowOpen",
+    "SEMESTER_BREAK": "SemesterEnded",
 }
 
 
@@ -83,23 +84,28 @@ def check_calendar_phases() -> None:
             if already_fired:
                 continue
 
-            DomainEventBus.publish(DomainEvent(
-                event_type=event_type,
-                entity_type="academic_calendar",
-                entity_id=str(cal["id"]),
-                org_id=cal["org_id"],
-                payload={
-                    "calendar_id": str(cal["id"]),
-                    "calendar_name": cal["name"],
-                    "phase_name": phase["phase_name"],
-                    "academic_year": cal["academic_year"],
-                    "phase_start": str(phase_start),
-                    "phase_end": str(phase["end_date"]),
-                },
-                actor_id="system:calendar_daemon",
-            ))
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type=event_type,
+                    entity_type="academic_calendar",
+                    entity_id=str(cal["id"]),
+                    org_id=cal["org_id"],
+                    payload={
+                        "calendar_id": str(cal["id"]),
+                        "calendar_name": cal["name"],
+                        "phase_name": phase["phase_name"],
+                        "academic_year": cal["academic_year"],
+                        "phase_start": str(phase_start),
+                        "phase_end": str(phase["end_date"]),
+                    },
+                    actor_id="system:calendar_daemon",
+                )
+            )
 
             logger.info(
                 "CalendarDaemon: fired %s [calendar=%s, phase=%s, org=%s]",
-                event_type, cal["id"], phase["phase_name"], cal["org_id"],
+                event_type,
+                cal["id"],
+                phase["phase_name"],
+                cal["org_id"],
             )

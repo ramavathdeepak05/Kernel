@@ -5,29 +5,25 @@ Eligibility gates:
   2. Attendance must meet minimum threshold (AttendanceFinalized confirms this)
   3. No pending dues
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from io import BytesIO
-from typing import Optional
 
+from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from reportlab.lib import colors
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
-from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.db_service import execute_query, execute_transaction
 
 logger = logging.getLogger(__name__)
 
 
 class HallTicketService:
-
     @classmethod
     def issue_for_semester(
         cls,
@@ -42,6 +38,7 @@ class HallTicketService:
         Called automatically when AttendanceFinalized event is received.
         """
         from server.core.policy_store import PolicyKey, PolicyStore
+
         min_att = float(PolicyStore.get(org_id, PolicyKey.MIN_ATTENDANCE_PCT) or 75.0)
 
         # Get enrolled students with their attendance %
@@ -78,10 +75,12 @@ class HallTicketService:
 
             # Attendance gate
             if att_pct < min_att:
-                blocked.append({
-                    "student_id": student_id,
-                    "reason": f"Attendance {att_pct:.1f}% below minimum {min_att:.1f}%",
-                })
+                blocked.append(
+                    {
+                        "student_id": student_id,
+                        "reason": f"Attendance {att_pct:.1f}% below minimum {min_att:.1f}%",
+                    }
+                )
                 continue
 
             # Idempotency
@@ -93,42 +92,77 @@ class HallTicketService:
                 issued.append(student_id)
                 continue
 
-            ticket_number = f"HT-{student['roll_number']}-{academic_year.replace('-','')}-S{semester}"
-            pdf_path = cls._generate_pdf(student, academic_year, semester, exam_type, ticket_number, org_id)
+            ticket_number = f"HT-{student['roll_number']}-{academic_year.replace('-', '')}-S{semester}"
+            pdf_path = cls._generate_pdf(
+                student, academic_year, semester, exam_type, ticket_number, org_id
+            )
 
             tid = str(uuid.uuid4())
-            execute_transaction([(
-                """
+            execute_transaction(
+                [
+                    (
+                        """
                 INSERT INTO hall_tickets
                     (id, org_id, student_id, academic_year, semester, exam_type,
                      ticket_number, pdf_path, issued_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (tid, org_id, student_id, academic_year, semester, exam_type,
-                 ticket_number, pdf_path, actor_id),
-            )])
+                        (
+                            tid,
+                            org_id,
+                            student_id,
+                            academic_year,
+                            semester,
+                            exam_type,
+                            ticket_number,
+                            pdf_path,
+                            actor_id,
+                        ),
+                    )
+                ]
+            )
             issued.append(student_id)
 
-            DomainEventBus.publish(DomainEvent(
-                event_type="HallTicketIssued",
-                entity_type="student",
-                entity_id=student_id,
-                org_id=org_id,
-                payload={"ticket_number": ticket_number, "academic_year": academic_year,
-                         "semester": semester, "exam_type": exam_type},
-                actor_id=actor_id,
-            ))
+            DomainEventBus.publish(
+                DomainEvent(
+                    event_type="HallTicketIssued",
+                    entity_type="student",
+                    entity_id=student_id,
+                    org_id=org_id,
+                    payload={
+                        "ticket_number": ticket_number,
+                        "academic_year": academic_year,
+                        "semester": semester,
+                        "exam_type": exam_type,
+                    },
+                    actor_id=actor_id,
+                )
+            )
 
-        AuditLog.log(action=AuditAction.CREATE, actor_id=actor_id, actor_type="system",
-                     entity_type="hall_ticket_batch", entity_id=f"{org_id}:{academic_year}:sem{semester}",
-                     org_id=org_id, module="E06-S02",
-                     metadata={"issued": len(issued), "blocked": len(blocked)})
+        AuditLog.log(
+            action=AuditAction.CREATE,
+            actor_id=actor_id,
+            actor_type="system",
+            entity_type="hall_ticket_batch",
+            entity_id=f"{org_id}:{academic_year}:sem{semester}",
+            org_id=org_id,
+            module="E06-S02",
+            metadata={"issued": len(issued), "blocked": len(blocked)},
+        )
 
-        logger.info("HallTicket: issued=%d blocked=%d for %s sem%d", len(issued), len(blocked), academic_year, semester)
+        logger.info(
+            "HallTicket: issued=%d blocked=%d for %s sem%d",
+            len(issued),
+            len(blocked),
+            academic_year,
+            semester,
+        )
         return {"issued": len(issued), "blocked": blocked}
 
     @classmethod
-    def get_for_student(cls, org_id: str, student_id: str, academic_year: str) -> list[dict]:
+    def get_for_student(
+        cls, org_id: str, student_id: str, academic_year: str
+    ) -> list[dict]:
         rows = execute_query(
             "SELECT * FROM hall_tickets WHERE student_id = %s AND academic_year = %s AND org_id = %s ORDER BY issued_at DESC",
             (student_id, academic_year, org_id),
@@ -136,8 +170,15 @@ class HallTicketService:
         return [dict(r) for r in rows]
 
     @classmethod
-    def _generate_pdf(cls, student: dict, academic_year: str, semester: int,
-                       exam_type: str, ticket_number: str, org_id: str) -> str:
+    def _generate_pdf(
+        cls,
+        student: dict,
+        academic_year: str,
+        semester: int,
+        exam_type: str,
+        ticket_number: str,
+        org_id: str,
+    ) -> str:
         """Generate hall ticket PDF and upload to MinIO. Returns object key."""
         buffer = BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4)
@@ -158,36 +199,57 @@ class HallTicketService:
             ["Exam Type", exam_type],
         ]
         table = Table(data, colWidths=[150, 300])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
-            ("FONTSIZE", (0, 0), (-1, -1), 11),
-            ("PADDING", (0, 0), (-1, -1), 6),
-        ]))
+        table.setStyle(
+            TableStyle(
+                [
+                    ("BACKGROUND", (0, 0), (0, -1), colors.lightgrey),
+                    ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                    ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+                    ("FONTSIZE", (0, 0), (-1, -1), 11),
+                    ("PADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
         elements.append(table)
         elements.append(Spacer(1, 20))
-        elements.append(Paragraph(
-            "This hall ticket must be presented at the examination hall.",
-            styles["Normal"]
-        ))
+        elements.append(
+            Paragraph(
+                "This hall ticket must be presented at the examination hall.",
+                styles["Normal"],
+            )
+        )
 
         doc.build(elements)
         pdf_bytes = buffer.getvalue()
 
         # Upload to MinIO
-        object_key = f"hall_tickets/{org_id}/{academic_year}/sem{semester}/{ticket_number}.pdf"
+        object_key = (
+            f"hall_tickets/{org_id}/{academic_year}/sem{semester}/{ticket_number}.pdf"
+        )
         try:
-            from server.core.settings import settings
-            from minio import Minio
             from io import BytesIO as BIO
-            endpoint = settings.minio_endpoint.replace("http://", "").replace("https://", "")
-            client = Minio(endpoint, access_key=settings.minio_access_key,
-                          secret_key=settings.minio_secret_key, secure=settings.minio_secure)
+
+            from minio import Minio
+            from server.core.settings import settings
+
+            endpoint = settings.minio_endpoint.replace("http://", "").replace(
+                "https://", ""
+            )
+            client = Minio(
+                endpoint,
+                access_key=settings.minio_access_key,
+                secret_key=settings.minio_secret_key,
+                secure=settings.minio_secure,
+            )
             if not client.bucket_exists(settings.minio_bucket):
                 client.make_bucket(settings.minio_bucket)
-            client.put_object(settings.minio_bucket, object_key,
-                             BIO(pdf_bytes), len(pdf_bytes), content_type="application/pdf")
+            client.put_object(
+                settings.minio_bucket,
+                object_key,
+                BIO(pdf_bytes),
+                len(pdf_bytes),
+                content_type="application/pdf",
+            )
         except Exception as exc:
             logger.warning("HallTicket: MinIO upload failed (non-fatal): %s", exc)
 

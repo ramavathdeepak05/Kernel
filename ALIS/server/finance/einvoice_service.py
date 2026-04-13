@@ -15,13 +15,10 @@ import base64
 import hashlib
 import json
 import logging
-import os
 from datetime import datetime, timezone
-from typing import Optional
 from uuid import uuid4
 
 import httpx
-
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.core.policy_engine import policy_engine
@@ -37,6 +34,7 @@ _NIC_AUTH_KEY_PREFIX = "alis:nic:auth:"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _check_feature_flag(org_id: str, flag_key: str) -> bool:
     """Return True if the feature flag is enabled for this tenant."""
@@ -58,6 +56,7 @@ def _get_redis():
     """Return a Redis client. Returns None if Redis is unavailable."""
     try:
         import redis as _redis_lib
+
         return _redis_lib.from_url(settings.redis_url, decode_responses=True)
     except Exception:
         return None
@@ -72,13 +71,13 @@ def _encrypt_password_aes256(password: str, client_secret: str) -> str:
     - IV   = first 16 bytes of client_secret (UTF-8, zero-padded if shorter)
     - Output: base64-encoded ciphertext
     """
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives import padding as sym_padding
     from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import padding as sym_padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
     key_bytes = client_secret.encode("utf-8")
     key = (key_bytes + b"\x00" * 32)[:32]
-    iv  = (key_bytes + b"\x00" * 16)[:16]
+    iv = (key_bytes + b"\x00" * 16)[:16]
 
     padder = sym_padding.PKCS7(128).padder()
     padded = padder.update(password.encode("utf-8")) + padder.finalize()
@@ -93,6 +92,7 @@ def _encrypt_password_aes256(password: str, client_secret: str) -> str:
 # ---------------------------------------------------------------------------
 # NIC API client (internal)
 # ---------------------------------------------------------------------------
+
 
 class _NICClient:
     """Thin wrapper around the NIC e-Invoice REST API."""
@@ -113,7 +113,7 @@ class _NICClient:
     def _cache_key(self) -> str:
         return f"{_NIC_AUTH_KEY_PREFIX}{self._gstin}"
 
-    def _get_cached_token(self) -> Optional[str]:
+    def _get_cached_token(self) -> str | None:
         r = _get_redis()
         if r is None:
             return None
@@ -178,7 +178,7 @@ class _NICClient:
         data = resp.json()
         if data.get("Status") != 1:
             raise BusinessRuleViolation(
-            f"NIC auth returned non-success status: {data.get('Info') or data}",
+                f"NIC auth returned non-success status: {data.get('Info') or data}",
                 code="NIC_API_ERROR",
             )
 
@@ -266,6 +266,7 @@ class _NICClient:
 # Payload builder
 # ---------------------------------------------------------------------------
 
+
 def _build_nic_payload(invoice: dict, date_str: str) -> dict:
     """
     Construct the NIC e-Invoice JSON payload from a student_invoices row.
@@ -281,11 +282,7 @@ def _build_nic_payload(invoice: dict, date_str: str) -> dict:
 
     seller_name = getattr(settings, "institution_name", None) or "ALIS Institution"
 
-    buyer_name = (
-        invoice.get("student_name")
-        or invoice.get("payer_name")
-        or "Student"
-    )
+    buyer_name = invoice.get("student_name") or invoice.get("payer_name") or "Student"
 
     return {
         "Version": "1.1",
@@ -347,8 +344,8 @@ def _build_nic_payload(invoice: dict, date_str: str) -> dict:
 # Service
 # ---------------------------------------------------------------------------
 
-class EInvoiceService:
 
+class EInvoiceService:
     @classmethod
     def should_generate_irn(cls, invoice_amount: float, org_id: str) -> bool:
         """
@@ -447,9 +444,10 @@ class EInvoiceService:
         # ------------------------------------------------------------------
         # 4. Persist
         # ------------------------------------------------------------------
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE student_invoices
                 SET irn              = %s,
                     irn_generated_at = NOW(),
@@ -458,9 +456,21 @@ class EInvoiceService:
                     updated_at       = NOW()
                 WHERE id = %s AND org_id = %s
                 """,
-                (irn, irn_ack_no, json.dumps(payload), invoice_id, org_id),
-            )
-        ])
+                    (irn, irn_ack_no, json.dumps(payload), invoice_id, org_id),
+                )
+            ]
+        )
+        from server.core.audit import AuditAction, AuditLog
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id=actor_id,
+            actor_role="system",
+            entity_type="student_invoice",
+            entity_id=invoice_id,
+            tenant_id=org_id,
+            metadata={"source": "generate_irn", "irn": irn[:16]},
+        )
 
         # ------------------------------------------------------------------
         # 5. Domain event
@@ -482,7 +492,10 @@ class EInvoiceService:
 
         logger.info(
             "irn_generated | org=%s invoice=%s irn=%s actor=%s",
-            org_id, invoice_id, irn[:16] + "...", actor_id,
+            org_id,
+            invoice_id,
+            irn[:16] + "...",
+            actor_id,
         )
 
         return {
@@ -535,7 +548,9 @@ class EInvoiceService:
             "invoice_id": invoice_id,
             "invoice_number": r["invoice_number"],
             "irn": r["irn"],
-            "irn_generated_at": r["irn_generated_at"].isoformat() if r["irn_generated_at"] else None,
+            "irn_generated_at": r["irn_generated_at"].isoformat()
+            if r["irn_generated_at"]
+            else None,
             "irn_ack_no": r["irn_ack_no"],
             "has_irn": bool(r["irn"]),
         }

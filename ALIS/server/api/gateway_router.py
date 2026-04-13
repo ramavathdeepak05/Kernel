@@ -20,45 +20,37 @@ Must Align With:
     - "Agents draft, rules decide"
     - "AI is read-only with respect to state"
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from server.agents.academics.registry import AcademicsAgentRegistry
 
+# Module-scoped agent registries — import per module
+from server.agents.admissions.registry import AdmissionsAgentRegistry
+from server.agents.examinations.registry import ExaminationsAgentRegistry
+from server.agents.finance.registry import FinanceAgentRegistry
+from server.agents.hr_admin.registry import HRAdminAgentRegistry
+from server.agents.rail.registry import RailAgentRegistry
+from server.agents.regulatory.registry import RegulatoryAgentRegistry
+from server.agents.research.registry import ResearchAgentRegistry
+from server.agents.student_services.registry import StudentServicesAgentRegistry
 from server.core.ai_gateway import (
     AIGateway,
     AIGatewayContext,
     AIInvocationResult,
 )
-from server.core.rbac import Role, Permission, require_permission
-from server.core.audit import AuditLog, AuditAction
-from server.core.exceptions import (
-    PermissionDeniedError,
-    PromptInjectionError,
-    AISchemaViolationError,
-    ALISError,
-)
 from server.core.ai_observability import AIObservabilityService
-
-# Module-scoped agent registries — import per module
-from server.agents.admissions.registry import AdmissionsAgentRegistry
-from server.agents.rail.registry import RailAgentRegistry
-from server.agents.academics.registry import AcademicsAgentRegistry
-from server.agents.examinations.registry import ExaminationsAgentRegistry
-from server.agents.finance.registry import FinanceAgentRegistry
-from server.agents.hr_admin.registry import HRAdminAgentRegistry
-from server.agents.student_services.registry import StudentServicesAgentRegistry
-from server.agents.regulatory.registry import RegulatoryAgentRegistry
-from server.agents.research.registry import ResearchAgentRegistry
-
+from server.core.rbac import Permission, Role, require_permission
 
 logger = logging.getLogger(__name__)
 
-from server.core.backpressure import require_ai_capacity
+from server.core.backpressure import require_ai_capacity  # noqa: E402
 
 router = APIRouter(
     prefix="/api/v1/ai",
@@ -73,15 +65,15 @@ router = APIRouter(
 
 # Maps module identifiers to their scoped agent registries.
 # Each module maintains its own registry per the Module-Scoped Agent Model.
-_MODULE_REGISTRIES: Dict[str, Any] = {
-    "M1":   AdmissionsAgentRegistry,
-    "M2":   AcademicsAgentRegistry,
-    "M3":   ExaminationsAgentRegistry,
-    "M4":   FinanceAgentRegistry,
-    "M5":   HRAdminAgentRegistry,
-    "M6":   StudentServicesAgentRegistry,
-    "M7":   RegulatoryAgentRegistry,
-    "M8":   ResearchAgentRegistry,
+_MODULE_REGISTRIES: dict[str, Any] = {
+    "M1": AdmissionsAgentRegistry,
+    "M2": AcademicsAgentRegistry,
+    "M3": ExaminationsAgentRegistry,
+    "M4": FinanceAgentRegistry,
+    "M5": HRAdminAgentRegistry,
+    "M6": StudentServicesAgentRegistry,
+    "M7": RegulatoryAgentRegistry,
+    "M8": ResearchAgentRegistry,
     "RAIL": RailAgentRegistry,
 }
 
@@ -90,6 +82,7 @@ _MODULE_REGISTRIES: Dict[str, Any] = {
 # REQUEST / RESPONSE MODELS
 # =============================================================================
 
+
 class AIInvokeRequest(BaseModel):
     """
     Request body for AI Gateway invocation.
@@ -97,6 +90,7 @@ class AIInvokeRequest(BaseModel):
     All fields required for tenant-aware, RBAC-protected, module-scoped
     AI agent invocation.
     """
+
     # Actor context
     actor_id: str = Field(
         ..., description="ID of the actor (user or system) requesting AI"
@@ -106,34 +100,30 @@ class AIInvokeRequest(BaseModel):
     )
 
     # Tenant context
-    org_id: str = Field(
-        ..., description="Tenant/Organization ID for isolation"
-    )
+    org_id: str = Field(..., description="Tenant/Organization ID for isolation")
 
     # Module & Agent targeting
-    module: str = Field(
-        ..., description="Target module (e.g., 'M1' for Admissions)"
-    )
+    module: str = Field(..., description="Target module (e.g., 'M1' for Admissions)")
     agent_name: str = Field(
-        ..., description="Name of the agent to invoke (e.g., 'eligibility_evaluator_v1')"
+        ...,
+        description="Name of the agent to invoke (e.g., 'eligibility_evaluator_v1')",
     )
 
     # Agent input
-    input_data: Dict[str, Any] = Field(
+    input_data: dict[str, Any] = Field(
         default_factory=dict,
-        description="Input payload for the agent (module-specific)"
+        description="Input payload for the agent (module-specific)",
     )
 
     # Optional
-    wizard: Optional[str] = Field(
+    wizard: str | None = Field(
         default=None, description="Wizard context (e.g., 'Eligibility Eval')"
     )
-    correlation_id: Optional[str] = Field(
+    correlation_id: str | None = Field(
         default=None, description="Correlation ID for distributed tracing"
     )
-    model_override: Optional[str] = Field(
-        default=None,
-        description="Optional LLM model override (e.g., 'qwen2.5')"
+    model_override: str | None = Field(
+        default=None, description="Optional LLM model override (e.g., 'qwen2.5')"
     )
 
 
@@ -144,6 +134,7 @@ class AIInvokeResponse(BaseModel):
     All AI outputs are advisory — they propose decisions but never
     mutate system state.
     """
+
     success: bool
     request_id: str
     module: str
@@ -152,15 +143,16 @@ class AIInvokeResponse(BaseModel):
     latency_ms: float = 0.0
 
     # Agent output (always advisory / draft)
-    content: Optional[str] = None
-    error: Optional[str] = None
+    content: str | None = None
+    error: str | None = None
 
     # E00-S06: Structured output (when schema-validated)
-    validated_output: Optional[Dict[str, Any]] = None
+    validated_output: dict[str, Any] | None = None
 
 
 class AgentListResponse(BaseModel):
     """Response listing available agents for a module."""
+
     module: str
     agents: list
 
@@ -169,7 +161,12 @@ class AgentListResponse(BaseModel):
 # POST /api/v1/ai/invoke — Central AI Invocation Endpoint
 # =============================================================================
 
-@router.post("/invoke", response_model=AIInvokeResponse, dependencies=[Depends(require_ai_capacity)])
+
+@router.post(
+    "/invoke",
+    response_model=AIInvokeResponse,
+    dependencies=[Depends(require_ai_capacity)],
+)
 @require_permission(Permission.AI_INVOKE)
 async def invoke_ai_agent(request: Request, body: AIInvokeRequest) -> JSONResponse:
     """
@@ -229,7 +226,9 @@ async def invoke_ai_agent(request: Request, body: AIInvokeRequest) -> JSONRespon
     context = AIGatewayContext(
         actor_id=body.actor_id,
         actor_role=actor_role,
-        actor_type="human" if actor_role not in (Role.AI_AGENT, Role.SYSTEM) else "system",
+        actor_type="human"
+        if actor_role not in (Role.AI_AGENT, Role.SYSTEM)
+        else "system",
         org_id=body.org_id,
         module=body.module,
         wizard=body.wizard,
@@ -256,9 +255,7 @@ async def invoke_ai_agent(request: Request, body: AIInvokeRequest) -> JSONRespon
         content=result.content,
         error=result.error,
         validated_output=(
-            result.validated_output.model_dump()
-            if result.validated_output
-            else None
+            result.validated_output.model_dump() if result.validated_output else None
         ),
     )
 
@@ -272,6 +269,7 @@ async def invoke_ai_agent(request: Request, body: AIInvokeRequest) -> JSONRespon
 # =============================================================================
 # GET /api/v1/ai/agents/{module} — List Module Agents
 # =============================================================================
+
 
 @router.get("/agents/{module}", response_model=AgentListResponse)
 @require_permission(Permission.AI_INVOKE)
@@ -308,13 +306,14 @@ async def list_module_agents(request: Request, module: str) -> JSONResponse:
 # GET /api/v1/ai/metrics — AI Observability (E03-S10)
 # =============================================================================
 
+
 @router.get("/metrics")
 @require_permission(Permission.AI_INVOKE)
 async def get_ai_metrics(
     request: Request,
     org_id: str,
     window_hours: int = 24,
-    module: Optional[str] = None,
+    module: str | None = None,
 ) -> JSONResponse:
     """
     Retrieve aggregated AI usage metrics for a tenant.
@@ -378,6 +377,7 @@ async def get_ai_metrics(
 # =============================================================================
 # GET /api/v1/ai/health — AI Subsystem Health
 # =============================================================================
+
 
 @router.get("/health")
 @require_permission(Permission.AI_INVOKE)

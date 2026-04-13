@@ -7,6 +7,7 @@ Reports:
 4. Scholarship impact — total discounts granted
 5. Program-wise revenue breakdown
 """
+
 from __future__ import annotations
 
 import logging
@@ -17,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 class FinanceReportService:
-
     @classmethod
     def collection_summary(cls, org_id: str, academic_year: str) -> dict:
         rows = execute_query(
@@ -42,7 +42,9 @@ class FinanceReportService:
         # Collection rate
         billed = float(summary.get("total_billed") or 0)
         collected = float(summary.get("total_collected") or 0)
-        summary["collection_rate"] = round((collected / billed * 100), 1) if billed > 0 else 0.0
+        summary["collection_rate"] = (
+            round((collected / billed * 100), 1) if billed > 0 else 0.0
+        )
 
         return summary
 

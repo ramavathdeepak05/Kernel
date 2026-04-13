@@ -11,16 +11,14 @@ as a JSON blob.  Redis caches the enabled flag: alis:shadow:{org_id}
 
 All SLA / threshold values come from the policy engine — never literals.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
 
 from pydantic import BaseModel
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.db_service import execute_query, execute_transaction
@@ -36,22 +34,23 @@ _CACHE_TTL = 300  # 5 minutes
 # Config model
 # ---------------------------------------------------------------------------
 
+
 class ShadowModeConfig(BaseModel):
     enabled: bool = False
-    max_attendance_divergence_pct: float = 2.0   # configurable pilot gate
+    max_attendance_divergence_pct: float = 2.0  # configurable pilot gate
     max_fee_divergence_pct: float = 0.1
     suppress_sms: bool = True
     suppress_email: bool = True
     suppress_whatsapp: bool = True
-    consecutive_passing_days_required: int = 5   # pilot gate
+    consecutive_passing_days_required: int = 5  # pilot gate
 
 
 class GoLiveGateResult(BaseModel):
     can_go_live: bool
     consecutive_days_passing: int
     required_days: int
-    latest_attendance_divergence_pct: Optional[float]
-    latest_fee_divergence_pct: Optional[float]
+    latest_attendance_divergence_pct: float | None
+    latest_fee_divergence_pct: float | None
     reason: str
 
 
@@ -59,10 +58,12 @@ class GoLiveGateResult(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_redis():
     """Return the shared Redis client (mirrors pattern from feature_flags)."""
     import redis as redis_lib
     from server.core.settings import settings
+
     return redis_lib.from_url(settings.redis_url, decode_responses=True)
 
 
@@ -73,6 +74,7 @@ def _redis_key(org_id: str) -> str:
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
+
 
 class ShadowModeService:
     """Static-method service — no instance state."""
@@ -87,23 +89,28 @@ class ShadowModeService:
         config.enabled = True
         config_json = config.model_dump_json()
 
-        execute_transaction([
-            ("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, updated_by)
             VALUES (%s, 'shadow_mode.config', %s, %s)
             ON CONFLICT (org_id, flag_key) DO UPDATE
                SET flag_value = EXCLUDED.flag_value,
                    updated_by = EXCLUDED.updated_by,
                    updated_at = NOW()
-            """, (org_id, config_json, actor_id)),
-        ])
+            """,
+                    (org_id, config_json, actor_id),
+                ),
+            ]
+        )
 
         # Invalidate cache
         try:
             r = _get_redis()
             r.delete(_redis_key(org_id))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         AuditLog.log(
             org_id=org_id,
@@ -114,11 +121,13 @@ class ShadowModeService:
             detail={"enabled": True, "config": config.model_dump()},
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="shadow_mode.enabled",
-            org_id=org_id,
-            payload={"actor_id": actor_id, "config": config.model_dump()},
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="shadow_mode.enabled",
+                org_id=org_id,
+                payload={"actor_id": actor_id, "config": config.model_dump()},
+            )
+        )
 
         logger.info("Shadow mode ENABLED for org %s by %s", org_id, actor_id)
         return {"status": "enabled", "config": config.model_dump()}
@@ -133,22 +142,27 @@ class ShadowModeService:
         existing.enabled = False
         config_json = existing.model_dump_json()
 
-        execute_transaction([
-            ("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO tenant_feature_flags (org_id, flag_key, flag_value, updated_by)
             VALUES (%s, 'shadow_mode.config', %s, %s)
             ON CONFLICT (org_id, flag_key) DO UPDATE
                SET flag_value = EXCLUDED.flag_value,
                    updated_by = EXCLUDED.updated_by,
                    updated_at = NOW()
-            """, (org_id, config_json, actor_id)),
-        ])
+            """,
+                    (org_id, config_json, actor_id),
+                ),
+            ]
+        )
 
         try:
             r = _get_redis()
             r.delete(_redis_key(org_id))
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         AuditLog.log(
             org_id=org_id,
@@ -159,11 +173,13 @@ class ShadowModeService:
             detail={"enabled": False},
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="shadow_mode.disabled",
-            org_id=org_id,
-            payload={"actor_id": actor_id},
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="shadow_mode.disabled",
+                org_id=org_id,
+                payload={"actor_id": actor_id},
+            )
+        )
 
         logger.info("Shadow mode DISABLED for org %s by %s", org_id, actor_id)
         return {"status": "disabled"}
@@ -181,7 +197,7 @@ class ShadowModeService:
             if cached is not None:
                 return cached == "1"
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         config = cls._load_config_from_db(org_id)
         enabled = config.enabled if config else False
@@ -190,7 +206,7 @@ class ShadowModeService:
             r = _get_redis()
             r.setex(_redis_key(org_id), _CACHE_TTL, "1" if enabled else "0")
         except Exception:
-            pass
+            pass  # noqa: S110 — intentionally suppressed
 
         return enabled
 
@@ -217,16 +233,35 @@ class ShadowModeService:
         else:
             divergence_pct = abs(alis_value - actual_value) / actual_value * 100
 
-        execute_transaction([
-            ("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO shadow_mode_divergence_log
                 (id, org_id, metric, alis_value, actual_value, divergence_pct, measured_at)
             VALUES (%s, %s, %s, %s, %s, %s, NOW())
-            """, (
-                str(uuid.uuid4()), org_id, metric,
-                alis_value, actual_value, divergence_pct,
-            )),
-        ])
+            """,
+                    (
+                        str(uuid.uuid4()),
+                        org_id,
+                        metric,
+                        alis_value,
+                        actual_value,
+                        divergence_pct,
+                    ),
+                ),
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="divergence",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "record_divergence"},
+        )
 
     # ------------------------------------------------------------------
     # Go-live gate
@@ -245,7 +280,8 @@ class ShadowModeService:
         fee_threshold = config.max_fee_divergence_pct
 
         # Per-day max divergence for the last N+5 days (buffer for checking streak)
-        rows = execute_query("""
+        rows = execute_query(
+            """
             SELECT
                 DATE(measured_at) AS day,
                 MAX(CASE WHEN metric = 'attendance' THEN divergence_pct ELSE 0 END) AS max_attn,
@@ -255,11 +291,13 @@ class ShadowModeService:
               AND measured_at >= NOW() - INTERVAL '60 days'
             GROUP BY DATE(measured_at)
             ORDER BY day DESC
-        """, (org_id,))
+        """,
+            (org_id,),
+        )
 
         consecutive = 0
-        latest_attn: Optional[float] = None
-        latest_fee: Optional[float] = None
+        latest_attn: float | None = None
+        latest_fee: float | None = None
 
         for i, row in enumerate(rows):
             attn = float(row["max_attn"] or 0)
@@ -278,13 +316,28 @@ class ShadowModeService:
             f"(attendance<{attn_threshold}%, fee<{fee_threshold}%)"
         )
 
-        execute_transaction([
-            ("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO shadow_mode_go_live_log
                 (id, org_id, consecutive_days, can_go_live, checked_at)
             VALUES (%s, %s, %s, %s, NOW())
-            """, (str(uuid.uuid4()), org_id, consecutive, can_go_live)),
-        ])
+            """,
+                    (str(uuid.uuid4()), org_id, consecutive, can_go_live),
+                ),
+            ]
+        )
+
+        AuditLog.log(
+            action=AuditAction.UPDATE,
+            actor_id="system",
+            actor_role="system",
+            entity_type="go_live_gate",
+            entity_id="",
+            tenant_id=org_id,
+            metadata={"source": "check_go_live_gate"},
+        )
 
         return GoLiveGateResult(
             can_go_live=can_go_live,
@@ -302,20 +355,23 @@ class ShadowModeService:
     @classmethod
     def get_divergence_log(cls, org_id: str, days: int = 30) -> list:
         """Return divergence measurements for the last N days."""
-        return execute_query("""
+        return execute_query(
+            """
             SELECT metric, alis_value, actual_value, divergence_pct, measured_at
             FROM shadow_mode_divergence_log
             WHERE org_id = %s
               AND measured_at >= NOW() - INTERVAL '%s days'
             ORDER BY measured_at DESC
-        """, (org_id, days))
+        """,
+            (org_id, days),
+        )
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     @classmethod
-    def _load_config_from_db(cls, org_id: str) -> Optional[ShadowModeConfig]:
+    def _load_config_from_db(cls, org_id: str) -> ShadowModeConfig | None:
         rows = execute_query(
             """
             SELECT flag_value FROM tenant_feature_flags

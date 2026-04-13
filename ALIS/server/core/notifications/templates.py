@@ -11,40 +11,42 @@ Must Align With:
 - Policy configurable (templates can be updated)
 - No domain logic (templates are content only)
 """
+
 from __future__ import annotations
 
-from typing import Dict, Any, Optional, Tuple
-from dataclasses import dataclass, field
-from string import Template
 import logging
-
+from dataclasses import dataclass
+from string import Template
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 # --- Template Definition ---
 
+
 @dataclass
 class NotificationTemplate:
     """
     A notification template with subject and body.
-    
+
     Uses Python's string.Template for safe substitution.
     Variables are specified as $variable or ${variable}.
     """
+
     id: str
     name: str
     subject_template: str  # For email; can be empty for SMS/WhatsApp
     body_template: str
-    description: Optional[str] = None
-    
-    def render(self, context: Dict[str, Any]) -> Tuple[str, str]:
+    description: str | None = None
+
+    def render(self, context: dict[str, Any]) -> tuple[str, str]:
         """
         Render the template with the given context.
-        
+
         Args:
             context: Dictionary of variable values
-            
+
         Returns:
             Tuple of (rendered_subject, rendered_body)
         """
@@ -59,22 +61,23 @@ class NotificationTemplate:
 
 # --- Template Registry ---
 
+
 class TemplateRegistry:
     """
     Central registry for notification templates.
-    
+
     Provides CRUD operations for templates and seeded defaults.
     """
-    
-    _templates: Dict[str, NotificationTemplate] = {}
-    
+
+    _templates: dict[str, NotificationTemplate] = {}
+
     # Pre-defined template IDs
     WELCOME_EMAIL = "welcome_email"
     PASSWORD_RESET = "password_reset"
     WORKFLOW_APPROVED = "workflow_approved"
     WORKFLOW_REJECTED = "workflow_rejected"
     GENERIC_ALERT = "generic_alert"
-    
+
     @classmethod
     def initialize_defaults(cls) -> None:
         """Seed default templates."""
@@ -94,7 +97,7 @@ Please log in to complete your profile setup.
 
 Best regards,
 ALIS System""",
-                description="Sent when a new user is created"
+                description="Sent when a new user is created",
             ),
             NotificationTemplate(
                 id=cls.PASSWORD_RESET,
@@ -112,7 +115,7 @@ This code expires in $expiry_minutes minutes.
 
 Best regards,
 ALIS System""",
-                description="Sent for password reset requests"
+                description="Sent for password reset requests",
             ),
             NotificationTemplate(
                 id=cls.WORKFLOW_APPROVED,
@@ -128,7 +131,7 @@ Approved by: $approver_name
 
 Best regards,
 ALIS System""",
-                description="Sent when a workflow is approved"
+                description="Sent when a workflow is approved",
             ),
             NotificationTemplate(
                 id=cls.WORKFLOW_REJECTED,
@@ -145,53 +148,49 @@ Reason: $reason
 
 Best regards,
 ALIS System""",
-                description="Sent when a workflow is rejected"
+                description="Sent when a workflow is rejected",
             ),
             NotificationTemplate(
                 id=cls.GENERIC_ALERT,
                 name="Generic Alert",
                 subject_template="ALIS Alert: $title",
                 body_template="""$message""",
-                description="Generic alert template"
+                description="Generic alert template",
             ),
         ]
-        
+
         for template in defaults:
             if template.id not in cls._templates:
                 cls._templates[template.id] = template
-    
+
     @classmethod
-    def get(cls, template_id: str) -> Optional[NotificationTemplate]:
+    def get(cls, template_id: str) -> NotificationTemplate | None:
         """Get a template by ID."""
         return cls._templates.get(template_id)
-    
+
     @classmethod
     def register(cls, template: NotificationTemplate) -> None:
         """Register a new template or update existing."""
         cls._templates[template.id] = template
         logger.info(f"Template registered: {template.id}")
-    
+
     @classmethod
-    def list_all(cls) -> Dict[str, NotificationTemplate]:
+    def list_all(cls) -> dict[str, NotificationTemplate]:
         """Get all registered templates."""
         return cls._templates.copy()
-    
+
     @classmethod
-    def render(
-        cls,
-        template_id: str,
-        context: Dict[str, Any]
-    ) -> Tuple[str, str]:
+    def render(cls, template_id: str, context: dict[str, Any]) -> tuple[str, str]:
         """
         Convenience method to get and render a template.
-        
+
         Args:
             template_id: ID of the template
             context: Variables for substitution
-            
+
         Returns:
             Tuple of (subject, body)
-            
+
         Raises:
             ValueError: If template not found
         """

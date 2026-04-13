@@ -1,14 +1,15 @@
 """E11-S02 — Admissions Reports"""
+
 from __future__ import annotations
 
 import logging
+
 from server.db_service import execute_query
 
 logger = logging.getLogger(__name__)
 
 
 class AdmissionsReportService:
-
     @classmethod
     def funnel(cls, org_id: str, academic_year: str) -> dict:
         """Admission funnel: applied → reviewed → offered → paid → enrolled."""
@@ -26,17 +27,20 @@ class AdmissionsReportService:
         total = sum(by_status.values())
 
         stages = [
-            ("Applied",       total),
-            ("Under Review",  by_status.get("DOCUMENT_REVIEW", 0) + by_status.get("POLICY_EVAL", 0)),
-            ("Offered",       by_status.get("OFFER_ISSUED", 0)),
-            ("Fee Paid",      by_status.get("PAYMENT_CONFIRMED", 0)),
-            ("Enrolled",      by_status.get("ENROLLED", 0)),
+            ("Applied", total),
+            (
+                "Under Review",
+                by_status.get("DOCUMENT_REVIEW", 0) + by_status.get("POLICY_EVAL", 0),
+            ),
+            ("Offered", by_status.get("OFFER_ISSUED", 0)),
+            ("Fee Paid", by_status.get("PAYMENT_CONFIRMED", 0)),
+            ("Enrolled", by_status.get("ENROLLED", 0)),
         ]
         return {
             "academic_year": academic_year,
-            "total":         total,
-            "by_status":     by_status,
-            "funnel":        [{"stage": s, "count": c} for s, c in stages],
+            "total": total,
+            "by_status": by_status,
+            "funnel": [{"stage": s, "count": c} for s, c in stages],
         }
 
     @classmethod

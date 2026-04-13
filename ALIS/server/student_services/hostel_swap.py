@@ -8,16 +8,15 @@ SAFETY severity (altercation/harassment):
   Overflow SLA: from policy_engine (R1 — never hardcoded 72h).
   Deadline stored as absolute TIMESTAMPTZ (R3).
 """
+
 from __future__ import annotations
 
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel
-
 from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
@@ -36,13 +35,12 @@ class SwapSeverity(str, Enum):
 class SwapRequestCreate(BaseModel):
     student_id: str
     current_room_id: str
-    preferred_room_type: Optional[str] = None  # e.g. "SINGLE", "DOUBLE"
+    preferred_room_type: str | None = None  # e.g. "SINGLE", "DOUBLE"
     reason: str
     severity: SwapSeverity = SwapSeverity.ROUTINE
 
 
 class HostelSwapService:
-
     # ------------------------------------------------------------------
     # Create swap request
     # ------------------------------------------------------------------
@@ -67,18 +65,48 @@ class HostelSwapService:
                 actor_id=actor_id,
             )
 
-        # Standard swap: find a compatible match
-        execute_transaction([("""
+        return await cls._create_routine_swap(
+            org_id=org_id,
+            request_id=request_id,
+            request=request,
+            actor_id=actor_id,
+        )
+
+    @classmethod
+    async def _create_routine_swap(
+        cls,
+        org_id: str,
+        request_id: str,
+        request: SwapRequestCreate,
+        actor_id: str,
+    ) -> dict:
+        """Handle non-safety swap requests."""
+        # Calculate if match exists AND build insert + update ops
+        match_ops, match = await cls._build_find_match_queries(
+            org_id, request_id, request
+        )
+
+        insert_ops = [
+            (
+                """
             INSERT INTO hostel_swap_requests
                 (id, org_id, student_id, current_room_id,
                  preferred_room_type, reason, severity, status, created_at)
             VALUES (%s, %s, %s, %s, %s, %s, %s, 'PENDING_MATCH', NOW())
-        """, (
-            request_id, org_id,
-            request.student_id, request.current_room_id,
-            request.preferred_room_type, request.reason,
-            request.severity.value,
-        ))])
+        """,
+                (
+                    request_id,
+                    org_id,
+                    request.student_id,
+                    request.current_room_id,
+                    request.preferred_room_type,
+                    request.reason,
+                    request.severity.value,
+                ),
+            )
+        ]
+
+        execute_transaction(insert_ops + match_ops)
 
         AuditLog.log(
             org_id=org_id,
@@ -89,19 +117,18 @@ class HostelSwapService:
             detail={"severity": request.severity.value, "reason": request.reason},
         )
 
-        # Try to find a match immediately
-        match = await cls._find_match(org_id, request_id, request)
-
-        DomainEventBus.publish(DomainEvent(
-            event_type="student_services.hostel_swap_requested",
-            org_id=org_id,
-            payload={
-                "request_id": request_id,
-                "student_id": request.student_id,
-                "severity": request.severity.value,
-                "match_found": match is not None,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="student_services.hostel_swap_requested",
+                org_id=org_id,
+                payload={
+                    "request_id": request_id,
+                    "student_id": request.student_id,
+                    "severity": request.severity.value,
+                    "match_found": match is not None,
+                },
+            )
+        )
 
         return {
             "request_id": request_id,
@@ -136,7 +163,21 @@ class HostelSwapService:
             reason=str(req.get("reason", "")),
             severity=SwapSeverity(req.get("severity", "ROUTINE")),
         )
-        match = await cls._find_match(org_id, request_id, request)
+        match_ops, match = await cls._build_find_match_queries(
+            org_id, request_id, request
+        )
+        if match_ops:
+            execute_transaction(match_ops)
+
+            AuditLog.log(
+                action=AuditAction.UPDATE,
+                actor_id=actor_id,
+                actor_role="system",
+                entity_type="find_match",
+                entity_id=request_id,
+                tenant_id=org_id,
+                metadata={"source": "find_match"},
+            )
         return {"request_id": request_id, "match": match}
 
     # ------------------------------------------------------------------
@@ -168,11 +209,16 @@ class HostelSwapService:
         student_a = str(req["student_id"])
         room_a = str(req["current_room_id"])
 
-        ops = [("""
+        ops = [
+            (
+                """
             UPDATE hostel_swap_requests
             SET status = 'APPROVED', approved_by = %s, approved_at = NOW()
             WHERE id = %s AND org_id = %s
-        """, (actor_id, request_id, org_id))]
+        """,
+                (actor_id, request_id, org_id),
+            )
+        ]
 
         if matched_request_id:
             matched_rows = execute_query(
@@ -184,23 +230,34 @@ class HostelSwapService:
                 room_b = str(matched_rows[0]["current_room_id"])
 
                 # Execute the room swap
-                ops.extend([
-                    ("""
+                ops.extend(
+                    [
+                        (
+                            """
                     UPDATE hostel_room_assignments
                     SET room_id = %s, updated_at = NOW()
                     WHERE student_id = %s AND org_id = %s AND status = 'ACTIVE'
-                    """, (room_b, student_a, org_id)),
-                    ("""
+                    """,
+                            (room_b, student_a, org_id),
+                        ),
+                        (
+                            """
                     UPDATE hostel_room_assignments
                     SET room_id = %s, updated_at = NOW()
                     WHERE student_id = %s AND org_id = %s AND status = 'ACTIVE'
-                    """, (room_a, student_b, org_id)),
-                    ("""
+                    """,
+                            (room_a, student_b, org_id),
+                        ),
+                        (
+                            """
                     UPDATE hostel_swap_requests
                     SET status = 'APPROVED', approved_by = %s, approved_at = NOW()
                     WHERE id = %s AND org_id = %s
-                    """, (actor_id, matched_request_id, org_id)),
-                ])
+                    """,
+                            (actor_id, matched_request_id, org_id),
+                        ),
+                    ]
+                )
 
         execute_transaction(ops)
 
@@ -213,11 +270,13 @@ class HostelSwapService:
             detail={"status": "APPROVED"},
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="student_services.hostel_swap_approved",
-            org_id=org_id,
-            payload={"request_id": request_id, "approved_by": actor_id},
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="student_services.hostel_swap_approved",
+                org_id=org_id,
+                payload={"request_id": request_id, "approved_by": actor_id},
+            )
+        )
 
         return {"request_id": request_id, "status": "APPROVED"}
 
@@ -237,33 +296,47 @@ class HostelSwapService:
     ) -> dict:
         """SAFETY severity: bypass exchange, place in temp overflow immediately."""
         # R1 — never hardcode 72h
-        overflow_hours = int(policy_engine.get_value(
-            "hostel.safety_overflow_max_hours", org_id, 72
-        ))
+        overflow_hours = int(
+            policy_engine.get_value("hostel.safety_overflow_max_hours", org_id, 72)
+        )
         # R3 — absolute TIMESTAMPTZ deadline
         overflow_deadline = datetime.now(timezone.utc) + timedelta(hours=overflow_hours)
 
-        execute_transaction([("""
+        execute_transaction(
+            [
+                (
+                    """
             INSERT INTO hostel_swap_requests
                 (id, org_id, student_id, current_room_id, reason, severity,
                  status, overflow_deadline, created_at)
             VALUES (%s, %s, %s, %s, %s, 'SAFETY', 'OVERFLOW_PLACED', %s, NOW())
-        """, (
-            request_id, org_id, student_id, current_room_id, reason, overflow_deadline,
-        ))])
+        """,
+                    (
+                        request_id,
+                        org_id,
+                        student_id,
+                        current_room_id,
+                        reason,
+                        overflow_deadline,
+                    ),
+                )
+            ]
+        )
 
         # Emit SAFETY domain event — Dean notified immediately
-        DomainEventBus.publish(DomainEvent(
-            event_type="student_services.hostel_safety_overflow",
-            org_id=org_id,
-            payload={
-                "request_id": request_id,
-                "student_id": student_id,
-                "reason": reason,
-                "overflow_deadline": overflow_deadline.isoformat(),
-                "template_key": "HOSTEL_SAFETY_DEAN_ALERT",
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="student_services.hostel_safety_overflow",
+                org_id=org_id,
+                payload={
+                    "request_id": request_id,
+                    "student_id": student_id,
+                    "reason": reason,
+                    "overflow_deadline": overflow_deadline.isoformat(),
+                    "template_key": "HOSTEL_SAFETY_DEAN_ALERT",
+                },
+            )
+        )
 
         AuditLog.log(
             org_id=org_id,
@@ -280,7 +353,9 @@ class HostelSwapService:
 
         logger.warning(
             "SAFETY hostel overflow: student=%s org=%s deadline=%s",
-            student_id, org_id, overflow_deadline.isoformat(),
+            student_id,
+            org_id,
+            overflow_deadline.isoformat(),
         )
 
         return {
@@ -296,25 +371,26 @@ class HostelSwapService:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def _find_match(
+    async def _build_find_match_queries(
         cls,
         org_id: str,
         request_id: str,
         request: SwapRequestCreate,
-    ) -> Optional[dict]:
-        """Find another student willing to swap into the current room."""
+    ) -> tuple[list[tuple], dict | None]:
+        """Find another student willing to swap into the current room, returning update query tuples."""
         # Find other PENDING_MATCH requests wanting the room type of this student's room
         room_info = execute_query(
             "SELECT room_type FROM hostel_rooms WHERE id = %s AND org_id = %s",
             (request.current_room_id, org_id),
         )
         if not room_info:
-            return None
+            return [], None
 
         current_room_type = room_info[0].get("room_type")
 
         # Find a compatible counter-request
-        matches = execute_query("""
+        matches = execute_query(
+            """
             SELECT sr.id, sr.student_id, sr.current_room_id
             FROM hostel_swap_requests sr
             JOIN hostel_rooms r ON r.id = sr.current_room_id
@@ -325,29 +401,36 @@ class HostelSwapService:
               AND (sr.preferred_room_type IS NULL OR sr.preferred_room_type = %s)
             ORDER BY sr.created_at ASC
             LIMIT 1
-        """, (org_id, request_id, current_room_type))
+        """,
+            (org_id, request_id, current_room_type),
+        )
 
         if not matches:
-            return None
+            return [], None
 
         match = matches[0]
         matched_id = str(match["id"])
 
-        # Link the two requests
-        execute_transaction([
-            ("""
+        ops = [
+            (
+                """
             UPDATE hostel_swap_requests
             SET status = 'MATCH_FOUND', matched_request_id = %s, updated_at = NOW()
             WHERE id = %s AND org_id = %s
-            """, (matched_id, request_id, org_id)),
-            ("""
+            """,
+                (matched_id, request_id, org_id),
+            ),
+            (
+                """
             UPDATE hostel_swap_requests
             SET status = 'MATCH_FOUND', matched_request_id = %s, updated_at = NOW()
             WHERE id = %s AND org_id = %s
-            """, (request_id, matched_id, org_id)),
-        ])
+            """,
+                (request_id, matched_id, org_id),
+            ),
+        ]
 
-        return {
+        return ops, {
             "matched_request_id": matched_id,
             "matched_student_id": str(match["student_id"]),
             "matched_room_id": str(match["current_room_id"]),

@@ -38,20 +38,18 @@ Hard Constraints:
     - Uses AIGateway.get_llm() exclusively for inference.
     - Output conforms to AIResponseSchema (E00-S06).
 """
+
 from __future__ import annotations
 
-from typing import TypedDict, Dict, Any, Optional
 import json
 import logging
+from typing import Any, TypedDict
 
-from langgraph.graph import StateGraph, END
-
+from langgraph.graph import END, StateGraph
 from server.core.ai_gateway import (
     AIGateway,
     AIGatewayContext,
     AIInvocationResult,
-    AIResponseSchema,
-    ConfidenceTier,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +59,7 @@ logger = logging.getLogger(__name__)
 # AGENT STATE (LangGraph TypedDict)
 # =============================================================================
 
+
 class EligibilityState(TypedDict):
     """
     State for the Eligibility Evaluator LangGraph workflow.
@@ -68,24 +67,26 @@ class EligibilityState(TypedDict):
     Per Blueprint B: State flows through nodes, each adding to / reading
     from this shared state dict.
     """
+
     # Input
-    marksheet_text: str          # OCR-extracted text from marksheet PDF
-    admission_criteria: str      # Institutional criteria to compare against
-    rbac_context: Dict[str, Any] # RBAC+ context (passed from gateway)
+    marksheet_text: str  # OCR-extracted text from marksheet PDF
+    admission_criteria: str  # Institutional criteria to compare against
+    rbac_context: dict[str, Any]  # RBAC+ context (passed from gateway)
 
     # Intermediate
-    extracted_grades: str        # Grades extracted by LLM
+    extracted_grades: str  # Grades extracted by LLM
 
     # Output
-    draft_verdict: str           # Raw LLM response (structured JSON)
-    eligibility_score: float     # 0.0–1.0
-    confidence_tier: str         # HIGH / MEDIUM / LOW
-    proposed_state: str          # ELIGIBLE / PROVISIONALLY_ELIGIBLE / MANUAL_REVIEW
+    draft_verdict: str  # Raw LLM response (structured JSON)
+    eligibility_score: float  # 0.0–1.0
+    confidence_tier: str  # HIGH / MEDIUM / LOW
+    proposed_state: str  # ELIGIBLE / PROVISIONALLY_ELIGIBLE / MANUAL_REVIEW
 
 
 # =============================================================================
 # GRAPH NODES
 # =============================================================================
+
 
 def extract_grades_node(state: EligibilityState) -> dict:
     """
@@ -129,7 +130,6 @@ def evaluate_eligibility_node(state: EligibilityState) -> dict:
 
     Constraint: Output must have state_impact = "Draft" or "ProvisionalOnly".
     """
-    from server.core.rbac import Role
 
     context = AIGatewayContext(
         actor_id="eligibility_evaluator_v1",
@@ -163,8 +163,13 @@ def evaluate_eligibility_node(state: EligibilityState) -> dict:
         # Confidence thresholds from policy_engine — never hardcoded (§12.4 R02)
         org_id = state["rbac_context"].get("org_id", "")
         from server.core.policy_store import PolicyStore
-        high_conf = float(PolicyStore.get(org_id, "ai.eligibility.high_confidence_threshold") or 0.8)
-        low_conf = float(PolicyStore.get(org_id, "ai.eligibility.low_confidence_threshold") or 0.5)
+
+        high_conf = float(
+            PolicyStore.get(org_id, "ai.eligibility.high_confidence_threshold") or 0.8
+        )
+        low_conf = float(
+            PolicyStore.get(org_id, "ai.eligibility.low_confidence_threshold") or 0.5
+        )
 
         # Map confidence to proposed state
         if score >= high_conf:
@@ -194,6 +199,7 @@ def evaluate_eligibility_node(state: EligibilityState) -> dict:
 # GRAPH CONSTRUCTION
 # =============================================================================
 
+
 def build_eligibility_graph() -> StateGraph:
     """
     Build the LangGraph StateGraph for eligibility evaluation.
@@ -217,10 +223,11 @@ def build_eligibility_graph() -> StateGraph:
 # EXECUTOR (Called by AdmissionsAgentRegistry)
 # =============================================================================
 
+
 def execute_eligibility_eval(
     context: AIGatewayContext,
-    input_data: Dict[str, Any],
-    model_override: Optional[str] = None,
+    input_data: dict[str, Any],
+    model_override: str | None = None,
 ) -> AIInvocationResult:
     """
     Execute the Eligibility Evaluator agent.
@@ -237,14 +244,12 @@ def execute_eligibility_eval(
     Returns:
         AIInvocationResult with the eligibility evaluation
     """
-    from server.core.rbac import Role
 
     # Build initial state
     initial_state: EligibilityState = {
         "marksheet_text": input_data.get("marksheet_text", ""),
         "admission_criteria": input_data.get(
-            "admission_criteria",
-            "Minimum 50% aggregate in qualifying examination"
+            "admission_criteria", "Minimum 50% aggregate in qualifying examination"
         ),
         "rbac_context": {
             "actor_role": context.actor_role,
@@ -268,12 +273,16 @@ def execute_eligibility_eval(
         # Build result from final state
         return AIInvocationResult(
             success=True,
-            content=json.dumps({
-                "eligibility_score": final_state.get("eligibility_score", 0.0),
-                "confidence_tier": final_state.get("confidence_tier", "LOW"),
-                "proposed_state": final_state.get("proposed_state", "MANUAL_REVIEW"),
-                "draft_verdict": final_state.get("draft_verdict", ""),
-            }),
+            content=json.dumps(
+                {
+                    "eligibility_score": final_state.get("eligibility_score", 0.0),
+                    "confidence_tier": final_state.get("confidence_tier", "LOW"),
+                    "proposed_state": final_state.get(
+                        "proposed_state", "MANUAL_REVIEW"
+                    ),
+                    "draft_verdict": final_state.get("draft_verdict", ""),
+                }
+            ),
             request_id=context.request_id,
             model=model_override or "llama3",
         )

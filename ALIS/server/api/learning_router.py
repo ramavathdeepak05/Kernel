@@ -24,18 +24,18 @@ Routes:
               PATCH    /learning/submissions/{submission_id}/grade
               PATCH    /learning/submissions/{submission_id}/return
 """
+
 from __future__ import annotations
 
 import json
 import logging
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-
 from server.core.rbac import Permission, require_permission
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ router = APIRouter(prefix="/api/v1/learning", tags=["learning"])
 # ---------------------------------------------------------------------------
 # Helpers (same pattern as academics_router)
 # ---------------------------------------------------------------------------
+
 
 def _jsonify(obj: Any) -> Any:
     if isinstance(obj, (datetime, date)):
@@ -75,6 +76,7 @@ def _role(r: Request) -> str:
 def _student_id(request: Request, org_id: str) -> str:
     """Resolve student UUID from the authenticated user_id."""
     from server.db_service import execute_query
+
     rows = execute_query(
         "SELECT id FROM students WHERE user_id=%s AND org_id=%s",
         (_actor(request), org_id),
@@ -84,9 +86,10 @@ def _student_id(request: Request, org_id: str) -> str:
     return str(rows[0]["id"])
 
 
-def _fetch_co_context(org_id: str, course_id: str, co_id: Optional[str]) -> dict:
+def _fetch_co_context(org_id: str, course_id: str, co_id: str | None) -> dict:
     """Fetch CO data needed to build AI generation variables."""
     from server.db_service import execute_query
+
     # Course metadata
     course_rows = execute_query(
         "SELECT name, code FROM courses WHERE id=%s AND org_id=%s",
@@ -109,11 +112,12 @@ def _fetch_co_context(org_id: str, course_id: str, co_id: Optional[str]) -> dict
         )
 
     return {
-        "course_name":     course["name"],
-        "course_code":     course["code"],
-        "co_codes":        [r["code"] for r in co_rows] or ["CO1"],
-        "co_descriptions": [r["description"] for r in co_rows] or ["General understanding"],
-        "bloom_levels":    [r.get("bloom_level", "Apply") for r in co_rows] or ["Apply"],
+        "course_name": course["name"],
+        "course_code": course["code"],
+        "co_codes": [r["code"] for r in co_rows] or ["CO1"],
+        "co_descriptions": [r["description"] for r in co_rows]
+        or ["General understanding"],
+        "bloom_levels": [r.get("bloom_level", "Apply") for r in co_rows] or ["Apply"],
     }
 
 
@@ -121,10 +125,12 @@ def _fetch_co_context(org_id: str, course_id: str, co_id: Optional[str]) -> dict
 # Materials
 # ---------------------------------------------------------------------------
 
+
 @router.post("/courses/{course_id}/materials")
 @require_permission(Permission.LEARNING_MANAGE)
 async def create_material(course_id: str, request: Request):
     from server.academics.learning_service import CourseMaterialService
+
     body = await request.json()
     org_id = _org(request)
     result = CourseMaterialService.create_material(
@@ -145,12 +151,12 @@ async def create_material(course_id: str, request: Request):
 @require_permission(Permission.LEARNING_MANAGE)
 async def generate_material(course_id: str, request: Request):
     """AI-generate course material from CO + syllabus context."""
+    from server.academics.learning_service import CourseMaterialService
     from server.agents.academics.content_generator_v1 import (
-        execute_content_generator,
         GENERATION_TYPE_TO_MATERIAL_TYPE,
+        execute_content_generator,
     )
     from server.core.ai_gateway import AIGatewayContext
-    from server.academics.learning_service import CourseMaterialService
 
     body = await request.json()
     org_id = _org(request)
@@ -180,7 +186,9 @@ async def generate_material(course_id: str, request: Request):
     ai_result = execute_content_generator(context, input_data, generation_type)
 
     # Parse generated body from AI result
-    generated_title = body.get("title", f"Generated {generation_type.replace('_', ' ').title()}")
+    generated_title = body.get(
+        "title", f"Generated {generation_type.replace('_', ' ').title()}"
+    )
     generated_body = None
     if ai_result and ai_result.content:
         try:
@@ -206,13 +214,20 @@ async def generate_material(course_id: str, request: Request):
     )
 
     if body.get("auto_publish"):
-        material = CourseMaterialService.publish_material(org_id, material["id"], _actor(request))
+        material = CourseMaterialService.publish_material(
+            org_id, material["id"], _actor(request)
+        )
 
-    return JSONResponse(status_code=201, content=_jsonify({
-        "material": material,
-        "ai_confidence": ai_result.confidence_score if ai_result else None,
-        "ai_confidence_tier": ai_result.confidence_tier if ai_result else None,
-    }))
+    return JSONResponse(
+        status_code=201,
+        content=_jsonify(
+            {
+                "material": material,
+                "ai_confidence": ai_result.confidence_score if ai_result else None,
+                "ai_confidence_tier": ai_result.confidence_tier if ai_result else None,
+            }
+        ),
+    )
 
 
 @router.get("/courses/{course_id}/materials")
@@ -220,10 +235,11 @@ async def generate_material(course_id: str, request: Request):
 async def list_materials(
     course_id: str,
     request: Request,
-    week: Optional[int] = None,
-    type: Optional[str] = None,
+    week: int | None = None,
+    type: str | None = None,
 ):
     from server.academics.learning_service import CourseMaterialService
+
     items = CourseMaterialService.list_materials(
         org_id=_org(request),
         course_id=course_id,
@@ -238,37 +254,54 @@ async def list_materials(
 @require_permission(Permission.LEARNING_READ)
 async def get_material(material_id: str, request: Request):
     from server.academics.learning_service import CourseMaterialService
-    return JSONResponse(content=_jsonify(
-        CourseMaterialService.get_material(_org(request), material_id, _role(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            CourseMaterialService.get_material(
+                _org(request), material_id, _role(request)
+            )
+        )
+    )
 
 
 @router.patch("/materials/{material_id}/publish")
 @require_permission(Permission.LEARNING_MANAGE)
 async def publish_material(material_id: str, request: Request):
     from server.academics.learning_service import CourseMaterialService
-    return JSONResponse(content=_jsonify(
-        CourseMaterialService.publish_material(_org(request), material_id, _actor(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            CourseMaterialService.publish_material(
+                _org(request), material_id, _actor(request)
+            )
+        )
+    )
 
 
 @router.patch("/materials/{material_id}/archive")
 @require_permission(Permission.LEARNING_MANAGE)
 async def archive_material(material_id: str, request: Request):
     from server.academics.learning_service import CourseMaterialService
-    return JSONResponse(content=_jsonify(
-        CourseMaterialService.archive_material(_org(request), material_id, _actor(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            CourseMaterialService.archive_material(
+                _org(request), material_id, _actor(request)
+            )
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Assignments
 # ---------------------------------------------------------------------------
 
+
 @router.post("/courses/{course_id}/assignments")
 @require_permission(Permission.LEARNING_MANAGE)
 async def create_assignment(course_id: str, request: Request):
     from server.academics.learning_service import AssignmentService
+
     body = await request.json()
     result = AssignmentService.create_assignment(
         org_id=_org(request),
@@ -279,9 +312,13 @@ async def create_assignment(course_id: str, request: Request):
         max_marks=Decimal(str(body.get("max_marks", 100))),
         due_date=body["due_date"],
         co_id=body.get("co_id"),
-        passing_marks=Decimal(str(body["passing_marks"])) if body.get("passing_marks") else None,
+        passing_marks=Decimal(str(body["passing_marks"]))
+        if body.get("passing_marks")
+        else None,
         allow_late=body.get("allow_late", False),
-        late_penalty_pct=Decimal(str(body["late_penalty_pct"])) if body.get("late_penalty_pct") is not None else None,
+        late_penalty_pct=Decimal(str(body["late_penalty_pct"]))
+        if body.get("late_penalty_pct") is not None
+        else None,
     )
     return JSONResponse(status_code=201, content=_jsonify(result))
 
@@ -290,9 +327,9 @@ async def create_assignment(course_id: str, request: Request):
 @require_permission(Permission.LEARNING_MANAGE)
 async def generate_assignment(course_id: str, request: Request):
     """AI-generate assignment questions with rubric."""
+    from server.academics.learning_service import AssignmentService
     from server.agents.academics.content_generator_v1 import execute_content_generator
     from server.core.ai_gateway import AIGatewayContext
-    from server.academics.learning_service import AssignmentService
 
     body = await request.json()
     org_id = _org(request)
@@ -336,18 +373,26 @@ async def generate_assignment(course_id: str, request: Request):
     )
 
     if body.get("auto_publish"):
-        assignment = AssignmentService.publish_assignment(org_id, assignment["id"], _actor(request))
+        assignment = AssignmentService.publish_assignment(
+            org_id, assignment["id"], _actor(request)
+        )
 
-    return JSONResponse(status_code=201, content=_jsonify({
-        "assignment": assignment,
-        "ai_confidence": ai_result.confidence_score if ai_result else None,
-    }))
+    return JSONResponse(
+        status_code=201,
+        content=_jsonify(
+            {
+                "assignment": assignment,
+                "ai_confidence": ai_result.confidence_score if ai_result else None,
+            }
+        ),
+    )
 
 
 @router.get("/courses/{course_id}/assignments")
 @require_permission(Permission.LEARNING_READ)
 async def list_assignments(course_id: str, request: Request):
     from server.academics.learning_service import AssignmentService
+
     org_id = _org(request)
     student_id = None
     if _role(request).upper() == "STUDENT":
@@ -368,37 +413,54 @@ async def list_assignments(course_id: str, request: Request):
 @require_permission(Permission.LEARNING_READ)
 async def get_assignment(assignment_id: str, request: Request):
     from server.academics.learning_service import AssignmentService
-    return JSONResponse(content=_jsonify(
-        AssignmentService.get_assignment(_org(request), assignment_id, _role(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            AssignmentService.get_assignment(
+                _org(request), assignment_id, _role(request)
+            )
+        )
+    )
 
 
 @router.patch("/assignments/{assignment_id}/publish")
 @require_permission(Permission.LEARNING_MANAGE)
 async def publish_assignment(assignment_id: str, request: Request):
     from server.academics.learning_service import AssignmentService
-    return JSONResponse(content=_jsonify(
-        AssignmentService.publish_assignment(_org(request), assignment_id, _actor(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            AssignmentService.publish_assignment(
+                _org(request), assignment_id, _actor(request)
+            )
+        )
+    )
 
 
 @router.patch("/assignments/{assignment_id}/close")
 @require_permission(Permission.LEARNING_MANAGE)
 async def close_assignment(assignment_id: str, request: Request):
     from server.academics.learning_service import AssignmentService
-    return JSONResponse(content=_jsonify(
-        AssignmentService.close_assignment(_org(request), assignment_id, _actor(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            AssignmentService.close_assignment(
+                _org(request), assignment_id, _actor(request)
+            )
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Submissions
 # ---------------------------------------------------------------------------
 
+
 @router.put("/assignments/{assignment_id}/my-submission")
 @require_permission(Permission.LEARNING_READ)
 async def save_draft_submission(assignment_id: str, request: Request):
     from server.academics.learning_service import SubmissionService
+
     body = await request.json()
     org_id = _org(request)
     result = SubmissionService.create_or_update_draft(
@@ -415,6 +477,7 @@ async def save_draft_submission(assignment_id: str, request: Request):
 @require_permission(Permission.LEARNING_READ)
 async def submit_assignment(assignment_id: str, request: Request):
     from server.academics.learning_service import SubmissionService
+
     org_id = _org(request)
     result = SubmissionService.submit(
         org_id=org_id,
@@ -428,6 +491,7 @@ async def submit_assignment(assignment_id: str, request: Request):
 @require_permission(Permission.LEARNING_READ)
 async def get_my_submission(assignment_id: str, request: Request):
     from server.academics.learning_service import SubmissionService
+
     org_id = _org(request)
     result = SubmissionService.get_my_submission(
         org_id=org_id,
@@ -444,9 +508,10 @@ async def get_my_submission(assignment_id: str, request: Request):
 async def list_submissions(
     assignment_id: str,
     request: Request,
-    status: Optional[str] = None,
+    status: str | None = None,
 ):
     from server.academics.learning_service import SubmissionService
+
     items = SubmissionService.list_submissions(
         org_id=_org(request),
         assignment_id=assignment_id,
@@ -459,31 +524,44 @@ async def list_submissions(
 @require_permission(Permission.LEARNING_MANAGE)
 async def begin_review(submission_id: str, request: Request):
     from server.academics.learning_service import SubmissionService
-    return JSONResponse(content=_jsonify(
-        SubmissionService.begin_review(_org(request), submission_id, _actor(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            SubmissionService.begin_review(
+                _org(request), submission_id, _actor(request)
+            )
+        )
+    )
 
 
 @router.patch("/submissions/{submission_id}/grade")
 @require_permission(Permission.LEARNING_MANAGE)
 async def grade_submission(submission_id: str, request: Request):
     from server.academics.learning_service import SubmissionService
+
     body = await request.json()
-    return JSONResponse(content=_jsonify(
-        SubmissionService.grade_submission(
-            org_id=_org(request),
-            submission_id=submission_id,
-            faculty_id=_actor(request),
-            marks_awarded=Decimal(str(body["marks_awarded"])),
-            feedback=body.get("feedback"),
+    return JSONResponse(
+        content=_jsonify(
+            SubmissionService.grade_submission(
+                org_id=_org(request),
+                submission_id=submission_id,
+                faculty_id=_actor(request),
+                marks_awarded=Decimal(str(body["marks_awarded"])),
+                feedback=body.get("feedback"),
+            )
         )
-    ))
+    )
 
 
 @router.patch("/submissions/{submission_id}/return")
 @require_permission(Permission.LEARNING_MANAGE)
 async def return_submission(submission_id: str, request: Request):
     from server.academics.learning_service import SubmissionService
-    return JSONResponse(content=_jsonify(
-        SubmissionService.return_to_student(_org(request), submission_id, _actor(request))
-    ))
+
+    return JSONResponse(
+        content=_jsonify(
+            SubmissionService.return_to_student(
+                _org(request), submission_id, _actor(request)
+            )
+        )
+    )

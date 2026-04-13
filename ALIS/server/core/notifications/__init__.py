@@ -3,27 +3,28 @@ ALIS Notifications Package - E02-S03
 
 Centralized notification infrastructure for all ALIS modules.
 """
+
 from __future__ import annotations
 
+# Re-export from models for convenience
+from ..models import NotificationChannel, NotificationStatus
 from .channels import (
     BaseChannel,
+    ChannelResult,
     EmailChannel,
     SMSChannel,
     WhatsAppChannel,
-    ChannelResult,
     get_channel,
-)
-from .templates import (
-    NotificationTemplate,
-    TemplateRegistry,
 )
 from .service import (
     NotificationDispatcher,
     NotificationError,
     get_dispatcher,
 )
-# Re-export from models for convenience
-from ..models import NotificationChannel, NotificationStatus
+from .templates import (
+    NotificationTemplate,
+    TemplateRegistry,
+)
 
 __all__ = [
     # Channels

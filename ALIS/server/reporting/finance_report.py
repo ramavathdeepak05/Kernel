@@ -4,16 +4,17 @@ E07 has module-scoped reports (collection summary, defaulters, etc.).
 E11 adds institution-wide financial analytics, trend reports, and
 reconciliation views that span multiple academic years.
 """
+
 from __future__ import annotations
 
 import logging
+
 from server.db_service import execute_query
 
 logger = logging.getLogger(__name__)
 
 
 class FinanceReportService:
-
     @classmethod
     def year_over_year(cls, org_id: str, years: list[str]) -> list[dict]:
         """Compare total billed, collected, and outstanding across academic years."""
@@ -21,7 +22,7 @@ class FinanceReportService:
             return []
         placeholders = ", ".join(["%s"] * len(years))
         rows = execute_query(
-            f"""
+            f"""  # noqa: S608
             SELECT
                 academic_year,
                 SUM(total_amount)       AS total_billed,
@@ -66,8 +67,8 @@ class FinanceReportService:
             (org_id, academic_year),
         )
         return {
-            "academic_year":  academic_year,
-            "total_billed":   float(tuition_rows[0]["total"] or 0) if tuition_rows else 0,
+            "academic_year": academic_year,
+            "total_billed": float(tuition_rows[0]["total"] or 0) if tuition_rows else 0,
             "by_scholarship_type": [dict(r) for r in scholar_rows],
         }
 

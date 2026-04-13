@@ -10,11 +10,12 @@ Fills remaining NAAC gaps:
 - AQAR continuous compilation with July 31 deadline
 - Peer team visit pack generation
 """
+
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from server.db_service import execute_query, execute_transaction
@@ -38,7 +39,9 @@ class NAACSSRService:
     """NAAC Self-Study Report compilation."""
 
     @classmethod
-    def compile_ssr_quantitative(cls, org_id: str, assessment_year: str) -> Dict[str, Any]:
+    def compile_ssr_quantitative(
+        cls, org_id: str, assessment_year: str
+    ) -> dict[str, Any]:
         """Pre-populate SSR quantitative metrics from 5-year lookback."""
         current_year = int(assessment_year[:4])
         years = list(range(current_year - 4, current_year + 1))
@@ -49,17 +52,20 @@ class NAACSSRService:
             enrollment = execute_query(
                 "SELECT COUNT(*) AS cnt FROM users WHERE org_id = %s AND role = 'STUDENT' "
                 "AND status = 'ACTIVE' AND EXTRACT(YEAR FROM created_at) <= %s",
-                (org_id, year), tenant_id=org_id,
+                (org_id, year),
+                tenant_id=org_id,
             )
             faculty = execute_query(
                 "SELECT COUNT(*) AS cnt FROM staff_profiles WHERE org_id = %s "
                 "AND status = 'ACTIVE' AND EXTRACT(YEAR FROM created_at) <= %s",
-                (org_id, year), tenant_id=org_id,
+                (org_id, year),
+                tenant_id=org_id,
             )
             publications = execute_query(
                 "SELECT COUNT(*) AS cnt FROM faculty_publications WHERE org_id = %s "
                 "AND year = %s AND status = 'VERIFIED'",
-                (org_id, yr_str), tenant_id=org_id,
+                (org_id, yr_str),
+                tenant_id=org_id,
             )
             data[yr_str] = {
                 "enrollment": enrollment[0]["cnt"] if enrollment else 0,
@@ -75,32 +81,49 @@ class NAACSSRService:
         }
 
     @classmethod
-    def add_evidence(cls, org_id: str, criterion: str, data: Dict[str, Any],
-                      actor_id: str) -> Dict[str, Any]:
+    def add_evidence(
+        cls, org_id: str, criterion: str, data: dict[str, Any], actor_id: str
+    ) -> dict[str, Any]:
         """Add evidence document to a NAAC criterion."""
         evidence_id = str(uuid4())
-        execute_transaction([
-            (
-                "INSERT INTO naac_evidence (id, org_id, criterion, title, description, "
-                "document_url, evidence_type, uploaded_by, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())",
-                (evidence_id, org_id, criterion, data.get("title", ""),
-                 data.get("description", ""), data.get("document_url", ""),
-                 data.get("evidence_type", "DOCUMENT"), actor_id),
-            )
-        ], tenant_id=org_id)
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO naac_evidence (id, org_id, criterion, title, description, "
+                    "document_url, evidence_type, uploaded_by, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())",
+                    (
+                        evidence_id,
+                        org_id,
+                        criterion,
+                        data.get("title", ""),
+                        data.get("description", ""),
+                        data.get("document_url", ""),
+                        data.get("evidence_type", "DOCUMENT"),
+                        actor_id,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
         return {"id": evidence_id, "criterion": criterion}
 
     @classmethod
-    def list_evidence(cls, org_id: str, criterion: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_evidence(
+        cls, org_id: str, criterion: str | None = None
+    ) -> list[dict[str, Any]]:
         if criterion:
             rows = execute_query(
                 "SELECT * FROM naac_evidence WHERE org_id = %s AND criterion = %s ORDER BY created_at",
-                (org_id, criterion), tenant_id=org_id)
+                (org_id, criterion),
+                tenant_id=org_id,
+            )
         else:
             rows = execute_query(
                 "SELECT * FROM naac_evidence WHERE org_id = %s ORDER BY criterion, created_at",
-                (org_id,), tenant_id=org_id)
+                (org_id,),
+                tenant_id=org_id,
+            )
         return [dict(r) for r in rows]
 
 
@@ -108,32 +131,58 @@ class DVVQueryService:
     """DVV (Data Verification & Validation) query management."""
 
     @classmethod
-    def submit_query(cls, org_id: str, query_data: Dict[str, Any], actor_id: str) -> Dict[str, Any]:
+    def submit_query(
+        cls, org_id: str, query_data: dict[str, Any], actor_id: str
+    ) -> dict[str, Any]:
         """Record a DVV query from NAAC (7-day SLA)."""
         query_id = str(uuid4())
         now = datetime.now(timezone.utc)
         sla_deadline = now + __import__("datetime").timedelta(days=7)
 
-        execute_transaction([
-            (
-                "INSERT INTO dvv_queries (id, org_id, query_text, criterion, "
-                "sla_deadline, status, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, 'PENDING', %s)",
-                (query_id, org_id, query_data.get("query_text", ""),
-                 query_data.get("criterion", ""), sla_deadline, now),
-            )
-        ], tenant_id=org_id)
-        return {"id": query_id, "sla_deadline": sla_deadline.isoformat(), "status": "PENDING"}
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO dvv_queries (id, org_id, query_text, criterion, "
+                    "sla_deadline, status, created_at) "
+                    "VALUES (%s, %s, %s, %s, %s, 'PENDING', %s)",
+                    (
+                        query_id,
+                        org_id,
+                        query_data.get("query_text", ""),
+                        query_data.get("criterion", ""),
+                        sla_deadline,
+                        now,
+                    ),
+                )
+            ],
+            tenant_id=org_id,
+        )
+        return {
+            "id": query_id,
+            "sla_deadline": sla_deadline.isoformat(),
+            "status": "PENDING",
+        }
 
     @classmethod
-    def respond_to_query(cls, org_id: str, query_id: str, response: str,
-                          evidence_ids: List[str], actor_id: str) -> Dict[str, Any]:
-        execute_transaction([
-            ("UPDATE dvv_queries SET response = %s, evidence_ids = %s::text[], "
-             "responded_by = %s, responded_at = NOW(), status = 'RESPONDED' "
-             "WHERE id = %s AND org_id = %s",
-             (response, evidence_ids, actor_id, query_id, org_id))
-        ], tenant_id=org_id)
+    def respond_to_query(
+        cls,
+        org_id: str,
+        query_id: str,
+        response: str,
+        evidence_ids: list[str],
+        actor_id: str,
+    ) -> dict[str, Any]:
+        execute_transaction(
+            [
+                (
+                    "UPDATE dvv_queries SET response = %s, evidence_ids = %s::text[], "
+                    "responded_by = %s, responded_at = NOW(), status = 'RESPONDED' "
+                    "WHERE id = %s AND org_id = %s",
+                    (response, evidence_ids, actor_id, query_id, org_id),
+                )
+            ],
+            tenant_id=org_id,
+        )
         return {"id": query_id, "status": "RESPONDED"}
 
 
@@ -141,43 +190,55 @@ class StudentSatisfactionSurvey:
     """SSS collection for NAAC (target ≥ 70% response rate)."""
 
     @classmethod
-    def create_survey(cls, org_id: str, academic_year: str, actor_id: str) -> Dict[str, Any]:
+    def create_survey(
+        cls, org_id: str, academic_year: str, actor_id: str
+    ) -> dict[str, Any]:
         survey_id = str(uuid4())
-        execute_transaction([
-            (
-                "INSERT INTO student_satisfaction_surveys "
-                "(id, org_id, academic_year, status, created_by, created_at) "
-                "VALUES (%s, %s, %s, 'OPEN', %s, NOW())",
-                (survey_id, org_id, academic_year, actor_id),
-            )
-        ], tenant_id=org_id)
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO student_satisfaction_surveys "
+                    "(id, org_id, academic_year, status, created_by, created_at) "
+                    "VALUES (%s, %s, %s, 'OPEN', %s, NOW())",
+                    (survey_id, org_id, academic_year, actor_id),
+                )
+            ],
+            tenant_id=org_id,
+        )
         return {"id": survey_id, "status": "OPEN"}
 
     @classmethod
-    def submit_response(cls, org_id: str, survey_id: str, student_id: str,
-                         responses: Dict[str, int]) -> Dict[str, Any]:
+    def submit_response(
+        cls, org_id: str, survey_id: str, student_id: str, responses: dict[str, int]
+    ) -> dict[str, Any]:
         import json
+
         response_id = str(uuid4())
-        execute_transaction([
-            (
-                "INSERT INTO sss_responses (id, org_id, survey_id, student_id, responses, submitted_at) "
-                "VALUES (%s, %s, %s, %s, %s::jsonb, NOW()) "
-                "ON CONFLICT (org_id, survey_id, student_id) DO UPDATE SET "
-                "responses = EXCLUDED.responses, submitted_at = NOW()",
-                (response_id, org_id, survey_id, student_id, json.dumps(responses)),
-            )
-        ], tenant_id=org_id)
+        execute_transaction(
+            [
+                (
+                    "INSERT INTO sss_responses (id, org_id, survey_id, student_id, responses, submitted_at) "
+                    "VALUES (%s, %s, %s, %s, %s::jsonb, NOW()) "
+                    "ON CONFLICT (org_id, survey_id, student_id) DO UPDATE SET "
+                    "responses = EXCLUDED.responses, submitted_at = NOW()",
+                    (response_id, org_id, survey_id, student_id, json.dumps(responses)),
+                )
+            ],
+            tenant_id=org_id,
+        )
         return {"id": response_id}
 
     @classmethod
-    def get_response_rate(cls, org_id: str, survey_id: str) -> Dict[str, Any]:
+    def get_response_rate(cls, org_id: str, survey_id: str) -> dict[str, Any]:
         total_students = execute_query(
             "SELECT COUNT(*) AS cnt FROM users WHERE org_id = %s AND role = 'STUDENT' AND status = 'ACTIVE'",
-            (org_id,), tenant_id=org_id,
+            (org_id,),
+            tenant_id=org_id,
         )
         responses = execute_query(
             "SELECT COUNT(*) AS cnt FROM sss_responses WHERE org_id = %s AND survey_id = %s",
-            (org_id, survey_id), tenant_id=org_id,
+            (org_id, survey_id),
+            tenant_id=org_id,
         )
         total = total_students[0]["cnt"] if total_students else 0
         resp_count = responses[0]["cnt"] if responses else 0
@@ -196,7 +257,7 @@ class NIRFComputationService:
     """Full NIRF parameter computation."""
 
     @classmethod
-    def compute_all_parameters(cls, org_id: str, year: str) -> Dict[str, Any]:
+    def compute_all_parameters(cls, org_id: str, year: str) -> dict[str, Any]:
         """Compute all 5 NIRF parameters."""
         return {
             "year": year,
@@ -209,35 +270,53 @@ class NIRFComputationService:
         }
 
     @classmethod
-    def _compute_tlr(cls, org_id: str, year: str) -> Dict[str, Any]:
+    def _compute_tlr(cls, org_id: str, year: str) -> dict[str, Any]:
         """TLR: Teaching, Learning & Resources (30%)."""
         faculty = execute_query(
             "SELECT COUNT(*) AS cnt FROM staff_profiles WHERE org_id = %s AND status = 'ACTIVE'",
-            (org_id,), tenant_id=org_id)
+            (org_id,),
+            tenant_id=org_id,
+        )
         students = execute_query(
             "SELECT COUNT(*) AS cnt FROM users WHERE org_id = %s AND role = 'STUDENT' AND status = 'ACTIVE'",
-            (org_id,), tenant_id=org_id)
+            (org_id,),
+            tenant_id=org_id,
+        )
         f_count = faculty[0]["cnt"] if faculty else 0
         s_count = students[0]["cnt"] if students else 0
         ratio = round(s_count / f_count, 1) if f_count > 0 else 0
 
         phd_faculty = execute_query(
             "SELECT COUNT(*) AS cnt FROM staff_profiles WHERE org_id = %s AND status = 'ACTIVE' AND has_phd = TRUE",
-            (org_id,), tenant_id=org_id)
-        phd_pct = round((phd_faculty[0]["cnt"] if phd_faculty else 0) / f_count * 100, 1) if f_count > 0 else 0
+            (org_id,),
+            tenant_id=org_id,
+        )
+        phd_pct = (
+            round((phd_faculty[0]["cnt"] if phd_faculty else 0) / f_count * 100, 1)
+            if f_count > 0
+            else 0
+        )
 
-        return {"student_faculty_ratio": ratio, "phd_faculty_pct": phd_pct, "weight": 30}
+        return {
+            "student_faculty_ratio": ratio,
+            "phd_faculty_pct": phd_pct,
+            "weight": 30,
+        }
 
     @classmethod
-    def _compute_rp(cls, org_id: str, year: str) -> Dict[str, Any]:
+    def _compute_rp(cls, org_id: str, year: str) -> dict[str, Any]:
         """RP: Research and Professional Practice (30%)."""
         pubs = execute_query(
             "SELECT COUNT(*) AS cnt FROM faculty_publications WHERE org_id = %s AND status = 'VERIFIED'",
-            (org_id,), tenant_id=org_id)
+            (org_id,),
+            tenant_id=org_id,
+        )
         citations = execute_query(
             "SELECT COALESCE(SUM(citation_count), 0) AS total FROM faculty_publications "
             "WHERE org_id = %s AND status = 'VERIFIED'",
-            (org_id,), tenant_id=org_id)
+            (org_id,),
+            tenant_id=org_id,
+        )
         return {
             "publications": pubs[0]["cnt"] if pubs else 0,
             "citations": int(citations[0]["total"]) if citations else 0,
@@ -245,27 +324,57 @@ class NIRFComputationService:
         }
 
     @classmethod
-    def _compute_go(cls, org_id: str, year: str) -> Dict[str, Any]:
-        """GO: Graduation Outcomes (20%) — uses GraduationEmploymentDeclaration."""
+    def _compute_go(cls, org_id: str, year: str) -> dict[str, Any]:
+        """GO: Graduation Outcomes (20%) — queries alumni_profiles and placement_records directly."""
         try:
-            from server.alumni.graduation_saga import GraduationEmploymentDeclaration
-            return {**GraduationEmploymentDeclaration.get_nirf_go_data(org_id, year), "weight": 20}
+            graduates = execute_query(
+                "SELECT COUNT(*) AS cnt FROM alumni_profiles WHERE org_id = %s "
+                "AND EXTRACT(YEAR FROM created_at) = %s",
+                (org_id, int(year[:4])),
+                tenant_id=org_id,
+            )
+            placed = execute_query(
+                "SELECT COUNT(DISTINCT student_id) AS cnt FROM placement_records WHERE org_id = %s "
+                "AND EXTRACT(YEAR FROM placed_at) = %s AND status = 'PLACED'",
+                (org_id, int(year[:4])),
+                tenant_id=org_id,
+            )
+            grad_count = int(graduates[0]["cnt"]) if graduates else 0
+            placed_count = int(placed[0]["cnt"]) if placed else 0
+            placement_rate = (
+                round(placed_count / grad_count * 100, 1) if grad_count > 0 else 0
+            )
+            return {
+                "placement_rate": placement_rate,
+                "go_rate": placement_rate,
+                "graduates": grad_count,
+                "placed": placed_count,
+                "weight": 20,
+            }
         except Exception:
             return {"placement_rate": 0, "go_rate": 0, "weight": 20}
 
     @classmethod
-    def _compute_oi(cls, org_id: str, year: str) -> Dict[str, Any]:
+    def _compute_oi(cls, org_id: str, year: str) -> dict[str, Any]:
         """OI: Outreach and Inclusivity (10%)."""
         categories = execute_query(
             "SELECT category, COUNT(*) AS cnt FROM users "
             "WHERE org_id = %s AND role = 'STUDENT' AND status = 'ACTIVE' GROUP BY category",
-            (org_id,), tenant_id=org_id)
+            (org_id,),
+            tenant_id=org_id,
+        )
         return {
-            "diversity": {str(r["category"]): r["cnt"] for r in categories} if categories else {},
+            "diversity": {str(r["category"]): r["cnt"] for r in categories}
+            if categories
+            else {},
             "weight": 10,
         }
 
     @classmethod
-    def _compute_pr(cls, org_id: str, year: str) -> Dict[str, Any]:
+    def _compute_pr(cls, org_id: str, year: str) -> dict[str, Any]:
         """PR: Perception (10%)."""
-        return {"peer_perception_score": 0, "employer_perception_score": 0, "weight": 10}
+        return {
+            "peer_perception_score": 0,
+            "employer_perception_score": 0,
+            "weight": 10,
+        }

@@ -10,10 +10,10 @@ import json
 import logging
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
-from server.core.audit import AuditLog, AuditAction
+from server.core.audit import AuditAction, AuditLog
 from server.core.domain_events import DomainEvent, DomainEventBus
 from server.core.exceptions import BusinessRuleViolation, NotFoundError
 from server.core.llm_router import LLMTaskClass, get_model_for_task
@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Enums
 # =============================================================================
 
+
 class CreditTransferStatus(str, Enum):
     PENDING = "PENDING"
     AI_DRAFTED = "AI_DRAFTED"
@@ -38,6 +39,7 @@ class CreditTransferStatus(str, Enum):
 # =============================================================================
 # CREDIT TRANSFER SERVICE
 # =============================================================================
+
 
 class CreditTransferService:
     """
@@ -67,8 +69,8 @@ class CreditTransferService:
         source_course_code: str,
         source_course_name: str,
         source_credits: int,
-        readmission_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        readmission_id: str | None = None,
+    ) -> dict[str, Any]:
         """
         Submit a credit transfer request for an external course.
 
@@ -87,9 +89,10 @@ class CreditTransferService:
         request_id = str(uuid4())
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 INSERT INTO credit_transfer_requests (
                     id, org_id, student_id, readmission_id,
                     source_institution, source_course_code, source_course_name,
@@ -102,16 +105,23 @@ class CreditTransferService:
                     %s, %s
                 )
                 """,
-                (
-                    request_id, org_id, student_id, readmission_id,
-                    source_institution, source_course_code, source_course_name,
-                    source_credits,
-                    CreditTransferStatus.PENDING.value,
-                    "AI_DRAFT",
-                    now, now,
-                ),
-            )
-        ])
+                    (
+                        request_id,
+                        org_id,
+                        student_id,
+                        readmission_id,
+                        source_institution,
+                        source_course_code,
+                        source_course_name,
+                        source_credits,
+                        CreditTransferStatus.PENDING.value,
+                        "AI_DRAFT",
+                        now,
+                        now,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.CREATE,
@@ -130,27 +140,32 @@ class CreditTransferService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.credit_transfer_submitted",
-            org_id=org_id,
-            entity_type="credit_transfer_request",
-            entity_id=request_id,
-            actor_id=student_id,
-            payload={
-                "request_id": request_id,
-                "org_id": org_id,
-                "student_id": student_id,
-                "source_institution": source_institution,
-                "source_course_code": source_course_code,
-                "source_course_name": source_course_name,
-                "source_credits": source_credits,
-                "readmission_id": readmission_id,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.credit_transfer_submitted",
+                org_id=org_id,
+                entity_type="credit_transfer_request",
+                entity_id=request_id,
+                actor_id=student_id,
+                payload={
+                    "request_id": request_id,
+                    "org_id": org_id,
+                    "student_id": student_id,
+                    "source_institution": source_institution,
+                    "source_course_code": source_course_code,
+                    "source_course_name": source_course_name,
+                    "source_credits": source_credits,
+                    "readmission_id": readmission_id,
+                },
+            )
+        )
 
         logger.info(
             "E17: Credit transfer request submitted [id=%s, student=%s, course=%s, credits=%d]",
-            request_id, student_id, source_course_code, source_credits,
+            request_id,
+            student_id,
+            source_course_code,
+            source_credits,
         )
         return cls._get_request(request_id, org_id)
 
@@ -164,7 +179,7 @@ class CreditTransferService:
         request_id: str,
         org_id: str,
         actor_id: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Call the LLM to produce an equivalency mapping draft.
 
@@ -204,6 +219,7 @@ class CreditTransferService:
         ai_draft_raw: str
         try:
             from server.core.settings import settings as _settings
+
             resp = httpx.post(
                 f"{_settings.ollama_base_url}/api/generate",
                 json={"model": model, "prompt": prompt, "stream": False},
@@ -214,7 +230,8 @@ class CreditTransferService:
         except Exception as exc:
             logger.warning(
                 "E17: LLM call failed for credit transfer draft [id=%s]: %s — using fallback",
-                request_id, exc,
+                request_id,
+                exc,
             )
             ai_draft_raw = (
                 '{"target_course_suggestion": "Pending manual review", '
@@ -227,6 +244,7 @@ class CreditTransferService:
         except (json.JSONDecodeError, ValueError):
             # Attempt to extract JSON substring if the model returned extra prose
             import re
+
             json_match = re.search(r"\{.*\}", ai_draft_raw, re.DOTALL)
             if json_match:
                 try:
@@ -248,9 +266,10 @@ class CreditTransferService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE credit_transfer_requests
                 SET status = %s,
                     ai_draft_json = %s,
@@ -260,16 +279,18 @@ class CreditTransferService:
                     updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    CreditTransferStatus.AI_DRAFTED.value,
-                    json.dumps(ai_draft_parsed),
-                    now,
-                    actor_id,
-                    now,
-                    request_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        CreditTransferStatus.AI_DRAFTED.value,
+                        json.dumps(ai_draft_parsed),
+                        now,
+                        actor_id,
+                        now,
+                        request_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         AuditLog.log(
             action=AuditAction.UPDATE,
@@ -284,29 +305,35 @@ class CreditTransferService:
                 "action": "ai_draft_generated",
                 "model": model,
                 "confidence": ai_draft_parsed.get("confidence"),
-                "target_course_suggestion": ai_draft_parsed.get("target_course_suggestion"),
+                "target_course_suggestion": ai_draft_parsed.get(
+                    "target_course_suggestion"
+                ),
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.credit_transfer_ai_drafted",
-            org_id=org_id,
-            entity_type="credit_transfer_request",
-            entity_id=request_id,
-            actor_id=actor_id,
-            payload={
-                "request_id": request_id,
-                "org_id": org_id,
-                "student_id": req["student_id"],
-                "source_course_code": source_course_code,
-                "ai_draft": ai_draft_parsed,
-                "model": model,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.credit_transfer_ai_drafted",
+                org_id=org_id,
+                entity_type="credit_transfer_request",
+                entity_id=request_id,
+                actor_id=actor_id,
+                payload={
+                    "request_id": request_id,
+                    "org_id": org_id,
+                    "student_id": req["student_id"],
+                    "source_course_code": source_course_code,
+                    "ai_draft": ai_draft_parsed,
+                    "model": model,
+                },
+            )
+        )
 
         logger.info(
             "E17: AI draft generated [id=%s, model=%s, confidence=%s]",
-            request_id, model, ai_draft_parsed.get("confidence"),
+            request_id,
+            model,
+            ai_draft_parsed.get("confidence"),
         )
         return cls._get_request(request_id, org_id)
 
@@ -321,10 +348,10 @@ class CreditTransferService:
         org_id: str,
         decision: str,
         decided_by: str,
-        notes: Optional[str] = None,
-        target_course_id: Optional[str] = None,
-        credits_awarded: Optional[int] = None,
-    ) -> Dict[str, Any]:
+        notes: str | None = None,
+        target_course_id: str | None = None,
+        credits_awarded: int | None = None,
+    ) -> dict[str, Any]:
         """
         Academic Committee decision on a credit transfer request.
 
@@ -374,7 +401,9 @@ class CreditTransferService:
                 """,
                 (org_id, req["student_id"], request_id),
             )
-            previously_approved = int(approved_rows[0]["total_approved"]) if approved_rows else 0
+            previously_approved = (
+                int(approved_rows[0]["total_approved"]) if approved_rows else 0
+            )
             this_award = credits_awarded or 0
             total_after = previously_approved + this_award
 
@@ -425,9 +454,10 @@ class CreditTransferService:
 
         now = datetime.now(timezone.utc)
 
-        execute_transaction([
-            (
-                """
+        execute_transaction(
+            [
+                (
+                    """
                 UPDATE credit_transfer_requests
                 SET status = %s,
                     committee_decision = %s,
@@ -440,27 +470,30 @@ class CreditTransferService:
                     updated_at = %s
                 WHERE id = %s AND org_id = %s
                 """,
-                (
-                    final_status,
-                    decision,
-                    notes,
-                    decided_by,
-                    now,
-                    target_course_id,
-                    credits_awarded,
-                    policy_version_id,
-                    now,
-                    request_id, org_id,
-                ),
-            )
-        ])
+                    (
+                        final_status,
+                        decision,
+                        notes,
+                        decided_by,
+                        now,
+                        target_course_id,
+                        credits_awarded,
+                        policy_version_id,
+                        now,
+                        request_id,
+                        org_id,
+                    ),
+                )
+            ]
+        )
 
         # If approved, write to the equivalency records table
         if decision in ("APPROVED", "PARTIAL") and target_course_id:
             equiv_id = str(uuid4())
-            execute_transaction([
-                (
-                    """
+            execute_transaction(
+                [
+                    (
+                        """
                     INSERT INTO credit_equivalency_records (
                         id, org_id, request_id, student_id,
                         source_institution, source_course_code, source_course_name, source_credits,
@@ -475,19 +508,32 @@ class CreditTransferService:
                         %s, %s
                     )
                     """,
-                    (
-                        equiv_id, org_id, request_id, req["student_id"],
-                        req["source_institution"], req["source_course_code"],
-                        req["source_course_name"], req["source_credits"],
-                        target_course_id, credits_awarded, decision,
-                        decided_by, now, policy_version_id,
-                        now, now,
-                    ),
-                )
-            ])
+                        (
+                            equiv_id,
+                            org_id,
+                            request_id,
+                            req["student_id"],
+                            req["source_institution"],
+                            req["source_course_code"],
+                            req["source_course_name"],
+                            req["source_credits"],
+                            target_course_id,
+                            credits_awarded,
+                            decision,
+                            decided_by,
+                            now,
+                            policy_version_id,
+                            now,
+                            now,
+                        ),
+                    )
+                ]
+            )
             logger.info(
                 "E17: Credit equivalency record created [equiv_id=%s, request_id=%s, awarded=%s]",
-                equiv_id, request_id, credits_awarded,
+                equiv_id,
+                request_id,
+                credits_awarded,
             )
 
         AuditLog.log(
@@ -508,26 +554,31 @@ class CreditTransferService:
             },
         )
 
-        DomainEventBus.publish(DomainEvent(
-            event_type="admissions.credit_transfer_decided",
-            org_id=org_id,
-            entity_type="credit_transfer_request",
-            entity_id=request_id,
-            actor_id=decided_by,
-            payload={
-                "request_id": request_id,
-                "org_id": org_id,
-                "student_id": req["student_id"],
-                "decision": decision,
-                "credits_awarded": credits_awarded,
-                "target_course_id": target_course_id,
-                "policy_version_id": policy_version_id,
-            },
-        ))
+        DomainEventBus.publish(
+            DomainEvent(
+                event_type="admissions.credit_transfer_decided",
+                org_id=org_id,
+                entity_type="credit_transfer_request",
+                entity_id=request_id,
+                actor_id=decided_by,
+                payload={
+                    "request_id": request_id,
+                    "org_id": org_id,
+                    "student_id": req["student_id"],
+                    "decision": decision,
+                    "credits_awarded": credits_awarded,
+                    "target_course_id": target_course_id,
+                    "policy_version_id": policy_version_id,
+                },
+            )
+        )
 
         logger.info(
             "E17: Credit transfer decision recorded [id=%s, decision=%s, credits=%s, by=%s]",
-            request_id, decision, credits_awarded, decided_by,
+            request_id,
+            decision,
+            credits_awarded,
+            decided_by,
         )
         return cls._get_request(request_id, org_id)
 
@@ -539,10 +590,10 @@ class CreditTransferService:
     def list_requests(
         cls,
         org_id: str,
-        student_id: Optional[str] = None,
-        readmission_id: Optional[str] = None,
-        status: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        student_id: str | None = None,
+        readmission_id: str | None = None,
+        status: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         List credit transfer requests for a tenant with optional filters.
 
@@ -571,7 +622,7 @@ class CreditTransferService:
             params.append(status)
 
         rows = execute_query(
-            f"SELECT * FROM credit_transfer_requests WHERE {' AND '.join(conditions)} "
+            f"SELECT * FROM credit_transfer_requests WHERE {' AND '.join(conditions)} "  # noqa: S608
             "ORDER BY created_at DESC",
             tuple(params),
         )
@@ -582,7 +633,7 @@ class CreditTransferService:
     # -------------------------------------------------------------------------
 
     @classmethod
-    def _get_request(cls, request_id: str, org_id: str) -> Dict[str, Any]:
+    def _get_request(cls, request_id: str, org_id: str) -> dict[str, Any]:
         """Fetch a credit transfer request by ID."""
         rows = execute_query(
             "SELECT * FROM credit_transfer_requests WHERE id = %s AND org_id = %s",
@@ -596,6 +647,6 @@ class CreditTransferService:
         return dict(rows[0])
 
     @classmethod
-    def _require(cls, request_id: str, org_id: str) -> Dict[str, Any]:
+    def _require(cls, request_id: str, org_id: str) -> dict[str, Any]:
         """Fetch or raise NotFoundError — alias used internally."""
         return cls._get_request(request_id, org_id)

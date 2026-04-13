@@ -4,13 +4,13 @@ Domain Event Celery Tasks — P0-S17/S18
 Celery tasks that dispatch domain events to registered handlers,
 and retry failed events from the DB.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import List
 
+from server.db_service import execute_system_query, execute_system_transaction
 from server.worker import celery_app
-from server.db_service import execute_query, execute_system_query, execute_system_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +33,19 @@ def dispatch_domain_event(self, event_id: str) -> None:
     """
     # Mark the event as in-flight so stuck-event detection can find it
     # if this worker crashes before DomainEventBus marks it PROCESSED.
-    execute_system_transaction([
-        (
-            "UPDATE domain_events "
-            "SET status = 'PROCESSING', processing_started_at = NOW() "
-            "WHERE id = %s AND status IN ('PENDING', 'PROCESSING')",
-            (event_id,),
-        )
-    ])
+    execute_system_transaction(
+        [
+            (
+                "UPDATE domain_events "
+                "SET status = 'PROCESSING', processing_started_at = NOW() "
+                "WHERE id = %s AND status IN ('PENDING', 'PROCESSING')",
+                (event_id,),
+            )
+        ]
+    )
     try:
         from server.core.domain_events import DomainEventBus
+
         DomainEventBus._dispatch_sync(event_id)
     except Exception as exc:
         logger.error("dispatch_domain_event failed for %s: %s", event_id, exc)
@@ -78,7 +81,7 @@ def retry_failed_events() -> None:
     ignore_result=True,
 )
 def retry_stuck_events(
-    topics: List[str] = None,
+    topics: list[str] = None,
     stuck_after_seconds: int = 120,
 ) -> None:
     """
@@ -98,7 +101,7 @@ def retry_stuck_events(
         like_conditions = " OR ".join(["event_type LIKE %s" for _ in topics])
         params: tuple = tuple(f"{t}%" for t in topics) + (stuck_after_seconds,)
         rows = execute_system_query(
-            f"""
+            f"""  # noqa: S608
             SELECT id, event_type FROM domain_events
             WHERE status = 'PROCESSING'
               AND ({like_conditions})
@@ -123,21 +126,24 @@ def retry_stuck_events(
         return
 
     stuck_ids = [row["id"] for row in rows]
-    execute_system_transaction([
-        (
-            "UPDATE domain_events "
-            "SET status = 'PENDING', processing_started_at = NULL "
-            "WHERE id = ANY(%s)",
-            (stuck_ids,),
-        )
-    ])
+    execute_system_transaction(
+        [
+            (
+                "UPDATE domain_events "
+                "SET status = 'PENDING', processing_started_at = NULL "
+                "WHERE id = ANY(%s)",
+                (stuck_ids,),
+            )
+        ]
+    )
     for row in rows:
         dispatch_domain_event.delay(row["id"])
         logger.warning(
             "retry_stuck_events: reset stuck event %s (type=%s, stuck_threshold=%ds)",
-            row["id"], row["event_type"], stuck_after_seconds,
+            row["id"],
+            row["event_type"],
+            stuck_after_seconds,
         )
-
 
 
 @celery_app.task(bind=True, max_retries=3)
@@ -162,12 +168,18 @@ def compile_aqar_draft(self):
         if not feature_flags.is_enabled("regulatory.naac_evidence_collection", org_id):
             continue
         try:
-            from server.regulatory.nirf_service import NIRFService
             import datetime
+
+            from server.regulatory.nirf_service import NIRFService
+
             year = datetime.date.today().year
             NIRFService.compute_submission(org_id, submission_year=year)
             compiled += 1
-            logger.info("compile_aqar_draft: NIRF draft computed for org %s (year=%d)", org_id, year)
+            logger.info(
+                "compile_aqar_draft: NIRF draft computed for org %s (year=%d)",
+                org_id,
+                year,
+            )
         except Exception as exc:
             logger.error("compile_aqar_draft: failed for org %s: %s", org_id, exc)
 
@@ -178,7 +190,7 @@ def compile_aqar_draft(self):
 # P26-TA — TA Assignment Notification Handlers
 # =============================================================================
 
-from server.core.domain_events import DomainEventBus as _DomainEventBus
+from server.core.domain_events import DomainEventBus as _DomainEventBus  # noqa: E402
 
 
 async def _handle_ta_assigned(payload: dict) -> None:
@@ -205,12 +217,18 @@ async def _handle_ta_assigned(payload: dict) -> None:
 
     logger.info(
         "ta_assigned_notify student=%s scope=%s course=%s",
-        payload.get("student_id"), scope, course_code,
+        payload.get("student_id"),
+        scope,
+        course_code,
     )
     if phone:
         await _DomainEventBus.publish_async(
             "notification.sms_requested",
-            {"phone": phone, "message": message, "student_id": payload.get("student_id")},
+            {
+                "phone": phone,
+                "message": message,
+                "student_id": payload.get("student_id"),
+            },
         )
 
 
@@ -231,12 +249,18 @@ async def _handle_ta_revoked(payload: dict) -> None:
 
     logger.info(
         "ta_revoked_notify student=%s course=%s",
-        payload.get("student_id"), course_code,
+        payload.get("student_id"),
+        course_code,
     )
     if phone:
         await _DomainEventBus.publish_async(
             "notification.sms_requested",
-            {"phone": phone, "message": message, "student_id": payload.get("student_id")},
+            {
+                "phone": phone,
+                "message": message,
+                "student_id": payload.get("student_id"),
+            },
         )
+
 
 _DomainEventBus.subscribe("attendance.ta_revoked", _handle_ta_revoked)

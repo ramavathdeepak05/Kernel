@@ -26,13 +26,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Template definitions
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class TemplateSpec:
@@ -44,7 +44,7 @@ class TemplateSpec:
 
 
 # fmt: off
-ADMISSIONS_TEMPLATES: List[TemplateSpec] = [
+ADMISSIONS_TEMPLATES: list[TemplateSpec] = [
 
     # =========================================================================
     # Stage 1 — Lead CRM
@@ -580,13 +580,14 @@ ADMISSIONS_TEMPLATES: List[TemplateSpec] = [
 # Registration helpers
 # ---------------------------------------------------------------------------
 
+
 class AdmissionsTemplates:
     """
     Registry of all admissions notification templates.
     """
 
     @classmethod
-    def all(cls) -> List[TemplateSpec]:
+    def all(cls) -> list[TemplateSpec]:
         return list(ADMISSIONS_TEMPLATES)
 
     @classmethod
@@ -599,7 +600,10 @@ class AdmissionsTemplates:
         Register all templates into the in-memory TemplateRegistry.
         Call once at application startup.
         """
-        from server.core.notifications.templates import NotificationTemplate, TemplateRegistry
+        from server.core.notifications.templates import (
+            NotificationTemplate,
+            TemplateRegistry,
+        )
 
         registered = 0
         for spec in ADMISSIONS_TEMPLATES:
@@ -612,7 +616,9 @@ class AdmissionsTemplates:
             TemplateRegistry.register(template)
             registered += 1
 
-        logger.info("P13: %d admissions templates registered in TemplateRegistry", registered)
+        logger.info(
+            "P13: %d admissions templates registered in TemplateRegistry", registered
+        )
 
     @classmethod
     def seed_to_db(cls, org_id: str, actor_id: str = "system") -> int:
@@ -622,7 +628,7 @@ class AdmissionsTemplates:
 
         Returns the number of templates inserted.
         """
-        from server.communication.models import TemplateCreate, NotifChannel
+        from server.communication.models import NotifChannel, TemplateCreate
         from server.communication.notif_templates import NotifTemplateService
 
         inserted = 0
@@ -647,6 +653,8 @@ class AdmissionsTemplates:
 
         logger.info(
             "P13: Admissions templates seeded — inserted=%d, skipped=%d, org=%s",
-            inserted, skipped, org_id,
+            inserted,
+            skipped,
+            org_id,
         )
         return inserted
