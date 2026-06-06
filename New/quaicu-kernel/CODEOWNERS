@@ -1,0 +1,52 @@
+# CODEOWNERS — QUAICU kernel ownership map
+#
+# One owner per directory. No two agents write the same files (AGENTS.md §4).
+# The handles below are LOGICAL roles, each fulfilled by the agent the orchestrator dispatches for that
+# unit (map them to real GitHub teams/users when the repo is hosted). Every change is reviewed by the
+# reviewer role — which is never the unit's own author (AGENTS.md §1, separation of duties).
+#
+# Last matching pattern wins, so the FROZEN surface is pinned last to override broader `core/` ownership.
+
+# ── Working agreement & process docs ─────────────────────────────────────────
+/AGENTS.md                      @quaicu/orchestrator
+/CODEOWNERS                     @quaicu/orchestrator
+/docs/adr/                      @quaicu/orchestrator
+/docs/BUILD_JOURNAL.md          @quaicu/orchestrator
+
+# ── Core layers (one owner per layer) ────────────────────────────────────────
+/core/lifecycle/                @quaicu/lifecycle-agent
+/core/policy/                   @quaicu/policy-agent          # K·01
+/core/ledger/                   @quaicu/ledger-agent          # K·02
+/core/hitl/                     @quaicu/hitl-agent            # K·03
+/core/consent/                  @quaicu/consent-agent         # K·04
+/core/gateway/                  @quaicu/gateway-agent         # K·05
+/core/process/                  @quaicu/process-agent         # K·06
+/core/events/                   @quaicu/events-agent          # K·07
+/core/registry/                 @quaicu/registry-agent        # K·08
+/core/fairness/                 @quaicu/fairness-agent        # K·09
+/core/drift/                    @quaicu/drift-agent           # K·10
+/core/explain/                  @quaicu/explain-agent         # K·11
+/core/incident/                 @quaicu/incident-agent        # K·12
+/core/sandbox/                  @quaicu/sandbox-agent         # K·13
+/core/regmap/                   @quaicu/regmap-agent          # K·14
+
+# ── Adapters (one owner per family) ──────────────────────────────────────────
+/adapters/inference/            @quaicu/adapter-inference
+/adapters/hitl/                 @quaicu/adapter-hitl
+/adapters/identity/             @quaicu/adapter-identity
+/adapters/storage/              @quaicu/adapter-storage
+/adapters/workflow/             @quaicu/adapter-workflow
+
+# ── Delivery, packs, migrations, tests ───────────────────────────────────────
+/delivery/                      @quaicu/delivery-agent
+/packs/                         @quaicu/packs-agent
+/migrations/                    @quaicu/adapter-storage
+/tests/conformance/             @quaicu/test-agent
+/tests/property/                @quaicu/test-agent
+
+# ── FROZEN contract surface (orchestrator only — change requires an ADR) ──────
+# Pinned last so it overrides the broader /core/ rules above. AGENTS.md §3, ADR-0001.
+/core/__init__.py               @quaicu/orchestrator
+/core/errors.py                 @quaicu/orchestrator
+/core/types.py                  @quaicu/orchestrator
+/core/ports/                    @quaicu/orchestrator

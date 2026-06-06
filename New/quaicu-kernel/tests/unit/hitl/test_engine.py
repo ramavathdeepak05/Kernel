@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+import pytest
+
+from core.errors import HITLPortError
+from core.hitl.engine import InProcessHITLPort
+from core.types import (
+    Action,
+    ActionId,
+    ActionState,
+    Actor,
+    ActorId,
+    ApprovalDecision,
+    ApprovalHandle,
+    ApproverRef,
+    IdempotencyKey,
+    TenantId,
+)
+
+
+# ── Fixtures ─────────────────────────────────────────────────────────────────
+
+
+def _tenant(name: str = "tenant-a") -> TenantId:
+    return TenantId(name)
+
+
+def _actor(uid: str = "actor-1", tenant: str = "tenant-a") -> Actor:
+    return Actor(id=ActorId(uid), tenant=TenantId(tenant))
+
+
+def _action(
+    action_id: str = "action-1",
+    tenant: str = "tenant-a",
+    actor_uid: str = "actor-1",
+) -> Action:
+    return Action(
+        id=ActionId(action_id),
+        type="test.action",
+        payload={},
+        actor=_actor(actor_uid, tenant),
+        tenant=TenantId(tenant),
+        idempotency_key=IdempotencyKey(f"idem-{action_id}"),
+        state=ActionState.PROPOSED,
+        proposed_at=datetime.now(UTC),
+    )
+
+
+def _approvers(*refs: str) -> list[ApproverRef]:
+    return [ApproverRef(r) for r in refs]
+
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+
+
+async def test_request_approval_returns_handle() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    assert isinstance(handle, ApprovalHandle)
+    assert handle.id != ""
+
+
+async def test_poll_returns_pending_initially() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.PENDING
+
+
+async def test_approve_then_poll_returns_approved() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.APPROVED
+
+
+async def test_reject_then_poll_returns_rejected() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.reject(handle.id, approver_actor_id=ActorId("admin"))
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.REJECTED
+
+
+async def test_force_expire_then_poll_returns_timed_out() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.force_expire(handle.id)
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.TIMED_OUT
+
+
+async def test_zero_timeout_is_immediately_expired() -> None:
+    port = InProcessHITLPort(timeout_seconds=0)
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.PENDING
+
+
+async def test_double_approve_raises() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+    with pytest.raises(HITLPortError):
+        await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+
+
+async def test_approve_after_reject_raises() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.reject(handle.id, approver_actor_id=ActorId("admin"))
+    with pytest.raises(HITLPortError):
+        await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+
+
+async def test_approve_nonexistent_handle_raises() -> None:
+    port = InProcessHITLPort()
+    with pytest.raises(HITLPortError):
+        await port.approve("bad-id", approver_actor_id=ActorId("admin"))
+
+
+async def test_poll_nonexistent_handle_raises() -> None:
+    port = InProcessHITLPort()
+    bad_handle = ApprovalHandle(id="no-such-handle", tenant=_tenant())
+    with pytest.raises(HITLPortError):
+        await port.poll(bad_handle)
+
+
+async def test_unauthorized_user_ref_raises() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("user:alice"),
+        tenant=_tenant(),
+    )
+    with pytest.raises(HITLPortError):
+        await port.approve(handle.id, approver_actor_id=ActorId("bob"))
+
+
+async def test_authorized_user_ref_passes() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("user:alice"),
+        tenant=_tenant(),
+    )
+    await port.approve(handle.id, approver_actor_id=ActorId("alice"))
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.APPROVED
+
+
+async def test_role_ref_accepted_by_inprocess_port() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.approve(handle.id, approver_actor_id=ActorId("anyone"))
+    decision = await port.poll(handle)
+    assert decision is ApprovalDecision.APPROVED
+
+
+async def test_get_record_returns_full_record() -> None:
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+    record = port.get_record(handle.id)
+    assert record is not None
+    assert record.decided_by == ActorId("admin")
+    assert record.decided_at is not None
+    assert record.decision is ApprovalDecision.APPROVED
+
+
+async def test_tenant_isolation() -> None:
+    port = InProcessHITLPort()
+    handle_a = await port.request_approval(
+        action=_action("action-a", "tenant-a"),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant("tenant-a"),
+    )
+    handle_b = await port.request_approval(
+        action=_action("action-b", "tenant-b"),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant("tenant-b"),
+    )
+    await port.approve(handle_a.id, approver_actor_id=ActorId("admin"))
+    assert await port.poll(handle_a) is ApprovalDecision.APPROVED
+    assert await port.poll(handle_b) is ApprovalDecision.PENDING
+
+
+async def test_handle_id_is_unique_per_request() -> None:
+    port = InProcessHITLPort()
+    handle_1 = await port.request_approval(
+        action=_action("action-1"),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    handle_2 = await port.request_approval(
+        action=_action("action-2"),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    assert handle_1.id != handle_2.id

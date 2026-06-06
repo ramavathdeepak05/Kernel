@@ -1,0 +1,35 @@
+[project]
+name = "quaicu-kernel"
+version = "0.0.0"
+description = "QUAICU Standalone Governance Kernel"
+requires-python = ">=3.11"
+dependencies = [
+    "cel-python>=0.4.0",       # K·01 — CEL condition evaluation (F-05)
+    "pyyaml>=6.0",             # K·01 — policy YAML authoring format
+    "cryptography>=42.0",      # K·02 — Ed25519 STH signing
+    "hypothesis>=6.0",         # property-based invariant tests
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "conformance: spec-derived golden/contract cases",
+    "property: Hypothesis property-based invariants",
+    "integration: requires real Postgres",
+    "chaos: random fault injection",
+    "tenant_isolation: adversarial cross-tenant tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+disallow_any_generics = true

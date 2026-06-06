@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Virtual envs
+.venv/
+venv/
+
+# Local config & secrets (never commit — injected from OpenBao at runtime)
+*.local.toml
+.env
