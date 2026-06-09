@@ -27,7 +27,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/RFC%206962-compliant-2962FF?style=flat-square" />
-  <img src="https://img.shields.io/badge/tests-126%20passing-00C853?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-402%20passing-00C853?style=flat-square" />
   <img src="https://img.shields.io/badge/fail--closed-by%20design-6C3AED?style=flat-square" />
   <img src="https://img.shields.io/badge/license-proprietary-555?style=flat-square" />
 </p>
@@ -300,7 +300,7 @@ These aren't aspirational. They're **property-tested in CI on every commit.**
 
 ## 📊 Build Status
 
-The delivery target is the full 14-layer kernel. The lifecycle spine and the first governance loop (K·01–K·07) are standing, with **126 tests** and spec-derived conformance suites; K·08–K·14 are net-new and queued in build order.
+All 14 governance layers are built and green. **402 tests** passing across unit, conformance, and SDK end-to-end suites. Postgres storage adapter, OpenBao signer, Docker image, and Helm chart shipped.
 
 <sub>✅ Shipped · 🔨 In progress · 📋 Planned</sub>
 
@@ -330,7 +330,7 @@ The delivery target is the full 14-layer kernel. The lifecycle spine and the fir
 # 1. install dependencies (from the repo root)
 pip install -e .
 
-# 2. run the kernel test suite (126 tests)
+# 2. run the kernel test suite (402 tests)
 cd New/quaicu-kernel
 pytest
 

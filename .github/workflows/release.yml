@@ -1,0 +1,99 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write   # required for cosign keyless signing via OIDC
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/kernel
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            "cel-python>=0.4.0" \
+            "pyyaml>=6.0" \
+            "cryptography>=42.0" \
+            "httpx>=0.27" \
+            "asyncpg>=0.29" \
+            "alembic>=1.13" \
+            "sqlalchemy>=2.0" \
+            "psycopg2-binary>=2.9" \
+            "fastapi>=0.111" \
+            "uvicorn[standard]>=0.29" \
+            "pydantic>=2.0" \
+            "PyJWT>=2.8" \
+            "hypothesis>=6.0" \
+            "pytest>=7.0" \
+            "pytest-asyncio>=0.21"
+
+      - name: Run test suite
+        run: |
+          cd New/quaicu-kernel
+          python -m pytest --tb=short -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version tag
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: New/quaicu-kernel
+          file: New/quaicu-kernel/delivery/docker/Dockerfile
+          push: true
+          provenance: true
+          sbom: true
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.title=QUAICU Governance Kernel
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless via Sigstore OIDC)
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+        env:
+          COSIGN_EXPERIMENTAL: "true"

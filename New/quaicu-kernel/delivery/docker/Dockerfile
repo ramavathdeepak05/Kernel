@@ -26,7 +26,11 @@ RUN pip install --no-cache-dir --upgrade pip \
         "PyJWT>=2.8" \
         "cel-python>=0.4.0" \
         "pyyaml>=6.0" \
-        "cryptography>=42.0"
+        "cryptography>=42.0" \
+        "asyncpg>=0.29" \
+        "alembic>=1.13" \
+        "sqlalchemy>=2.0" \
+        "psycopg2-binary>=2.9"
 
 # Copy source after installing deps (layer cache: dep install cached unless pip args change)
 COPY . .
