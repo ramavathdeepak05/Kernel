@@ -23,6 +23,17 @@ ledger   = "memory_ledger"   # replace with "postgres_ledger" in prod
 events   = "memory_events"   # replace with "kafka_events" in prod
 identity = "jwt"             # optional — omit to skip JWT verification
 
+# ── Postgres storage adapter (production) ────────────────────────────────────
+# Uncomment and set storage = "postgres_storage" under [adapters] to persist
+# actions to Postgres instead of the in-memory default.
+# Run migrations first:
+#   DATABASE_URL=<dsn> alembic -c adapters/storage/migrations/alembic.ini upgrade head
+#
+# [adapters]
+# storage = "postgres_storage"
+[storage]
+dsn = "postgresql://quaicu:change-me@localhost:5432/quaicu"
+
 # ── HITL webhook adapter config ───────────────────────────────────────────────
 [hitl]
 dispatch_url = "http://localhost:9000/hitl/dispatch"

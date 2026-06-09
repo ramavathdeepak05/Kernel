@@ -5,8 +5,7 @@ version: "3.9"
 # Run from this directory (delivery/docker/):
 #   docker-compose up --build
 #
-# The kernel starts on http://localhost:7000 with in-memory adapters.
-# No external services required for the dev config.
+# The kernel starts on http://localhost:7000 backed by Postgres.
 #
 # Smoke-test after startup:
 #   curl http://localhost:7000/health
@@ -14,17 +13,42 @@ version: "3.9"
 #     -H "Content-Type: application/json" \
 #     -d '{"type":"demo.action","payload":{"key":"value"},
 #          "idempotency_key":"ik-1","actor_id":"alice","actor_roles":["role:analyst"]}'
+#
+# Run migrations (one-off after first `docker-compose up`):
+#   docker-compose exec kernel \
+#     sh -c "DATABASE_URL=postgresql://quaicu:quaicu-dev@postgres/quaicu \
+#            alembic -c adapters/storage/migrations/alembic.ini upgrade head"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: quaicu
+      POSTGRES_PASSWORD: quaicu-dev
+      POSTGRES_DB: quaicu
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quaicu"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   kernel:
     build:
       context: ../..                          # quaicu-kernel/ (git repo root)
       dockerfile: delivery/docker/Dockerfile
     image: quaicu-kernel:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "7000:7000"
     environment:
       KERNEL_CONFIG: /etc/quaicu/kernel.toml
+      DATABASE_URL: postgresql://quaicu:quaicu-dev@postgres/quaicu
     volumes:
       - ./kernel.dev.toml:/etc/quaicu/kernel.toml:ro
     healthcheck:
@@ -35,6 +59,9 @@ services:
         - "import urllib.request; urllib.request.urlopen('http://localhost:7000/health')"
       interval: 10s
       timeout: 5s
-      start_period: 15s
+      start_period: 20s
       retries: 3
     restart: unless-stopped
+
+volumes:
+  postgres_data:

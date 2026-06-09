@@ -76,6 +76,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "jwt":                     ("adapters.identity.jwt_adapter",     "JWTIdentityAdapter"),
     # StoragePort
     "memory_storage":          ("adapters.storage.memory",           "InMemoryStorageAdapter"),
+    "postgres_storage":        ("adapters.storage.postgres",         "PostgresStorageAdapter"),
     # PolicyEvaluator (dev/demo only)
     "always_allow":            ("adapters.policy.always_allow",      "AlwaysAllowPolicyAdapter"),
     # Ledger
@@ -130,12 +131,16 @@ class Kernel:
         adapter_cfg = cfg.get("adapters", {})
 
         repo: ActionRepository = _InMemoryActionRepository()
+        storage_adapter = None
         policy: PolicyEvaluator | None = None
         hitl: HITLPort | None = None
         ledger: Ledger | None = None
         events: EventBus | None = None
         identity: IdentityPort | None = None
 
+        if "storage" in adapter_cfg:
+            storage_adapter = _load_adapter(adapter_cfg["storage"], **cfg.get("storage", {}))
+            repo = storage_adapter  # PostgresStorageAdapter implements ActionRepository
         if "policy" in adapter_cfg:
             policy = _load_adapter(adapter_cfg["policy"])
         if "hitl" in adapter_cfg:
