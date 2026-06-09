@@ -81,6 +81,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "always_allow":            ("adapters.policy.always_allow",      "AlwaysAllowPolicyAdapter"),
     # Ledger
     "memory_ledger":           ("adapters.ledger.memory",            "InMemoryLedgerAdapter"),
+    "openbao_ledger":          ("adapters.ledger.openbao",           "OpenBaoLedgerAdapter"),
     # EventBus
     "memory_events":           ("adapters.events.memory",            "InMemoryEventBusAdapter"),
 }
@@ -146,7 +147,7 @@ class Kernel:
         if "hitl" in adapter_cfg:
             hitl = _load_adapter(adapter_cfg["hitl"], **cfg.get("hitl", {}))
         if "ledger" in adapter_cfg:
-            ledger = _load_adapter(adapter_cfg["ledger"])
+            ledger = _load_adapter(adapter_cfg["ledger"], **cfg.get("ledger", {}))
         if "events" in adapter_cfg:
             events = _load_adapter(adapter_cfg["events"])
         if "identity" in adapter_cfg:

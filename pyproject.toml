@@ -7,6 +7,7 @@ dependencies = [
     "cel-python>=0.4.0",       # K·01 — CEL condition evaluation (F-05)
     "pyyaml>=6.0",             # K·01 — policy YAML authoring format
     "cryptography>=42.0",      # K·02 — Ed25519 STH signing
+    "httpx>=0.27",             # OpenBao signer — sync HTTP client for Transit API
     "asyncpg>=0.29",           # Postgres storage adapter — async runtime driver
     "alembic>=1.13",           # schema migrations
     "sqlalchemy>=2.0",         # alembic env.py async engine

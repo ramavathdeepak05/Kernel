@@ -23,6 +23,20 @@ ledger   = "memory_ledger"   # replace with "postgres_ledger" in prod
 events   = "memory_events"   # replace with "kafka_events" in prod
 identity = "jwt"             # optional — omit to skip JWT verification
 
+# ── OpenBao ledger (production) ───────────────────────────────────────────────
+# Replace "memory_ledger" with "openbao_ledger" for durable Ed25519 signing.
+# The key must exist in OpenBao's Transit engine before starting the kernel:
+#   bao secrets enable transit
+#   bao write transit/keys/quaicu-ledger type=ed25519
+#
+# [adapters]
+# ledger = "openbao_ledger"
+[ledger]
+addr      = "http://localhost:8200"
+token     = "change-me"         # use an AppRole token in production
+key_name  = "quaicu-ledger"     # ed25519 key in OpenBao Transit
+# verify_tls = true             # set false only for local dev with self-signed certs
+
 # ── Postgres storage adapter (production) ────────────────────────────────────
 # Uncomment and set storage = "postgres_storage" under [adapters] to persist
 # actions to Postgres instead of the in-memory default.
