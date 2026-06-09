@@ -1,0 +1,16 @@
+# QUAICU Kernel — Docker dev config (in-memory adapters, no external services)
+# Used by docker-compose for local development and testing.
+
+[tenant]
+id = "dev-tenant"
+
+[adapters]
+policy = "always_allow"
+hitl   = "webhook"
+ledger = "memory_ledger"
+events = "memory_events"
+
+[hitl]
+dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"
+poll_url     = "http://host.docker.internal:9000/hitl/status"
+timeout      = 10

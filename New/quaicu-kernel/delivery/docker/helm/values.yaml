@@ -1,0 +1,63 @@
+# QUAICU Kernel — Helm default values
+# Override per environment: helm upgrade --set image.tag=v1.2.3 ...
+
+replicaCount: 1
+
+image:
+  repository: quaicu-kernel
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 7000
+
+resources:
+  requests:
+    cpu: "100m"
+    memory: "256Mi"
+  limits:
+    cpu: "500m"
+    memory: "512Mi"
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 7000
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 7000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+
+# Inline kernel.toml rendered into a ConfigMap.
+# Override this in your environment values file with a real adapter config.
+kernelConfig: |
+  [tenant]
+  id = "k8s-tenant"
+
+  [adapters]
+  policy = "always_allow"
+  hitl   = "webhook"
+  ledger = "memory_ledger"
+  events = "memory_events"
+
+  [hitl]
+  dispatch_url = "http://hitl-service/dispatch"
+  poll_url     = "http://hitl-service/status"
+  timeout      = 30
+
+env: []
+  # Additional environment variables injected into the container.
+  # Example:
+  # - name: SOME_SECRET
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: quaicu-secrets
+  #       key: some-secret

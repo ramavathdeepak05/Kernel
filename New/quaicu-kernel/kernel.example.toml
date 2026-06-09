@@ -1,0 +1,37 @@
+# QUAICU Kernel — example configuration
+#
+# Copy this file to kernel.toml (or point KERNEL_CONFIG at it) and fill in
+# your values. Adapter names must match keys in the adapter registry
+# (delivery/sdk/kernel.py:_ADAPTER_REGISTRY).
+#
+# ── For local development / Docker demo ──────────────────────────────────────
+# Use "always_allow" for policy, "memory_ledger" / "memory_events" for a
+# fully in-process kernel that needs no external services.
+#
+# ── For production ───────────────────────────────────────────────────────────
+# Replace the dev adapters with real ones (postgres_ledger, kafka_events,
+# cel_policy, etc.) as those adapters are built in later phases.
+
+[tenant]
+id = "demo-tenant"
+
+# ── Adapter selection (required keys: policy, hitl, ledger, events) ──────────
+[adapters]
+policy   = "always_allow"    # dev only — replace with "cel_policy" in prod
+hitl     = "webhook"
+ledger   = "memory_ledger"   # replace with "postgres_ledger" in prod
+events   = "memory_events"   # replace with "kafka_events" in prod
+identity = "jwt"             # optional — omit to skip JWT verification
+
+# ── HITL webhook adapter config ───────────────────────────────────────────────
+[hitl]
+dispatch_url = "http://localhost:9000/hitl/dispatch"
+poll_url     = "http://localhost:9000/hitl/status"
+timeout      = 30            # seconds before TIMED_OUT (fail-closed)
+# api_key    = ""            # optional Bearer token for the HITL service
+
+# ── JWT identity adapter config ───────────────────────────────────────────────
+[identity]
+secret_or_key = "change-me-in-production"
+algorithms    = ["HS256"]
+verify        = true         # set false to skip signature check in local dev

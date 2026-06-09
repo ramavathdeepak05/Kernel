@@ -1,0 +1,14 @@
+apiVersion: v2
+name: quaicu-kernel
+description: QUAICU Standalone Governance Kernel — sovereign-tier AI governance for regulated industries
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ai-governance
+  - compliance
+  - fintech
+  - audit-trail
+maintainers:
+  - name: QUAICU Team
+    email: platform@quaicu.io

@@ -1,0 +1,40 @@
+version: "3.9"
+
+# QUAICU Governance Kernel — local development compose
+#
+# Run from this directory (delivery/docker/):
+#   docker-compose up --build
+#
+# The kernel starts on http://localhost:7000 with in-memory adapters.
+# No external services required for the dev config.
+#
+# Smoke-test after startup:
+#   curl http://localhost:7000/health
+#   curl -s -X POST http://localhost:7000/v1/actions/propose \
+#     -H "Content-Type: application/json" \
+#     -d '{"type":"demo.action","payload":{"key":"value"},
+#          "idempotency_key":"ik-1","actor_id":"alice","actor_roles":["role:analyst"]}'
+
+services:
+  kernel:
+    build:
+      context: ../..                          # quaicu-kernel/ (git repo root)
+      dockerfile: delivery/docker/Dockerfile
+    image: quaicu-kernel:dev
+    ports:
+      - "7000:7000"
+    environment:
+      KERNEL_CONFIG: /etc/quaicu/kernel.toml
+    volumes:
+      - ./kernel.dev.toml:/etc/quaicu/kernel.toml:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:7000/health')"
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
