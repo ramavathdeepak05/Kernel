@@ -2,30 +2,52 @@
   <img src="https://img.shields.io/badge/QUAICU-Governance%20Kernel-0A0A0A?style=for-the-badge&labelColor=6C3AED&color=0A0A0A" alt="QUAICU Governance Kernel" />
 </p>
 
-<h1 align="center">
-  The Governance Layer Your AI Can't Ship Without
-</h1>
+<h1 align="center">The Governance Layer Your AI Can't Ship Without</h1>
 
 <p align="center">
-  <strong>A standalone, embeddable governance engine that makes every AI action auditable, policy-compliant, and tamper-evident — before it executes.</strong>
+  <strong>A standalone, embeddable governance engine that makes every AI action<br/>auditable, policy-compliant, and tamper-evident — <em>before</em> it executes.</strong>
 </p>
 
 <p align="center">
-  <a href="#-the-problem">Problem</a>&nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#-how-it-works">How It Works</a>&nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#-14-governance-layers">14 Layers</a>&nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#-deploy-your-way">Deploy</a>&nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#-quickstart">Quickstart</a>&nbsp;&nbsp;·&nbsp;&nbsp;
-  <a href="#-tech-stack">Stack</a>&nbsp;&nbsp;·&nbsp;&nbsp;
+  Drop it into a Python app, call it over REST, or run it air-gapped in a bank.<br/>
+  One core. No forks. Fails closed, always.
+</p>
+
+<p align="center">
+  <a href="#-the-problem">Problem</a>&nbsp;·&nbsp;
+  <a href="#-how-it-works">How It Works</a>&nbsp;·&nbsp;
+  <a href="#-why-quaicu">Why QUAICU</a>&nbsp;·&nbsp;
+  <a href="#-14-governance-layers">14 Layers</a>&nbsp;·&nbsp;
+  <a href="#-deploy-your-way">Deploy</a>&nbsp;·&nbsp;
+  <a href="#-quickstart">Quickstart</a>&nbsp;·&nbsp;
+  <a href="#-build-status">Status</a>&nbsp;·&nbsp;
   <a href="#-license">License</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/license-proprietary-6C3AED?style=flat-square" />
-  <img src="https://img.shields.io/badge/status-active%20development-00C853?style=flat-square" />
-  <img src="https://img.shields.io/badge/RFC%206962-compliant-blue?style=flat-square" />
+  <img src="https://img.shields.io/badge/RFC%206962-compliant-2962FF?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-126%20passing-00C853?style=flat-square" />
+  <img src="https://img.shields.io/badge/fail--closed-by%20design-6C3AED?style=flat-square" />
+  <img src="https://img.shields.io/badge/license-proprietary-555?style=flat-square" />
 </p>
+
+---
+
+<p align="center">
+  <strong>Evaluate&nbsp;→ Gate&nbsp;→ Execute&nbsp;→ Seal.</strong>&nbsp; Every AI decision, governed and provable —<br/>
+  so when the regulator asks <em>"what did your model do, and were you allowed to?"</em>, you have the receipt.
+</p>
+
+<table align="center">
+<tr>
+<td align="center" width="33%"><strong>🔐 Provable</strong><br/><sub>RFC 6962 tamper-evident ledger.<br/>Verifiable by a third party.</sub></td>
+<td align="center" width="33%"><strong>⛔ Fail-closed</strong><br/><sub>Any error or doubt → deny/halt.<br/>Never manufactures false assurance.</sub></td>
+<td align="center" width="33%"><strong>🔌 Portable</strong><br/><sub>Runs in your VPC, on-prem,<br/>or fully air-gapped.</sub></td>
+</tr>
+</table>
+
+<br/>
 
 ---
 
@@ -33,15 +55,15 @@
 
 ## 🔥 The Problem
 
-You're building AI-powered products. Your models make decisions that affect real people — loans, grades, hiring, risk scoring. Regulators are watching. Your board is asking questions. And right now, you have **no provable record** of what your AI decided, why, or whether it was allowed to.
+You're shipping AI that makes decisions about real people — loans, grades, hiring, risk scores. Regulators are watching. Your board is asking. And right now you have **no provable record** of what your AI decided, why, or whether it was even allowed to.
 
 Building governance from scratch for every product is:
 
-- **Expensive** — months of engineering on audit trails, policy engines, and consent flows  
-- **Error-prone** — one `if` statement away from failing open and manufacturing false assurance  
-- **Impossible to certify** — because your auditor can't verify a bespoke system they've never seen  
+- **Expensive** — months of engineering on audit trails, policy engines, and consent flows
+- **Error-prone** — one `if` statement away from failing open and manufacturing false assurance
+- **Impossible to certify** — your auditor can't verify a bespoke system they've never seen
 
-**QUAICU solves this in one layer.**
+**QUAICU is that governance layer, built once, correctly — so you don't.**
 
 <br/>
 
@@ -51,20 +73,63 @@ Building governance from scratch for every product is:
 
 ## ⚡ How It Works
 
-Every governed action follows a strict, deterministic lifecycle. No exceptions. No shortcuts. No silent failures.
+Every governed action runs the same strict, deterministic lifecycle. No exceptions. No shortcuts. No silent failures.
 
 ```
-┌─────────┐     ┌──────────┐     ┌──────┐     ┌─────────┐     ┌──────┐     ┌──────┐
-│ PROPOSE │────▶│ EVALUATE │────▶│ GATE │────▶│ EXECUTE │────▶│ SEAL │────▶│ EMIT │
-└─────────┘     └──────────┘     └──────┘     └─────────┘     └──────┘     └──────┘
-                     │                │             │              │
-                  Policies         Human-in-      State        Tamper-
-                  checked          the-loop       change       evident
-                  (CEL)            approval       applied      ledger
-                                   (if req'd)                  entry
+┌─────────┐    ┌──────────┐    ┌──────┐    ┌─────────┐    ┌──────┐    ┌──────┐
+│ PROPOSE │──▶ │ EVALUATE │──▶ │ GATE │──▶ │ EXECUTE │──▶ │ SEAL │──▶ │ EMIT │
+└─────────┘    └──────────┘    └──────┘    └─────────┘    └──────┘    └──────┘
+                    │              │            │             │
+                Policies +     Human-in-     State        Tamper-
+                consent        the-loop      change       evident
+                (CEL)          (if req'd)    applied      ledger entry
 ```
 
-> **The guarantee:** any failure, timeout, or ambiguity at **any** step → the action is **denied or halted**. The kernel never fails open. Ever.
+> **The guarantee:** any failure, timeout, or ambiguity at **any** step → the action is **denied or halted**. The kernel never fails open. Ever. A governance kernel that fails open is worse than none — it manufactures false assurance.
+
+<br/>
+
+---
+
+<br/>
+
+## 💎 Why QUAICU
+
+| | |
+|---|---|
+| **Governance is the product** | Not a feature bolted onto a model. The kernel governs the action regardless of which model produced it or where it runs — model- and deployment-agnostic. |
+| **One core, no forks** | Every customer runs the *same* codebase. Differences live in config, adapters, and content packs — never a branch. What we certify once, every customer inherits. |
+| **Prove, don't assert** | The ledger is an RFC 6962 transparency log — the same standard behind certificate transparency. Your auditor verifies it independently; they don't take your word. |
+| **No bypass** | There is no fast-path. Even admin actions are governed actions. Nothing executes or seals without passing evaluation and gating. |
+| **Deterministic & replayable** | Identical inputs → identical decision. Any sealed action is re-derivable from the ledger — replay reconstructs, never re-runs side effects. |
+| **Runs in someone else's environment** | Encryption at rest, signed releases, least privilege, air-gap-ready. Built to be trusted on hardware you don't control. |
+
+<br/>
+
+---
+
+<br/>
+
+## 🛡️ 14 Governance Layers
+
+Not a single feature — a **full governance stack**, built as independent, composable layers on a shared lifecycle spine.
+
+| | Layer | What It Does |
+|---|---|---|
+| **K·01** | **Policy Engine** | Evaluates every action against all applicable policies. CEL conditions, total conflict resolution, fully deterministic. |
+| **K·02** | **TrustLedger** | RFC 6962 Merkle transparency log. Append-only, per-tenant, with cryptographic inclusion & consistency proofs. |
+| **K·03** | **HITL Gate** | Human-in-the-loop approval. Timeout → reject. No silent approvals, ever. |
+| **K·04** | **DPDP Consent** | Purpose-bound consent checked at evaluation time. Missing / expired / withdrawn → deny. |
+| **K·05** | **AI Gateway** | PII masking → model routing → prompt logging → cost governance. Every model call governed and sealed. |
+| **K·06** | **Process Engine** | Durable state machine with HITL pauses and incident rollback. Postgres or Temporal adapter. |
+| **K·07** | **Event Bus** | Structured events emitted only after seal. A failed emit never alters a sealed outcome. |
+| **K·08** | **Model Registry** | Per-tenant model allowlists the gateway enforces. No approved model → deny, no fallback. |
+| **K·09** | **Fairness** | Bias and fairness sweeps over recorded decisions; the delta feeds policy impact reports. |
+| **K·10** | **Drift Monitor** | Detects model and decision drift against a recorded baseline; breaches raise incidents. |
+| **K·11** | **Explainability** | Point-in-time explanations derived from recorded inputs — no model re-call. |
+| **K·12** | **Incident Engine** | Rollback as a *governed action* through the full lifecycle. No out-of-band effects. |
+| **K·13** | **Sandbox** | Counterfactual replay: test candidate policies against history before they ever enforce. |
+| **K·14** | **Regulatory Mapping** | Maps policies → regulations. Generates signed, point-in-time evidence packs that verify against the ledger. |
 
 <br/>
 
@@ -78,48 +143,21 @@ One core. No forks. No domain imports. Customer differences are configuration �
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
-║  DELIVERY ADAPTERS                                          ║
+║  DELIVERY ADAPTERS  (thin wrappers over core)                ║
 ║    Python SDK  ·  FastAPI / REST  ·  Docker Image            ║
 ╠══════════════════════════════════════════════════════════════╣
-║  CORE KERNEL                                                 ║
+║  CORE KERNEL  —  one codebase, no forks, zero domain imports ║
 ║    Lifecycle Spine  +  14 Governance Layers  +  Port APIs    ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  PLUGGABLE ADAPTERS  (selected by config)                    ║
 ║    Inference · HITL · Identity · Storage · Workflow           ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  CONTENT PACKS  (data, not code)                             ║
-║    Policy Packs  ·  Regulatory Maps (RBI, EU AI Act, DPDP)   ║
+║    Policy Packs  ·  Regulatory Maps (RBI · EU AI Act · DPDP) ║
 ╚══════════════════════════════════════════════════════════════╝
 ```
 
 **Onboarding a customer** = pick adapters in config + load relevant policy packs. Zero core code touched.
-
-<br/>
-
----
-
-<br/>
-
-## 🛡️ 14 Governance Layers
-
-The kernel isn't a single feature — it's a **full governance stack**, built as independent, composable layers on a shared lifecycle spine.
-
-| | Layer | What It Does |
-|---|---|---|
-| **K·01** | **Policy Engine** | Evaluates every action against all applicable policies. CEL conditions. Total conflict resolution. Deterministic. |
-| **K·02** | **TrustLedger** | RFC 6962 Merkle transparency log. Append-only, per-tenant, with cryptographic inclusion & consistency proofs. |
-| **K·03** | **HITL Gate** | Human-in-the-loop approval. Timeout → reject. No silent approvals. |
-| **K·04** | **DPDP Consent** | Data protection consent checks at evaluation time. Point-in-time replay. |
-| **K·05** | **AI Gateway** | PII masking → model routing → prompt logging → cost governance. Every model call governed and sealed. |
-| **K·06** | **Process Engine** | Durable state machine with HITL pauses and incident rollback. Postgres or Temporal adapter. |
-| **K·07** | **Event Bus** | Structured event emission post-seal. A failed emit never alters a sealed outcome. |
-| **K·08** | **Model Registry** | Per-tenant model allowlists. The gateway enforces against it. |
-| **K·09** | **Fairness** | Bias detection and fairness sweeps over recorded decisions. |
-| **K·10** | **Drift Monitor** | Detects model and decision drift over time. |
-| **K·11** | **Explainability** | Generates decision explanations from recorded inputs and policy versions. |
-| **K·12** | **Incident Engine** | Governed rollback — itself a governed action through the full lifecycle. |
-| **K·13** | **Sandbox** | Counterfactual replay: run historical actions against candidate policies before enforcement. |
-| **K·14** | **Regulatory Mapping** | Maps policies → regulatory requirements. Generates signed, point-in-time evidence packs. |
 
 <br/>
 
@@ -133,13 +171,13 @@ Three delivery modes. Three customer profiles. One kernel.
 
 <table>
 <tr>
-<td align="center" width="33%">
+<td valign="top" width="33%">
 
 ### 🐍 Python SDK
 
-**For: AI agencies & product companies**
+**For: AI agencies & product teams**
 
-Embed governance directly into your app with a single decorator.
+Embed governance with a single decorator.
 
 ```python
 from quaicu_kernel import Kernel
@@ -148,19 +186,19 @@ kernel = Kernel(config="quaicu.yaml")
 
 @kernel.governed
 async def approve_loan(application):
-    # Your logic here
-    # The kernel handles the rest
+    # your logic — the kernel
+    # runs the whole lifecycle
     ...
 ```
 
 </td>
-<td align="center" width="33%">
+<td valign="top" width="33%">
 
 ### 🌐 REST API
 
-**For: Product companies & enterprises**
+**For: polyglot stacks & enterprises**
 
-Standard OpenAPI. Integrate from any language.
+Standard OpenAPI. Any language.
 
 ```bash
 POST /kernel/v1/actions/propose
@@ -174,18 +212,18 @@ Content-Type: application/json
 ```
 
 </td>
-<td align="center" width="33%">
+<td valign="top" width="33%">
 
 ### 🐳 Docker Image
 
-**For: Regulated enterprises**
+**For: regulated enterprises**
 
-Self-contained. Air-gappable. Helm charts included.
+Self-contained. Air-gappable.
 
 ```bash
 docker pull quaicu/kernel:latest
 
-# Or deploy to k3s/K8s
+# or deploy to k3s / K8s
 helm install quaicu-kernel \
   ./charts/kernel
 ```
@@ -202,16 +240,16 @@ helm install quaicu-kernel \
 
 ## 🔒 Security That Auditors Love
 
-This isn't security theater. Every mechanism is verifiable.
+This isn't security theater. Every mechanism is independently verifiable.
 
 | Capability | Implementation |
 |---|---|
-| **Tamper-evident audit trail** | RFC 6962 Merkle transparency log — the same standard behind certificate transparency |
-| **Cryptographic ledger integrity** | Ed25519 Signed Tree Heads (STH) with inclusion & consistency proofs |
+| **Tamper-evident audit trail** | RFC 6962 Merkle transparency log — the standard behind certificate transparency |
+| **Cryptographic ledger integrity** | Ed25519 Signed Tree Heads with inclusion & consistency proofs |
 | **PII protection** | Sensitive fields masked before transmission — raw data never leaves the tenant boundary |
 | **Secrets management** | OpenBao (MPL 2.0) — Vault-compatible, no BSL restrictions |
 | **Fail-closed by default** | Unlogged model calls are blocked. Unreachable policy services deny. Period. |
-| **Zero trust posture** | Encryption at rest, signed releases, least privilege, supply-chain hygiene |
+| **Zero-trust posture** | Encryption at rest, signed releases, least privilege, supply-chain hygiene |
 
 > 🏦 **External cryptographic review** is required before any bank deployment — and we budget for it, because it's a sales asset, not just a safeguard.
 
@@ -239,37 +277,66 @@ Tenant isolation isn't a filter. It's an architectural guarantee.
 
 <br/>
 
+## 📐 Core Invariants
+
+These aren't aspirational. They're **property-tested in CI on every commit.**
+
+| Invariant | What It Means |
+|---|---|
+| **Fail-closed** | Any failure or ambiguity → DENY/HALT. Never allow. |
+| **No bypass** | No path executes an action that skipped evaluation and gating. Even admin actions are governed. |
+| **Determinism** | Identical inputs → identical decision. No hidden state. No wall-clock branching. |
+| **Total conflict resolution** | Policy evaluation never returns "undefined." Resolution order is explicit and exhaustive. |
+| **Tenant isolation** | No data, decision, or ledger entry crosses a tenant boundary. Tested adversarially. |
+| **Ledger immutability** | A sealed entry is never modified. Old proofs remain verifiable forever. |
+| **Idempotency** | Re-submitting the same proposal never double-executes, double-seals, or double-emits. |
+| **Replay fidelity** | Every governed action is re-derivable from the ledger. Replay reconstructs — never re-performs side effects. |
+
+<br/>
+
+---
+
+<br/>
+
+## 📊 Build Status
+
+The delivery target is the full 14-layer kernel. The lifecycle spine and the first governance loop (K·01–K·07) are standing, with **126 tests** and spec-derived conformance suites; K·08–K·14 are net-new and queued in build order.
+
+<sub>✅ Shipped · 🔨 In progress · 📋 Planned</sub>
+
+| Layer | Status | Notes |
+|---|---|---|
+| Spine · Ports · Types | ✅ **Shipped** | Lifecycle engine, all ports (inference/hitl/identity/storage/workflow/consent), frozen shared types |
+| K·01 Policy Engine | ✅ **Shipped** | CEL evaluation, total conflict resolution, unit + conformance suites |
+| K·02 TrustLedger | ✅ **Shipped** | RFC 6962 Merkle tree, Ed25519 STH, inclusion/consistency proofs, conformance suite |
+| K·03 HITL Gate | ✅ **Shipped** | Approval routing, fail-closed timeout, conformance suite |
+| K·04 DPDP Consent | 🔨 **In progress** | Purpose-based consent engine implemented; conformance suite pending |
+| K·05 AI Gateway | ✅ **Shipped** | PII masking, model routing, budget enforcement, prompt logging, conformance suite |
+| K·06 Process Engine | 🔨 **In progress** | Durable process model and step machine taking shape |
+| K·07 Event Bus | ✅ **Shipped** | Emit-after-seal event bus with conformance suite |
+| K·08 – K·14 | 📋 **Planned** | Registry, Fairness, Drift, Explainability, Incident, Sandbox, RegMap — net-new, no prior implementation |
+
+<br/>
+
+---
+
+<br/>
+
 ## 🧪 Quickstart
 
-### Prerequisites
-
-- Python 3.11+
-- `pip` or `uv`
-
-### Install
+**Prerequisites:** Python 3.11+ and `pip` (or `uv`).
 
 ```bash
+# 1. install dependencies (from the repo root)
+pip install -e .
+
+# 2. run the kernel test suite (126 tests)
 cd New/quaicu-kernel
-pip install -e ".[dev]"
-```
-
-### Run the test suite
-
-```bash
 pytest
-```
 
-### Run specific test categories
-
-```bash
-# Spec-derived golden cases
-pytest -m conformance
-
-# Property-based invariant tests  
-pytest -m property
-
-# Adversarial cross-tenant leakage tests
-pytest -m tenant_isolation
+# 3. run a specific category
+pytest -m conformance        # spec-derived golden cases
+pytest -m tenant_isolation   # adversarial cross-tenant tests
 ```
 
 <br/>
@@ -292,7 +359,7 @@ Every choice optimizes for **correctness, auditability, and portability** — no
 | Secrets | **OpenBao** (MPL 2.0) | Vault-compatible, BSL-free |
 | Durable workflow | **Temporal** / **Postgres state machine** | Tiered by deployment |
 | Inference | **Ollama · vLLM · TGI · OpenAI · Anthropic · Gemini · Bedrock · Azure OpenAI · Vertex** | Pluggable, governed, never hardcoded |
-| Orchestration | **k3s / docker-compose / K8s** | Matched to customer |
+| Orchestration | **k3s / docker-compose / K8s** | Matched to the customer tier |
 | IaC | **OpenTofu** (MPL 2.0) | Terraform-compatible, BSL-free |
 | Observability | **OpenTelemetry + Prometheus + Grafana + Loki** | Full-stack, vendor-neutral |
 
@@ -302,78 +369,37 @@ Every choice optimizes for **correctness, auditability, and portability** — no
 
 <br/>
 
-## 📐 Core Invariants
-
-These aren't aspirational. They're **tested in CI on every commit.**
-
-| Invariant | What It Means |
-|---|---|
-| **Fail-closed** | Any failure or ambiguity → DENY/HALT. Never allow. |
-| **No bypass** | No code path executes an action that skipped evaluation and gating. Even admin actions are governed. |
-| **Determinism** | Identical inputs → identical policy decision. No hidden state. No wall-clock branching. |
-| **Total conflict resolution** | Policy evaluation never returns "undefined." Resolution order is explicit and exhaustive. |
-| **Tenant isolation** | No data, decision, or ledger entry crosses a tenant boundary. Tested adversarially. |
-| **Ledger immutability** | A sealed entry is never modified. Old proofs remain verifiable forever. |
-| **Idempotency** | Re-submitting the same proposal never double-executes, double-seals, or double-emits. |
-| **Replay fidelity** | Every governed action is re-derivable from the ledger. Replay reconstructs — never re-performs side effects. |
-
-<br/>
-
----
-
-<br/>
-
-## 📊 Build Status
-
-| Layer | Status | Notes |
-|---|---|---|
-| Spine + Ports + Types | ✅ **Shipped** | Lifecycle engine, all 6 ports, frozen shared types |
-| K·01 Policy Engine | ✅ **Shipped** | CEL evaluation, total conflict resolution, conformance suite |
-| K·02 TrustLedger | ✅ **Shipped** | RFC 6962 Merkle tree, Ed25519 STH, inclusion/consistency proofs |
-| K·03 HITL Gate | ✅ **Shipped** | Approval routing, fail-closed timeout, conformance suite |
-| K·04 DPDP Consent | ✅ **Shipped** | Purpose-based consent engine |
-| K·05 AI Gateway | ✅ **Shipped** | PII masking, model routing, budget enforcement, prompt logging |
-| K·06 Process Engine | 🔨 **In Progress** | Process definitions and step DSL |
-| K·07 Event Bus | ✅ **Shipped** | In-process event bus with conformance suite |
-| K·08–K·14 | 📋 **Planned** | Net-new layers — no prior implementation |
-
-<br/>
-
----
-
-<br/>
-
 ## 📁 Repository Structure
 
+The kernel package lives under `New/quaicu-kernel/`; the workspace root holds the spec, the working agreement, and the skill library that guides the build.
+
 ```
-quaicu-kernel/
-├── core/                       # The kernel — zero domain imports, zero concrete deps
-│   ├── types.py                # Frozen shared value types (Action, LedgerEntry, etc.)
-│   ├── errors.py               # Kernel error hierarchy
-│   ├── ports/                  # Port interfaces — core depends ONLY on these
-│   │   ├── consent.py          #   ConsentPort
-│   │   ├── hitl.py             #   HITLPort
-│   │   ├── identity.py         #   IdentityPort
-│   │   ├── inference.py        #   InferencePort
-│   │   ├── storage.py          #   StoragePort
-│   │   └── workflow.py         #   WorkflowPort
-│   ├── lifecycle/              # K·00 — the governance spine
-│   ├── policy/                 # K·01 — Policy Engine (CEL)
-│   ├── ledger/                 # K·02 — TrustLedger (RFC 6962)
-│   ├── hitl/                   # K·03 — Human-in-the-Loop Gate
-│   ├── consent/                # K·04 — DPDP Consent
-│   ├── gateway/                # K·05 — AI Gateway
-│   ├── process/                # K·06 — Process Engine
-│   └── events/                 # K·07 — Event Bus
-├── tests/
-│   ├── conformance/            # Spec-derived golden test suites per layer
-│   └── unit/                   # Unit tests
-├── docs/
-│   ├── BUILD_JOURNAL.md        # Chronological build decisions
-│   └── adr/                    # Architecture Decision Records
-├── AGENTS.md                   # AI agent coding guidelines
-├── CODEOWNERS                  # Per-layer ownership
-└── pyproject.toml              # Project config & dependencies
+Kernel/
+├── README.md                       # this page
+├── AGENTS.md                       # the multi-agent working agreement (read first)
+├── SKILLS.md                       # directory → skill routing map (read-first protocol)
+├── QUAICU_Kernel_Build_Spec.md     # the authoritative build specification
+├── .agents/skills/                 # curated skill library (quaicu-* layer + stack skills)
+└── New/quaicu-kernel/              # ── the kernel package ──
+    ├── core/                       #   zero domain imports, zero concrete deps
+    │   ├── types.py                #     frozen shared value types
+    │   ├── errors.py               #     kernel error hierarchy
+    │   ├── ports/                  #     port interfaces — core depends ONLY on these
+    │   ├── lifecycle/              #     the governance spine (propose→…→emit)
+    │   ├── policy/                 #     K·01 — Policy Engine (CEL)
+    │   ├── ledger/                 #     K·02 — TrustLedger (RFC 6962)
+    │   ├── hitl/                   #     K·03 — Human-in-the-Loop Gate
+    │   ├── consent/                #     K·04 — DPDP Consent
+    │   ├── gateway/                #     K·05 — AI Gateway
+    │   ├── process/                #     K·06 — Process Engine
+    │   └── events/                 #     K·07 — Event Bus
+    ├── tests/
+    │   ├── conformance/            #     spec-derived golden suites per layer
+    │   └── unit/                   #     unit tests
+    ├── docs/
+    │   ├── BUILD_JOURNAL.md        #     chronological build decisions
+    │   └── adr/                    #     Architecture Decision Records
+    └── CODEOWNERS                  #     per-layer ownership
 ```
 
 <br/>
@@ -384,14 +410,14 @@ quaicu-kernel/
 
 ## 🤝 Contributing
 
-See [AGENTS.md](New/quaicu-kernel/AGENTS.md) for coding guidelines, the layer ownership model, and the Definition of Done checklist.
+See **[AGENTS.md](AGENTS.md)** for the working agreement, the layer-ownership model, and the Definition of Done — and **[SKILLS.md](SKILLS.md)** for which skill to read before touching each part of the kernel.
 
 **The rules that don't bend:**
 
-- `core/` contains **zero domain concepts** — `grep` for student, loan, patient must return nothing  
-- `core/` imports **zero concrete implementations** — only port interfaces  
-- Every layer must pass the **universal Definition of Done** before merge  
-- Frozen types and ports require an **ADR + leadership sign-off** to change  
+- `core/` contains **zero domain concepts** — `grep` for student, loan, patient must return nothing
+- `core/` imports **zero concrete implementations** — only port interfaces
+- Every layer must pass the **universal Definition of Done** before merge
+- Frozen types and ports require an **ADR + leadership sign-off** to change
 
 <br/>
 
@@ -399,11 +425,13 @@ See [AGENTS.md](New/quaicu-kernel/AGENTS.md) for coding guidelines, the layer ow
 
 <br/>
 
+## 📜 License
+
+Proprietary. © 2026 QUAICU. All rights reserved.
+
+<br/>
+
 <p align="center">
   <strong>QUAICU Governance Kernel</strong><br/>
   <em>Because "trust us, the AI is fine" doesn't pass an audit.</em>
-</p>
-
-<p align="center">
-  © 2026 QUAICU · All rights reserved · Proprietary
 </p>
