@@ -88,6 +88,38 @@ class LedgerTrailResponse(BaseModel):
     count: int
 
 
+class AuthorizeRequest(BaseModel):
+    """Body for POST /v1/authorize — a pure policy-decision query.
+
+    The actor is NEVER supplied by the caller; it is resolved from the bearer token. ``record``
+    overrides the profile's ``seal_to_ledger`` flag: None = follow the profile (default all() seals
+    every decision), True = always seal, False = never seal.
+    """
+
+    type: str = Field(..., description="Action type to authorize (e.g. 'payments.wire')")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Optional action payload")
+    idempotency_key: str | None = Field(None, description="Optional caller-supplied key")
+    record: bool | None = Field(None, description="Override whether to seal this decision to the ledger")
+
+
+class AuthorizeResponse(BaseModel):
+    """Response for POST /v1/authorize.
+
+    Always returns 200 — the HTTP status never encodes the verdict. Check ``allowed`` or
+    ``decision`` in the body. The caller is the enforcement point.
+    """
+
+    decision: str
+    allowed: bool
+    actor_id: str
+    reason: str | None = None
+    policy_versions: list[str] = Field(default_factory=list)
+    approvers: list[str] = Field(default_factory=list)
+    enforced_layers: list[str] = Field(default_factory=list)
+    sealed: bool = False
+    ledger_seq: int | None = None
+
+
 class ErrorResponse(BaseModel):
     """Standard error envelope."""
 

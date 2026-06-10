@@ -20,6 +20,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from core.errors import StoragePortError
+from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.profile import GovernanceProfile
 from core.lifecycle.protocols import ActionRepository, EventBus, Ledger, PolicyEvaluator
 from core.lifecycle.transitions import assert_transition
@@ -150,6 +151,132 @@ class LifecycleEngine:
             await self._emit(action, entry)
         return action
 
+    # ── Decision-only (PDP) path ─────────────────────────────────────────────────
+
+    async def decide(
+        self,
+        action: Action,
+        *,
+        context: RequestContext | None = None,
+        profile: GovernanceProfile | None = None,
+        record: bool | None = None,
+    ) -> AuthorizationResult:
+        """Evaluate policy + consent + identity for ``action`` and return a verdict.
+
+        **Side-effect-free**: no action row is inserted, no state-machine transitions happen, no
+        events are emitted. The action object is never persisted. The caller is the enforcement
+        point (PEP) — it decides what to do with the verdict.
+
+        When ``record`` is True (or ``record`` is None and the active profile has
+        ``seal_to_ledger=True``) a decision-only leaf is sealed into the transparency log so every
+        authorization query becomes a tamper-evident monitoring record. A seal failure is
+        best-effort: it is logged as a warning but does NOT change the returned verdict.
+        """
+        prof = profile or self._default_profile
+
+        # Identity resolution (no insert, no persist — just enrich the action's actor).
+        if prof.verify_identity and context is not None and self._identity is not None:
+            try:
+                actor = await self._identity.resolve_actor(context=context, tenant=action.tenant)
+                action = dataclasses.replace(action, actor=actor)
+            except Exception as exc:  # noqa: BLE001
+                log.info("decide: identity unresolved — fail-closed: %s", exc)
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    allowed=False,
+                    actor_id=action.actor.id,
+                    reason="identity unresolved — fail-closed",
+                    enforced_layers=prof.enabled_layers(),
+                )
+
+        # Consent check (pure — no state mutation).
+        consent_state: dict[str, Any] = {}
+        if prof.enforce_consent and self._consent is not None:
+            ok, consent_state, consent_reason = await self._consent_verdict(action)
+            if not ok:
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    allowed=False,
+                    actor_id=action.actor.id,
+                    reason=consent_reason,
+                    enforced_layers=prof.enabled_layers(),
+                    consent_state=consent_state,
+                )
+
+        # Policy evaluation (pure — no state mutation).
+        if not prof.enforce_policy:
+            eval_decision = Decision.ALLOW
+            policy_versions: tuple[str, ...] = ("<policy-unenforced>",)
+            approvers: tuple[ApproverRef, ...] = ()
+            reason: str | None = None
+        else:
+            try:
+                evaluation = await self._policy.evaluate(action)
+            except Exception as exc:  # noqa: BLE001
+                log.info("decide: policy evaluation failed — fail-closed: %s", exc)
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    allowed=False,
+                    actor_id=action.actor.id,
+                    reason="policy evaluation failed — fail-closed",
+                    enforced_layers=prof.enabled_layers(),
+                    consent_state=consent_state,
+                )
+            if evaluation is None:
+                return AuthorizationResult(
+                    decision=Decision.DENY,
+                    allowed=False,
+                    actor_id=action.actor.id,
+                    reason="policy returned None — fail-closed",
+                    enforced_layers=prof.enabled_layers(),
+                    consent_state=consent_state,
+                )
+            eval_decision = evaluation.decision
+            policy_versions = evaluation.policy_versions
+            approvers = evaluation.approvers
+            reason = evaluation.reason
+
+        # Monitoring seal (best-effort — never changes the verdict).
+        should_seal = record if record is not None else prof.seal_to_ledger
+        sealed = False
+        ledger_seq: int | None = None
+        if should_seal:
+            try:
+                eval_result = EvaluationResult(
+                    decision=eval_decision,
+                    policy_versions=policy_versions,
+                    approvers=approvers,
+                    reason=reason,
+                )
+                annotated = self._annotate(eval_result, consent_state, prof)
+                entry = await self._ledger.seal(
+                    action=action,
+                    evaluation=annotated,
+                    recorded_result={"decision_only": True},
+                    approver=None,
+                )
+                sealed = True
+                ledger_seq = entry.ledger_seq
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "decide: monitoring seal failed for action %s (best-effort — verdict unchanged): %s",
+                    action.id,
+                    exc,
+                )
+
+        return AuthorizationResult(
+            decision=eval_decision,
+            allowed=(eval_decision is Decision.ALLOW),
+            actor_id=action.actor.id,
+            reason=reason,
+            policy_versions=policy_versions,
+            approvers=approvers,
+            enforced_layers=prof.enabled_layers(),
+            consent_state=consent_state,
+            sealed=sealed,
+            ledger_seq=ledger_seq,
+        )
+
     # ── Steps ───────────────────────────────────────────────────────────────────
 
     async def _propose(
@@ -190,16 +317,16 @@ class LifecycleEngine:
 
         return action, True
 
-    async def _consent_check(
+    async def _consent_verdict(
         self, action: Action
-    ) -> tuple[Action, dict[str, Any], bool]:
-        """Standalone K·04 consent layer. Returns (action, consent_state, ok).
+    ) -> tuple[bool, dict[str, Any], str | None]:
+        """Pure consent check — no state mutations, no action persistence.
 
-        Fail-closed: missing / withdrawn / expired / non-active / any port error → DENY. On success,
-        returns the consent snapshot to be sealed into the ledger leaf (F-09). The action stays
-        PROPOSED on success (the next layer advances it).
+        Returns ``(ok, consent_state, reason)``. Used by both ``decide`` (pure PDP path) and
+        ``_consent_check`` (run path, which wraps failures in ``_deny``).
         """
         from core.consent.engine import _is_expired, _resolve_purpose  # local import (core→core)
+        from datetime import datetime, timezone
 
         tenant_id = str(action.tenant)
         subject_id = str(action.actor.id)
@@ -208,20 +335,32 @@ class LifecycleEngine:
             record = await self._consent.get_consent(
                 tenant_id=tenant_id, subject_id=subject_id, purpose=purpose
             )
-        except Exception as exc:  # noqa: BLE001 — any consent port failure → fail-closed DENY
-            denied = await self._deny(action, "consent port error — fail-closed", exc)
-            return denied, {}, False
-
-        from datetime import datetime, timezone
+        except Exception as exc:  # noqa: BLE001
+            return False, {}, f"consent port error — fail-closed ({exc})"
 
         if record is None:
-            return await self._deny(action, "consent missing — fail-closed"), {}, False
+            return False, {}, "consent missing — fail-closed"
         if record.status != "active":
-            return await self._deny(action, f"consent {record.status} — fail-closed"), {}, False
+            return False, {}, f"consent {record.status} — fail-closed"
         if _is_expired(record, datetime.now(tz=timezone.utc)):
-            return await self._deny(action, "consent expired — fail-closed"), {}, False
+            return False, {}, "consent expired — fail-closed"
 
-        return action, record.as_state_dict(), True
+        return True, record.as_state_dict(), None
+
+    async def _consent_check(
+        self, action: Action
+    ) -> tuple[Action, dict[str, Any], bool]:
+        """Standalone K·04 consent layer for the ``run`` path. Returns (action, consent_state, ok).
+
+        Fail-closed: missing / withdrawn / expired / non-active / any port error → DENY. On success,
+        returns the consent snapshot to be sealed into the ledger leaf (F-09). The action stays
+        PROPOSED on success (the next layer advances it).
+        """
+        ok, consent_state, reason = await self._consent_verdict(action)
+        if not ok:
+            denied = await self._deny(action, reason or "consent denied — fail-closed")
+            return denied, {}, False
+        return action, consent_state, True
 
     def _annotate(
         self,

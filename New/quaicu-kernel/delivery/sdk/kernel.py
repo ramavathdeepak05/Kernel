@@ -30,6 +30,7 @@ from core.gateway.allowlist import InMemoryModelAllowlist
 from core.gateway.budget import InMemoryBudgetTracker
 from core.gateway.engine import AIGateway
 from core.gateway.masking import MaskingConfig
+from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.engine import LifecycleEngine
 from core.lifecycle.profile import GovernanceProfile, resolve_preset
 from core.lifecycle.protocols import ActionRepository, EventBus, Ledger, PolicyEvaluator
@@ -378,6 +379,34 @@ class Kernel:
             resp, recorded_output={**dict(resp.recorded_output), "action_id": str(final.id)}
         )
 
+    # ── Decision-only (PDP) ─────────────────────────────────────────────────────
+
+    async def check(
+        self,
+        *,
+        action_type: str,
+        actor: Actor,
+        payload: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        profile: GovernanceProfile | None = None,
+        context: Any | None = None,
+        record: bool | None = None,
+    ) -> AuthorizationResult:
+        """Ask the kernel: "is this action allowed?" without performing it.
+
+        Returns an ``AuthorizationResult`` on all outcomes — never raises on DENY. The caller (the
+        enforcement point, or PEP) decides what to do with the verdict.
+
+        When ``record`` is None (the default), the monitoring seal follows the active profile's
+        ``seal_to_ledger`` flag: the default ``all()`` profile seals every check into the
+        tamper-evident ledger. Pass ``record=False`` to suppress sealing on the hot path.
+        """
+        resolved = self.resolve_profile(action_type, profile)
+        action = self._build_action(action_type, payload or {}, actor)
+        if idempotency_key is not None:
+            action = dataclasses.replace(action, idempotency_key=IdempotencyKey(idempotency_key))
+        return await self.engine.decide(action, context=context, profile=resolved, record=record)
+
     # ── Decorator factories ─────────────────────────────────────────────────────
 
     def governed(
@@ -543,4 +572,21 @@ class BoundAgent:
             actor=self._actor,
             payload=payload,
             profile=profile or self._profile,
+        )
+
+    async def check(
+        self,
+        *,
+        action_type: str,
+        payload: dict[str, Any] | None = None,
+        profile: GovernanceProfile | None = None,
+        record: bool | None = None,
+    ) -> "AuthorizationResult":
+        """Ask whether this agent is allowed to perform an action, without performing it."""
+        return await self._kernel.check(
+            action_type=action_type,
+            actor=self._actor,
+            payload=payload,
+            profile=profile or self._profile,
+            record=record,
         )

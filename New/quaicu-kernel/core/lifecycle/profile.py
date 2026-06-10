@@ -81,6 +81,17 @@ class GovernanceProfile:
             enforce_hitl_gate=False,
         )
 
+    @classmethod
+    def monitor(cls) -> "GovernanceProfile":
+        """Evaluate + record every decision, but never block on a HITL gate.
+
+        Designed for ``LifecycleEngine.decide`` / ``Kernel.check``: full identity + consent +
+        policy evaluation, sealed to the ledger (tamper-evident monitoring), but no HITL gating
+        (gating is meaningless for a pure decision query). Gateway sub-layers are on so model-call
+        authorizations also have allowlist/PII/budget checks.
+        """
+        return cls(enforce_hitl_gate=False)
+
 
 # Module-level preset lookup used by config (`[governance].default`, action_profiles).
 PRESETS: dict[str, GovernanceProfile] = {
@@ -88,6 +99,7 @@ PRESETS: dict[str, GovernanceProfile] = {
     "standard": GovernanceProfile.standard(),
     "gateway_only": GovernanceProfile.gateway_only(),
     "audit_only": GovernanceProfile.audit_only(),
+    "monitor": GovernanceProfile.monitor(),
 }
 
 

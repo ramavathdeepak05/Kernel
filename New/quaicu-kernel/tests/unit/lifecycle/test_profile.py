@@ -178,3 +178,24 @@ async def test_require_approval_with_gate_disabled_denies() -> None:
         make_action(), Counter(), profile=GovernanceProfile(enforce_hitl_gate=False)
     )
     assert result.state is ActionState.DENIED  # approval required but gate disabled → fail-closed
+
+
+# ── monitor() preset ──────────────────────────────────────────────────────────────
+
+
+def test_monitor_preset_enforces_all_except_hitl_gate() -> None:
+    p = GovernanceProfile.monitor()
+    assert p.verify_identity
+    assert p.enforce_consent
+    assert p.enforce_policy
+    assert not p.enforce_hitl_gate
+    assert p.seal_to_ledger
+    assert p.emit_events
+    assert p.mask_pii
+    assert p.enforce_model_allowlist
+
+
+def test_monitor_preset_registered_in_presets() -> None:
+    from core.lifecycle.profile import resolve_preset
+    p = resolve_preset("monitor")
+    assert p == GovernanceProfile.monitor()
