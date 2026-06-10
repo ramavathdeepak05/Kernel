@@ -25,11 +25,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.errors import LifecycleDeniedError, LifecycleHaltedError
+from core.errors import LifecycleDeniedError, LifecycleHaltedError  # noqa: F401 (re-exported)
 from core.gateway.allowlist import InMemoryModelAllowlist
 from core.gateway.budget import InMemoryBudgetTracker
 from core.gateway.engine import AIGateway
 from core.gateway.masking import MaskingConfig
+from core.lifecycle.context import async_actor_scope, actor_scope, get_current_actor, set_actor
 from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.engine import LifecycleEngine
 from core.lifecycle.profile import GovernanceProfile, resolve_preset
@@ -406,6 +407,203 @@ class Kernel:
         if idempotency_key is not None:
             action = dataclasses.replace(action, idempotency_key=IdempotencyKey(idempotency_key))
         return await self.engine.decide(action, context=context, profile=resolved, record=record)
+
+    # ── Zero-friction integration ────────────────────────────────────────────────
+
+    def actor_context(self, actor: Actor | str, *, roles: tuple[str, ...] = ()):
+        """Context manager that binds ``actor`` for all ``guard``/``wrap`` calls inside the block.
+
+        Works as both a sync (``with``) and async (``async with``) context manager so the same
+        one-liner covers request handlers, background tasks, and sync code alike.
+
+        Usage::
+
+            async with kernel.actor_context(current_user_actor):
+                result = await existing_function(arg1, arg2)  # unchanged call-site
+
+            # String shorthand:
+            async with kernel.actor_context("agent:planner"):
+                ...
+
+        The actor is task-local (ContextVar): concurrent async tasks each have their own actor and
+        cannot see each other's.
+        """
+        if isinstance(actor, str):
+            actor = Actor(id=ActorId(actor), tenant=self.tenant, roles=tuple(roles))
+        # Return the async context manager; the sync one is also available via actor_scope.
+        return async_actor_scope(actor)
+
+    def set_actor(self, actor: Actor | str, *, roles: tuple[str, ...] = ()) -> None:
+        """Imperatively set the governed actor for this async task / thread.
+
+        Prefer ``actor_context`` (auto-cleanup). Use this only when a context manager scope is
+        impractical (e.g. long-lived coroutine sessions).
+        """
+        if isinstance(actor, str):
+            actor = Actor(id=ActorId(actor), tenant=self.tenant, roles=tuple(roles))
+        set_actor(actor)
+
+    def get_actor(self) -> Actor | None:
+        """Return the actor currently bound in this async task / thread, or None."""
+        return get_current_actor()
+
+    def guard(
+        self,
+        *,
+        policy: str,
+        action_type: str | None = None,
+        profile: GovernanceProfile | None = None,
+    ) -> Callable:
+        """Decorator that governs any existing function **without changing its signature**.
+
+        The actor is resolved from the ContextVar set by ``kernel.actor_context()``.  The
+        decorated function's signature, call-sites, and return type are **completely unchanged**.
+        Zero codebase modification required.
+
+        Usage::
+
+            # BEFORE — existing function, untouched:
+            async def approve_loan(loan_id: str, amount: float) -> dict:
+                return await db.approve(loan_id, amount)
+
+            # AFTER — add one decorator line:
+            @kernel.guard(policy="loans.approve")
+            async def approve_loan(loan_id: str, amount: float) -> dict:
+                return await db.approve(loan_id, amount)
+
+            # Caller — add actor_context once at the request boundary:
+            async with kernel.actor_context(user_actor):
+                result = await approve_loan(loan_id="L-1", amount=5000)  # unchanged
+
+        On DENY the call raises ``LifecycleDeniedError``; on HALT it raises ``LifecycleHaltedError``.
+        """
+        effective_type = action_type or policy
+
+        def decorator(fn: Callable) -> Callable:
+            @functools.wraps(fn)
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                # Pop actor= if the caller passed it as an escape-hatch override; otherwise use ctx.
+                actor: Actor | None = kwargs.pop("actor", None)
+                if actor is None:
+                    actor = get_current_actor()
+                if actor is None:
+                    raise RuntimeError(
+                        f"@kernel.guard on {fn.__name__!r}: no actor in scope. "
+                        "Call this function inside `async with kernel.actor_context(actor): ...` "
+                        "or pass actor=<Actor> as a keyword argument."
+                    )
+                payload = dict(kwargs)
+                action = self._build_action(effective_type, payload, actor)
+                captured: dict[str, Any] = {}
+
+                async def execute_fn() -> dict[str, Any]:
+                    result = fn(*args, **kwargs)
+                    if inspect.isawaitable(result):
+                        result = await result
+                    captured["result"] = result
+                    return {"result": result}
+
+                resolved = self.resolve_profile(effective_type, profile)
+                final = await self.engine.run(action, execute_fn, profile=resolved)
+                self._raise_on_terminal_failure(final, effective_type)
+                return captured.get("result")
+
+            wrapper._governed_policy = policy  # type: ignore[attr-defined]
+            wrapper._governed_action_type = effective_type  # type: ignore[attr-defined]
+            wrapper._zero_friction = True  # type: ignore[attr-defined]
+            return wrapper
+
+        return decorator
+
+    def proxy(
+        self,
+        target: Any,
+        *,
+        policies: dict[str, str],
+        actor: Actor | None = None,
+    ) -> Any:
+        """Wrap any existing object so that specified method calls are governed before execution.
+
+        ``policies`` maps dotted method paths to policy names. Every listed method goes through
+        ``kernel.check()`` before being called on the underlying object; unlisted methods pass
+        through unchanged — the proxy is fully transparent to the rest of the codebase.
+
+        Usage::
+
+            client = kernel.proxy(
+                openai.AsyncOpenAI(api_key="..."),
+                policies={
+                    "chat.completions.create": "ai.chat",
+                    "embeddings.create":        "ai.embed",
+                },
+            )
+
+            # Existing code completely unchanged:
+            async with kernel.actor_context(user):
+                response = await client.chat.completions.create(model="gpt-4", messages=[...])
+        """
+        from delivery.sdk.proxy import GovernedProxy
+
+        return GovernedProxy(target, policies=policies, kernel=self, actor=actor)
+
+    def wrap(
+        self,
+        fn: Callable,
+        *,
+        policy: str,
+        action_type: str | None = None,
+        actor: Actor | None = None,
+        profile: GovernanceProfile | None = None,
+    ) -> Callable:
+        """Govern any existing callable **without modifying it** — programmatic (non-decorator) form.
+
+        Identical to ``guard`` but applied at call-time rather than definition-time. Use this to
+        govern functions you don't own (third-party libraries, imported modules):
+
+        Usage::
+
+            # One line to govern an external function:
+            governed_transfer = kernel.wrap(payments_lib.transfer, policy="payments.transfer")
+
+            # Caller unchanged:
+            async with kernel.actor_context(user_actor):
+                result = await governed_transfer(amount=100, to="ACC-2")
+
+        An explicit ``actor=`` bound at wrap-time takes priority over the ContextVar.
+        """
+        bound_actor = actor  # bound at wrap-time (optional override)
+        effective_type = action_type or policy
+
+        @functools.wraps(fn)
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Priority: call-time actor= kwarg > wrap-time bound actor > context var
+            act: Actor | None = kwargs.pop("actor", None) or bound_actor or get_current_actor()
+            if act is None:
+                raise RuntimeError(
+                    f"kernel.wrap({fn.__name__!r}): no actor in scope. "
+                    "Call inside `async with kernel.actor_context(actor): ...` "
+                    "or pass actor=<Actor> as a keyword argument."
+                )
+            payload = dict(kwargs)
+            action = self._build_action(effective_type, payload, act)
+            captured: dict[str, Any] = {}
+
+            async def execute_fn() -> dict[str, Any]:
+                result = fn(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+                captured["result"] = result
+                return {"result": result}
+
+            resolved = self.resolve_profile(effective_type, profile)
+            final = await self.engine.run(action, execute_fn, profile=resolved)
+            self._raise_on_terminal_failure(final, effective_type)
+            return captured.get("result")
+
+        wrapper._governed_policy = policy  # type: ignore[attr-defined]
+        wrapper._governed_action_type = effective_type  # type: ignore[attr-defined]
+        wrapper._zero_friction = True  # type: ignore[attr-defined]
+        return wrapper
 
     # ── Decorator factories ─────────────────────────────────────────────────────
 
