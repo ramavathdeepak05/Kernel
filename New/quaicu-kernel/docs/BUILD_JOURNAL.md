@@ -14,11 +14,12 @@ next cold agent doesn't know it happened.
 
 ## Current status (2026-06-10)
 
-**All 14 governance layers + the delivery phase are built and green. Suite: 506 tests passing,
-9 skipped.** Four feature waves have landed on top of the core kernel since the Wave-2 milestone
+**All 14 governance layers + the delivery phase are built and green. Suite: 532 tests passing,
+9 skipped.** Five feature waves have landed on top of the core kernel since the Wave-2 milestone
 below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
-(3) a decision-only authorize/monitor surface + reference PEP, and (4) a zero-friction integration
-layer. See the Log for the per-wave detail.
+(3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
+layer, and (5) config-wiring the CEL policy engine + a durable (Postgres) policy store. See the Log
+for the per-wave detail. Extension decisions are recorded as ADR-0002…0005 (`docs/adr/`).
 
 The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1/authorize`,
 `/v1/inference`, `/v1/ledger`), the Python SDK (`@kernel.guard` / `kernel.wrap` / `kernel.proxy` /
@@ -26,11 +27,14 @@ The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1
 all running over one composable `GovernanceProfile` model with per-agent identity.
 
 ### Next planned work — Policy Management API + Dashboards
-Before that work can start, a gap audit (2026-06-10) found the following must be closed first. **The
-real CEL `PolicyEngine` (`core/policy/`) is built and tested but is NOT reachable through
-`Kernel.from_config` — only the dev `always_allow` adapter is registered, and there are no policy
-CRUD routes, no policy persistence adapter, and no dashboard read-models.** Detailed gap list is in
-the Log entry dated 2026-06-10 ("Pre-management-API gap audit").
+A gap audit (2026-06-10) found six items to close before this work; **gaps #1 (CEL engine not
+config-wireable) and #2 (no durable policy store) are now CLOSED** (commit `e121a9fe`, ADR-0005).
+The real CEL `PolicyEngine` is now selectable via `policy = "cel_policy"`, backed by a durable
+write-through `PolicyRepository` (in-memory + Postgres), hydrated on `kernel.startup()`. **Still open
+(dependency-ordered):** #3 policy CRUD HTTP routes (`/v1/policies …`) over the shipped SDK
+write-through primitives + control-plane authz (#6); #4 backtest→`ImpactReport` bridge (K·13
+`SandboxRun` + K·09 fairness) + `/v1/policies/{id}/simulate`; #5 dashboard read-models / projections
++ query routes. Full gap list is in the 2026-06-10 "Pre-management-API gap audit" log entry.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (still open).** The lifecycle records *that* a HITL gate was
@@ -84,6 +88,22 @@ the Log entry dated 2026-06-10 ("Pre-management-API gap audit").
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-10 · CEL engine config-wired + durable policy store · policy/delivery** (commit
+  `e121a9fe`, ADR-0005) — Closes pre-management-API gaps #1+#2. New `PolicyRepository` async port
+  (`core/policy/repository.py`) + `PolicyPersistenceError`; `InMemoryPolicyRepository` (default) and
+  `PostgresPolicyRepository` (asyncpg upsert, mock-tested) + Alembic migration `002` (`quaicu_policies`
+  + `quaicu_policy_impact_reports`). `PolicyStore` gains an optional repository and write-through async
+  methods — `hydrate()` (recompiles CEL on load; compiled programs are never persisted),
+  `register_persisted` / `activate_persisted` / `deprecate_persisted` — while the sync `register` /
+  `activate` / `lookup` API and the 22 existing K·01 tests stay untouched. `Kernel` wires
+  `policy = "cel_policy"` via `_build_policy` (with `[adapters].policy_store` selecting
+  `memory_policy` / `postgres_policy`), exposes `policy_store` / `policy_repository`, adds
+  `startup()` / `shutdown()` (hydrate on boot; wired into the FastAPI lifespan), and ships the SDK
+  write-through primitives `register_policy` / `activate_policy` / `deprecate_policy` (the surface the
+  management API will wrap). **No file seeding** — an empty store fail-closed DENYs until policies are
+  written and ACTIVATED (secure default, F-10). 26 new tests; suite 506 → **532**. **Follow-ups:**
+  gaps #3 (CRUD routes) / #4 (backtest→ImpactReport bridge) / #5 (dashboard read-models) remain.
 
 - **2026-06-10 · Pre-management-API gap audit · orchestrator** — Audit before planning the Policy
   Management API + dashboards. **Gaps found (must close first):**
