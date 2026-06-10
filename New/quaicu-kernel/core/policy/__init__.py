@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from core.policy.evaluator import PolicyEngine
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
+from core.policy.repository import PolicyRepository
 from core.policy.store import PolicyStore
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "PolicyEngine",
     "PolicyEnvelope",
     "PolicyLifecycle",
+    "PolicyRepository",
     "PolicyStore",
 ]

@@ -124,6 +124,16 @@ class PolicyNotFoundError(PolicyError):
     code = "POLICY_NOT_FOUND"
 
 
+class PolicyPersistenceError(PolicyError):
+    """A durable policy-store operation (load/save/update) failed.
+
+    Raised by a PolicyRepository adapter so a persistence fault on the policy write path surfaces
+    to the caller (management API) rather than silently leaving the durable store inconsistent.
+    """
+
+    code = "POLICY_PERSISTENCE_ERROR"
+
+
 # ── Ledger errors (K·02) ────────────────────────────────────────────────────────
 
 

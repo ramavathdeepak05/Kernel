@@ -35,6 +35,13 @@ from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.engine import LifecycleEngine
 from core.lifecycle.profile import GovernanceProfile, resolve_preset
 from core.lifecycle.protocols import ActionRepository, EventBus, Ledger, PolicyEvaluator
+from core.policy import (
+    ImpactReport,
+    PolicyEngine,
+    PolicyEnvelope,
+    PolicyRepository,
+    PolicyStore,
+)
 from core.ports import HITLPort, IdentityPort
 from core.ports.consent import ConsentPort
 from core.types import (
@@ -96,6 +103,9 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "postgres_storage":        ("adapters.storage.postgres",         "PostgresStorageAdapter"),
     # PolicyEvaluator (dev/demo only)
     "always_allow":            ("adapters.policy.always_allow",      "AlwaysAllowPolicyAdapter"),
+    # PolicyRepository (durable policy store backends; CEL engine wired via _build_policy)
+    "memory_policy":           ("adapters.policy.memory",            "InMemoryPolicyRepository"),
+    "postgres_policy":         ("adapters.policy.postgres",          "PostgresPolicyRepository"),
     # Ledger
     "memory_ledger":           ("adapters.ledger.memory",            "InMemoryLedgerAdapter"),
     "openbao_ledger":          ("adapters.ledger.openbao",           "OpenBaoLedgerAdapter"),
@@ -132,6 +142,11 @@ class Kernel:
     gateway: AIGateway | None = None
     default_profile: GovernanceProfile = dataclasses.field(default_factory=GovernanceProfile.all)
     action_profiles: dict[str, GovernanceProfile] = dataclasses.field(default_factory=dict)
+    # Set only when the CEL policy engine is wired (policy = "cel_policy"). The store is the
+    # in-memory read cache; the repository is its durable backend. Both are exposed so the policy
+    # management API (and the SDK write-through primitives below) can author and persist policies.
+    policy_store: PolicyStore | None = None
+    policy_repository: PolicyRepository | None = None
 
     @property
     def has_identity(self) -> bool:
@@ -143,6 +158,56 @@ class Kernel:
     def has_inference(self) -> bool:
         """True if an AI Gateway (inference adapter) is wired — i.e. ``generate`` is available."""
         return self.gateway is not None
+
+    @property
+    def has_policy_store(self) -> bool:
+        """True if the CEL policy engine is wired — i.e. policies can be authored/persisted."""
+        return self.policy_store is not None
+
+    # ── Lifecycle hooks (startup / shutdown) ─────────────────────────────────────
+
+    async def startup(self) -> None:
+        """Initialise async resources. Call once before serving (the API does this via lifespan).
+
+        Hydrates the policy store from its durable repository so a restarted kernel enforces the
+        same policies. No-op when no durable policy store is wired.
+        """
+        if self.policy_store is not None:
+            await self.policy_store.hydrate()
+
+    async def shutdown(self) -> None:
+        """Release async resources (connection pools). Call once on shutdown."""
+        for collaborator in (self.policy_repository, self.gateway):
+            close = getattr(collaborator, "close", None)
+            if close is not None:
+                try:
+                    await close()
+                except Exception:  # noqa: BLE001 — shutdown is best-effort
+                    pass
+
+    # ── Policy authoring (write-through primitives the management API wraps) ──────
+
+    async def register_policy(self, envelope: PolicyEnvelope) -> PolicyEnvelope:
+        """Persist a policy envelope and register it in the live store. Requires the CEL engine."""
+        if self.policy_store is None:
+            raise RuntimeError(
+                "No policy store configured — set policy = \"cel_policy\" to author policies."
+            )
+        return await self.policy_store.register_persisted(envelope)
+
+    async def activate_policy(
+        self, policy_id: str, version: int, impact_report: ImpactReport
+    ) -> PolicyEnvelope:
+        """Run the F-10 activation gate and persist the ACTIVATED policy. Requires the CEL engine."""
+        if self.policy_store is None:
+            raise RuntimeError("No policy store configured.")
+        return await self.policy_store.activate_persisted(policy_id, version, impact_report)
+
+    async def deprecate_policy(self, policy_id: str, version: int) -> PolicyEnvelope:
+        """Deprecate a policy (stops matching in lookups) and persist it. Requires the CEL engine."""
+        if self.policy_store is None:
+            raise RuntimeError("No policy store configured.")
+        return await self.policy_store.deprecate_persisted(policy_id, version)
 
     def resolve_profile(
         self, action_type: str, override: GovernanceProfile | None = None
@@ -175,6 +240,8 @@ class Kernel:
 
         repo: ActionRepository = _InMemoryActionRepository()
         policy: PolicyEvaluator | None = None
+        policy_store: PolicyStore | None = None
+        policy_repository: PolicyRepository | None = None
         hitl: HITLPort | None = None
         ledger: Ledger | None = None
         events: EventBus | None = None
@@ -184,7 +251,12 @@ class Kernel:
         if "storage" in adapter_cfg:
             repo = _load_adapter(adapter_cfg["storage"], **cfg.get("storage", {}))
         if "policy" in adapter_cfg:
-            policy = _load_adapter(adapter_cfg["policy"])
+            if adapter_cfg["policy"] == "cel_policy":
+                # The real K·01 CEL engine needs composition (PolicyEngine over a PolicyStore over an
+                # optional durable repository), so it is built here rather than via the flat registry.
+                policy, policy_store, policy_repository = cls._build_policy(adapter_cfg, cfg)
+            else:
+                policy = _load_adapter(adapter_cfg["policy"])
         if "hitl" in adapter_cfg:
             hitl = _load_adapter(adapter_cfg["hitl"], **cfg.get("hitl", {}))
         if "ledger" in adapter_cfg:
@@ -228,7 +300,27 @@ class Kernel:
             gateway=gateway,
             default_profile=default_profile,
             action_profiles=action_profiles,
+            policy_store=policy_store,
+            policy_repository=policy_repository,
         )
+
+    @staticmethod
+    def _build_policy(
+        adapter_cfg: dict[str, Any], cfg: dict[str, Any]
+    ) -> tuple[PolicyEngine, PolicyStore, PolicyRepository | None]:
+        """Assemble the K·01 CEL policy engine over a (optionally durable) PolicyStore.
+
+        ``[adapters].policy_store`` selects the durable backend (``"postgres_policy"`` /
+        ``"memory_policy"``); omit it for an in-process store with no persistence. The store is
+        hydrated from the repository at ``kernel.startup()``, not here (hydration is async).
+        """
+        repository: PolicyRepository | None = None
+        if "policy_store" in adapter_cfg:
+            repository = _load_adapter(
+                adapter_cfg["policy_store"], **cfg.get("policy_store", {})
+            )
+        store = PolicyStore(repository=repository)
+        return PolicyEngine(store), store, repository
 
     @staticmethod
     def _build_gateway(
@@ -274,6 +366,8 @@ class Kernel:
         gateway: AIGateway | None = None,
         default_profile: GovernanceProfile | None = None,
         action_profiles: dict[str, GovernanceProfile] | None = None,
+        policy_store: PolicyStore | None = None,
+        policy_repository: PolicyRepository | None = None,
         max_poll_attempts: int = 1,
     ) -> "Kernel":
         """Build a Kernel directly from collaborator instances (for tests and SDK demos)."""
@@ -295,6 +389,8 @@ class Kernel:
             gateway=gateway,
             default_profile=profile,
             action_profiles=action_profiles or {},
+            policy_store=policy_store,
+            policy_repository=policy_repository,
         )
 
     # ── Agent binding ──────────────────────────────────────────────────────────

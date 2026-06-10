@@ -19,6 +19,8 @@ retrieve it via ``request.app.state.kernel`` without global state.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -49,6 +51,15 @@ def create_app(
     Returns:
         A configured ``FastAPI`` app ready to serve.
     """
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # Initialise async resources (e.g. hydrate the durable policy store) before serving.
+        await kernel.startup()
+        try:
+            yield
+        finally:
+            await kernel.shutdown()
+
     app = FastAPI(
         title="QUAICU Governance Kernel",
         version="0.1.0",
@@ -58,6 +69,7 @@ def create_app(
         ),
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     # Attach kernel to app state (no globals)

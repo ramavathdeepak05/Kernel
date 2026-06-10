@@ -23,6 +23,23 @@ ledger   = "memory_ledger"   # replace with "postgres_ledger" in prod
 events   = "memory_events"   # replace with "kafka_events" in prod
 identity = "jwt"             # optional — omit to skip JWT verification
 
+# ── CEL policy engine + durable policy store (production) ────────────────────
+# Set policy = "cel_policy" above to use the real K·01 CEL evaluator instead of always_allow.
+# Choose a durable backend with policy_store; omit it for an in-process (non-persistent) store.
+#   "postgres_policy" — durable (run migration 002 first, same alembic.ini as storage)
+#   "memory_policy"   — in-process default (lost on restart)
+#
+# There is NO policy pack / file seeding: policies enter ONLY via the durable write path
+# (kernel.register_policy / the management API). A freshly-configured kernel with an empty store
+# fail-closed DENYs every governed action until policies are written and ACTIVATED. This is the
+# intended secure default. The store is hydrated from the durable backend on startup.
+#
+# [adapters]
+# policy       = "cel_policy"
+# policy_store = "postgres_policy"
+[policy_store]
+dsn = "postgresql://quaicu:change-me@localhost:5432/quaicu"
+
 # ── OpenBao ledger (production) ───────────────────────────────────────────────
 # Replace "memory_ledger" with "openbao_ledger" for durable Ed25519 signing.
 # The key must exist in OpenBao's Transit engine before starting the kernel:

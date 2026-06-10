@@ -22,6 +22,7 @@ import celpy
 
 from core.errors import PolicyActivationError, PolicyCompileError
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
+from core.policy.repository import PolicyRepository
 
 log = logging.getLogger("quaicu.policy")
 
@@ -51,12 +52,17 @@ class PolicyStore:
     interface; this class becomes the in-process cache / write-through layer at that point.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, repository: PolicyRepository | None = None) -> None:
         # Primary index: (policy_id, version) → PolicyEnvelope
         self._policies: dict[tuple[str, int], PolicyEnvelope] = {}
         # Impact-report index: (policy_id, version) → ImpactReport
         self._impact_reports: dict[tuple[str, int], ImpactReport] = {}
         self._lock = threading.Lock()
+        # Optional durable backend. When set, the write-through (`*_persisted`) methods persist to it
+        # and `hydrate()` repopulates the in-memory cache from it on startup. The hot-path `lookup`
+        # never touches it — this store remains the fast in-memory read cache (holding the compiled
+        # CEL programs, which are not serialisable and are recompiled on hydrate).
+        self._repository = repository
 
     # ── Authoring ───────────────────────────────────────────────────────────────
 
@@ -154,6 +160,74 @@ class PolicyStore:
 
         log.info("policy activated: %s@v%d (reviewed_by=%s)", policy_id, version, impact_report.reviewed_by)
         return activated
+
+    def deprecate(self, policy_id: str, version: int) -> PolicyEnvelope:
+        """Transition a policy to DEPRECATED (cache-only). It will no longer match in `lookup`."""
+        with self._lock:
+            key = (policy_id, version)
+            envelope = self._policies.get(key)
+            if envelope is None:
+                raise PolicyActivationError(
+                    f"Policy {policy_id}@v{version} not found in the store.",
+                    detail={"policy_id": policy_id, "version": version},
+                )
+            deprecated = object.__new__(PolicyEnvelope)
+            for attr in (
+                "id", "version", "governs", "scope", "condition", "decision",
+                "approvers", "regulatory_refs", "compiled_condition",
+            ):
+                object.__setattr__(deprecated, attr, getattr(envelope, attr))
+            object.__setattr__(deprecated, "lifecycle", PolicyLifecycle.DEPRECATED)
+            self._policies[key] = deprecated
+        log.info("policy deprecated: %s@v%d", policy_id, version)
+        return deprecated
+
+    # ── Durable write-through (async; not on the hot path) ───────────────────────
+
+    async def hydrate(self) -> None:
+        """Repopulate the in-memory cache from the durable repository, recompiling CEL.
+
+        Called once at startup (`kernel.startup()`). No-op when no repository is wired. Every
+        persisted envelope is re-`register`ed (which recompiles its CEL `condition`), and every
+        persisted impact report is restored, so a restarted kernel enforces the same policies.
+        """
+        if self._repository is None:
+            return
+        envelopes = await self._repository.load_all()
+        for envelope in envelopes:
+            self.register(envelope)  # recompiles CEL; preserves the persisted lifecycle
+        for report in await self._repository.load_impact_reports():
+            self.store_impact_report(report)
+        log.info(
+            "policy store hydrated: %d envelope(s) from durable repository", len(envelopes)
+        )
+
+    async def register_persisted(self, envelope: PolicyEnvelope) -> PolicyEnvelope:
+        """Persist an envelope to the durable store, then register it in the cache.
+
+        Persist-first so the in-memory cache never gets ahead of the durable record on a write
+        failure. Returns the cached (compiled) envelope.
+        """
+        if self._repository is not None:
+            await self._repository.save_envelope(envelope)
+        return self.register(envelope)
+
+    async def activate_persisted(
+        self, policy_id: str, version: int, impact_report: ImpactReport
+    ) -> PolicyEnvelope:
+        """Run the F-10 activation gate in-cache, then persist the report + ACTIVATED lifecycle."""
+        activated = self.activate(policy_id, version, impact_report)  # validates F-10 + updates cache
+        if self._repository is not None:
+            await self._repository.save_impact_report(impact_report)
+            await self._repository.set_lifecycle(policy_id, version, PolicyLifecycle.ACTIVATED)
+        return activated
+
+    async def deprecate_persisted(self, policy_id: str, version: int) -> PolicyEnvelope:
+        """Deprecate a policy in-cache, then persist the DEPRECATED lifecycle."""
+        deprecated = self.deprecate(policy_id, version)
+        if self._repository is not None:
+            await self._repository.set_lifecycle(policy_id, version, PolicyLifecycle.DEPRECATED)
+        return deprecated
 
     # ── Query ───────────────────────────────────────────────────────────────────
 
