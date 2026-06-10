@@ -84,7 +84,9 @@ async def test_approve_then_poll_returns_approved() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+    await port.approve(
+        handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+    )
     decision = await port.poll(handle)
     assert decision is ApprovalDecision.APPROVED
 
@@ -96,7 +98,9 @@ async def test_reject_then_poll_returns_rejected() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    await port.reject(handle.id, approver_actor_id=ActorId("admin"))
+    await port.reject(
+        handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+    )
     decision = await port.poll(handle)
     assert decision is ApprovalDecision.REJECTED
 
@@ -131,9 +135,13 @@ async def test_double_approve_raises() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+    await port.approve(
+        handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+    )
     with pytest.raises(HITLPortError):
-        await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+        await port.approve(
+            handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+        )
 
 
 async def test_approve_after_reject_raises() -> None:
@@ -143,9 +151,13 @@ async def test_approve_after_reject_raises() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    await port.reject(handle.id, approver_actor_id=ActorId("admin"))
+    await port.reject(
+        handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+    )
     with pytest.raises(HITLPortError):
-        await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+        await port.approve(
+            handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+        )
 
 
 async def test_approve_nonexistent_handle_raises() -> None:
@@ -184,16 +196,47 @@ async def test_authorized_user_ref_passes() -> None:
     assert decision is ApprovalDecision.APPROVED
 
 
-async def test_role_ref_accepted_by_inprocess_port() -> None:
+async def test_role_ref_requires_matching_role() -> None:
+    """An actor holding the required role may approve a role-gated request."""
     port = InProcessHITLPort()
     handle = await port.request_approval(
         action=_action(),
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    await port.approve(handle.id, approver_actor_id=ActorId("anyone"))
+    await port.approve(
+        handle.id, approver_actor_id=ActorId("carol"), approver_roles=("role:risk_head",)
+    )
     decision = await port.poll(handle)
     assert decision is ApprovalDecision.APPROVED
+
+
+async def test_role_gate_rejects_actor_without_role() -> None:
+    """Fail-closed: an actor lacking the required role cannot approve a role-gated request."""
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    with pytest.raises(HITLPortError):
+        await port.approve(
+            handle.id, approver_actor_id=ActorId("nobody"), approver_roles=("role:teller",)
+        )
+
+
+async def test_proposer_cannot_self_approve() -> None:
+    """Separation of duties: the actor who proposed the action may never approve it."""
+    port = InProcessHITLPort()
+    handle = await port.request_approval(
+        action=_action(actor_uid="alice"),
+        approvers=_approvers("role:risk_head"),
+        tenant=_tenant(),
+    )
+    with pytest.raises(HITLPortError):
+        await port.approve(
+            handle.id, approver_actor_id=ActorId("alice"), approver_roles=("role:risk_head",)
+        )
 
 
 async def test_get_record_returns_full_record() -> None:
@@ -203,7 +246,9 @@ async def test_get_record_returns_full_record() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    await port.approve(handle.id, approver_actor_id=ActorId("admin"))
+    await port.approve(
+        handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+    )
     record = port.get_record(handle.id)
     assert record is not None
     assert record.decided_by == ActorId("admin")
@@ -223,7 +268,9 @@ async def test_tenant_isolation() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant("tenant-b"),
     )
-    await port.approve(handle_a.id, approver_actor_id=ActorId("admin"))
+    await port.approve(
+        handle_a.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
+    )
     assert await port.poll(handle_a) is ApprovalDecision.APPROVED
     assert await port.poll(handle_b) is ApprovalDecision.PENDING
 

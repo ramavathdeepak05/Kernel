@@ -166,6 +166,49 @@ async def test_identity_failure_denies() -> None:
     assert body.count == 0
 
 
+async def test_identity_failure_does_not_poison_idempotency_slot() -> None:
+    """An unauthenticated request must not occupy the (tenant, idempotency_key) slot (#7)."""
+    from core.types import RequestContext
+
+    repo = FakeActionRepository()
+    engine, _repo, _ledger, _events = _engine(
+        policy=FakePolicy(decision=Decision.ALLOW),
+        repo=repo,
+        identity=FakeIdentity(raise_exc=True),
+    )
+    body = Counter()
+    result = await engine.run(make_action(), body, context=RequestContext())
+    assert result.state is ActionState.DENIED
+    assert body.count == 0
+    assert repo.by_key == {}  # nothing inserted — a legitimate retry can still proceed
+
+
+async def test_storage_failure_on_insert_halts() -> None:
+    """A storage failure during the idempotency insert HALTS and never raises out of run() (#6)."""
+    engine, _repo, ledger, _events = _engine(
+        policy=FakePolicy(decision=Decision.ALLOW),
+        repo=FakeActionRepository(raise_on_insert=True),
+    )
+    body = Counter()
+    result = await engine.run(make_action(), body)
+    assert result.state is ActionState.HALTED
+    assert body.count == 0
+    assert len(ledger.sealed) == 0
+
+
+async def test_storage_failure_on_update_halts() -> None:
+    """A storage failure while persisting a transition HALTS, never raises, never executes (#6)."""
+    engine, _repo, ledger, _events = _engine(
+        policy=FakePolicy(decision=Decision.ALLOW),
+        repo=FakeActionRepository(raise_on_update=True),
+    )
+    body = Counter()
+    result = await engine.run(make_action(), body)
+    assert result.state is ActionState.HALTED
+    assert body.count == 0  # halted at the EVALUATING persist, before execute
+    assert len(ledger.sealed) == 0
+
+
 async def test_idempotency_duplicate_returns_existing_without_rerun() -> None:
     repo = FakeActionRepository()
     engine, _repo, ledger, _events = _engine(policy=FakePolicy(decision=Decision.ALLOW), repo=repo)

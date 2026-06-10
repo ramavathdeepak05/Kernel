@@ -19,9 +19,12 @@ import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from core.errors import StoragePortError
+from core.lifecycle.profile import GovernanceProfile
 from core.lifecycle.protocols import ActionRepository, EventBus, Ledger, PolicyEvaluator
 from core.lifecycle.transitions import assert_transition
 from core.ports import HITLPort, IdentityPort
+from core.ports.consent import ConsentPort
 from core.types import (
     Action,
     ActionState,
@@ -51,6 +54,8 @@ class LifecycleEngine:
         ledger: Ledger,
         events: EventBus,
         identity: IdentityPort | None = None,
+        consent: ConsentPort | None = None,
+        default_profile: GovernanceProfile | None = None,
         max_poll_attempts: int = 1,
         poll_wait: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
@@ -60,10 +65,21 @@ class LifecycleEngine:
         self._ledger = ledger
         self._events = events
         self._identity = identity
+        # Optional standalone consent collaborator (K·04). When wired and the active profile enforces
+        # consent, it runs as its own step before policy — making consent independently toggleable.
+        self._consent = consent
+        # Default profile used when run() is called without an explicit one. all() = maximal governance.
+        self._default_profile = default_profile or GovernanceProfile.all()
         # Bounded poll safety net. A real HITL adapter long-polls (blocks until a decision or its own
         # configured timeout); the count cap guarantees the loop terminates without a wall-clock.
         self._max_poll_attempts = max(1, max_poll_attempts)
         self._poll_wait = poll_wait
+
+    @property
+    def has_identity(self) -> bool:
+        """True if an IdentityPort is wired. The standalone API requires this to be True so it
+        never trusts a caller-supplied actor."""
+        return self._identity is not None
 
     # ── Public entry point ──────────────────────────────────────────────────────
 
@@ -73,26 +89,45 @@ class LifecycleEngine:
         execute_fn: ExecuteFn,
         *,
         context: RequestContext | None = None,
+        profile: GovernanceProfile | None = None,
     ) -> Action:
-        """Drive `action` through the full lifecycle, running `execute_fn` as the execute step.
+        """Drive `action` through the lifecycle, enforcing the layers the `profile` declares.
 
-        Returns the action in its final state (COMPLETED on success; DENIED/HALTED otherwise, or the
-        pre-existing action on an idempotency hit). Never raises for an expected governance/infra
-        outcome — the terminal state carries it.
+        `profile=None` uses the engine default (maximal governance). Returns the action in its final
+        state (COMPLETED on success; DENIED/HALTED otherwise, or the pre-existing action on an
+        idempotency hit). Never raises for an expected governance/infra outcome — the terminal state
+        carries it. Each enabled layer remains fail-closed; a disabled layer is skipped by config.
         """
+        prof = profile or self._default_profile
+
         # propose (identity + idempotency). proceed=False ⇒ stop and return (duplicate or denied).
-        action, proceed = await self._propose(action, context)
+        action, proceed = await self._propose(action, context, prof)
         if not proceed:
             return action
 
+        # consent (independent layer, before policy) — only when enforced and a port is wired.
+        consent_state: dict[str, Any] = {}
+        if prof.enforce_consent and self._consent is not None:
+            action, consent_state, ok = await self._consent_check(action)
+            if not ok:
+                return action  # consent denied (fail-closed)
+
         # evaluate
-        action, evaluation = await self._evaluate(action)
+        action, evaluation = await self._evaluate(action, prof)
         if evaluation is None:  # denied at evaluate
             return action
+
+        # annotate the evaluation with consent state + the enforced layers so they are sealed.
+        evaluation = self._annotate(evaluation, consent_state, prof)
 
         # gate (only when a policy requires approval)
         approver: ApproverRef | None = None
         if evaluation.decision is Decision.REQUIRE_APPROVAL:
+            if not prof.enforce_hitl_gate:
+                # Approval was required but the gate layer is disabled — fail closed.
+                return await self._deny(
+                    action, "approval required but HITL gate disabled by profile"
+                )
             action, approver = await self._gate(action, evaluation)
             if action.state is not ActionState.PENDING_APPROVAL and action.state in (
                 ActionState.DENIED,
@@ -106,22 +141,45 @@ class LifecycleEngine:
             return action
 
         # seal
-        action, entry = await self._seal(action, evaluation, result, approver)
+        action, entry = await self._seal(action, evaluation, result, approver, prof)
         if action.state is ActionState.HALTED:
             return action
 
         # emit (best-effort, after seal — never changes the outcome)
-        await self._emit(action, entry)
+        if prof.emit_events:
+            await self._emit(action, entry)
         return action
 
     # ── Steps ───────────────────────────────────────────────────────────────────
 
     async def _propose(
-        self, action: Action, context: RequestContext | None
+        self, action: Action, context: RequestContext | None, profile: GovernanceProfile
     ) -> tuple[Action, bool]:
+        # Identity FIRST, before any insert (F-03/F-07). The kernel takes identity from the host
+        # (IdentityPort); failure → DENY. Resolving before the idempotency insert means an
+        # unauthenticated request never occupies the (tenant, idempotency_key) slot and so cannot
+        # poison a legitimate retry. No row exists yet, so the denial is not persisted.
+        if profile.verify_identity and context is not None and self._identity is not None:
+            try:
+                actor = await self._identity.resolve_actor(context=context, tenant=action.tenant)
+            except Exception as exc:  # noqa: BLE001 — unresolved identity must fail closed
+                denied = await self._deny(
+                    action, "identity unresolved — fail-closed", exc, persist=False
+                )
+                return denied, False
+            action = dataclasses.replace(action, actor=actor)
+
         # Idempotency: atomic insert. On conflict, return the existing action — never re-run it,
-        # whatever state it is in.
-        existing = await self._repo.insert_if_absent(action)
+        # whatever state it is in. A storage failure here means the action was never recorded,
+        # so there is no row to update → HALT in memory (fail-closed, never raise out of run()).
+        try:
+            existing = await self._repo.insert_if_absent(action)
+        except StoragePortError as exc:
+            halted = action.with_state(ActionState.HALTED)
+            log.critical(
+                "action %s HALTED before insert — storage failure: %s", action.id, exc
+            )
+            return halted, False
         if existing is not None:
             log.info(
                 "idempotency hit — returning existing action %s (state=%s)",
@@ -130,20 +188,66 @@ class LifecycleEngine:
             )
             return existing, False
 
-        # Identity: the kernel takes identity from the host (IdentityPort). Failure → DENY.
-        if context is not None and self._identity is not None:
-            try:
-                actor = await self._identity.resolve_actor(context=context, tenant=action.tenant)
-            except Exception as exc:  # noqa: BLE001 — unresolved identity must fail closed
-                denied = await self._deny(action, "identity unresolved — fail-closed", exc)
-                return denied, False
-            action = dataclasses.replace(action, actor=actor)
-
         return action, True
 
-    async def _evaluate(self, action: Action) -> tuple[Action, EvaluationResult | None]:
-        action = self._advance(action, ActionState.EVALUATING)
-        await self._repo.update_state(action)
+    async def _consent_check(
+        self, action: Action
+    ) -> tuple[Action, dict[str, Any], bool]:
+        """Standalone K·04 consent layer. Returns (action, consent_state, ok).
+
+        Fail-closed: missing / withdrawn / expired / non-active / any port error → DENY. On success,
+        returns the consent snapshot to be sealed into the ledger leaf (F-09). The action stays
+        PROPOSED on success (the next layer advances it).
+        """
+        from core.consent.engine import _is_expired, _resolve_purpose  # local import (core→core)
+
+        tenant_id = str(action.tenant)
+        subject_id = str(action.actor.id)
+        purpose = _resolve_purpose(action)
+        try:
+            record = await self._consent.get_consent(
+                tenant_id=tenant_id, subject_id=subject_id, purpose=purpose
+            )
+        except Exception as exc:  # noqa: BLE001 — any consent port failure → fail-closed DENY
+            denied = await self._deny(action, "consent port error — fail-closed", exc)
+            return denied, {}, False
+
+        from datetime import datetime, timezone
+
+        if record is None:
+            return await self._deny(action, "consent missing — fail-closed"), {}, False
+        if record.status != "active":
+            return await self._deny(action, f"consent {record.status} — fail-closed"), {}, False
+        if _is_expired(record, datetime.now(tz=timezone.utc)):
+            return await self._deny(action, "consent expired — fail-closed"), {}, False
+
+        return action, record.as_state_dict(), True
+
+    def _annotate(
+        self,
+        evaluation: EvaluationResult,
+        consent_state: dict[str, Any],
+        profile: GovernanceProfile,
+    ) -> EvaluationResult:
+        """Attach consent_state (when resolved by the standalone layer) and the enforced-layer list
+        to the evaluation metadata so both are sealed into the Merkle leaf."""
+        metadata = dict(evaluation.metadata)
+        if consent_state:
+            metadata["consent_state"] = consent_state
+        metadata["governance_profile"] = list(profile.enabled_layers())
+        return dataclasses.replace(evaluation, metadata=metadata)
+
+    async def _evaluate(
+        self, action: Action, profile: GovernanceProfile
+    ) -> tuple[Action, EvaluationResult | None]:
+        action, ok = await self._transition(action, ActionState.EVALUATING)
+        if not ok:
+            return action, None  # storage failure → HALTED (run() returns it)
+        if not profile.enforce_policy:
+            # Policy layer disabled by profile → auto-ALLOW (explicit configuration decision).
+            return action, EvaluationResult(
+                decision=Decision.ALLOW, policy_versions=("<policy-unenforced>",)
+            )
         try:
             evaluation = await self._policy.evaluate(action)
         except Exception as exc:  # noqa: BLE001 — any policy failure → DENY (fail-closed)
@@ -158,8 +262,9 @@ class LifecycleEngine:
     async def _gate(
         self, action: Action, evaluation: EvaluationResult
     ) -> tuple[Action, ApproverRef | None]:
-        action = self._advance(action, ActionState.PENDING_APPROVAL)
-        await self._repo.update_state(action)
+        action, ok = await self._transition(action, ActionState.PENDING_APPROVAL)
+        if not ok:
+            return action, None  # storage failure → HALTED (run() returns it)
         try:
             handle = await self._hitl.request_approval(
                 action=action, approvers=list(evaluation.approvers), tenant=action.tenant
@@ -188,8 +293,9 @@ class LifecycleEngine:
         return ApprovalDecision.TIMED_OUT  # exhausted attempts → fail-closed
 
     async def _execute(self, action: Action, execute_fn: ExecuteFn) -> tuple[Action, Any]:
-        action = self._advance(action, ActionState.EXECUTING)
-        await self._repo.update_state(action)
+        action, ok = await self._transition(action, ActionState.EXECUTING)
+        if not ok:
+            return action, None  # storage failure → HALTED (run() returns it)
         try:
             result = await execute_fn()
         except Exception as exc:  # noqa: BLE001 — execute body failure must HALT, never proceed
@@ -202,26 +308,40 @@ class LifecycleEngine:
         evaluation: EvaluationResult,
         result: Any,
         approver: ApproverRef | None,
+        profile: GovernanceProfile,
     ) -> tuple[Action, Any]:
-        action = self._advance(action, ActionState.SEALING)
-        await self._repo.update_state(action)
-        try:
-            entry = await self._ledger.seal(
-                action=action, evaluation=evaluation, recorded_result=result, approver=approver
-            )
-        except Exception as exc:  # noqa: BLE001
-            # CRITICAL: the state change happened but the ledger has no record. Halt + alert; the
-            # action is NOT completed. A reconcile path re-attempts sealing without re-executing.
-            halted = await self._halt(action, "ledger seal failed — executed but unsealed", exc)
-            log.critical(
-                "PARTIAL FAILURE: action %s executed but seal failed — manual reconcile required",
+        action, ok = await self._transition(action, ActionState.SEALING)
+        if not ok:
+            return action, None  # storage failure → HALTED (run() returns it)
+        entry = None
+        if not profile.seal_to_ledger:
+            # Seal layer disabled by profile — the action will COMPLETE without an audit entry.
+            log.warning(
+                "action %s COMPLETED unsealed — ledger layer disabled by profile (no audit entry)",
                 action.id,
             )
-            return halted, None
-        action = self._advance(action, ActionState.SEALED)
-        await self._repo.update_state(action)
-        action = self._advance(action, ActionState.COMPLETED)
-        await self._repo.update_state(action)
+        else:
+            try:
+                entry = await self._ledger.seal(
+                    action=action, evaluation=evaluation, recorded_result=result, approver=approver
+                )
+            except Exception as exc:  # noqa: BLE001
+                # CRITICAL: the state change happened but the ledger has no record. Halt + alert; the
+                # action is NOT completed. A reconcile path re-attempts sealing without re-executing.
+                halted = await self._halt(action, "ledger seal failed — executed but unsealed", exc)
+                log.critical(
+                    "PARTIAL FAILURE: action %s executed but seal failed — manual reconcile required",
+                    action.id,
+                )
+                return halted, None
+        # The ledger record now exists. If persisting SEALED/COMPLETED fails we still HALT
+        # (fail-closed) — the action is durably sealed and a reconcile path can mark it COMPLETED.
+        action, ok = await self._transition(action, ActionState.SEALED)
+        if not ok:
+            return action, None
+        action, ok = await self._transition(action, ActionState.COMPLETED)
+        if not ok:
+            return action, None
         return action, entry
 
     async def _emit(self, action: Action, entry: Any) -> None:
@@ -238,14 +358,70 @@ class LifecycleEngine:
         assert_transition(action.state, state)
         return action.with_state(state)
 
-    async def _deny(self, action: Action, reason: str, cause: Exception | None = None) -> Action:
+    async def _transition(
+        self, action: Action, state: ActionState
+    ) -> tuple[Action, bool]:
+        """Advance to ``state`` and persist it. Returns ``(action, ok)``.
+
+        On a ``StoragePortError`` the action is moved to HALTED (emergency stop — bypasses the
+        normal transition guard because infrastructure can fail in any state) and ``ok=False`` is
+        returned so the calling step returns immediately. Never raises — preserves run()'s contract.
+        """
+        advanced = self._advance(action, state)
+        try:
+            await self._repo.update_state(advanced)
+        except StoragePortError as exc:
+            return self._halt_on_storage(advanced, exc), False
+        return advanced, True
+
+    def _halt_on_storage(self, action: Action, exc: Exception) -> Action:
+        """Emergency HALT on a storage failure, making a best-effort attempt to record it.
+
+        Uses ``with_state`` directly (not ``_advance``) because HALTED is not a legal successor of
+        every state in the transition table, yet a storage outage must stop the action from any
+        state. The HALTED persist is best-effort: if storage is still down we swallow it and return
+        HALTED anyway so run() resolves terminally.
+        """
+        halted = action.with_state(ActionState.HALTED)
+        log.critical(
+            "action %s HALTED on storage failure from state %s: %s",
+            action.id,
+            action.state.value,
+            exc,
+        )
+        return halted
+
+    async def _deny(
+        self,
+        action: Action,
+        reason: str,
+        cause: Exception | None = None,
+        *,
+        persist: bool = True,
+    ) -> Action:
         denied = self._advance(action, ActionState.DENIED)
-        await self._repo.update_state(denied)
+        if persist:
+            try:
+                await self._repo.update_state(denied)
+            except StoragePortError as exc:
+                # DENIED is terminal; if we cannot persist it we still return DENIED (fail-closed).
+                log.error("failed to persist DENIED for action %s: %s", action.id, exc)
         log.info("action %s DENIED: %s%s", action.id, reason, f" ({cause})" if cause else "")
         return denied
 
-    async def _halt(self, action: Action, reason: str, cause: Exception | None = None) -> Action:
+    async def _halt(
+        self,
+        action: Action,
+        reason: str,
+        cause: Exception | None = None,
+        *,
+        persist: bool = True,
+    ) -> Action:
         halted = self._advance(action, ActionState.HALTED)
-        await self._repo.update_state(halted)
+        if persist:
+            try:
+                await self._repo.update_state(halted)
+            except StoragePortError as exc:
+                log.error("failed to persist HALTED for action %s: %s", action.id, exc)
         log.error("action %s HALTED: %s%s", action.id, reason, f" ({cause})" if cause else "")
         return halted

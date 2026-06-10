@@ -6,8 +6,10 @@ GET /v1/ledger/health          →  200 { "ok": true }
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
+from core.types import TenantId
+from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import LedgerEntryResponse, LedgerTrailResponse
 
 router = APIRouter(prefix="/v1/ledger", tags=["ledger"])
@@ -19,13 +21,27 @@ router = APIRouter(prefix="/v1/ledger", tags=["ledger"])
     summary="List sealed ledger entries for a tenant",
 )
 async def ledger_trail(tenant: str, request: Request) -> LedgerTrailResponse:
-    """Return all sealed ledger entries for the requested tenant.
+    """Return the sealed ledger entries for the requested tenant.
 
-    In this implementation the ledger is the in-memory FakeLedger (or a real
-    TrustLedger). The route projects from domain types to API schemas.
+    Requires a bearer token (401 if absent). The audit trail is tenant-private: the path tenant
+    must match this kernel instance's tenant (F-07) — any mismatch is 403, never a silent empty
+    result. Entries are read via the ledger's tenant-scoped ``get_entries`` and projected to the
+    API schema.
     """
-    ledger = request.app.state.kernel.engine._ledger  # type: ignore[attr-defined]
-    entries = getattr(ledger, "sealed", [])
+    _bearer_token(request)  # require authentication
+
+    kernel = request.app.state.kernel
+    if tenant != str(kernel.tenant):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Cannot read another tenant's audit trail",
+                "code": "TENANT_ISOLATION",
+            },
+        )
+
+    ledger = kernel.engine._ledger  # type: ignore[attr-defined]
+    entries = ledger.get_entries(TenantId(tenant))
 
     projected = [
         LedgerEntryResponse(
@@ -39,7 +55,6 @@ async def ledger_trail(tenant: str, request: Request) -> LedgerTrailResponse:
             approver=str(e.approver) if e.approver else None,
         )
         for e in entries
-        if str(e.tenant) == tenant
     ]
 
     return LedgerTrailResponse(tenant=tenant, entries=projected, count=len(projected))

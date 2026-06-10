@@ -227,8 +227,11 @@ class ConsentEngine:
         if record is None:
             return None, "missing"
 
-        if record.status == "withdrawn":
-            return None, "withdrawn"
+        # Fail-closed allowlist (F-03): grant ONLY for an explicitly active status. Any other
+        # value — "withdrawn", "expired", "pending", a typo, or an unknown state — denies.
+        if record.status != "active":
+            reason = record.status if record.status in ("withdrawn", "expired") else "invalid"
+            return None, reason
 
         now = datetime.now(tz=timezone.utc)
         if _is_expired(record, now):

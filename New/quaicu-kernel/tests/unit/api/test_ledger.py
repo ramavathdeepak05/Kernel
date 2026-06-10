@@ -8,9 +8,16 @@ from httpx import ASGITransport, AsyncClient
 from core.types import Decision, TenantId
 from delivery.api.app import create_app
 from delivery.sdk.kernel import Kernel
-from tests.unit.lifecycle.fakes import FakeEvents, FakeHITL, FakeLedger, FakePolicy
+from tests.unit.lifecycle.fakes import (
+    FakeEvents,
+    FakeHITL,
+    FakeIdentity,
+    FakeLedger,
+    FakePolicy,
+)
 
 TENANT = TenantId("ciro-bank")
+AUTH = {"Authorization": "Bearer test-token"}
 
 
 def _kernel(decision: Decision = Decision.ALLOW) -> Kernel:
@@ -20,6 +27,7 @@ def _kernel(decision: Decision = Decision.ALLOW) -> Kernel:
         hitl=FakeHITL(),
         ledger=FakeLedger(),
         events=FakeEvents(),
+        identity=FakeIdentity(),
     )
 
 
@@ -32,18 +40,23 @@ def _propose_body(idempotency_key: str = "ik-ledger-1") -> dict:
         "type": "ciro.ifrs9.stage_transition",
         "payload": {"loan_id": "4471", "from_stage": 1, "to_stage": 2},
         "idempotency_key": idempotency_key,
-        "actor_id": "alice",
-        "actor_roles": ["role:risk_analyst"],
     }
 
 
 # ── GET /v1/ledger/{tenant}/trail ────────────────────────────────────────────────
 
 
-async def test_empty_trail_returns_zero_entries():
+async def test_trail_without_token_returns_401():
     app = _app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get(f"/v1/ledger/{TENANT}/trail")
+    assert resp.status_code == 401
+
+
+async def test_empty_trail_returns_zero_entries():
+    app = _app()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(f"/v1/ledger/{TENANT}/trail", headers=AUTH)
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 0
@@ -53,8 +66,8 @@ async def test_empty_trail_returns_zero_entries():
 async def test_trail_has_entry_after_allow():
     app = _app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        await client.post("/v1/actions/propose", json=_propose_body("ik-trail-1"))
-        resp = await client.get(f"/v1/ledger/{TENANT}/trail")
+        await client.post("/v1/actions/propose", json=_propose_body("ik-trail-1"), headers=AUTH)
+        resp = await client.get(f"/v1/ledger/{TENANT}/trail", headers=AUTH)
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 1
@@ -64,8 +77,8 @@ async def test_trail_has_entry_after_allow():
 async def test_trail_entry_has_required_fields():
     app = _app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        await client.post("/v1/actions/propose", json=_propose_body("ik-trail-fields"))
-        resp = await client.get(f"/v1/ledger/{TENANT}/trail")
+        await client.post("/v1/actions/propose", json=_propose_body("ik-trail-fields"), headers=AUTH)
+        resp = await client.get(f"/v1/ledger/{TENANT}/trail", headers=AUTH)
     entry = resp.json()["entries"][0]
     assert "ledger_seq" in entry
     assert "action_id" in entry
@@ -75,31 +88,30 @@ async def test_trail_entry_has_required_fields():
     assert "sealed_at" in entry
 
 
-async def test_trail_tenant_filter():
-    """Trail returns only entries for the requested tenant."""
+async def test_trail_cross_tenant_path_returns_403():
+    """A tenant audit trail is private — requesting another tenant's trail is 403, not empty."""
     app = _app()
     other_tenant = "other-bank"
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        await client.post("/v1/actions/propose", json=_propose_body("ik-filter-1"))
-        resp = await client.get(f"/v1/ledger/{other_tenant}/trail")
-    data = resp.json()
-    assert data["count"] == 0
+        await client.post("/v1/actions/propose", json=_propose_body("ik-filter-1"), headers=AUTH)
+        resp = await client.get(f"/v1/ledger/{other_tenant}/trail", headers=AUTH)
+    assert resp.status_code == 403
 
 
 async def test_trail_count_grows_with_each_action():
     app = _app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         for i in range(3):
-            await client.post("/v1/actions/propose", json=_propose_body(f"ik-count-{i}"))
-        resp = await client.get(f"/v1/ledger/{TENANT}/trail")
+            await client.post("/v1/actions/propose", json=_propose_body(f"ik-count-{i}"), headers=AUTH)
+        resp = await client.get(f"/v1/ledger/{TENANT}/trail", headers=AUTH)
     assert resp.json()["count"] == 3
 
 
 async def test_trail_decision_field_is_allow():
     app = _app(Decision.ALLOW)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        await client.post("/v1/actions/propose", json=_propose_body("ik-decision"))
-        resp = await client.get(f"/v1/ledger/{TENANT}/trail")
+        await client.post("/v1/actions/propose", json=_propose_body("ik-decision"), headers=AUTH)
+        resp = await client.get(f"/v1/ledger/{TENANT}/trail", headers=AUTH)
     entry = resp.json()["entries"][0]
     assert entry["decision"] == "allow"
 

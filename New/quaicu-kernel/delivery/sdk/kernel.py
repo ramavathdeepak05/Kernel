@@ -1,17 +1,24 @@
 """QUAICU Kernel — SDK entry point.
 
-``Kernel`` holds injected collaborators and vends the ``@governed`` decorator.
+``Kernel`` holds injected collaborators and vends the governance decorators:
+  - ``@kernel.governed(...)`` — wrap an action function.
+  - ``@kernel.governed_tool(...)`` — wrap an agent tool (returns the tool's own result).
+  - ``kernel.generate(...)`` — a governed model call through the AI Gateway.
+  - ``kernel.for_agent(actor)`` — a handle that stamps every action with that agent's identity.
+
 It is a thin composition root; all governance logic lives in ``core/``.
 
-Config-driven construction (F-11 — config over code): ``Kernel.from_config`` reads
-a TOML file and selects adapter implementations by name from an adapter registry.
-No ``if/elif`` chains — the registry maps config strings to adapter classes.
+Composable enforcement (F-11): every governed action runs under a ``GovernanceProfile`` that
+declares which layers are enforced (identity, consent, policy, HITL gate, gateway protections,
+ledger seal, event emit). The profile is resolved per action type, overridable per call.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import functools
 import importlib
+import inspect
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -19,16 +26,24 @@ from pathlib import Path
 from typing import Any
 
 from core.errors import LifecycleDeniedError, LifecycleHaltedError
+from core.gateway.allowlist import InMemoryModelAllowlist
+from core.gateway.budget import InMemoryBudgetTracker
+from core.gateway.engine import AIGateway
+from core.gateway.masking import MaskingConfig
 from core.lifecycle.engine import LifecycleEngine
+from core.lifecycle.profile import GovernanceProfile, resolve_preset
 from core.lifecycle.protocols import ActionRepository, EventBus, Ledger, PolicyEvaluator
 from core.ports import HITLPort, IdentityPort
+from core.ports.consent import ConsentPort
 from core.types import (
     Action,
     ActionId,
     ActionState,
     Actor,
+    ActorId,
     IdempotencyKey,
-    RequestContext,
+    ModelRef,
+    ModelResponse,
     TenantId,
 )
 
@@ -106,13 +121,37 @@ def _load_adapter(name: str, **kwargs: Any) -> Any:
 class Kernel:
     """Composition root for the QUAICU governance kernel.
 
-    Holds all port adapters and vends the ``@governed`` decorator.
-    Create via ``Kernel.from_config(path)`` for production, or construct
-    directly in tests by injecting fakes.
+    Holds all port adapters, the optional AI Gateway, and the governance profiles. Create via
+    ``Kernel.from_config(path)`` for production, or ``Kernel.from_parts(...)`` in tests.
     """
 
     engine: LifecycleEngine
     tenant: TenantId
+    gateway: AIGateway | None = None
+    default_profile: GovernanceProfile = dataclasses.field(default_factory=GovernanceProfile.all)
+    action_profiles: dict[str, GovernanceProfile] = dataclasses.field(default_factory=dict)
+
+    @property
+    def has_identity(self) -> bool:
+        """True if an IdentityPort is wired. The standalone REST API requires this so it never
+        trusts a caller-supplied actor."""
+        return self.engine.has_identity
+
+    @property
+    def has_inference(self) -> bool:
+        """True if an AI Gateway (inference adapter) is wired — i.e. ``generate`` is available."""
+        return self.gateway is not None
+
+    def resolve_profile(
+        self, action_type: str, override: GovernanceProfile | None = None
+    ) -> GovernanceProfile:
+        """Resolve the governance profile for an action type.
+
+        Precedence: explicit call override > per-action-type config > kernel default.
+        """
+        if override is not None:
+            return override
+        return self.action_profiles.get(action_type, self.default_profile)
 
     # ── Factory ──────────────────────────────────────────────────────────────
 
@@ -120,8 +159,9 @@ class Kernel:
     def from_config(cls, path: str | Path) -> "Kernel":
         """Build a Kernel from a TOML config file.
 
-        Selects concrete adapter classes by the names declared under
-        ``[adapters]`` in the config — no code changes needed to swap adapters.
+        Selects concrete adapter classes by the names declared under ``[adapters]``. Optionally
+        wires the AI Gateway (``[adapters].inference`` + ``[gateway]``) and the governance
+        profiles (``[governance]``).
         """
         import tomllib
 
@@ -132,16 +172,15 @@ class Kernel:
         adapter_cfg = cfg.get("adapters", {})
 
         repo: ActionRepository = _InMemoryActionRepository()
-        storage_adapter = None
         policy: PolicyEvaluator | None = None
         hitl: HITLPort | None = None
         ledger: Ledger | None = None
         events: EventBus | None = None
         identity: IdentityPort | None = None
+        consent: ConsentPort | None = None
 
         if "storage" in adapter_cfg:
-            storage_adapter = _load_adapter(adapter_cfg["storage"], **cfg.get("storage", {}))
-            repo = storage_adapter  # PostgresStorageAdapter implements ActionRepository
+            repo = _load_adapter(adapter_cfg["storage"], **cfg.get("storage", {}))
         if "policy" in adapter_cfg:
             policy = _load_adapter(adapter_cfg["policy"])
         if "hitl" in adapter_cfg:
@@ -152,11 +191,24 @@ class Kernel:
             events = _load_adapter(adapter_cfg["events"])
         if "identity" in adapter_cfg:
             identity = _load_adapter(adapter_cfg["identity"], **cfg.get("identity", {}))
+        if "consent" in adapter_cfg:
+            consent = _load_adapter(adapter_cfg["consent"], **cfg.get("consent", {}))
 
         if policy is None or hitl is None or ledger is None or events is None:
             raise ValueError(
                 "kernel.toml must declare [adapters] for: policy, hitl, ledger, events"
             )
+
+        # Governance profiles (composable enforcement).
+        gov_cfg = cfg.get("governance", {})
+        default_profile = resolve_preset(gov_cfg.get("default", "all"))
+        action_profiles = {
+            at: resolve_preset(name)
+            for at, name in gov_cfg.get("action_profiles", {}).items()
+        }
+
+        # Optional AI Gateway for governed inference.
+        gateway = cls._build_gateway(tenant, adapter_cfg, cfg) if "inference" in adapter_cfg else None
 
         engine = LifecycleEngine(
             repository=repo,
@@ -165,8 +217,45 @@ class Kernel:
             ledger=ledger,
             events=events,
             identity=identity,
+            consent=consent,
+            default_profile=default_profile,
         )
-        return cls(engine=engine, tenant=tenant)
+        return cls(
+            engine=engine,
+            tenant=tenant,
+            gateway=gateway,
+            default_profile=default_profile,
+            action_profiles=action_profiles,
+        )
+
+    @staticmethod
+    def _build_gateway(
+        tenant: TenantId, adapter_cfg: dict[str, Any], cfg: dict[str, Any]
+    ) -> AIGateway:
+        """Assemble the AI Gateway from the inference adapter + ``[gateway]`` config."""
+        inference = _load_adapter(adapter_cfg["inference"], **cfg.get("inference", {}))
+        gw_cfg = cfg.get("gateway", {})
+
+        allowlist = InMemoryModelAllowlist()
+        for model_id in gw_cfg.get("permitted_models", []):
+            allowlist.permit(tenant, str(model_id))
+
+        budget = InMemoryBudgetTracker()
+        if gw_cfg.get("max_tokens"):
+            budget.set_budget(tenant, max_tokens=int(gw_cfg["max_tokens"]))
+
+        masking_configs = {
+            str(tenant): MaskingConfig(
+                sensitive_fields=frozenset(gw_cfg.get("sensitive_fields", [])),
+                mask_patterns=bool(gw_cfg.get("mask_patterns", True)),
+            )
+        }
+        return AIGateway(
+            inference=inference,
+            allowlist=allowlist,
+            budget=budget,
+            masking_configs=masking_configs,
+        )
 
     @classmethod
     def from_parts(
@@ -178,10 +267,15 @@ class Kernel:
         ledger: Ledger,
         events: EventBus,
         identity: IdentityPort | None = None,
+        consent: ConsentPort | None = None,
         repository: ActionRepository | None = None,
+        gateway: AIGateway | None = None,
+        default_profile: GovernanceProfile | None = None,
+        action_profiles: dict[str, GovernanceProfile] | None = None,
         max_poll_attempts: int = 1,
     ) -> "Kernel":
         """Build a Kernel directly from collaborator instances (for tests and SDK demos)."""
+        profile = default_profile or GovernanceProfile.all()
         engine = LifecycleEngine(
             repository=repository or _InMemoryActionRepository(),
             policy=policy,
@@ -189,77 +283,264 @@ class Kernel:
             ledger=ledger,
             events=events,
             identity=identity,
+            consent=consent,
+            default_profile=profile,
             max_poll_attempts=max_poll_attempts,
         )
-        return cls(engine=engine, tenant=TenantId(str(tenant)))
+        return cls(
+            engine=engine,
+            tenant=TenantId(str(tenant)),
+            gateway=gateway,
+            default_profile=profile,
+            action_profiles=action_profiles or {},
+        )
 
-    # ── Decorator factory ─────────────────────────────────────────────────────
+    # ── Agent binding ──────────────────────────────────────────────────────────
+
+    def for_agent(
+        self,
+        actor: Actor | str,
+        *,
+        roles: tuple[str, ...] = (),
+        profile: GovernanceProfile | None = None,
+    ) -> "BoundAgent":
+        """Return a handle whose tool/generate calls are stamped with this agent's identity.
+
+        ``actor`` may be an ``Actor`` or a bare id string (e.g. ``"agent:researcher"``), in which
+        case an ``Actor`` is built under this kernel's tenant. In a multi-agent system, give each
+        agent its own handle so the ledger attributes every action to the right agent.
+        """
+        if isinstance(actor, str):
+            actor = Actor(id=ActorId(actor), tenant=self.tenant, roles=tuple(roles))
+        return BoundAgent(self, actor, profile)
+
+    # ── Governed inference ──────────────────────────────────────────────────────
+
+    async def generate(
+        self,
+        *,
+        prompt_text: str,
+        model_ref: ModelRef,
+        actor: Actor,
+        payload: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+        profile: GovernanceProfile | None = None,
+        context: Any | None = None,
+    ) -> ModelResponse:
+        """Make a governed model call.
+
+        The call becomes an ``inference.generate`` action: the active profile decides which layers
+        run (policy/HITL/seal/emit + gateway allowlist/mask/log/budget). The AI Gateway is the
+        execute step. Returns the ``ModelResponse`` on success; raises ``LifecycleDeniedError`` /
+        ``LifecycleHaltedError`` otherwise.
+        """
+        if self.gateway is None:
+            raise RuntimeError(
+                "No inference adapter configured — kernel.generate is unavailable. "
+                "Set [adapters].inference and [gateway] in your config."
+            )
+
+        action_type = "inference.generate"
+        resolved = self.resolve_profile(action_type, profile)
+        captured: dict[str, ModelResponse] = {}
+
+        action = Action(
+            id=ActionId(str(uuid.uuid4())),
+            type=action_type,
+            payload={
+                "model_id": model_ref.id,
+                "model_version": model_ref.version,
+                **(payload or {}),
+            },
+            actor=actor,
+            tenant=self.tenant,
+            idempotency_key=IdempotencyKey(idempotency_key or str(uuid.uuid4())),
+            proposed_at=datetime.now(tz=timezone.utc),
+        )
+
+        async def execute_fn() -> dict[str, Any]:
+            resp = await self.gateway.generate(
+                prompt_text=prompt_text,
+                model_ref=model_ref,
+                tenant=self.tenant,
+                action_id=action.id,
+                payload=payload,
+                profile=resolved,
+            )
+            captured["response"] = resp
+            return dict(resp.recorded_output)
+
+        final = await self.engine.run(action, execute_fn, context=context, profile=resolved)
+        self._raise_on_terminal_failure(final, action_type)
+        # Surface the action id to the caller (the sealed leaf already covers action.id).
+        resp = captured["response"]
+        return dataclasses.replace(
+            resp, recorded_output={**dict(resp.recorded_output), "action_id": str(final.id)}
+        )
+
+    # ── Decorator factories ─────────────────────────────────────────────────────
 
     def governed(
         self,
         *,
         policy: str,
         action_type: str | None = None,
+        profile: GovernanceProfile | None = None,
     ) -> Callable:
         """Decorator factory. Wraps an async function as a governed action.
 
-        The decorated function must accept ``actor: Actor`` as a keyword argument.
-        On COMPLETED the decorated function's return value is returned unchanged.
-        On DENIED the call raises ``LifecycleDeniedError``.
-        On HALTED the call raises ``LifecycleHaltedError``.
-
-        Example::
-
-            @kernel.governed(policy="ciro.ifrs9.stage_transition")
-            async def reclassify(loan_id: str, to_stage: int, *, actor: Actor):
-                await db.update(loan_id, to_stage)
+        The decorated function must accept ``actor: Actor`` as a keyword argument. On COMPLETED the
+        final ``Action`` is returned; on DENIED/HALTED it raises. (For tools, prefer
+        ``governed_tool``, which returns the function's own result.)
         """
-        import functools
-
         effective_type = action_type or policy
 
         def decorator(fn: Callable) -> Callable:
             @functools.wraps(fn)
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
-                actor: Actor = kwargs.get("actor")  # type: ignore[assignment]
+                actor: Actor | None = kwargs.get("actor")
                 if actor is None:
                     raise TypeError(
                         f"@governed function {fn.__name__!r} must receive actor=<Actor> as a kwarg"
                     )
-
-                # Build payload from kwargs, excluding 'actor'
                 payload = {k: v for k, v in kwargs.items() if k != "actor"}
+                action = self._build_action(effective_type, payload, actor)
 
-                action = Action(
-                    id=ActionId(str(uuid.uuid4())),
-                    type=effective_type,
-                    payload=payload,
-                    actor=actor,
-                    tenant=self.tenant,
-                    idempotency_key=IdempotencyKey(str(uuid.uuid4())),
-                    proposed_at=datetime.now(tz=timezone.utc),
-                )
-
-                # The execute step is the decorated function body
                 async def execute_fn() -> Any:
                     return await fn(*args, **kwargs)
 
-                final_action = await self.engine.run(action, execute_fn)
-
-                if final_action.state is ActionState.DENIED:
-                    raise LifecycleDeniedError(
-                        f"Action {final_action.id} denied by governance",
-                        detail={"action_id": str(final_action.id), "type": effective_type},
-                    )
-                if final_action.state is ActionState.HALTED:
-                    raise LifecycleHaltedError(
-                        f"Action {final_action.id} halted by governance",
-                        detail={"action_id": str(final_action.id), "type": effective_type},
-                    )
-                return final_action
+                resolved = self.resolve_profile(effective_type, profile)
+                final = await self.engine.run(action, execute_fn, profile=resolved)
+                self._raise_on_terminal_failure(final, effective_type)
+                return final
 
             wrapper._governed_policy = policy  # type: ignore[attr-defined]
             wrapper._governed_action_type = effective_type  # type: ignore[attr-defined]
             return wrapper
 
         return decorator
+
+    def governed_tool(
+        self,
+        *,
+        policy: str,
+        name: str | None = None,
+        actor: Actor | None = None,
+        profile: GovernanceProfile | None = None,
+    ) -> Callable:
+        """Decorator factory for an agent tool. Governs the call and returns the tool's own result.
+
+        Unlike ``governed``, this returns whatever the wrapped tool returns (not the Action) — which
+        is what an agent framework expects. Works on sync or async tools. The actor may be bound (via
+        ``for_agent``) or passed as ``actor=`` at call time. On DENIED/HALTED it raises.
+        """
+        effective_type = name or policy
+
+        def decorator(fn: Callable) -> Callable:
+            @functools.wraps(fn)
+            async def wrapper(*args: Any, **kwargs: Any) -> Any:
+                act: Actor | None = kwargs.pop("actor", None) or actor
+                if act is None:
+                    raise TypeError(
+                        f"governed tool {fn.__name__!r} needs an actor — bind one with "
+                        "kernel.for_agent(...) or pass actor=<Actor> at call time"
+                    )
+                payload = {k: v for k, v in kwargs.items()}
+                action = self._build_action(effective_type, payload, act)
+                captured: dict[str, Any] = {}
+
+                async def execute_fn() -> dict[str, Any]:
+                    result = fn(*args, **kwargs)
+                    if inspect.isawaitable(result):
+                        result = await result
+                    captured["result"] = result
+                    # Seal a dict (recorded_result is a Mapping); the leaf hash covers the value.
+                    return {"result": result}
+
+                resolved = self.resolve_profile(effective_type, profile)
+                final = await self.engine.run(action, execute_fn, profile=resolved)
+                self._raise_on_terminal_failure(final, effective_type)
+                return captured.get("result")
+
+            wrapper._governed_policy = policy  # type: ignore[attr-defined]
+            wrapper._governed_action_type = effective_type  # type: ignore[attr-defined]
+            return wrapper
+
+        return decorator
+
+    # ── Internal helpers ─────────────────────────────────────────────────────────
+
+    def _build_action(self, action_type: str, payload: dict[str, Any], actor: Actor) -> Action:
+        return Action(
+            id=ActionId(str(uuid.uuid4())),
+            type=action_type,
+            payload=payload,
+            actor=actor,
+            tenant=self.tenant,
+            idempotency_key=IdempotencyKey(str(uuid.uuid4())),
+            proposed_at=datetime.now(tz=timezone.utc),
+        )
+
+    @staticmethod
+    def _raise_on_terminal_failure(final: Action, action_type: str) -> None:
+        if final.state is ActionState.DENIED:
+            raise LifecycleDeniedError(
+                f"Action {final.id} denied by governance",
+                detail={"action_id": str(final.id), "type": action_type},
+            )
+        if final.state is ActionState.HALTED:
+            raise LifecycleHaltedError(
+                f"Action {final.id} halted by governance",
+                detail={"action_id": str(final.id), "type": action_type},
+            )
+
+
+# ── Bound agent handle ──────────────────────────────────────────────────────────
+
+
+class BoundAgent:
+    """A kernel handle bound to one agent's ``Actor``.
+
+    Every tool or model call made through it is attributed to that agent in the ledger, enabling
+    per-agent audit trails in a multi-agent system.
+    """
+
+    def __init__(
+        self, kernel: Kernel, actor: Actor, profile: GovernanceProfile | None = None
+    ) -> None:
+        self._kernel = kernel
+        self._actor = actor
+        self._profile = profile
+
+    @property
+    def actor(self) -> Actor:
+        return self._actor
+
+    def tool(
+        self,
+        *,
+        policy: str,
+        name: str | None = None,
+        profile: GovernanceProfile | None = None,
+    ) -> Callable:
+        """Decorator: govern this agent's tool, attributed to this agent."""
+        return self._kernel.governed_tool(
+            policy=policy, name=name, actor=self._actor, profile=profile or self._profile
+        )
+
+    async def generate(
+        self,
+        *,
+        prompt_text: str,
+        model_ref: ModelRef,
+        payload: dict[str, Any] | None = None,
+        profile: GovernanceProfile | None = None,
+    ) -> ModelResponse:
+        """Make a governed model call attributed to this agent."""
+        return await self._kernel.generate(
+            prompt_text=prompt_text,
+            model_ref=model_ref,
+            actor=self._actor,
+            payload=payload,
+            profile=profile or self._profile,
+        )

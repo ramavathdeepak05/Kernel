@@ -27,12 +27,29 @@ from core.types import (
     Actor,
     ActorId,
     IdempotencyKey,
+    RequestContext,
     TenantId,
 )
 from delivery.api.schemas import ActionResponse, ApproveRequest, ProposeRequest
 from delivery.sdk.kernel import Kernel
 
 router = APIRouter(prefix="/v1/actions", tags=["actions"])
+
+
+def _bearer_token(request: Request) -> str:
+    """Extract the bearer token from the Authorization header, or 401.
+
+    The kernel never trusts a caller-supplied identity — the actor is resolved from this token
+    by the configured IdentityPort.
+    """
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=401,
+            detail={"error": "Missing or malformed bearer token", "code": "UNAUTHENTICATED"},
+        )
+    return token.strip()
 
 
 def _action_response(action: Action) -> ActionResponse:
@@ -60,16 +77,33 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
     kernel: Kernel = request.app.state.kernel
     tenant: TenantId = kernel.tenant
 
-    actor = Actor(
-        id=ActorId(body.actor_id),
-        tenant=tenant,
-        roles=tuple(body.actor_roles),
+    # Authentication is mandatory on the standalone API: extract the bearer token and require a
+    # configured IdentityPort. The actor is resolved from the token by the engine — never trusted
+    # from the request body.
+    token = _bearer_token(request)
+    if not kernel.has_identity:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "API requires an identity adapter to authenticate callers",
+                "code": "IDENTITY_NOT_CONFIGURED",
+            },
+        )
+
+    ctx = RequestContext(
+        headers=dict(request.headers),
+        source_ip=request.client.host if request.client else None,
+        raw_token=token,
+        tenant_hint=tenant,
     )
+
+    # Placeholder actor — the engine replaces it with the token-resolved identity during _propose.
+    placeholder_actor = Actor(id=ActorId("unresolved"), tenant=tenant)
     action = Action(
         id=ActionId(str(uuid.uuid4())),
         type=body.type,
         payload=body.payload,
-        actor=actor,
+        actor=placeholder_actor,
         tenant=tenant,
         idempotency_key=IdempotencyKey(body.idempotency_key),
         proposed_at=datetime.now(tz=timezone.utc),
@@ -79,7 +113,7 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
         return {"payload": dict(action.payload)}
 
     try:
-        final = await kernel.engine.run(action, execute_fn)
+        final = await kernel.engine.run(action, execute_fn, context=ctx)
     except QUAICUError as exc:
         raise HTTPException(status_code=503, detail={"error": str(exc), "code": exc.code})
 

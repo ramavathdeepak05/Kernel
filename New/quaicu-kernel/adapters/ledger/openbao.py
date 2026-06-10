@@ -188,6 +188,9 @@ class OpenBaoLedgerAdapter:
     def get_entry(self, tenant, seq):  # type: ignore[no-untyped-def]
         return self._ledger.get_entry(tenant, seq)
 
+    def get_entries(self, tenant):  # type: ignore[no-untyped-def]
+        return self._ledger.get_entries(tenant)
+
     def get_signed_tree_head(self, tenant):  # type: ignore[no-untyped-def]
         return self._ledger.get_signed_tree_head(tenant)
 

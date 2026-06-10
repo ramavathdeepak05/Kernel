@@ -70,3 +70,8 @@ class InMemoryLedgerAdapter:
     def sealed(self) -> list[LedgerEntry]:
         with self._lock:
             return list(self._entries)
+
+    def get_entries(self, tenant: Any) -> list[LedgerEntry]:
+        """Return sealed entries for `tenant` only (F-07: tenant-scoped read)."""
+        with self._lock:
+            return [e for e in self._entries if str(e.tenant) == str(tenant)]

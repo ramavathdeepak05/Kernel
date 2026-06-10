@@ -191,6 +191,15 @@ async def test_withdrawn_consent_is_denied():
     assert exc_info.value.detail["reason"] == "withdrawn"
 
 
+async def test_unknown_status_is_denied_fail_closed():
+    """Any status other than 'active' must DENY — not just 'withdrawn'/'expired' (fail-closed allowlist)."""
+    port = _FakeConsentPort(record=_make_record(status="pending"))
+    engine = ConsentEngine(consent_port=port, inner=_OKInner())
+    with pytest.raises(ConsentDeniedError) as exc_info:
+        await engine.evaluate(_make_action())
+    assert exc_info.value.detail["reason"] == "invalid"
+
+
 async def test_port_error_is_denied_fail_closed():
     """Any port exception must result in DENY (F-03)."""
     port = _FakeConsentPort(raise_exc=True)

@@ -40,6 +40,7 @@ def _canonical_bytes(
     recorded_result: Any,
     approver: ApproverRef | None,
     consent_state: dict[str, Any] | None = None,
+    governance_profile: list[str] | None = None,
 ) -> bytes:
     """Deterministic serialization of a seal request for hashing.
 
@@ -52,11 +53,20 @@ def _canonical_bytes(
         "action_type": action.type,
         "tenant": str(action.tenant),
         "actor_id": str(action.actor.id),
+        # payload is part of the sealed leaf so post-hoc payload tampering in storage is
+        # detectable against the transparency log (F-09). default=str below handles any
+        # non-JSON-native value the payload may carry.
+        "payload": dict(action.payload),
         "decision": evaluation.decision.value,
         "policy_versions": list(evaluation.policy_versions),
         "approver": str(approver) if approver else None,
         "consent_state": consent_state or {},
-        "recorded_result": recorded_result if isinstance(recorded_result, dict) else {},
+        # The set of governance layers that were enforced for this action — sealed so an auditor
+        # can verify which controls actually ran (composable enforcement).
+        "governance_profile": governance_profile or [],
+        # Seal the result verbatim (not only dicts) so strings/lists/scalars are covered by
+        # the Merkle leaf; default=str serializes anything non-JSON-native.
+        "recorded_result": recorded_result,
     }
     return json.dumps(d, sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")
 
@@ -111,10 +121,12 @@ class TrustLedger:
                 # Extract K·04 consent state from evaluation metadata so it is
                 # covered by the Merkle leaf hash and resolvable point-in-time.
                 consent_state = dict(evaluation.metadata.get("consent_state", {}))
+                # The enforced governance layers (composable enforcement) — sealed for audit.
+                governance_profile = list(evaluation.metadata.get("governance_profile", []))
 
                 seq = self._sequences[tenant]
                 entry_bytes = _canonical_bytes(
-                    action, evaluation, recorded_result, approver, consent_state
+                    action, evaluation, recorded_result, approver, consent_state, governance_profile
                 )
                 idx, lh = self._trees[tenant].append(entry_bytes)
                 now = datetime.now(tz=timezone.utc)
@@ -168,6 +180,10 @@ class TrustLedger:
         if seq < 0 or seq >= len(entries):
             raise KeyError(f"No entry at seq={seq} for tenant={tenant}")
         return entries[seq]
+
+    def get_entries(self, tenant: TenantId) -> list[LedgerEntry]:
+        """Return all sealed entries for `tenant` in sequence order (F-07: tenant-scoped)."""
+        return list(self._entries.get(tenant, []))
 
     def get_signed_tree_head(self, tenant: TenantId) -> SignedTreeHead:
         """Return the current Signed Tree Head for `tenant`."""

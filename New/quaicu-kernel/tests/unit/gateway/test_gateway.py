@@ -200,6 +200,110 @@ async def test_pii_masking_rehydrated_in_response() -> None:
     assert resp.content is not None
 
 
+async def test_pattern_masking_strips_undeclared_pii() -> None:
+    """Built-in PII detectors mask PAN/Aadhaar/email even when no sensitive field is declared (#3)."""
+    fake = FakeInference()
+    gw, al, _, _ = _make_gateway(fake)  # no masking_configs → defaults (mask_patterns=True)
+    al.permit(TENANT_A, MODEL_GPT4.id)
+
+    await gw.generate(
+        prompt_text="Applicant PAN ABCDE1234F, Aadhaar 1234 5678 9012, email jane@example.com",
+        model_ref=MODEL_GPT4,
+        tenant=TENANT_A,
+    )
+
+    sent = fake.calls[0]["prompt"].text
+    assert "ABCDE1234F" not in sent
+    assert "1234 5678 9012" not in sent
+    assert "jane@example.com" not in sent
+
+
+async def test_pattern_masking_can_be_disabled() -> None:
+    """With mask_patterns=False and no declared fields, free-text PII is left intact."""
+    fake = FakeInference()
+    masking_configs = {str(TENANT_A): MaskingConfig(mask_patterns=False)}
+    gw, al, _, _ = _make_gateway(fake, masking_configs=masking_configs)
+    al.permit(TENANT_A, MODEL_GPT4.id)
+
+    await gw.generate(
+        prompt_text="email jane@example.com",
+        model_ref=MODEL_GPT4,
+        tenant=TENANT_A,
+    )
+
+    assert "jane@example.com" in fake.calls[0]["prompt"].text
+
+
+async def test_profile_disables_allowlist() -> None:
+    """A profile with enforce_model_allowlist=False lets an unlisted model through (#composable)."""
+    from core.lifecycle.profile import GovernanceProfile
+
+    fake = FakeInference()
+    gw, al, _, _ = _make_gateway(fake)  # nothing permitted
+    resp = await gw.generate(
+        prompt_text="hi",
+        model_ref=MODEL_GPT4,
+        tenant=TENANT_A,
+        profile=GovernanceProfile(enforce_model_allowlist=False),
+    )
+    assert resp.content == "ok"
+    assert len(fake.calls) == 1
+
+
+async def test_profile_disables_masking() -> None:
+    from core.lifecycle.profile import GovernanceProfile
+
+    fake = FakeInference()
+    masking_configs = {str(TENANT_A): MaskingConfig(sensitive_fields=frozenset(["ssn"]))}
+    gw, al, _, _ = _make_gateway(fake, masking_configs=masking_configs)
+    al.permit(TENANT_A, MODEL_GPT4.id)
+
+    await gw.generate(
+        prompt_text="SSN 123-45-6789",
+        model_ref=MODEL_GPT4,
+        tenant=TENANT_A,
+        payload={"ssn": "123-45-6789"},
+        profile=GovernanceProfile(mask_pii=False),
+    )
+    assert "123-45-6789" in fake.calls[0]["prompt"].text  # masking skipped
+
+
+async def test_profile_disables_logging() -> None:
+    from core.lifecycle.profile import GovernanceProfile
+
+    fake = FakeInference()
+    pl = InMemoryPromptLog()
+    gw, al, _, _ = _make_gateway(fake, prompt_log=pl)
+    al.permit(TENANT_A, MODEL_GPT4.id)
+
+    await gw.generate(
+        prompt_text="no log please",
+        model_ref=MODEL_GPT4,
+        tenant=TENANT_A,
+        profile=GovernanceProfile(log_prompts=False),
+    )
+    assert len(pl.entries) == 0  # logging skipped
+    assert len(fake.calls) == 1
+
+
+async def test_profile_disables_budget() -> None:
+    from core.lifecycle.profile import GovernanceProfile
+
+    fake = FakeInference()
+    bt = InMemoryBudgetTracker()
+    gw, al, _, _ = _make_gateway(fake, budget=bt)
+    al.permit(TENANT_A, MODEL_GPT4.id)
+    bt.set_budget(TENANT_A, max_tokens=1)  # would normally block a multi-word prompt
+
+    resp = await gw.generate(
+        prompt_text="this prompt would exceed the tiny budget",
+        model_ref=MODEL_GPT4,
+        tenant=TENANT_A,
+        profile=GovernanceProfile(enforce_budget=False),
+    )
+    assert resp.content == "ok"  # budget not enforced
+
+
 async def test_inference_failure_propagates() -> None:
     fake = FakeInference(fail=True)
     gw, al, _, _ = _make_gateway(fake)

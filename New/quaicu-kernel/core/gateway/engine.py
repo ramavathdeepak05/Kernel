@@ -8,7 +8,8 @@ from core.errors import GatewayDeniedError, GatewayLoggingError
 from core.gateway.allowlist import InMemoryModelAllowlist
 from core.gateway.budget import InMemoryBudgetTracker
 from core.gateway.log import InMemoryPromptLog
-from core.gateway.masking import MaskingConfig, MaskingContext, mask_payload
+from core.gateway.masking import MaskingConfig, MaskingContext, mask_payload, mask_text
+from core.lifecycle.profile import GovernanceProfile
 from core.ports.inference import InferencePort
 from core.types import ActionId, ModelRef, ModelResponse, Prompt, TenantId
 
@@ -52,70 +53,93 @@ class AIGateway:
         tenant: TenantId,
         action_id: ActionId | None = None,
         payload: dict | None = None,
+        profile: GovernanceProfile | None = None,
     ) -> ModelResponse:
         """
         Execute a governed model call.
 
         `prompt_text` is the raw (unmasked) prompt. Masking happens here before transmission.
         Returns a `ModelResponse` with `recorded_output` populated for ledger sealing.
+
+        `profile` toggles the four gateway sub-layers independently (allowlist, PII masking,
+        prompt logging, budget). When None, all four are enforced (maximal posture).
         """
-        if not self._allowlist.is_permitted(tenant, model_ref):
-            raise GatewayDeniedError(
-                f"Model {model_ref.id!r} is not in the allowlist for tenant {tenant!r}. Denied (no fallback).",
-                detail={"model_id": model_ref.id, "tenant": str(tenant)},
-            )
+        prof = profile or GovernanceProfile.all()
 
-        masking_cfg = self._masking_configs.get(str(tenant), MaskingConfig())
+        if prof.enforce_model_allowlist:
+            if not self._allowlist.is_permitted(tenant, model_ref):
+                raise GatewayDeniedError(
+                    f"Model {model_ref.id!r} is not in the allowlist for tenant {tenant!r}. Denied (no fallback).",
+                    detail={"model_id": model_ref.id, "tenant": str(tenant)},
+                )
+        else:
+            log.warning("gateway: model allowlist disabled by profile for tenant %s", tenant)
+
         ctx = MaskingContext()
-        masked_payload = mask_payload(payload or {}, masking_cfg, ctx)
-
-        masked_prompt_text = prompt_text
-        for original, token in {v: k for k, v in ctx.token_map.items()}.items():
-            masked_prompt_text = masked_prompt_text.replace(original, token)
+        if prof.mask_pii:
+            masking_cfg = self._masking_configs.get(str(tenant), MaskingConfig())
+            mask_payload(payload or {}, masking_cfg, ctx)
+            # First substitute the values of declared sensitive payload fields wherever they
+            # appear verbatim in the prompt, then run the built-in PII detectors so that any
+            # remaining free-text PII (PAN, Aadhaar, email, …) is masked too — even if it was
+            # never declared as a structured field.
+            masked_prompt_text = prompt_text
+            for original, token in {v: k for k, v in ctx.token_map.items()}.items():
+                masked_prompt_text = masked_prompt_text.replace(original, token)
+            masked_prompt_text = mask_text(masked_prompt_text, masking_cfg, ctx)
+        else:
+            masked_prompt_text = prompt_text
 
         prompt = Prompt(text=masked_prompt_text, metadata={"tenant": str(tenant)})
         prompt_hash = hashlib.sha256(prompt.text.encode("utf-8")).hexdigest()
 
-        try:
-            log_entry = self._prompt_log.write(
-                action_id=action_id,
-                tenant=tenant,
-                model_ref=model_ref,
-                prompt_hash=prompt_hash,
-            )
-        except GatewayLoggingError:
-            raise
-        except Exception as exc:
-            raise GatewayLoggingError(
-                f"Prompt log write failed: {exc}",
-                detail={"tenant": str(tenant), "model_id": model_ref.id},
-            ) from exc
+        log_id: str | None = None
+        if prof.log_prompts:
+            try:
+                log_entry = self._prompt_log.write(
+                    action_id=action_id,
+                    tenant=tenant,
+                    model_ref=model_ref,
+                    prompt_hash=prompt_hash,
+                )
+                log_id = log_entry.log_id
+            except GatewayLoggingError:
+                raise
+            except Exception as exc:
+                raise GatewayLoggingError(
+                    f"Prompt log write failed: {exc}",
+                    detail={"tenant": str(tenant), "model_id": model_ref.id},
+                ) from exc
+        else:
+            log.warning("gateway: prompt logging disabled by profile for tenant %s", tenant)
 
-        estimated_tokens = max(1, len(prompt.text.split()))
-        self._budget.check_and_consume(tenant, tokens=estimated_tokens)
+        if prof.enforce_budget:
+            estimated_tokens = max(1, len(prompt.text.split()))
+            self._budget.check_and_consume(tenant, tokens=estimated_tokens)
 
         log.info(
             "gateway: calling model %s for tenant %s (log_id=%s)",
             model_ref.id,
             tenant,
-            log_entry.log_id,
+            log_id,
         )
         response = await self._inference.generate(prompt=prompt, model_ref=model_ref, tenant=tenant)
 
         response_hash = hashlib.sha256(response.content.encode("utf-8")).hexdigest()
-        self._prompt_log.record_response(log_entry.log_id, response_hash)
+        if log_id is not None:
+            self._prompt_log.record_response(log_id, response_hash)
 
         rehydrated_content = ctx.rehydrate(response.content)
 
         recorded_output = {
-            "log_id": log_entry.log_id,
+            "log_id": log_id,
             "prompt_hash": prompt_hash,
             "response_hash": response_hash,
             "model_id": model_ref.id,
             "model_version": model_ref.version,
         }
 
-        log.info("gateway: model call complete log_id=%s", log_entry.log_id)
+        log.info("gateway: model call complete log_id=%s", log_id)
 
         return dataclasses.replace(
             response,

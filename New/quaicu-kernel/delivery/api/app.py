@@ -29,6 +29,7 @@ from core.errors import (
     TenantIsolationError,
 )
 from delivery.api.routes.actions import router as actions_router
+from delivery.api.routes.inference import router as inference_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.sdk.kernel import Kernel
 
@@ -58,6 +59,7 @@ def create_app(kernel: Kernel) -> FastAPI:
 
     # Routers
     app.include_router(actions_router)
+    app.include_router(inference_router)
     app.include_router(ledger_router)
 
     # ── Exception handlers ────────────────────────────────────────────────────

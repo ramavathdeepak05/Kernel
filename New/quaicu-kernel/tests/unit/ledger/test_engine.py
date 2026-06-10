@@ -260,6 +260,49 @@ async def test_leaf_hash_in_entry() -> None:
     assert entry.leaf_hash == expected_lh
 
 
+async def test_payload_is_covered_by_leaf_hash() -> None:
+    """Two actions identical except for payload must produce different leaf hashes (#8)."""
+    t = _tenant()
+    evaluation = _evaluation()
+
+    def _act(payload: dict) -> Action:
+        return Action(
+            id=ActionId("act-same"),
+            type="test.action",
+            payload=payload,
+            actor=_actor(t),
+            tenant=t,
+            idempotency_key=IdempotencyKey("idem-same"),
+            state=ActionState.SEALING,
+        )
+
+    lh_a = leaf_hash(_canonical_bytes(_act({"amount": 100}), evaluation, {}, None))
+    lh_b = leaf_hash(_canonical_bytes(_act({"amount": 999}), evaluation, {}, None))
+    assert lh_a != lh_b, "payload tampering must change the Merkle leaf"
+
+
+async def test_non_dict_recorded_result_is_covered_by_leaf_hash() -> None:
+    """A non-dict recorded_result must still be sealed (not coerced to {}) (#8)."""
+    t = _tenant()
+    evaluation = _evaluation()
+    action = _action(t)
+
+    lh_x = leaf_hash(_canonical_bytes(action, evaluation, "result-x", None))
+    lh_y = leaf_hash(_canonical_bytes(action, evaluation, "result-y", None))
+    assert lh_x != lh_y, "non-dict results must be covered by the leaf hash"
+
+
+def test_governance_profile_is_covered_by_leaf_hash() -> None:
+    """The enforced-layer list is sealed, so the same action under different profiles differs."""
+    action = _action()
+    eval_all = EvaluationResult(decision=Decision.ALLOW, metadata={"governance_profile": ["enforce_policy", "seal_to_ledger"]})
+    eval_audit = EvaluationResult(decision=Decision.ALLOW, metadata={"governance_profile": ["seal_to_ledger"]})
+
+    lh_a = leaf_hash(_canonical_bytes(action, eval_all, {}, None, None, ["enforce_policy", "seal_to_ledger"]))
+    lh_b = leaf_hash(_canonical_bytes(action, eval_audit, {}, None, None, ["seal_to_ledger"]))
+    assert lh_a != lh_b, "the enforced governance layers must be covered by the leaf"
+
+
 async def test_concurrent_seals_are_safe() -> None:
     ledger = TrustLedger()
     t = _tenant()

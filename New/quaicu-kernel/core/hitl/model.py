@@ -20,6 +20,8 @@ class ApprovalRecord:
     decided_by: ActorId | None = None
     decided_at: datetime | None = None
     expires_at: datetime | None = None
+    # The actor who proposed the action — used to forbid self-approval (separation of duties).
+    proposed_by: ActorId | None = None
 
     def is_expired(self, now: datetime) -> bool:
         return self.expires_at is not None and now >= self.expires_at

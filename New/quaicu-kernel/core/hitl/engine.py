@@ -51,6 +51,7 @@ class InProcessHITLPort:
             required_approvers=tuple(approvers),
             requested_at=now,
             expires_at=now + timedelta(seconds=self._timeout_seconds) if self._timeout_seconds > 0 else None,
+            proposed_by=action.actor.id,
         )
         self._store.put(record)
         log.info(
@@ -79,7 +80,13 @@ class InProcessHITLPort:
 
     # ── External control (admin / test surface) ──────────────────────────────
 
-    async def approve(self, handle_id: str, *, approver_actor_id: ActorId) -> None:
+    async def approve(
+        self,
+        handle_id: str,
+        *,
+        approver_actor_id: ActorId,
+        approver_roles: tuple[str, ...] = (),
+    ) -> None:
         record = self._store.get(handle_id)
         if record is None:
             raise HITLPortError(f"Handle {handle_id!r} not found.")
@@ -89,14 +96,27 @@ class InProcessHITLPort:
             )
         if record.is_expired(datetime.now(UTC)):
             raise HITLPortError(f"Handle {handle_id!r} has expired.")
-        self._assert_authorized(approver_actor_id, record.required_approvers)
+        # Separation of duties: the proposer may never approve their own action.
+        if record.proposed_by is not None and approver_actor_id == record.proposed_by:
+            raise HITLPortError(
+                f"Actor {approver_actor_id!r} proposed this action and cannot approve it "
+                "(separation of duties).",
+                detail={"actor_id": str(approver_actor_id), "handle_id": handle_id},
+            )
+        self._assert_authorized(approver_actor_id, approver_roles, record.required_approvers)
         approved = record.with_decision(
             ApprovalDecision.APPROVED, decided_by=approver_actor_id
         )
         self._store.update(approved)
         log.info("HITL approved: handle=%s by=%s", handle_id, approver_actor_id)
 
-    async def reject(self, handle_id: str, *, approver_actor_id: ActorId) -> None:
+    async def reject(
+        self,
+        handle_id: str,
+        *,
+        approver_actor_id: ActorId,
+        approver_roles: tuple[str, ...] = (),
+    ) -> None:
         record = self._store.get(handle_id)
         if record is None:
             raise HITLPortError(f"Handle {handle_id!r} not found.")
@@ -104,7 +124,7 @@ class InProcessHITLPort:
             raise HITLPortError(
                 f"Handle {handle_id!r} already decided: {record.decision.value}."
             )
-        self._assert_authorized(approver_actor_id, record.required_approvers)
+        self._assert_authorized(approver_actor_id, approver_roles, record.required_approvers)
         rejected = record.with_decision(
             ApprovalDecision.REJECTED, decided_by=approver_actor_id
         )
@@ -125,16 +145,35 @@ class InProcessHITLPort:
     # ── Authority ────────────────────────────────────────────────────────────
 
     def _assert_authorized(
-        self, actor_id: ActorId, required: tuple[ApproverRef, ...]
+        self,
+        actor_id: ActorId,
+        actor_roles: tuple[str, ...],
+        required: tuple[ApproverRef, ...],
     ) -> None:
-        user_refs = [r for r in required if str(r).startswith("user:")]
-        if user_refs:
-            actor_ref = ApproverRef(f"user:{actor_id}")
-            if actor_ref not in user_refs:
-                raise HITLPortError(
-                    f"Actor {actor_id!r} is not authorized. Required user refs: {user_refs}",
-                    detail={
-                        "actor_id": str(actor_id),
-                        "required": [str(r) for r in required],
-                    },
-                )
+        """Fail-closed authorization against required approver refs.
+
+        The actor is authorized iff they satisfy at least one required ref:
+          - a ``user:<id>`` ref matching their actor id, OR
+          - a ``role:<role>`` ref matching one of their roles.
+
+        If ``required`` is empty no approver was specified — treat as unauthorized (a gate with
+        no eligible approver must never be approvable). Previously only ``user:`` refs were
+        checked, so any actor could satisfy a purely role-based gate (the common case).
+        """
+        # Normalise the actor's roles to bare role names (strip an optional "role:" prefix).
+        actor_role_refs = {
+            ApproverRef(r if str(r).startswith("role:") else f"role:{r}") for r in actor_roles
+        }
+        actor_user_ref = ApproverRef(f"user:{actor_id}")
+
+        satisfied = actor_user_ref in required or bool(actor_role_refs & set(required))
+        if not satisfied:
+            raise HITLPortError(
+                f"Actor {actor_id!r} is not authorized to decide this approval. "
+                f"Required one of: {[str(r) for r in required]}",
+                detail={
+                    "actor_id": str(actor_id),
+                    "actor_roles": list(actor_roles),
+                    "required": [str(r) for r in required],
+                },
+            )

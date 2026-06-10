@@ -60,3 +60,32 @@ timeout      = 30            # seconds before TIMED_OUT (fail-closed)
 secret_or_key = "change-me-in-production"
 algorithms    = ["HS256"]
 verify        = true         # set false to skip signature check in local dev
+
+# ── AI Gateway (governed inference) ───────────────────────────────────────────
+# Set inference = "openai_compat" under [adapters] to enable kernel.generate() and the
+# POST /v1/inference route. Works with any OpenAI-compatible endpoint (OpenAI, Ollama,
+# vLLM, TGI, Together, Mistral). The gateway enforces the model allowlist, masks PII,
+# logs every prompt, and tracks the token budget before any model call leaves the kernel.
+#
+# [adapters]
+# inference = "openai_compat"
+[inference]
+base_url      = "http://localhost:11434/v1"   # e.g. Ollama; use https://api.openai.com/v1 for OpenAI
+api_key       = "ollama"
+default_model = "llama3"
+
+[gateway]
+permitted_models = ["llama3", "gpt-4"]   # only these models may be called for this tenant
+max_tokens       = 1000000               # per-tenant token budget (0 = unlimited)
+sensitive_fields = ["ssn", "pan", "aadhaar"]   # payload field VALUES masked wherever they appear
+mask_patterns    = true                  # also mask PAN/Aadhaar/email/phone/SSN/card in free text
+
+# ── Composable governance profiles ────────────────────────────────────────────
+# Each governed action runs under a profile that declares which layers are enforced.
+# Presets: "all" (everything), "standard" (no consent), "gateway_only" (gateway protections
+# only — no policy/HITL/seal/emit), "audit_only" (seal+emit, no gating).
+[governance]
+default = "all"
+# Per-action-type overrides, e.g. run model calls under gateway-only protection:
+# [governance.action_profiles]
+# "inference.generate" = "gateway_only"

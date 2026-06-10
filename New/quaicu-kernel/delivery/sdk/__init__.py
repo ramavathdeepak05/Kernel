@@ -15,6 +15,7 @@ Usage::
         await ledger_db.update_stage(loan_id, to_stage)
 """
 
-from delivery.sdk.kernel import Kernel
+from core.lifecycle.profile import GovernanceProfile
+from delivery.sdk.kernel import BoundAgent, Kernel
 
-__all__ = ["Kernel"]
+__all__ = ["Kernel", "BoundAgent", "GovernanceProfile"]

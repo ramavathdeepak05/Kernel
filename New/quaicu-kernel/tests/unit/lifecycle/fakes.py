@@ -15,6 +15,7 @@ from core.errors import (
     IdentityPortError,
     LedgerSealError,
     PolicyEvaluationError,
+    StoragePortError,
 )
 from core.types import (
     Action,
@@ -52,13 +53,23 @@ def make_action(
 
 
 class FakeActionRepository:
-    """In-memory action store with atomic-style insert_if_absent keyed by (tenant, idempotency_key)."""
+    """In-memory action store with atomic-style insert_if_absent keyed by (tenant, idempotency_key).
 
-    def __init__(self) -> None:
+    ``raise_on_insert`` / ``raise_on_update`` inject a StoragePortError so the engine's
+    fail-closed storage handling (HALT, never raise out of run()) can be proven.
+    """
+
+    def __init__(
+        self, *, raise_on_insert: bool = False, raise_on_update: bool = False
+    ) -> None:
         self.by_key: dict[tuple[str, str], Action] = {}
         self.update_calls: list[Action] = []
+        self.raise_on_insert = raise_on_insert
+        self.raise_on_update = raise_on_update
 
     async def insert_if_absent(self, action: Action) -> Action | None:
+        if self.raise_on_insert:
+            raise StoragePortError("injected insert fault")
         k = (str(action.tenant), str(action.idempotency_key))
         if k in self.by_key:
             return self.by_key[k]
@@ -66,6 +77,8 @@ class FakeActionRepository:
         return None
 
     async def update_state(self, action: Action) -> None:
+        if self.raise_on_update:
+            raise StoragePortError("injected update fault")
         self.update_calls.append(action)
         self.by_key[(str(action.tenant), str(action.idempotency_key))] = action
 
@@ -157,6 +170,9 @@ class FakeLedger:
         )
         self.sealed.append(entry)
         return entry
+
+    def get_entries(self, tenant: TenantId) -> list[LedgerEntry]:
+        return [e for e in self.sealed if str(e.tenant) == str(tenant)]
 
 
 class FakeEvents:
