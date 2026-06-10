@@ -27,7 +27,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" />
   <img src="https://img.shields.io/badge/RFC%206962-compliant-2962FF?style=flat-square" />
-  <img src="https://img.shields.io/badge/tests-402%20passing-00C853?style=flat-square" />
+  <img src="https://img.shields.io/badge/tests-532%20passing-00C853?style=flat-square" />
   <img src="https://img.shields.io/badge/fail--closed-by%20design-6C3AED?style=flat-square" />
   <img src="https://img.shields.io/badge/license-proprietary-555?style=flat-square" />
 </p>
@@ -177,18 +177,20 @@ Three delivery modes. Three customer profiles. One kernel.
 
 **For: AI agencies & product teams**
 
-Embed governance with a single decorator.
+Govern an existing function — no signature change.
 
 ```python
-from quaicu_kernel import Kernel
+from delivery.sdk import Kernel
 
-kernel = Kernel(config="quaicu.yaml")
+kernel = Kernel.from_config("kernel.toml")
 
-@kernel.governed
+@kernel.guard(policy="loan.approve")
 async def approve_loan(application):
-    # your logic — the kernel
-    # runs the whole lifecycle
-    ...
+    ...                       # unchanged
+
+# set the actor once at the boundary
+async with kernel.actor_context(user):
+    await approve_loan(app)   # call-site unchanged
 ```
 
 </td>
@@ -201,14 +203,16 @@ async def approve_loan(application):
 Standard OpenAPI. Any language.
 
 ```bash
-POST /kernel/v1/actions/propose
+POST /v1/authorize          # or /v1/actions/propose
+Authorization: Bearer <jwt>
 Content-Type: application/json
 
 {
   "type": "loan.approve",
-  "payload": { ... },
-  "actor": "user:analyst-42"
+  "payload": { ... }
 }
+# actor is resolved from the
+# token — never sent in the body
 ```
 
 </td>
@@ -300,21 +304,37 @@ These aren't aspirational. They're **property-tested in CI on every commit.**
 
 ## 📊 Build Status
 
-All 14 governance layers are built and green. **402 tests** passing across unit, conformance, and SDK end-to-end suites. Postgres storage adapter, OpenBao signer, Docker image, and Helm chart shipped.
+All 14 governance layers and the delivery phase are built and green. **532 tests** passing across unit, conformance, and SDK end-to-end suites. Postgres storage + policy adapters, OpenBao signer, Docker image, Helm chart, and CI/signed-release pipeline shipped.
 
 <sub>✅ Shipped · 🔨 In progress · 📋 Planned</sub>
 
 | Layer | Status | Notes |
 |---|---|---|
 | Spine · Ports · Types | ✅ **Shipped** | Lifecycle engine, all ports (inference/hitl/identity/storage/workflow/consent), frozen shared types |
-| K·01 Policy Engine | ✅ **Shipped** | CEL evaluation, total conflict resolution, unit + conformance suites |
+| K·01 Policy Engine | ✅ **Shipped** | CEL evaluation, total conflict resolution; config-wireable + **durable policy store** (write-through cache, Postgres) |
 | K·02 TrustLedger | ✅ **Shipped** | RFC 6962 Merkle tree, Ed25519 STH, inclusion/consistency proofs, conformance suite |
-| K·03 HITL Gate | ✅ **Shipped** | Approval routing, fail-closed timeout, conformance suite |
-| K·04 DPDP Consent | 🔨 **In progress** | Purpose-based consent engine implemented; conformance suite pending |
-| K·05 AI Gateway | ✅ **Shipped** | PII masking, model routing, budget enforcement, prompt logging, conformance suite |
-| K·06 Process Engine | 🔨 **In progress** | Durable process model and step machine taking shape |
+| K·03 HITL Gate | ✅ **Shipped** | Approval routing, role-based authz + self-approval guard, fail-closed timeout |
+| K·04 DPDP Consent | ✅ **Shipped** | Purpose-bound consent, fail-closed on missing/expired/withdrawn, standalone composable layer |
+| K·05 AI Gateway | ✅ **Shipped** | PII masking, model routing, budget, prompt logging; wired to `kernel.generate()` + `/v1/inference` |
+| K·06 Process Engine | ✅ **Shipped** | Durable process/step machine (in-memory adapter; Temporal pending) |
 | K·07 Event Bus | ✅ **Shipped** | Emit-after-seal event bus with conformance suite |
-| K·08 – K·14 | 📋 **Planned** | Registry, Fairness, Drift, Explainability, Incident, Sandbox, RegMap — net-new, no prior implementation |
+| K·08 Model Registry | ✅ **Shipped** | Per-tenant model allowlists enforced by the gateway |
+| K·09 Fairness | ✅ **Shipped** | Bias/fairness sweeps over recorded decisions |
+| K·10 Drift Monitor | ✅ **Shipped** | Decision/model drift against a recorded baseline |
+| K·11 Explainability | ✅ **Shipped** | Point-in-time explanations from recorded inputs, no model re-call |
+| K·12 Incident Engine | ✅ **Shipped** | Rollback as a governed action |
+| K·13 Sandbox | ✅ **Shipped** | Counterfactual replay / backtest of candidate policies |
+| K·14 Regulatory Mapping | ✅ **Shipped** | Policy→regulation mapping + signed evidence packs |
+| Delivery (SDK · REST · Docker · Helm) | ✅ **Shipped** | `Kernel` SDK, FastAPI app + routes, Postgres adapters, OpenBao signer, CI/signed releases |
+
+**Recent capability waves** (see `docs/adr/`):
+
+| Capability | Status | Notes |
+|---|---|---|
+| Composable governance ([ADR-0002](New/quaicu-kernel/docs/adr/0002-composable-governance-profile.md)) | ✅ **Shipped** | `GovernanceProfile` — enforce each layer independently, as a pack, or all; presets + per-action config |
+| Decision-only authorize / monitor ([ADR-0003](New/quaicu-kernel/docs/adr/0003-decision-only-authorization-surface.md)) | ✅ **Shipped** | `kernel.check()` / `POST /v1/authorize` (pure PDP) + reference enforcement-point middleware |
+| Zero-friction integration ([ADR-0004](New/quaicu-kernel/docs/adr/0004-zero-friction-integration.md)) | ✅ **Shipped** | `@kernel.guard` / `kernel.wrap` / `kernel.proxy` + `actor_context` — no signature or call-site changes |
+| Policy management API + dashboards | 🔨 **In progress** | Durable store + SDK write-through shipped ([ADR-0005](New/quaicu-kernel/docs/adr/0005-durable-policy-store-write-through.md)); HTTP CRUD routes, simulate, and read-models next |
 
 <br/>
 
@@ -330,7 +350,7 @@ All 14 governance layers are built and green. **402 tests** passing across unit,
 # 1. install dependencies (from the repo root)
 pip install -e .
 
-# 2. run the kernel test suite (402 tests)
+# 2. run the kernel test suite (532 tests)
 cd New/quaicu-kernel
 pytest
 
@@ -385,20 +405,32 @@ Kernel/
     │   ├── types.py                #     frozen shared value types
     │   ├── errors.py               #     kernel error hierarchy
     │   ├── ports/                  #     port interfaces — core depends ONLY on these
-    │   ├── lifecycle/              #     the governance spine (propose→…→emit)
-    │   ├── policy/                 #     K·01 — Policy Engine (CEL)
+    │   ├── lifecycle/              #     spine + GovernanceProfile + decision-only path
+    │   ├── policy/                 #     K·01 — Policy Engine (CEL) + durable repository port
     │   ├── ledger/                 #     K·02 — TrustLedger (RFC 6962)
     │   ├── hitl/                   #     K·03 — Human-in-the-Loop Gate
     │   ├── consent/                #     K·04 — DPDP Consent
     │   ├── gateway/                #     K·05 — AI Gateway
     │   ├── process/                #     K·06 — Process Engine
-    │   └── events/                 #     K·07 — Event Bus
+    │   ├── events/                 #     K·07 — Event Bus
+    │   ├── registry/               #     K·08 — Model Registry
+    │   ├── fairness/               #     K·09 — Fairness sweeps
+    │   ├── drift/                  #     K·10 — Drift Monitor
+    │   ├── explain/                #     K·11 — Explainability
+    │   ├── incident/               #     K·12 — Incident Engine
+    │   ├── sandbox/                #     K·13 — Counterfactual Sandbox
+    │   └── regmap/                 #     K·14 — Regulatory Mapping
+    ├── adapters/                   #   pluggable, selected by config (never imported by core)
+    │   ├── policy/ inference/ hitl/ identity/ storage/ ledger/ events/ workflow/
+    ├── delivery/                   #   thin wrappers over core
+    │   ├── sdk/                     #     Kernel SDK: guard/wrap/proxy/generate/check/for_agent
+    │   └── api/                     #     FastAPI app, routes, governance middleware (PEP)
     ├── tests/
     │   ├── conformance/            #     spec-derived golden suites per layer
     │   └── unit/                   #     unit tests
     ├── docs/
     │   ├── BUILD_JOURNAL.md        #     chronological build decisions
-    │   └── adr/                    #     Architecture Decision Records
+    │   └── adr/                    #     Architecture Decision Records (0001–0005)
     └── CODEOWNERS                  #     per-layer ownership
 ```
 
