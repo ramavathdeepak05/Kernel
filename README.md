@@ -398,7 +398,7 @@ Kernel/
 ├── README.md                       # this page
 ├── AGENTS.md                       # the multi-agent working agreement (read first)
 ├── SKILLS.md                       # directory → skill routing map (read-first protocol)
-├── QUAICU_Kernel_Build_Spec.md     # the authoritative build specification
+├── "QUAICU_Kernel_Build_Spec (1).md"  # the authoritative build specification
 ├── .agents/skills/                 # curated skill library (quaicu-* layer + stack skills)
 └── New/quaicu-kernel/              # ── the kernel package ──
     ├── core/                       #   zero domain imports, zero concrete deps

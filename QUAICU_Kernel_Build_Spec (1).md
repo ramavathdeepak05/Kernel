@@ -108,6 +108,8 @@ These are foundational. Each underpins multiple other parts of the system, so re
 
 If a customer requirement appears to need violating one of these, the requirement is met through the adapter, config, or content-pack layers — or it is declined. The frozen set is not negotiable per deal.
 
+> **Two ADR tiers — don't confuse them.** F-01–F-11 above are the *frozen* foundational decisions; they live here and only change via the formal supersede process. *Extension* ADRs — design decisions made while building **within** these constraints — are logged separately in `New/quaicu-kernel/docs/adr/` (ADR-0001 froze the code contract surface; ADR-0002+ record composable governance, the decision-only authorization surface, zero-friction integration, and the durable policy store). Extension ADRs must each stay consistent with the frozen set; none supersedes an F-ADR. As of 2026-06-10 every shipped extension upholds F-01–F-11 (e.g. composable profiles are presets, not forks → F-01; the durable policy store keeps CEL, the F-10 activation gate, and config-over-code → F-05/F-10/F-11).
+
 ---
 
 ## 2. Recommended Tech Stack
