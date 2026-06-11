@@ -15,7 +15,9 @@ next cold agent doesn't know it happened.
 ## Current status (2026-06-11)
 
 **All 14 governance layers + the delivery phase are built and green. Suite: 586 tests passing,
-9 skipped.** Six feature waves have landed on top of the core kernel since the Wave-2 milestone
+9 skipped on a bare checkout — and 595 passing / 0 skipped once the real external deps are live
+(the 9 skips are the Postgres + OpenBao integration tests, now validated against a GCP Cloud SQL
+instance and a Dockerized OpenBao; see the top Log entry).** Six feature waves have landed on top of the core kernel since the Wave-2 milestone
 below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
 (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
 layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, and (6) the
@@ -89,6 +91,24 @@ projections + query routes. Full gap list is in the 2026-06-10 "Pre-management-A
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-11 · Integration-environment validation + OpenBao sign fix · adapters/infra** (commits
+  `00b77581`, `5d1edb26`) — Stood up the real external dependencies and ran the integration suites
+  that had only ever been skipped. **Postgres:** provisioned a GCP Cloud SQL instance
+  (`quaicu-pg`, POSTGRES_16, project `ordinal-quarter-499114-s2`), connected via the Cloud SQL Auth
+  Proxy on `localhost:5433` (keyless ADC — org policy blocks downloadable SA keys), ran Alembic
+  migrations, and turned the 5 storage conformance tests green. **OpenBao:** ran `openbao/openbao`
+  dev in Docker, enabled Transit + an `ed25519` `quaicu-ledger` key, and turned the 4 ledger
+  conformance tests green. **Bug found + fixed:** `adapters/ledger/openbao.py` was sending
+  `hash_algorithm="none"` on `transit/sign`, which current OpenBao rejects with 400 (it routes that
+  into an RSA-only prehash validation path — *"requires prehashed=true and signature_algorithm"*).
+  Ed25519 signs the raw message, so the param is now omitted; this would have broken production
+  signing against any recent OpenBao. Unit test `test_openbao_signer.py::test_sign_sends_correct_payload`
+  updated to assert its absence. **With both deps live: 595 passing, 0 skipped.** **Detour (reverted):**
+  briefly built a Cloud KMS ECDSA-P256 `TreeSigner` (`cloudkms_ledger`) as a GCP-native alternative —
+  owner chose to keep OpenBao (Ed25519, portable / on-prem / air-gapped), so the adapter + ADR 0006 +
+  KMS tests were removed and the KMS key scheduled for destruction. OpenBao remains the sole production
+  signer; `.tools/` (proxy binary) and `graphify-out/` gitignored.
 
 - **2026-06-11 · Policy Management HTTP API + control-plane authz · policy/delivery** — Closes
   pre-management-API gaps #3 (no policy CRUD surface) + #6 (no control-plane authz). New route module
