@@ -99,7 +99,9 @@ def test_sign_sends_correct_payload():
     body = call_kwargs[1]["json"]
     expected_b64 = base64.b64encode(_signing_message(TREE_SIZE, ROOT_HASH)).decode("ascii")
     assert body["input"] == expected_b64
-    assert body["hash_algorithm"] == "none"
+    # Ed25519 signs the raw message: no hash_algorithm (it trips OpenBao's
+    # RSA-only prehash validation). See adapters/ledger/openbao.py.
+    assert "hash_algorithm" not in body
 
 
 def test_sign_wraps_http_error_as_ledger_seal_error():

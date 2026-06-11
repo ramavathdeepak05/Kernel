@@ -73,9 +73,12 @@ class OpenBaoTreeSigner:
         msg = _signing_message(tree_size, root_hash)
         b64_input = base64.b64encode(msg).decode("ascii")
         try:
+            # Ed25519 signs the raw message directly — do NOT send hash_algorithm.
+            # (Passing hash_algorithm="none" trips OpenBao's RSA-only prehash
+            # validation path: "requires prehashed=true and signature_algorithm".)
             resp = self._client.post(
                 f"/v1/transit/sign/{self._key_name}",
-                json={"input": b64_input, "hash_algorithm": "none"},
+                json={"input": b64_input},
             )
             resp.raise_for_status()
             signature_str: str = resp.json()["data"]["signature"]
