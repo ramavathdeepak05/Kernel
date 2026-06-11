@@ -53,6 +53,9 @@ def _canonical_bytes(
         "action_type": action.type,
         "tenant": str(action.tenant),
         "actor_id": str(action.actor.id),
+        # Actor roles are sealed alongside actor_id so role-gated policies are point-in-time
+        # replayable (F-09) and the roles are tamper-evident (ADR-0006).
+        "actor_roles": list(action.actor.roles),
         # payload is part of the sealed leaf so post-hoc payload tampering in storage is
         # detectable against the transparency log (F-09). default=str below handles any
         # non-JSON-native value the payload may carry.
@@ -144,6 +147,7 @@ class TrustLedger:
                     approver=approver,
                     consent_state=consent_state,
                     recorded_result=recorded_result if isinstance(recorded_result, dict) else {},
+                    actor_roles=tuple(action.actor.roles),
                 )
 
                 self._entries[tenant].append(entry)

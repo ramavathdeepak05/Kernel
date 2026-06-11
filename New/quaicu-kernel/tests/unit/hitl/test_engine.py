@@ -73,8 +73,8 @@ async def test_poll_returns_pending_initially() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.PENDING
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.PENDING
 
 
 async def test_approve_then_poll_returns_approved() -> None:
@@ -87,8 +87,9 @@ async def test_approve_then_poll_returns_approved() -> None:
     await port.approve(
         handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
     )
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.APPROVED
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.APPROVED
+    assert outcome.decided_by == ActorId("admin")  # ADR-0007: poll surfaces the decider
 
 
 async def test_reject_then_poll_returns_rejected() -> None:
@@ -101,8 +102,8 @@ async def test_reject_then_poll_returns_rejected() -> None:
     await port.reject(
         handle.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
     )
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.REJECTED
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.REJECTED
 
 
 async def test_force_expire_then_poll_returns_timed_out() -> None:
@@ -113,8 +114,8 @@ async def test_force_expire_then_poll_returns_timed_out() -> None:
         tenant=_tenant(),
     )
     await port.force_expire(handle.id)
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.TIMED_OUT
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.TIMED_OUT
 
 
 async def test_zero_timeout_is_immediately_expired() -> None:
@@ -124,8 +125,8 @@ async def test_zero_timeout_is_immediately_expired() -> None:
         approvers=_approvers("role:risk_head"),
         tenant=_tenant(),
     )
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.PENDING
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.PENDING
 
 
 async def test_double_approve_raises() -> None:
@@ -192,8 +193,8 @@ async def test_authorized_user_ref_passes() -> None:
         tenant=_tenant(),
     )
     await port.approve(handle.id, approver_actor_id=ActorId("alice"))
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.APPROVED
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.APPROVED
 
 
 async def test_role_ref_requires_matching_role() -> None:
@@ -207,8 +208,8 @@ async def test_role_ref_requires_matching_role() -> None:
     await port.approve(
         handle.id, approver_actor_id=ActorId("carol"), approver_roles=("role:risk_head",)
     )
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.APPROVED
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.APPROVED
 
 
 async def test_role_gate_rejects_actor_without_role() -> None:
@@ -271,8 +272,8 @@ async def test_tenant_isolation() -> None:
     await port.approve(
         handle_a.id, approver_actor_id=ActorId("admin"), approver_roles=("role:risk_head",)
     )
-    assert await port.poll(handle_a) is ApprovalDecision.APPROVED
-    assert await port.poll(handle_b) is ApprovalDecision.PENDING
+    assert (await port.poll(handle_a)).decision is ApprovalDecision.APPROVED
+    assert (await port.poll(handle_b)).decision is ApprovalDecision.PENDING
 
 
 async def test_handle_id_is_unique_per_request() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 
 from core.hitl.model import ApprovalRecord
-from core.types import ActionId
+from core.types import ActionId, ApprovalDecision
 
 
 class ApprovalStore:
@@ -33,3 +33,12 @@ class ApprovalStore:
             if handle_id is None:
                 return None
             return self._by_handle.get(handle_id)
+
+    def pending_count(self) -> int:
+        """Number of approval records still awaiting a decision (HITL queue depth)."""
+        with self._lock:
+            return sum(
+                1
+                for r in self._by_handle.values()
+                if r.decision is ApprovalDecision.PENDING
+            )

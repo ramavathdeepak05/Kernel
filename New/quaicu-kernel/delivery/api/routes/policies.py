@@ -19,6 +19,9 @@ empty fail-closed store could never register its first policy if CRUD were itsel
 
 from __future__ import annotations
 
+from typing import Any
+
+from celpy import celtypes
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from core.errors import (
@@ -27,7 +30,11 @@ from core.errors import (
     PolicyCompileError,
     PolicyTransitionError,
 )
+from core.fairness.engine import compute_fairness_delta, compute_fairness_metrics
+from core.fairness.model import DecisionRecord
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
+from core.sandbox.bridge import assemble_impact_report
+from core.sandbox.engine import run_counterfactual_backtest
 from core.types import ApproverRef, Actor, Decision, RequestContext
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import (
@@ -37,6 +44,8 @@ from delivery.api.schemas import (
     PolicyListResponse,
     PolicyRegisterRequest,
     PolicyResponse,
+    SimulateRequest,
+    SimulateResponse,
 )
 from delivery.sdk.kernel import Kernel
 
@@ -157,6 +166,64 @@ def _impact_report_response(report: ImpactReport) -> ImpactReportResponse:
         fairness_delta=report.fairness_delta,
         acknowledged=report.acknowledged,
     )
+
+
+def _cel_activation(
+    action_type: str, payload: dict[str, Any], actor_id: str, actor_roles: tuple[str, ...]
+) -> dict[str, Any]:
+    """Build a dot-free CEL activation from a recorded action's type, payload, and actor identity.
+
+    Mirrors ``core/policy/evaluator._build_activation``'s payload flattening (``payload_<key>``)
+    and its bare ``actor_id`` / ``actor_roles`` variables. Both actor fields are replayed from the
+    sealed ``LedgerEntry`` (``actor_id`` + ``actor_roles``, sealed under ADR-0006), so candidate
+    policies that gate on the actor re-evaluate faithfully.
+    """
+    activation: dict[str, Any] = {
+        "action_type": celtypes.StringType(action_type),
+        "actor_id": celtypes.StringType(actor_id),
+        "actor_roles": celtypes.ListType([celtypes.StringType(r) for r in actor_roles]),
+    }
+    for key, val in payload.items():
+        cel_key = f"payload_{key}"
+        if isinstance(val, bool):
+            activation[cel_key] = celtypes.BoolType(val)
+        elif isinstance(val, int):
+            activation[cel_key] = celtypes.IntType(val)
+        elif isinstance(val, float):
+            activation[cel_key] = celtypes.DoubleType(val)
+        elif isinstance(val, str):
+            activation[cel_key] = celtypes.StringType(val)
+        else:
+            activation[cel_key] = celtypes.StringType(str(val))
+    return activation
+
+
+def _candidate_evaluator(envelope: PolicyEnvelope):
+    """Return a side-effect-free CandidateEvaluator that re-derives this policy's decision.
+
+    Fail-closed: a missing compiled program or any CEL fault scores the entry as ``"deny"`` —
+    a backtest must never silently treat an un-evaluable entry as allowed.
+    """
+
+    def evaluate(
+        action_type: str,
+        payload: dict[str, Any],
+        recorded_outputs: dict[str, Any],
+        actor_id: str,
+        actor_roles: tuple[str, ...],
+    ) -> str:
+        prog = envelope.compiled_condition
+        if prog is None:
+            return Decision.DENY.value
+        try:
+            matched = bool(prog.evaluate(_cel_activation(action_type, payload, actor_id, actor_roles)))
+        except Exception:  # noqa: BLE001 — any CEL fault → fail-closed deny in the shadow run
+            return Decision.DENY.value
+        # Condition true → this policy's decision applies; false → it does not govern, so the
+        # action would fall through to a fail-closed deny (no other policy is simulated here).
+        return envelope.decision.value if matched else Decision.DENY.value
+
+    return evaluate
 
 
 def _get_or_404(kernel: Kernel, policy_id: str, version: int) -> PolicyEnvelope:
@@ -320,6 +387,98 @@ async def activate_policy(
     except PolicyActivationError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code, "detail": exc.detail})
     return _policy_response(env)
+
+
+@router.post(
+    "/{policy_id}/versions/{version}/simulate",
+    response_model=SimulateResponse,
+    summary="Backtest a REVIEW policy and assemble an F-10 impact report",
+)
+async def simulate_policy(
+    policy_id: str, version: int, body: SimulateRequest, request: Request
+) -> SimulateResponse:
+    """Run a K·13 counterfactual backtest and assemble the F-10 ImpactReport.
+
+    Re-evaluates the candidate policy version against the tenant's sealed ledger entries (no
+    model re-calls — recorded outputs are reused, F-09), assembles an ImpactReport from the
+    flip statistics (and an optional K·09 fairness sweep), and optionally stores it. The
+    assembled report is NOT acknowledged — activation still requires a reviewer to acknowledge
+    it. 404 if the policy is absent; 409 if it is not in REVIEW.
+    """
+    kernel, _ = await _require_policy_admin(request)
+    envelope = _get_or_404(kernel, policy_id, version)
+    if envelope.lifecycle is not PolicyLifecycle.REVIEW:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": f"Policy {policy_id}@v{version} is {envelope.lifecycle.value}; "
+                "only REVIEW policies can be simulated.",
+                "code": "POLICY_NOT_IN_REVIEW",
+                "detail": {"lifecycle": envelope.lifecycle.value},
+            },
+        )
+
+    ledger = kernel.engine._ledger  # type: ignore[attr-defined]
+    entries = ledger.get_entries(kernel.tenant)
+
+    run, shadow = run_counterfactual_backtest(
+        entries=entries,
+        candidate_evaluator=_candidate_evaluator(envelope),
+        policy_id=policy_id,
+        policy_version=str(version),
+        tenant_id=str(kernel.tenant),
+    )
+
+    fairness_delta = None
+    if body.group_key and entries:
+        entry_by_id = {str(e.action_id): e for e in entries}
+        active_records: list[DecisionRecord] = []
+        candidate_records: list[DecisionRecord] = []
+        for sd in shadow:
+            entry = entry_by_id.get(sd.action_id)
+            if entry is None:
+                continue
+            group_value = str(entry.recorded_result.get(body.group_key, "__unknown__"))
+            active_records.append(
+                DecisionRecord(
+                    action_id=sd.action_id,
+                    tenant_id=sd.tenant_id,
+                    decision=sd.active_decision,
+                    group_value=group_value,
+                )
+            )
+            candidate_records.append(
+                DecisionRecord(
+                    action_id=sd.action_id,
+                    tenant_id=sd.tenant_id,
+                    decision=sd.candidate_decision,
+                    group_value=group_value,
+                )
+            )
+        active_metrics = compute_fairness_metrics(active_records, body.group_key, str(kernel.tenant))
+        candidate_metrics = compute_fairness_metrics(
+            candidate_records, body.group_key, str(kernel.tenant)
+        )
+        fairness_delta = compute_fairness_delta(active_metrics, candidate_metrics)
+
+    report = assemble_impact_report(
+        run, reviewed_by=body.reviewed_by, fairness_delta=fairness_delta
+    )
+
+    stored = False
+    if body.auto_store:
+        await kernel.store_policy_impact_report(report)
+        stored = True
+
+    return SimulateResponse(
+        impact_report=_impact_report_response(report),
+        run_id=run.run_id,
+        ledger_entries_evaluated=run.ledger_entries_evaluated,
+        decisions_flipped=run.decisions_flipped,
+        flip_rate=run.flip_rate,
+        fairness_delta=fairness_delta.max_delta if fairness_delta is not None else None,
+        stored=stored,
+    )
 
 
 @router.post(

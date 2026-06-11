@@ -174,6 +174,21 @@ class Kernel:
         """True if the CEL policy engine is wired — i.e. policies can be authored/persisted."""
         return self.policy_store is not None
 
+    @property
+    def hitl_queue_depth(self) -> int:
+        """Number of HITL approvals still pending (dashboard read-model).
+
+        Only the in-process HITL adapter exposes a queryable store; for any other adapter
+        (e.g. a webhook adapter whose queue lives in an external system) this returns 0 — the
+        dashboard should source that depth from the external system in that deployment.
+        """
+        from core.hitl.engine import InProcessHITLPort
+
+        hitl = self.engine._hitl  # type: ignore[attr-defined]
+        if isinstance(hitl, InProcessHITLPort):
+            return hitl._store.pending_count()
+        return 0
+
     # ── Lifecycle hooks (startup / shutdown) ─────────────────────────────────────
 
     async def startup(self) -> None:

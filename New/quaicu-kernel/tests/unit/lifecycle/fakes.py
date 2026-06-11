@@ -24,6 +24,7 @@ from core.types import (
     ActorId,
     ApprovalDecision,
     ApprovalHandle,
+    ApprovalOutcome,
     ApproverRef,
     Decision,
     EvaluationResult,
@@ -117,12 +118,20 @@ class FakePolicy:
 
 
 class FakeHITL:
-    """Returns a configured approval decision; can raise to simulate a port outage."""
+    """Returns a configured approval decision; can raise to simulate a port outage.
+
+    ``decided_by`` configures the approver identity surfaced on the outcome (defaults to a fixed
+    actor) so the lifecycle's approver-capture (ADR-0007) can be exercised."""
 
     def __init__(
-        self, *, decision: ApprovalDecision = ApprovalDecision.APPROVED, raise_exc: bool = False
+        self,
+        *,
+        decision: ApprovalDecision = ApprovalDecision.APPROVED,
+        decided_by: ActorId | None = ActorId("approver-1"),
+        raise_exc: bool = False,
     ) -> None:
         self.decision = decision
+        self.decided_by = decided_by
         self.raise_exc = raise_exc
         self.requested = False
 
@@ -134,8 +143,8 @@ class FakeHITL:
         self.requested = True
         return ApprovalHandle(id="appr-1", tenant=tenant)
 
-    async def poll(self, handle: ApprovalHandle) -> ApprovalDecision:
-        return self.decision
+    async def poll(self, handle: ApprovalHandle) -> ApprovalOutcome:
+        return ApprovalOutcome(self.decision, decided_by=self.decided_by)
 
 
 class FakeLedger:

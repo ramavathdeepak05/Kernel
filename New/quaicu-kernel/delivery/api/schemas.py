@@ -223,3 +223,86 @@ class ImpactReportResponse(BaseModel):
     flip_count: int
     fairness_delta: float
     acknowledged: bool
+
+
+class SimulateRequest(BaseModel):
+    """Body for POST /v1/policies/{id}/versions/{v}/simulate.
+
+    Runs a K·13 counterfactual backtest of the candidate policy version against the tenant's
+    sealed ledger entries, assembles an F-10 ImpactReport, and (optionally) stores it. The
+    assembled report is NOT acknowledged — a reviewer must acknowledge it before activation.
+    """
+
+    reviewed_by: str = Field(..., description="Reviewer identity recorded on the assembled report")
+    group_key: str | None = Field(
+        None,
+        description="Protected-attribute payload key; when set, a K·09 fairness sweep is run "
+        "and its max delta is recorded on the report",
+    )
+    auto_store: bool = Field(
+        False, description="Persist the assembled report immediately so activate can reference it"
+    )
+
+
+class SimulateResponse(BaseModel):
+    """Response for the simulate endpoint — the assembled report plus the backtest stats."""
+
+    impact_report: ImpactReportResponse
+    run_id: str
+    ledger_entries_evaluated: int
+    decisions_flipped: int
+    flip_rate: float
+    fairness_delta: float | None = None
+    stored: bool
+
+
+# ── Dashboard read-models ───────────────────────────────────────────────────────────
+
+
+class DashboardOverviewResponse(BaseModel):
+    """Aggregate governance snapshot for a tenant."""
+
+    tenant: str
+    total_governed: int
+    decision_counts: dict[str, int]
+    denial_rate: float
+    last_ledger_seq: int | None = None
+
+
+class DayBucket(BaseModel):
+    """Decision counts for a single UTC day."""
+
+    date: str  # YYYY-MM-DD
+    decision_counts: dict[str, int]
+    total: int
+
+
+class DecisionTimelineResponse(BaseModel):
+    """Per-day decision counts over a trailing window."""
+
+    tenant: str
+    window_days: int
+    buckets: list[DayBucket]
+
+
+class TopActionEntry(BaseModel):
+    """One action type with its volume and denial count."""
+
+    action_type: str
+    total: int
+    denials: int
+
+
+class TopActionsResponse(BaseModel):
+    """Top action types by volume and by denial count."""
+
+    tenant: str
+    by_volume: list[TopActionEntry]
+    by_denials: list[TopActionEntry]
+
+
+class HitlQueueResponse(BaseModel):
+    """Current HITL approval queue depth."""
+
+    tenant: str
+    pending: int
