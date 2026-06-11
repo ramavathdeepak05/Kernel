@@ -1,6 +1,14 @@
 # Claude Code machine-local settings (never share — absolute paths, local permissions)
 .claude/settings.local.json
 
+# Local tooling + secrets (never commit — proxy binary, SA keys, ADC creds)
+.tools/
+*-sa-key.json
+*.credentials.json
+
+# graphify output
+graphify-out/
+
 # Python
 __pycache__/
 *.py[cod]
