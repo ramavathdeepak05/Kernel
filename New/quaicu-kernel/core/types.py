@@ -167,6 +167,10 @@ class LedgerEntry:
     consent_state: Mapping[str, Any] = field(default_factory=dict)
     recorded_result: Mapping[str, Any] = field(default_factory=dict)
     recorded_outputs: Mapping[str, Any] = field(default_factory=dict)
+    # The actor's roles at seal time. Sealed into the Merkle leaf alongside `actor_id` so a
+    # point-in-time replay (and the K·13 counterfactual backtest) can re-evaluate policies that
+    # gate on roles. Added under ADR-0006 (ADR-0001 incremental-freeze rule).
+    actor_roles: tuple[str, ...] = ()
 
 
 # ── Inference types (K·05 / InferencePort) ───────────────────────────────────────
@@ -211,6 +215,18 @@ class ApprovalHandle:
     id: str
     tenant: TenantId
     created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ApprovalOutcome:
+    """The result of polling a HITL gate: the decision and who made it (K·03).
+
+    `decided_by` is the approver's actor id when the gate has been decided (APPROVED/REJECTED by a
+    known actor); it is None while PENDING or on a TIMED_OUT with no decider. The lifecycle seals it
+    as the approving identity on the `LedgerEntry` (ADR-0007)."""
+
+    decision: ApprovalDecision
+    decided_by: ActorId | None = None
 
 
 # ── Workflow types (K·06 / WorkflowPort) ─────────────────────────────────────────

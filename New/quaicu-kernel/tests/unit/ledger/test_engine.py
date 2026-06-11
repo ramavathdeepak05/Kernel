@@ -77,6 +77,24 @@ async def test_seal_returns_ledger_entry() -> None:
     assert isinstance(entry.sealed_at, datetime)
 
 
+async def test_seal_records_actor_roles() -> None:
+    # ADR-0006: the actor's roles are sealed on the entry (and into the leaf) so role-gated
+    # policies are point-in-time replayable.
+    ledger = TrustLedger()
+    t = _tenant()
+    action = Action(
+        id=ActionId("act-roles"),
+        type="test.action",
+        payload={},
+        actor=Actor(id=ActorId("actor-1"), tenant=t, roles=("role:risk_head", "role:maker")),
+        tenant=t,
+        idempotency_key=IdempotencyKey("idem-roles"),
+        state=ActionState.SEALING,
+    )
+    entry = await ledger.seal(action=action, evaluation=_evaluation(), recorded_result={})
+    assert entry.actor_roles == ("role:risk_head", "role:maker")
+
+
 async def test_sequential_seals_increment_seq() -> None:
     ledger = TrustLedger()
     t = _tenant()

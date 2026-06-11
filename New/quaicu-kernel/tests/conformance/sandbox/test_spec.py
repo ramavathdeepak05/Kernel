@@ -41,7 +41,7 @@ def test_backtest_uses_recorded_outputs_not_live_model():
     """F-09: evaluator receives recorded_outputs, not a live model call."""
     received = []
 
-    def capture(action_type, payload, recorded_outputs):
+    def capture(action_type, payload, recorded_outputs, actor_id, actor_roles):
         received.append(recorded_outputs)
         return "allow"
 
@@ -61,7 +61,7 @@ def test_cross_tenant_entries_excluded_from_backtest():
         _entry("act-b", Decision.DENY, tenant="evil-bank"),
     ]
     run, decisions = run_counterfactual_backtest(
-        entries=entries, candidate_evaluator=lambda t, p, o: "allow",
+        entries=entries, candidate_evaluator=lambda t, p, o, a, r: "allow",
         policy_id="p", policy_version="v2", tenant_id=TENANT,
     )
     assert run.ledger_entries_evaluated == 1
@@ -77,7 +77,7 @@ def test_flip_rate_available_for_impact_report():
         _entry("act-3", Decision.ALLOW),
     ]
     run, _ = run_counterfactual_backtest(
-        entries=entries, candidate_evaluator=lambda t, p, o: "allow",
+        entries=entries, candidate_evaluator=lambda t, p, o, a, r: "allow",
         policy_id="p", policy_version="v2", tenant_id=TENANT,
     )
     assert run.decisions_flipped == 2
@@ -89,7 +89,7 @@ def test_backtest_is_deterministic():
     """F-09: same entries + same evaluator → same flip counts every run."""
     entries = [_entry("act-1", Decision.DENY), _entry("act-2", Decision.ALLOW)]
     kwargs = dict(
-        entries=entries, candidate_evaluator=lambda t, p, o: "allow",
+        entries=entries, candidate_evaluator=lambda t, p, o, a, r: "allow",
         policy_id="p", policy_version="v2", tenant_id=TENANT,
     )
     run1, _ = run_counterfactual_backtest(**kwargs)
@@ -101,7 +101,7 @@ def test_backtest_is_deterministic():
 @pytest.mark.conformance
 def test_backtest_run_type_is_backtest():
     run, _ = run_counterfactual_backtest(
-        entries=[], candidate_evaluator=lambda t, p, o: "allow",
+        entries=[], candidate_evaluator=lambda t, p, o, a, r: "allow",
         policy_id="p", policy_version="v1", tenant_id=TENANT,
     )
     assert run.run_type == "backtest"

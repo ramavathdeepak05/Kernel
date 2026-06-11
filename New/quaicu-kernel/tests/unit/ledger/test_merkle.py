@@ -49,6 +49,40 @@ def test_empty_tree_root() -> None:
     assert t.root() == expected
 
 
+def test_append_leaf_hash_rebuilds_equivalent_tree() -> None:
+    # Rehydrating a tree from stored leaf hashes yields the same root as the original.
+    original = _build_tree(5)
+    stored = list(original._leaves)  # leaf hashes as persisted
+    rebuilt = MerkleTree()
+    for lh in stored:
+        rebuilt.append_leaf_hash(lh)
+    assert rebuilt.size == original.size
+    assert rebuilt.root() == original.root()
+
+
+def test_append_leaf_hash_returns_index() -> None:
+    t = MerkleTree()
+    assert t.append_leaf_hash(leaf_hash(b"a")) == 0
+    assert t.append_leaf_hash(leaf_hash(b"b")) == 1
+
+
+def test_pop_last_restores_prior_root() -> None:
+    t = _build_tree(3)
+    root_before = t.root()
+    t.append(b"entry-3")
+    assert t.root() != root_before
+    t.pop_last()
+    assert t.size == 3
+    assert t.root() == root_before
+
+
+def test_pop_last_on_empty_raises() -> None:
+    import pytest
+
+    with pytest.raises(IndexError):
+        MerkleTree().pop_last()
+
+
 def test_single_leaf_root() -> None:
     entry = b"hello"
     t = MerkleTree()

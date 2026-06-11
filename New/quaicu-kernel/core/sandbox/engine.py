@@ -12,7 +12,6 @@ Rules:
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -23,8 +22,10 @@ from core.types import LedgerEntry
 class CandidateEvaluator(Protocol):
     """Callable that evaluates a recorded action payload against the candidate policy.
 
-    Must be deterministic and side-effect-free. Receives the recorded payload and
-    recorded outputs (so no model re-call is needed). Returns the candidate decision string.
+    Must be deterministic and side-effect-free. Receives the recorded payload, recorded outputs,
+    and the recorded actor identity (id + roles) so no model re-call is needed and policies that
+    gate on the actor can be faithfully replayed (``actor_id`` / ``actor_roles`` are sealed on the
+    ``LedgerEntry`` — see ADR-0006). Returns the candidate decision string.
     """
 
     def __call__(
@@ -32,6 +33,8 @@ class CandidateEvaluator(Protocol):
         action_type: str,
         payload: dict[str, Any],
         recorded_outputs: dict[str, Any],
+        actor_id: str,
+        actor_roles: tuple[str, ...],
     ) -> str: ...
 
 
@@ -62,6 +65,8 @@ def run_counterfactual_backtest(
             entry.action_type,
             dict(entry.recorded_result),
             dict(entry.recorded_outputs),
+            str(entry.actor_id),
+            tuple(entry.actor_roles),
         )
         active_decision = entry.decision.value
         did_flip = candidate_decision != active_decision

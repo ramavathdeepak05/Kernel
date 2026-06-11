@@ -47,8 +47,8 @@ async def test_require_approval_suspends_durably() -> None:
         tenant=TenantId("conf-tenant"),
     )
     for _ in range(5):
-        decision = await port.poll(handle)
-        assert decision is ApprovalDecision.PENDING
+        outcome = await port.poll(handle)
+        assert outcome.decision is ApprovalDecision.PENDING
 
     record = port.get_record(handle.id)
     assert record is not None
@@ -67,10 +67,10 @@ async def test_timeout_resolves_fail_closed() -> None:
         tenant=TenantId("conf-tenant"),
     )
     await port.force_expire(handle.id)
-    decision = await port.poll(handle)
-    assert decision is ApprovalDecision.TIMED_OUT
-    assert decision is not ApprovalDecision.APPROVED
-    assert decision != ApprovalDecision.APPROVED
+    outcome = await port.poll(handle)
+    assert outcome.decision is ApprovalDecision.TIMED_OUT
+    assert outcome.decision is not ApprovalDecision.APPROVED
+    assert outcome.decision != ApprovalDecision.APPROVED
 
 
 @pytest.mark.conformance

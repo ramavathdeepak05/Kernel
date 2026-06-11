@@ -33,6 +33,7 @@ from core.errors import (
 from delivery.api.middleware import GovernanceMiddleware
 from delivery.api.routes.actions import router as actions_router
 from delivery.api.routes.authorize import router as authorize_router
+from delivery.api.routes.dashboard import router as dashboard_router
 from delivery.api.routes.inference import router as inference_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
@@ -82,6 +83,7 @@ def create_app(
     app.include_router(inference_router)
     app.include_router(ledger_router)
     app.include_router(policies_router)
+    app.include_router(dashboard_router)
 
     # Optional reference PEP: governance enforcement middleware.
     # Wired only when the caller explicitly passes enforce_paths so existing tests are unaffected.

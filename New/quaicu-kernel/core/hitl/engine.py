@@ -7,7 +7,15 @@ from datetime import UTC, datetime, timedelta
 from core.errors import HITLPortError
 from core.hitl.model import ApprovalRecord
 from core.hitl.store import ApprovalStore
-from core.types import Action, ActorId, ApprovalDecision, ApprovalHandle, ApproverRef, TenantId
+from core.types import (
+    Action,
+    ActorId,
+    ApprovalDecision,
+    ApprovalHandle,
+    ApprovalOutcome,
+    ApproverRef,
+    TenantId,
+)
 
 log = logging.getLogger("quaicu.hitl")
 
@@ -62,7 +70,7 @@ class InProcessHITLPort:
         )
         return ApprovalHandle(id=handle_id, tenant=tenant, created_at=now)
 
-    async def poll(self, handle: ApprovalHandle) -> ApprovalDecision:
+    async def poll(self, handle: ApprovalHandle) -> ApprovalOutcome:
         record = self._store.get(handle.id)
         if record is None:
             raise HITLPortError(
@@ -70,13 +78,13 @@ class InProcessHITLPort:
                 detail={"handle_id": handle.id},
             )
         if record.decision is not ApprovalDecision.PENDING:
-            return record.decision
+            return ApprovalOutcome(record.decision, decided_by=record.decided_by)
         if record.is_expired(datetime.now(UTC)):
             timed_out = record.with_decision(ApprovalDecision.TIMED_OUT)
             self._store.update(timed_out)
             log.info("HITL timed out: handle=%s action=%s", handle.id, record.action_id)
-            return ApprovalDecision.TIMED_OUT
-        return ApprovalDecision.PENDING
+            return ApprovalOutcome(ApprovalDecision.TIMED_OUT)
+        return ApprovalOutcome(ApprovalDecision.PENDING)
 
     # ── External control (admin / test surface) ──────────────────────────────
 

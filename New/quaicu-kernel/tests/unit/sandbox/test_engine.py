@@ -37,15 +37,15 @@ def _entry(
     )
 
 
-def _always_allow(action_type: str, payload: dict, recorded_outputs: dict) -> str:
+def _always_allow(action_type, payload, recorded_outputs, actor_id, actor_roles) -> str:
     return "allow"
 
 
-def _always_deny(action_type: str, payload: dict, recorded_outputs: dict) -> str:
+def _always_deny(action_type, payload, recorded_outputs, actor_id, actor_roles) -> str:
     return "deny"
 
 
-def _same_as_recorded(action_type: str, payload: dict, recorded_outputs: dict) -> str:
+def _same_as_recorded(action_type, payload, recorded_outputs, actor_id, actor_roles) -> str:
     return "allow"
 
 
@@ -166,7 +166,7 @@ def test_cross_tenant_entries_excluded():
 def test_recorded_outputs_passed_to_evaluator():
     received_outputs = []
 
-    def capture_evaluator(action_type, payload, recorded_outputs):
+    def capture_evaluator(action_type, payload, recorded_outputs, actor_id, actor_roles):
         received_outputs.append(dict(recorded_outputs))
         return "allow"
 

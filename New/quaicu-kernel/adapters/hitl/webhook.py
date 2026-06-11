@@ -9,7 +9,6 @@ receiver, not in the kernel. The handle carries the URL to poll.
 
 from __future__ import annotations
 
-import dataclasses
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,8 +17,10 @@ import httpx
 from core.errors import HITLPortError, PortTimeoutError
 from core.types import (
     Action,
+    ActorId,
     ApprovalDecision,
     ApprovalHandle,
+    ApprovalOutcome,
     ApproverRef,
     TenantId,
 )
@@ -100,10 +101,12 @@ class WebhookHITLAdapter:
             created_at=datetime.now(tz=timezone.utc),
         )
 
-    async def poll(self, handle: ApprovalHandle) -> ApprovalDecision:
-        """GET the approval status; map the response to an ApprovalDecision.
+    async def poll(self, handle: ApprovalHandle) -> ApprovalOutcome:
+        """GET the approval status; map the response to an ApprovalOutcome.
 
-        Unknown or error responses are treated as TIMED_OUT (fail-closed).
+        Reads the decider from a ``decided_by`` field in the response body when present, so the
+        approving identity is sealed to the ledger (ADR-0007). Unknown or error responses are
+        treated as TIMED_OUT (fail-closed).
         """
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -112,16 +115,19 @@ class WebhookHITLAdapter:
                     headers=self._headers(),
                 )
         except Exception:
-            return ApprovalDecision.TIMED_OUT  # fail-closed: unreachable webhook → TIMED_OUT
+            return ApprovalOutcome(ApprovalDecision.TIMED_OUT)  # fail-closed: unreachable webhook
 
         if resp.status_code != 200:
-            return ApprovalDecision.TIMED_OUT
+            return ApprovalOutcome(ApprovalDecision.TIMED_OUT)
 
         data: dict[str, Any] = resp.json() if resp.content else {}
         raw = str(data.get("decision", "pending")).lower()
-
-        return {
+        decision = {
             "approved": ApprovalDecision.APPROVED,
             "rejected": ApprovalDecision.REJECTED,
             "timed_out": ApprovalDecision.TIMED_OUT,
         }.get(raw, ApprovalDecision.PENDING)
+
+        raw_decider = data.get("decided_by")
+        decided_by = ActorId(str(raw_decider)) if raw_decider else None
+        return ApprovalOutcome(decision, decided_by=decided_by)

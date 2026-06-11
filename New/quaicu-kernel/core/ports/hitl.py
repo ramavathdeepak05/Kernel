@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from core.types import Action, ApprovalDecision, ApprovalHandle, ApproverRef, TenantId
+from core.types import (
+    Action,
+    ApprovalHandle,
+    ApprovalOutcome,
+    ApproverRef,
+    TenantId,
+)
 
 
 @runtime_checkable
@@ -32,12 +38,14 @@ class HITLPort(Protocol):
         """
         ...
 
-    async def poll(self, handle: ApprovalHandle) -> ApprovalDecision:
+    async def poll(self, handle: ApprovalHandle) -> ApprovalOutcome:
         """Poll for a decision.
 
         Returns:
-            ApprovalDecision: PENDING | APPROVED | REJECTED | TIMED_OUT. TIMED_OUT is a valid
-            terminal outcome the lifecycle treats as REJECTED (fail-closed).
+            ApprovalOutcome: the decision (PENDING | APPROVED | REJECTED | TIMED_OUT) plus
+            `decided_by` — the approver's actor id when known, else None (PENDING, or a TIMED_OUT
+            with no decider). TIMED_OUT is a valid terminal outcome the lifecycle treats as
+            REJECTED (fail-closed). The approver is sealed onto the ledger entry (ADR-0007).
 
         Raises:
             HITLPortError: the poll backend is unreachable.

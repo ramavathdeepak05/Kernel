@@ -30,6 +30,7 @@ from core.types import (
     Action,
     ActionState,
     ApprovalDecision,
+    ApprovalOutcome,
     ApproverRef,
     Decision,
     EvaluationResult,
@@ -414,28 +415,30 @@ class LifecycleEngine:
             handle = await self._hitl.request_approval(
                 action=action, approvers=list(evaluation.approvers), tenant=action.tenant
             )
-            decision = await self._poll_until_decided(handle)
+            outcome = await self._poll_until_decided(handle)
         except Exception as exc:  # noqa: BLE001 — HITL infra failure → HALT (fail-closed)
             return await self._halt(action, "HITL port error — fail-closed halt", exc), None
 
-        if decision is ApprovalDecision.APPROVED:
-            # NOTE: the approving identity is not yet captured — `ApprovalDecision` is a status enum.
-            # Recording WHO approved requires extending the frozen HITL result type; tracked as a
-            # follow-up ADR (see BUILD_JOURNAL). Until then `approver` is None.
-            return action, None
+        if outcome.decision is ApprovalDecision.APPROVED:
+            # Capture WHO approved (ADR-0007): seal the decider as a `user:<id>` approver ref. A
+            # backend that approves without reporting an identity seals approver=None.
+            approver = (
+                ApproverRef(f"user:{outcome.decided_by}") if outcome.decided_by else None
+            )
+            return action, approver
         # REJECTED or TIMED_OUT → fail-closed DENY (never auto-approve on timeout)
-        return await self._deny(action, f"approval {decision.value.lower()}"), None
+        return await self._deny(action, f"approval {outcome.decision.value.lower()}"), None
 
-    async def _poll_until_decided(self, handle: Any) -> ApprovalDecision:
+    async def _poll_until_decided(self, handle: Any) -> ApprovalOutcome:
         attempts = 0
         while attempts < self._max_poll_attempts:
-            decision = await self._hitl.poll(handle)
-            if decision is not ApprovalDecision.PENDING:
-                return decision
+            outcome = await self._hitl.poll(handle)
+            if outcome.decision is not ApprovalDecision.PENDING:
+                return outcome
             attempts += 1
             if self._poll_wait is not None:
                 await self._poll_wait()
-        return ApprovalDecision.TIMED_OUT  # exhausted attempts → fail-closed
+        return ApprovalOutcome(ApprovalDecision.TIMED_OUT)  # exhausted attempts → fail-closed
 
     async def _execute(self, action: Action, execute_fn: ExecuteFn) -> tuple[Action, Any]:
         action, ok = await self._transition(action, ActionState.EXECUTING)

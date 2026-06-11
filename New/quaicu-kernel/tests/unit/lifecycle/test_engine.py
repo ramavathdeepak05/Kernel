@@ -7,7 +7,7 @@ not — a passing test that lets an action through under a fault is itself a def
 from __future__ import annotations
 
 from core.lifecycle.engine import LifecycleEngine
-from core.types import ActionState, ApprovalDecision, Decision
+from core.types import ActionState, ActorId, ApprovalDecision, ApproverRef, Decision
 
 from tests.unit.lifecycle.fakes import (
     Counter,
@@ -66,13 +66,26 @@ async def test_deny_never_executes() -> None:
 async def test_require_approval_approved_completes() -> None:
     engine, _repo, ledger, _events = _engine(
         policy=FakePolicy(decision=Decision.REQUIRE_APPROVAL, approvers=("role:risk_head",)),  # type: ignore[arg-type]
-        hitl=FakeHITL(decision=ApprovalDecision.APPROVED),
+        hitl=FakeHITL(decision=ApprovalDecision.APPROVED, decided_by=ActorId("risk-officer-7")),
     )
     body = Counter()
     result = await engine.run(make_action(), body)
     assert result.state is ActionState.COMPLETED
     assert body.count == 1
     assert len(ledger.sealed) == 1
+    # ADR-0007: the deciding identity is sealed onto the ledger entry as a user ref.
+    assert ledger.sealed[0].approver == ApproverRef("user:risk-officer-7")
+
+
+async def test_require_approval_approved_without_decider_seals_no_approver() -> None:
+    # A backend that approves but reports no identity still completes; approver is None.
+    engine, _repo, ledger, _events = _engine(
+        policy=FakePolicy(decision=Decision.REQUIRE_APPROVAL, approvers=("role:risk_head",)),  # type: ignore[arg-type]
+        hitl=FakeHITL(decision=ApprovalDecision.APPROVED, decided_by=None),
+    )
+    result = await engine.run(make_action(), Counter())
+    assert result.state is ActionState.COMPLETED
+    assert ledger.sealed[0].approver is None
 
 
 async def test_require_approval_rejected_denies_without_execute() -> None:

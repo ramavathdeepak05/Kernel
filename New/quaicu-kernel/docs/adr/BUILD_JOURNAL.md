@@ -14,15 +14,16 @@ next cold agent doesn't know it happened.
 
 ## Current status (2026-06-11)
 
-**All 14 governance layers + the delivery phase are built and green. Suite: 586 tests passing,
-9 skipped on a bare checkout — and 595 passing / 0 skipped once the real external deps are live
-(the 9 skips are the Postgres + OpenBao integration tests, now validated against a GCP Cloud SQL
-instance and a Dockerized OpenBao; see the top Log entry).** Six feature waves have landed on top of the core kernel since the Wave-2 milestone
+**All 14 governance layers + the delivery phase are built and green. Suite: 647 tests passing,
+10 skipped on a bare checkout — and 657 passing / 0 skipped once the real external deps are live
+(the 10 skips are the Postgres + OpenBao integration tests — incl. the new durable-ledger Postgres
+round-trip — now validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the Log).** Seven feature waves have landed on top of the core kernel since the Wave-2 milestone
 below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
 (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
-layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, and (6) the
-Policy Management HTTP API (`/v1/policies`) with route-level control-plane authz. See the Log
-for the per-wave detail. Extension decisions are recorded as ADR-0002…0005 (`docs/adr/`).
+layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the
+Policy Management HTTP API (`/v1/policies`) with route-level control-plane authz, and (7) the
+backtest→ImpactReport simulate bridge + dashboard read-model query routes. See the Log
+for the per-wave detail. Extension decisions are recorded as ADR-0002…0008 (`docs/adr/`).
 
 The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1/authorize`,
 `/v1/inference`, `/v1/ledger`), the Python SDK (`@kernel.guard` / `kernel.wrap` / `kernel.proxy` /
@@ -30,25 +31,26 @@ The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1
 all running over one composable `GovernanceProfile` model with per-agent identity.
 
 ### Next planned work — Policy Management API + Dashboards
-A gap audit (2026-06-10) found six items to close before this work; **gaps #1 (CEL engine not
-config-wireable), #2 (no durable policy store), #3 (no policy CRUD surface) and #6 (no control-plane
-authz) are now CLOSED.** #1+#2 landed in commit `e121a9fe` (ADR-0005); #3+#6 landed 2026-06-11 — the
-`/v1/policies` management API (register/list/versions/get/submit/impact-report/activate/deprecate)
-over the shipped SDK write-through primitives, gated by a route-level policy-admin role check
-(`[governance] policy_admin_roles`). **Still open (dependency-ordered):** #4 backtest→`ImpactReport`
-bridge (K·13 `SandboxRun` + K·09 fairness) + `/v1/policies/{id}/simulate`; #5 dashboard read-models /
-projections + query routes. Full gap list is in the 2026-06-10 "Pre-management-API gap audit" log entry.
+A gap audit (2026-06-10) found six items to close before this work; **all six are now CLOSED.**
+#1 (CEL engine config-wireable) + #2 (durable policy store) landed in commit `e121a9fe` (ADR-0005);
+#3 (policy CRUD surface) + #6 (control-plane authz) landed 2026-06-11 — the `/v1/policies` management
+API gated by a route-level policy-admin role check (`[governance] policy_admin_roles`). #4
+(backtest→`ImpactReport` bridge + `/v1/policies/{id}/versions/{v}/simulate`) and #5 (dashboard
+read-models + `/v1/dashboard` query routes) landed 2026-06-11 (see the top Log entry). Full gap list
+is in the 2026-06-10 "Pre-management-API gap audit" log entry.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
-- **Capture the approving identity (still open).** The lifecycle records *that* a HITL gate was
-  approved but not *who* — `ApprovalDecision` is a status enum. K·03's `ApprovalRecord.decided_by`
-  captures it at the HITL layer, but the approver is not yet threaded into the sealed `LedgerEntry`
-  (the lifecycle passes `approver=None`). Threading it through needs a frozen-surface change → ADR.
+- **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
+  `ApprovalOutcome(decision, decided_by)`; the lifecycle seals the decider as `user:<id>` into
+  `LedgerEntry.approver`, surfaced by the ledger-trail API. See the top Log entry.
 - **K·02 external cryptographic review (still open, pre-sale critical path).** OpenBao signer adapter
-  now provides durable Ed25519 signing, but the tree/entries are still in-memory and the RFC 6962
-  implementation has not had a third-party crypto review (spec §3.4). On the critical path for banks.
-- **Durable ledger persistence.** `OpenBaoLedgerAdapter` wraps an in-memory TrustLedger: durable
-  signing key, ephemeral tree/entries (lost on restart). Needs a persistent tree backend.
+  provides durable Ed25519 signing and the tree/entries are now durably persisted (ADR-0008), but the
+  RFC 6962 implementation has not had a third-party crypto review (spec §3.4). On the critical path
+  for banks.
+- **Durable ledger persistence (CLOSED 2026-06-12, ADR-0008).** `TrustLedger` now write-throughs each
+  sealed entry + STH to a `LedgerRepository` (Postgres adapter + migration 003) and rebuilds itself
+  on `hydrate()` at startup. Remaining ledger hardening: physical per-tenant tables (current design
+  is `tenant_id`-keyed, matching `quaicu_actions`) + the crypto review above.
 - **Policy content packs.** K·14 regmap catalog + K·01 CEL engine exist, but no actual RBI / EU AI
   Act / DPDP rule sets are written. The kernel enforces rules; the rules themselves are unwritten.
 
@@ -81,16 +83,88 @@ projections + query routes. Full gap list is in the 2026-06-10 "Pre-management-A
 | 5 | K·14 Regulatory Mapping | `core/regmap/` | regmap-agent | **done** | K·01, K·02 | §6 (K·14) |
 | ↳ | Delivery (SDK · API · Docker) | `delivery/` | delivery-agent | **done** | per delivered layer | §6, §8 |
 
-> **Forward dependency (now resolved in code):** K·01's activation gate (F-10) needs K·13's
-> counterfactual backtest. K·13 (`run_counterfactual_backtest`) is built, but its `SandboxRun`
-> output is not yet wired to produce the `ImpactReport` that `PolicyStore.activate` consumes — the
-> bridge (SandboxRun + K·09 fairness_delta → ImpactReport) is a pre-management-API item (see 06-10 log).
+> **Forward dependency (RESOLVED 2026-06-11):** K·01's activation gate (F-10) needs K·13's
+> counterfactual backtest. The bridge now exists — `core/sandbox/bridge.assemble_impact_report`
+> turns a `SandboxRun` (+ optional K·09 `FairnessDelta`) into the `ImpactReport` that
+> `PolicyStore.activate` consumes, and `POST /v1/policies/{id}/versions/{v}/simulate` runs the
+> backtest end-to-end over the tenant's sealed ledger entries (see the top Log entry).
 
 ---
 
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-12 · Durable ledger persistence · ledger/adapters/delivery (ADR-0008)** — Closed the
+  heaviest pre-sale blocker: the K·02 transparency log survived only in process memory (lost on
+  restart) behind the durable OpenBao *signing key*. Mirroring ADR-0005's write-through policy store:
+  new async `LedgerRepository` port (`core/ledger/repository.py`) + `LedgerPersistenceError`;
+  `InMemoryLedgerRepository` (default/tests) + `PostgresLedgerRepository` (asyncpg, mock-tested) +
+  Alembic migration `003` (`quaicu_ledger_entries` keyed `(tenant_id, ledger_seq)`,
+  `quaicu_ledger_sth` keyed `tenant_id`). `TrustLedger` gains an optional `repository`: `seal()` is
+  write-through (append leaf → sign head → persist entry + STH **before** committing in-memory; on
+  any failure `MerkleTree.pop_last` rolls back and the action HALTs fail-closed), and `hydrate()`
+  rebuilds every tenant's tree from the stored leaf hashes (`append_leaf_hash`), restoring entries,
+  sequence, and the signed head. `OpenBaoLedgerAdapter` takes an optional `repository` + `hydrate`;
+  the kernel wires `[adapters].ledger_store` via `_build_ledger`, exposes `kernel.ledger_repository`,
+  hydrates the ledger in `startup()`, and closes it in `shutdown()`. Proofs stay on the fast
+  in-memory path (no DB round-trip). 20 new tests (merkle rehydrate/pop, write-through + hydrate
+  round-trip + tenant isolation + fail-closed rollback, mock Postgres adapter, kernel startup
+  hydrate) + a `DATABASE_URL`-gated Postgres round-trip; suite 627 → **647** (10 skipped on a bare
+  checkout). **Follow-ups:** physical per-tenant ledger tables + the K·02 crypto review remain.
+
+- **2026-06-12 · Capture the approving identity in the ledger · hitl/lifecycle (ADR-0007)** — Closed
+  the "who approved this?" audit gap. The lifecycle sealed `approver=None` because `HITLPort.poll`
+  returned a bare `ApprovalDecision` and never reported the decider (captured one layer down in
+  `ApprovalRecord.decided_by`). **ADR-0007** enriches the frozen port: new `ApprovalOutcome(decision,
+  decided_by)` (`core/types.py`); `HITLPort.poll -> ApprovalOutcome`; `InProcessHITLPort` returns
+  `record.decided_by`, the webhook adapter reads a `decided_by` body field. The lifecycle's `_gate`
+  now seals the decider as `ApproverRef("user:<id>")` into `LedgerEntry.approver` (a backend that
+  approves without an identity seals `None`); `_poll_until_decided` returns the full outcome.
+  Fail-closed unchanged (REJECTED/TIMED_OUT still deny). The approver was already inside the Merkle
+  leaf (`_canonical_bytes`) and is surfaced by `GET /v1/ledger/{tenant}/trail`, so the gap closes
+  end-to-end with no read-side change. Updated the 3 `poll` implementers + the HITL/lifecycle poll
+  assertions; added sealed-approver tests (with and without a reported decider). Suite 626 → **627**.
+
+- **2026-06-12 · Seal `actor_roles` for role-based backtest replay · ledger/sandbox/policy (ADR-0006)** —
+  Closes the simulate backtest's last fidelity gap. The `/simulate` candidate evaluator could replay
+  `actor_id` conditions (id was already sealed) but **not** `actor_roles` — roles weren't on the
+  `LedgerEntry`, so role-gated conditions (`"role:risk_head" in actor_roles`, the common shape) hit
+  an undefined CEL var, raised, and scored fail-closed `deny`, overstating flips. **ADR-0006** adds
+  `actor_roles: tuple[str, ...] = ()` to the frozen `LedgerEntry` (extending the contract surface
+  under ADR-0001's incremental-freeze rule): `seal()` populates it from `action.actor.roles` and
+  `_canonical_bytes` commits it to the Merkle leaf next to `actor_id` (tamper-evident, F-09). The
+  K·13 `CandidateEvaluator` contract grew a 5th `actor_roles` arg; `run_counterfactual_backtest`
+  passes `entry.actor_roles`; the route's `_cel_activation` sets the CEL `actor_roles` list var
+  (mirroring the live `_build_activation`). Role-based policies now replay faithfully. 1 new ledger
+  test (`test_seal_records_actor_roles`) + the simulate roles test flipped to assert faithful eval;
+  suite 625 → **626**. **No remaining actor field is unsealed** — the simulate-fidelity follow-up is
+  fully closed.
+
+- **2026-06-11 · Backtest→ImpactReport simulate bridge + dashboard read-models · sandbox/policy/delivery** —
+  Closes the last two pre-management-API gaps (#4 + #5). **Gap #4 (F-10 bridge):** new pure
+  `core/sandbox/bridge.assemble_impact_report(SandboxRun, *, reviewed_by, fairness_delta=None,
+  acknowledged=False)` converts a K·13 counterfactual run (+ optional K·09 `FairnessDelta`) into the
+  K·01 `ImpactReport` the activation gate consumes — `decision_distribution` is a conservative
+  two-bucket proxy (unchanged→allow, flipped→deny), `flip_count`/`fairness_delta` carried through,
+  `acknowledged` defaults False (a reviewer must still acknowledge before activation). New route
+  `POST /v1/policies/{id}/versions/{v}/simulate` (REVIEW-only, 409 otherwise): re-evaluates the
+  candidate version's compiled CEL against the tenant's sealed `LedgerEntry` set via
+  `run_counterfactual_backtest` (no model re-calls, F-09), optionally runs a fairness sweep when
+  `group_key` is given, assembles the report, and persists it when `auto_store=True`. The candidate
+  evaluator is fail-closed — a missing program or any CEL fault scores the entry `deny`. The recorded
+  `actor_id` is threaded through the backtest (the K·13 `CandidateEvaluator` contract was widened to
+  pass `LedgerEntry.actor_id`), so `actor_id`-based conditions replay faithfully. (At the time, actor
+  `roles` were not carried on the entry, so `actor_roles` conditions re-evaluated fail-closed — now
+  closed by ADR-0006, see the top Log entry.) **Gap #5 (dashboards):** new `delivery/api/routes/dashboard.py` with four
+  read-only, tenant-isolated (401/403) projections over `ledger.get_entries`: `/overview` (decision
+  counts + denial rate + last seq), `/decisions` (per-day buckets over a window), `/actions/top`
+  (volume + denial rankings), `/hitl/queue` (pending depth). Supporting surface:
+  `ApprovalStore.pending_count()` + `Kernel.hitl_queue_depth` (in-process adapter only; external
+  queues report 0). 36 new tests (`test_bridge.py`, `test_simulate.py`, `test_dashboard.py`); suite
+  586 → **622** (631 with live deps). **Follow-ups:** dashboard projections are full-scans (fine for
+  MVP; a materialized read-model replaces them at volume); approver-identity capture + K·02 external
+  crypto review + durable ledger persistence remain open (see above).
 
 - **2026-06-11 · Integration-environment validation + OpenBao sign fix · adapters/infra** (commits
   `00b77581`, `5d1edb26`) — Stood up the real external dependencies and ran the integration suites
