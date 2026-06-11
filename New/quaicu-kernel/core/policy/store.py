@@ -20,7 +20,7 @@ from typing import Any
 
 import celpy
 
-from core.errors import PolicyActivationError, PolicyCompileError
+from core.errors import PolicyActivationError, PolicyCompileError, PolicyTransitionError
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
 from core.policy.repository import PolicyRepository
 
@@ -66,12 +66,32 @@ class PolicyStore:
 
     # ── Authoring ───────────────────────────────────────────────────────────────
 
+    def _assert_registrable(self, policy_id: str, version: int) -> None:
+        """Guard against mutating a finalised version.
+
+        Overwriting a DRAFT or REVIEW envelope is legitimate draft iteration, but an ACTIVATED or
+        DEPRECATED version is an immutable evidence artifact — re-registering it must raise. The
+        caller MUST hold `self._lock`, or call this before any durable write (see
+        `register_persisted`) so the cache check happens before the row is overwritten.
+        """
+        existing = self._policies.get((policy_id, version))
+        if existing is not None and existing.lifecycle in (
+            PolicyLifecycle.ACTIVATED,
+            PolicyLifecycle.DEPRECATED,
+        ):
+            raise PolicyTransitionError(
+                f"Policy {policy_id}@v{version} is {existing.lifecycle.value} and immutable; "
+                "create a new version instead.",
+                detail={"policy_id": policy_id, "version": version, "lifecycle": existing.lifecycle.value},
+            )
+
     def register(self, envelope: PolicyEnvelope) -> PolicyEnvelope:
         """Compile the CEL condition and store the envelope.
 
         Returns the stored envelope (with `compiled_condition` populated).
         Raises `PolicyCompileError` if the CEL expression is syntactically invalid.
-        ACTIVATED policies cannot be re-registered; create a new version instead.
+        Raises `PolicyTransitionError` if the (id, version) is already ACTIVATED/DEPRECATED;
+        create a new version instead.
         """
         _env, prog = _compile_cel(envelope.condition)
         # frozen=True prevents normal attribute assignment; use object.__setattr__ as sanctioned
@@ -89,6 +109,7 @@ class PolicyStore:
         object.__setattr__(stored, "compiled_condition", prog)
 
         with self._lock:
+            self._assert_registrable(envelope.id, envelope.version)
             self._policies[(envelope.id, envelope.version)] = stored
 
         log.info("policy registered: %s@v%d (lifecycle=%s)", envelope.id, envelope.version, envelope.lifecycle.value)
@@ -182,6 +203,63 @@ class PolicyStore:
         log.info("policy deprecated: %s@v%d", policy_id, version)
         return deprecated
 
+    def submit_for_review(self, policy_id: str, version: int) -> PolicyEnvelope:
+        """Transition a DRAFT policy to REVIEW (cache-only).
+
+        Raises `PolicyTransitionError` if the policy is missing or not in DRAFT.
+        """
+        with self._lock:
+            key = (policy_id, version)
+            envelope = self._policies.get(key)
+            if envelope is None:
+                raise PolicyTransitionError(
+                    f"Policy {policy_id}@v{version} not found in the store.",
+                    detail={"policy_id": policy_id, "version": version},
+                )
+            if envelope.lifecycle is not PolicyLifecycle.DRAFT:
+                raise PolicyTransitionError(
+                    f"Policy {policy_id}@v{version} is {envelope.lifecycle.value!r}; "
+                    "only DRAFT policies may be submitted for review.",
+                    detail={"policy_id": policy_id, "version": version, "lifecycle": envelope.lifecycle.value},
+                )
+            reviewing = object.__new__(PolicyEnvelope)
+            for attr in (
+                "id", "version", "governs", "scope", "condition", "decision",
+                "approvers", "regulatory_refs", "compiled_condition",
+            ):
+                object.__setattr__(reviewing, attr, getattr(envelope, attr))
+            object.__setattr__(reviewing, "lifecycle", PolicyLifecycle.REVIEW)
+            self._policies[key] = reviewing
+        log.info("policy submitted for review: %s@v%d", policy_id, version)
+        return reviewing
+
+    # ── Management reads (lock-guarded snapshots; never raise on absence) ─────────
+
+    def get(self, policy_id: str, version: int) -> PolicyEnvelope | None:
+        """Return the envelope for (id, version), or None if absent."""
+        with self._lock:
+            return self._policies.get((policy_id, version))
+
+    def list_policies(self, lifecycle: PolicyLifecycle | None = None) -> list[PolicyEnvelope]:
+        """Return all envelopes, optionally filtered by lifecycle, sorted by (id, version)."""
+        with self._lock:
+            envelopes = [
+                env for env in self._policies.values()
+                if lifecycle is None or env.lifecycle is lifecycle
+            ]
+        return sorted(envelopes, key=lambda e: (e.id, e.version))
+
+    def list_versions(self, policy_id: str) -> list[PolicyEnvelope]:
+        """Return all versions of a policy id, sorted ascending by version."""
+        with self._lock:
+            versions = [env for (pid, _), env in self._policies.items() if pid == policy_id]
+        return sorted(versions, key=lambda e: e.version)
+
+    def get_impact_report(self, policy_id: str, version: int) -> ImpactReport | None:
+        """Return the stored impact report for (id, version), or None if absent."""
+        with self._lock:
+            return self._impact_reports.get((policy_id, version))
+
     # ── Durable write-through (async; not on the hot path) ───────────────────────
 
     async def hydrate(self) -> None:
@@ -206,8 +284,12 @@ class PolicyStore:
         """Persist an envelope to the durable store, then register it in the cache.
 
         Persist-first so the in-memory cache never gets ahead of the durable record on a write
-        failure. Returns the cached (compiled) envelope.
+        failure. The immutability guard runs BEFORE the durable write so a re-register of an
+        ACTIVATED/DEPRECATED version cannot overwrite the persisted row. Returns the cached
+        (compiled) envelope.
         """
+        with self._lock:
+            self._assert_registrable(envelope.id, envelope.version)
         if self._repository is not None:
             await self._repository.save_envelope(envelope)
         return self.register(envelope)
@@ -228,6 +310,22 @@ class PolicyStore:
         if self._repository is not None:
             await self._repository.set_lifecycle(policy_id, version, PolicyLifecycle.DEPRECATED)
         return deprecated
+
+    async def submit_for_review_persisted(self, policy_id: str, version: int) -> PolicyEnvelope:
+        """Transition DRAFT → REVIEW in-cache (validates), then persist the REVIEW lifecycle."""
+        reviewing = self.submit_for_review(policy_id, version)
+        if self._repository is not None:
+            await self._repository.set_lifecycle(policy_id, version, PolicyLifecycle.REVIEW)
+        return reviewing
+
+    async def store_impact_report_persisted(self, report: ImpactReport) -> None:
+        """Persist an impact report to the durable store, then cache it.
+
+        Persist-first so the cache never gets ahead of the durable record on a write failure.
+        """
+        if self._repository is not None:
+            await self._repository.save_impact_report(report)
+        self.store_impact_report(report)
 
     # ── Query ───────────────────────────────────────────────────────────────────
 

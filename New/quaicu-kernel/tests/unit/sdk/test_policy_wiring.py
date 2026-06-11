@@ -116,3 +116,107 @@ async def test_register_policy_without_store_raises() -> None:
     assert kernel.has_policy_store is False
     with pytest.raises(RuntimeError, match="No policy store"):
         await kernel.register_policy(_allow_envelope())
+
+
+# ── Management passthroughs ──────────────────────────────────────────────────
+
+
+def _draft_envelope() -> PolicyEnvelope:
+    import dataclasses
+
+    return dataclasses.replace(_allow_envelope(), lifecycle=PolicyLifecycle.DRAFT)
+
+
+async def test_submit_policy_for_review_passthrough() -> None:
+    kernel, store = _kernel()
+    await kernel.register_policy(_draft_envelope())
+    env = await kernel.submit_policy_for_review("p.allow-wire", 1)
+    assert env.lifecycle is PolicyLifecycle.REVIEW
+
+
+async def test_submit_policy_for_review_without_store_raises() -> None:
+    from adapters.policy.always_allow import AlwaysAllowPolicyAdapter
+
+    kernel = Kernel.from_parts(
+        tenant=TENANT,
+        policy=AlwaysAllowPolicyAdapter(),
+        hitl=FakeHITL(),
+        ledger=FakeLedger(),
+        events=FakeEvents(),
+    )
+    with pytest.raises(RuntimeError, match="No policy store"):
+        await kernel.submit_policy_for_review("x", 1)
+
+
+async def test_store_policy_impact_report_passthrough() -> None:
+    kernel, store = _kernel()
+    report = ImpactReport(
+        policy_id="p.allow-wire",
+        policy_version=1,
+        reviewed_by="user:reviewer",
+        reviewed_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
+        decision_distribution={"allow": 1.0},
+        flip_count=0,
+        fairness_delta=0.0,
+        acknowledged=True,
+    )
+    await kernel.store_policy_impact_report(report)
+    assert store.get_impact_report("p.allow-wire", 1) is not None
+
+
+# ── resolve_actor ─────────────────────────────────────────────────────────────
+
+
+async def test_resolve_actor_resolves_via_identity_port() -> None:
+    from core.types import RequestContext
+
+    from tests.unit.lifecycle.fakes import FakeIdentity
+
+    store = PolicyStore()
+    kernel = Kernel.from_parts(
+        tenant=TENANT,
+        policy=PolicyEngine(store),
+        hitl=FakeHITL(),
+        ledger=FakeLedger(),
+        events=FakeEvents(),
+        identity=FakeIdentity(roles=("role:policy_admin",)),
+        policy_store=store,
+    )
+    actor = await kernel.resolve_actor(RequestContext(raw_token="t"))
+    assert actor.roles == ("role:policy_admin",)
+
+
+async def test_resolve_actor_without_identity_raises() -> None:
+    from core.types import RequestContext
+
+    kernel, _ = _kernel()  # no identity wired
+    with pytest.raises(RuntimeError, match="No identity adapter"):
+        await kernel.resolve_actor(RequestContext(raw_token="t"))
+
+
+# ── from_config: policy_admin_roles parsing ──────────────────────────────────
+
+
+def test_from_config_default_policy_admin_roles(tmp_path) -> None:
+    cfg = tmp_path / "kernel.toml"
+    cfg.write_text(
+        "[tenant]\nid = \"acme\"\n"
+        "[adapters]\npolicy = \"cel_policy\"\nhitl = \"webhook\"\n"
+        "ledger = \"memory_ledger\"\nevents = \"memory_events\"\n",
+        encoding="utf-8",
+    )
+    kernel = Kernel.from_config(cfg)
+    assert kernel.policy_admin_roles == ("role:policy_admin",)
+
+
+def test_from_config_normalizes_bare_policy_admin_roles(tmp_path) -> None:
+    cfg = tmp_path / "kernel.toml"
+    cfg.write_text(
+        "[tenant]\nid = \"acme\"\n"
+        "[adapters]\npolicy = \"cel_policy\"\nhitl = \"webhook\"\n"
+        "ledger = \"memory_ledger\"\nevents = \"memory_events\"\n"
+        "[governance]\npolicy_admin_roles = [\"policy_admin\", \"role:governance_lead\"]\n",
+        encoding="utf-8",
+    )
+    kernel = Kernel.from_config(cfg)
+    assert kernel.policy_admin_roles == ("role:policy_admin", "role:governance_lead")

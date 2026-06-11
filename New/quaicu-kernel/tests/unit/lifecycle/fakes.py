@@ -189,15 +189,22 @@ class FakeEvents:
 
 
 class FakeIdentity:
-    """Resolves to a fixed actor, or raises to simulate an unresolvable identity."""
+    """Resolves to a fixed actor, or raises to simulate an unresolvable identity.
 
-    def __init__(self, *, raise_exc: bool = False) -> None:
+    ``roles`` configures the resolved actor's roles so control-plane authz (e.g. the policy
+    management API's policy-admin check) can be exercised with and without the required role.
+    """
+
+    def __init__(
+        self, *, raise_exc: bool = False, roles: tuple[str, ...] = ("role:risk_analyst",)
+    ) -> None:
         self.raise_exc = raise_exc
+        self.roles = roles
 
     async def resolve_actor(self, *, context: Any, tenant: TenantId) -> Actor:
         if self.raise_exc:
             raise IdentityPortError("injected identity fault")
-        return Actor(id=ActorId("alice"), tenant=tenant, roles=("role:risk_analyst",))
+        return Actor(id=ActorId("alice"), tenant=tenant, roles=self.roles)
 
 
 class Counter:

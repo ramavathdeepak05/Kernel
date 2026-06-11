@@ -112,6 +112,13 @@ class PolicyActivationError(PolicyError):
     code = "POLICY_ACTIVATION_BLOCKED"
 
 
+class PolicyTransitionError(PolicyError):
+    """Invalid policy lifecycle transition: re-registering an ACTIVATED/DEPRECATED version, or
+    submitting a non-DRAFT policy for review. (Activation has its own PolicyActivationError.)"""
+
+    code = "POLICY_TRANSITION_INVALID"
+
+
 class PolicyConflictError(PolicyError):
     """Conflict resolution produced an undefined result (should never happen — totality bug)."""
 

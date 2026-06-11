@@ -6,9 +6,12 @@ Pydantic v2 is required.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from core.types import Decision
 
 
 # ── Request schemas ───────────────────────────────────────────────────────────────
@@ -126,3 +129,97 @@ class ErrorResponse(BaseModel):
     error: str
     code: str
     detail: dict[str, Any] = Field(default_factory=dict)
+
+
+# ── Policy management (K·01 authoring API) ─────────────────────────────────────────
+
+_VALID_DECISIONS = {d.value for d in Decision}
+
+
+class PolicyRegisterRequest(BaseModel):
+    """Body for POST /v1/policies — register a new policy version.
+
+    The server always registers as DRAFT; there is intentionally no ``lifecycle`` field. Lifecycle
+    advances only via the explicit submit / activate / deprecate endpoints.
+    """
+
+    id: str = Field(..., description="Policy id, dot-namespaced (e.g. 'ciro.ifrs9.stage_transition')")
+    version: int = Field(..., ge=1, description="Monotonic version number (>= 1)")
+    governs: str = Field(..., description="Action type this policy governs; '*' is a wildcard")
+    scope: dict[str, str] = Field(..., description="e.g. {'tenant': '*'} or {'tenant': 'ciro-bank'}")
+    condition: str = Field(..., description="CEL expression; compiled at registration")
+    decision: str = Field(..., description="One of: allow | deny | require_approval")
+    approvers: list[str] = Field(default_factory=list, description="Required only for require_approval")
+    regulatory_refs: list[str] = Field(default_factory=list, description="K·14 regulation references")
+
+    @field_validator("decision")
+    @classmethod
+    def _decision_is_valid(cls, v: str) -> str:
+        normalized = v.lower()
+        if normalized not in _VALID_DECISIONS:
+            raise ValueError(f"decision must be one of {sorted(_VALID_DECISIONS)}, got {v!r}")
+        return normalized
+
+    @model_validator(mode="after")
+    def _approvers_required_for_approval(self) -> "PolicyRegisterRequest":
+        if self.decision == Decision.REQUIRE_APPROVAL.value and not self.approvers:
+            raise ValueError("decision 'require_approval' requires a non-empty approvers list")
+        return self
+
+
+class ImpactReportRequest(BaseModel):
+    """Body for PUT /v1/policies/{id}/versions/{v}/impact-report (and the inline activate report).
+
+    ``policy_id`` / ``policy_version`` are taken from the URL path, not the body — this eliminates
+    the mismatch class of F-10 errors entirely.
+    """
+
+    reviewed_by: str = Field(..., description="Reviewer identity (e.g. 'user:compliance_officer')")
+    reviewed_at: datetime = Field(..., description="Review timestamp (ISO 8601)")
+    decision_distribution: dict[str, float] = Field(default_factory=dict)
+    flip_count: int = Field(0, ge=0)
+    fairness_delta: float = 0.0
+    acknowledged: bool = Field(..., description="Must be True to pass the F-10 activation gate")
+
+
+class ActivateRequest(BaseModel):
+    """Body for POST /v1/policies/{id}/versions/{v}/activate.
+
+    Provide ``impact_report`` inline, or omit it to use a report previously uploaded via PUT.
+    """
+
+    impact_report: ImpactReportRequest | None = None
+
+
+class PolicyResponse(BaseModel):
+    """A policy envelope, sans the non-serialisable compiled condition."""
+
+    id: str
+    version: int
+    governs: str
+    scope: dict[str, str]
+    condition: str
+    decision: str
+    approvers: list[str]
+    regulatory_refs: list[str]
+    lifecycle: str
+
+
+class PolicyListResponse(BaseModel):
+    """Response for the policy list / versions endpoints."""
+
+    policies: list[PolicyResponse]
+    count: int
+
+
+class ImpactReportResponse(BaseModel):
+    """An echo of a stored impact report."""
+
+    policy_id: str
+    policy_version: int
+    reviewed_by: str
+    reviewed_at: str  # ISO 8601
+    decision_distribution: dict[str, float]
+    flip_count: int
+    fairness_delta: float
+    acknowledged: bool

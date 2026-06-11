@@ -82,6 +82,12 @@ class LifecycleEngine:
         never trusts a caller-supplied actor."""
         return self._identity is not None
 
+    @property
+    def identity(self) -> IdentityPort | None:
+        """The wired IdentityPort, if any. Read-only access for control-plane surfaces (e.g. the
+        policy management API) that must resolve the actor from a token outside the run lifecycle."""
+        return self._identity
+
     # ── Public entry point ──────────────────────────────────────────────────────
 
     async def run(

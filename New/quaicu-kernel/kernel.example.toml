@@ -103,6 +103,10 @@ mask_patterns    = true                  # also mask PAN/Aadhaar/email/phone/SSN
 # only — no policy/HITL/seal/emit), "audit_only" (seal+emit, no gating).
 [governance]
 default = "all"
+# Control-plane roles permitted to author/manage policies via the /v1/policies API. An actor needs
+# at least one of these (resolved from its bearer token). Bare names are normalised to "role:<name>".
+# Defaults to ["policy_admin"] when omitted.
+# policy_admin_roles = ["policy_admin", "governance_lead"]
 # Per-action-type overrides, e.g. run model calls under gateway-only protection:
 # [governance.action_profiles]
 # "inference.generate" = "gateway_only"

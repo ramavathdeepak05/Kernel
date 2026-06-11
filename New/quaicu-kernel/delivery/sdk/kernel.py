@@ -53,8 +53,15 @@ from core.types import (
     IdempotencyKey,
     ModelRef,
     ModelResponse,
+    RequestContext,
     TenantId,
 )
+
+
+def _normalize_roles(roles: Any) -> tuple[str, ...]:
+    """Normalise role names to the ``role:<name>`` convention used across the kernel (cf. the HITL
+    approver matching in core/hitl). Bare names are prefixed; already-prefixed names pass through."""
+    return tuple(r if str(r).startswith("role:") else f"role:{r}" for r in roles)
 
 
 # ── In-process action repository (used when no storage adapter is provided) ────
@@ -147,6 +154,9 @@ class Kernel:
     # management API (and the SDK write-through primitives below) can author and persist policies.
     policy_store: PolicyStore | None = None
     policy_repository: PolicyRepository | None = None
+    # Control-plane roles permitted to author/manage policies via the management API. Normalised to
+    # the ``role:<name>`` convention. An actor needs at least one of these to use ``/v1/policies``.
+    policy_admin_roles: tuple[str, ...] = ("role:policy_admin",)
 
     @property
     def has_identity(self) -> bool:
@@ -185,6 +195,20 @@ class Kernel:
                 except Exception:  # noqa: BLE001 — shutdown is best-effort
                     pass
 
+    # ── Identity (control-plane actor resolution) ────────────────────────────────
+
+    async def resolve_actor(self, context: RequestContext) -> Actor:
+        """Resolve the authenticated actor from a request context via the IdentityPort.
+
+        Used by control-plane surfaces (the policy management API) that authenticate a caller
+        outside the run lifecycle. Raises ``RuntimeError`` if no IdentityPort is wired;
+        propagates ``IdentityPortError`` / ``TenantIsolationError`` fail-closed.
+        """
+        identity = self.engine.identity
+        if identity is None:
+            raise RuntimeError("No identity adapter configured.")
+        return await identity.resolve_actor(context=context, tenant=self.tenant)
+
     # ── Policy authoring (write-through primitives the management API wraps) ──────
 
     async def register_policy(self, envelope: PolicyEnvelope) -> PolicyEnvelope:
@@ -208,6 +232,18 @@ class Kernel:
         if self.policy_store is None:
             raise RuntimeError("No policy store configured.")
         return await self.policy_store.deprecate_persisted(policy_id, version)
+
+    async def submit_policy_for_review(self, policy_id: str, version: int) -> PolicyEnvelope:
+        """Transition a DRAFT policy to REVIEW and persist it. Requires the CEL engine."""
+        if self.policy_store is None:
+            raise RuntimeError("No policy store configured.")
+        return await self.policy_store.submit_for_review_persisted(policy_id, version)
+
+    async def store_policy_impact_report(self, report: ImpactReport) -> None:
+        """Persist a policy's F-10 impact report so a later activation can reference it."""
+        if self.policy_store is None:
+            raise RuntimeError("No policy store configured.")
+        await self.policy_store.store_impact_report_persisted(report)
 
     def resolve_profile(
         self, action_type: str, override: GovernanceProfile | None = None
@@ -280,6 +316,7 @@ class Kernel:
             at: resolve_preset(name)
             for at, name in gov_cfg.get("action_profiles", {}).items()
         }
+        policy_admin_roles = _normalize_roles(gov_cfg.get("policy_admin_roles", ["policy_admin"]))
 
         # Optional AI Gateway for governed inference.
         gateway = cls._build_gateway(tenant, adapter_cfg, cfg) if "inference" in adapter_cfg else None
@@ -302,6 +339,7 @@ class Kernel:
             action_profiles=action_profiles,
             policy_store=policy_store,
             policy_repository=policy_repository,
+            policy_admin_roles=policy_admin_roles,
         )
 
     @staticmethod
@@ -368,6 +406,7 @@ class Kernel:
         action_profiles: dict[str, GovernanceProfile] | None = None,
         policy_store: PolicyStore | None = None,
         policy_repository: PolicyRepository | None = None,
+        policy_admin_roles: tuple[str, ...] | None = None,
         max_poll_attempts: int = 1,
     ) -> "Kernel":
         """Build a Kernel directly from collaborator instances (for tests and SDK demos)."""
@@ -391,6 +430,11 @@ class Kernel:
             action_profiles=action_profiles or {},
             policy_store=policy_store,
             policy_repository=policy_repository,
+            policy_admin_roles=(
+                _normalize_roles(policy_admin_roles)
+                if policy_admin_roles is not None
+                else ("role:policy_admin",)
+            ),
         )
 
     # ── Agent binding ──────────────────────────────────────────────────────────

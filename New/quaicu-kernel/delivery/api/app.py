@@ -35,6 +35,7 @@ from delivery.api.routes.actions import router as actions_router
 from delivery.api.routes.authorize import router as authorize_router
 from delivery.api.routes.inference import router as inference_router
 from delivery.api.routes.ledger import router as ledger_router
+from delivery.api.routes.policies import router as policies_router
 from delivery.sdk.kernel import Kernel
 
 
@@ -80,6 +81,7 @@ def create_app(
     app.include_router(authorize_router)
     app.include_router(inference_router)
     app.include_router(ledger_router)
+    app.include_router(policies_router)
 
     # Optional reference PEP: governance enforcement middleware.
     # Wired only when the caller explicitly passes enforce_paths so existing tests are unaffected.

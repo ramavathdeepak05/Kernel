@@ -12,13 +12,14 @@ next cold agent doesn't know it happened.
 
 ---
 
-## Current status (2026-06-10)
+## Current status (2026-06-11)
 
-**All 14 governance layers + the delivery phase are built and green. Suite: 532 tests passing,
-9 skipped.** Five feature waves have landed on top of the core kernel since the Wave-2 milestone
+**All 14 governance layers + the delivery phase are built and green. Suite: 586 tests passing,
+9 skipped.** Six feature waves have landed on top of the core kernel since the Wave-2 milestone
 below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
 (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
-layer, and (5) config-wiring the CEL policy engine + a durable (Postgres) policy store. See the Log
+layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, and (6) the
+Policy Management HTTP API (`/v1/policies`) with route-level control-plane authz. See the Log
 for the per-wave detail. Extension decisions are recorded as ADR-0002…0005 (`docs/adr/`).
 
 The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1/authorize`,
@@ -28,13 +29,13 @@ all running over one composable `GovernanceProfile` model with per-agent identit
 
 ### Next planned work — Policy Management API + Dashboards
 A gap audit (2026-06-10) found six items to close before this work; **gaps #1 (CEL engine not
-config-wireable) and #2 (no durable policy store) are now CLOSED** (commit `e121a9fe`, ADR-0005).
-The real CEL `PolicyEngine` is now selectable via `policy = "cel_policy"`, backed by a durable
-write-through `PolicyRepository` (in-memory + Postgres), hydrated on `kernel.startup()`. **Still open
-(dependency-ordered):** #3 policy CRUD HTTP routes (`/v1/policies …`) over the shipped SDK
-write-through primitives + control-plane authz (#6); #4 backtest→`ImpactReport` bridge (K·13
-`SandboxRun` + K·09 fairness) + `/v1/policies/{id}/simulate`; #5 dashboard read-models / projections
-+ query routes. Full gap list is in the 2026-06-10 "Pre-management-API gap audit" log entry.
+config-wireable), #2 (no durable policy store), #3 (no policy CRUD surface) and #6 (no control-plane
+authz) are now CLOSED.** #1+#2 landed in commit `e121a9fe` (ADR-0005); #3+#6 landed 2026-06-11 — the
+`/v1/policies` management API (register/list/versions/get/submit/impact-report/activate/deprecate)
+over the shipped SDK write-through primitives, gated by a route-level policy-admin role check
+(`[governance] policy_admin_roles`). **Still open (dependency-ordered):** #4 backtest→`ImpactReport`
+bridge (K·13 `SandboxRun` + K·09 fairness) + `/v1/policies/{id}/simulate`; #5 dashboard read-models /
+projections + query routes. Full gap list is in the 2026-06-10 "Pre-management-API gap audit" log entry.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (still open).** The lifecycle records *that* a HITL gate was
@@ -88,6 +89,29 @@ write-through primitives + control-plane authz (#6); #4 backtest→`ImpactReport
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-11 · Policy Management HTTP API + control-plane authz · policy/delivery** — Closes
+  pre-management-API gaps #3 (no policy CRUD surface) + #6 (no control-plane authz). New route module
+  `delivery/api/routes/policies.py` exposes eight endpoints under `/v1/policies`: `POST` register (DRAFT),
+  `GET` list (`?lifecycle=` filter), `GET /{id}` versions, `GET /{id}/versions/{v}`, `POST .../submit`
+  (DRAFT→REVIEW), `PUT .../impact-report` (store an F-10 report), `POST .../activate` (REVIEW→ACTIVATED,
+  F-10 gate, inline or stored report), `POST .../deprecate`. All are thin adapters over the SDK
+  write-through primitives. **Authz:** every endpoint (reads included) resolves the actor from the
+  bearer token via the IdentityPort and requires a policy-admin role — route-level, **not** governed
+  actions, to avoid the empty-store bootstrap deadlock (a fail-closed store could never register its
+  first policy). Roles are configurable via `[governance] policy_admin_roles` (bare / `role:`-prefixed
+  forms interoperate, normalised to the HITL convention). **Supporting surface:** `PolicyTransitionError`
+  (`POLICY_TRANSITION_INVALID`); `PolicyStore` management API — an `_assert_registrable` immutability
+  guard (ACTIVATED/DEPRECATED versions cannot be re-registered; runs *before* the durable write in
+  `register_persisted`), reads (`get` / `list_policies` / `list_versions` / `get_impact_report`),
+  `submit_for_review(_persisted)`, `store_impact_report_persisted`; `LifecycleEngine.identity` property;
+  `Kernel.resolve_actor` + `submit_policy_for_review` / `store_policy_impact_report` passthroughs +
+  `policy_admin_roles` field & config plumbing. Error mapping: bad CEL → 400, lifecycle/F-10 violations
+  → 409, persistence fault → 503 (via the global handler), unknown id/version → 404 (route pre-check).
+  54 new tests (`test_policies.py`, `test_store_management.py`, extended `test_policy_wiring.py`) —
+  auth, role normalization both directions, the full HTTP lifecycle journey, persistence fail-closed,
+  and hydrate-after-restart; suite 532 → **586**. **Follow-ups:** gaps #4 (backtest→ImpactReport
+  bridge) / #5 (dashboard read-models) remain.
 
 - **2026-06-10 · CEL engine config-wired + durable policy store · policy/delivery** (commit
   `e121a9fe`, ADR-0005) — Closes pre-management-API gaps #1+#2. New `PolicyRepository` async port
