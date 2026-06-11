@@ -156,6 +156,16 @@ class LedgerSealError(LedgerError):
     code = "LEDGER_SEAL_FAILED"
 
 
+class LedgerPersistenceError(LedgerError):
+    """A durable ledger-store operation (append/load/save) failed.
+
+    Raised by a LedgerRepository adapter. `TrustLedger.seal` maps it to a fail-closed seal failure
+    (the action HALTs) so the durable transparency log and the in-memory tree never diverge.
+    """
+
+    code = "LEDGER_PERSISTENCE_ERROR"
+
+
 class LedgerProofError(LedgerError):
     """Merkle inclusion/consistency proof verification failed."""
 

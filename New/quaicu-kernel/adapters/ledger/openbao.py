@@ -30,6 +30,7 @@ import httpx
 
 from core.errors import LedgerSealError
 from core.ledger.engine import TrustLedger
+from core.ledger.repository import LedgerRepository
 from core.ledger.signer import SignedTreeHead, _signing_message
 from core.types import Action, ApproverRef, EvaluationResult, LedgerEntry
 
@@ -160,6 +161,7 @@ class OpenBaoLedgerAdapter:
         key_name: str,
         *,
         verify_tls: bool = True,
+        repository: LedgerRepository | None = None,
     ) -> None:
         self._signer = OpenBaoTreeSigner(
             addr=addr,
@@ -167,7 +169,12 @@ class OpenBaoLedgerAdapter:
             key_name=key_name,
             verify_tls=verify_tls,
         )
-        self._ledger = TrustLedger(signer=self._signer)
+        self._repository = repository
+        self._ledger = TrustLedger(signer=self._signer, repository=repository)
+
+    async def hydrate(self) -> None:
+        """Rebuild the in-memory tree/entries/STHs from the durable repository (startup)."""
+        await self._ledger.hydrate()
 
     # ── Ledger protocol ───────────────────────────────────────────────────────
 
@@ -209,5 +216,7 @@ class OpenBaoLedgerAdapter:
     def verify_consistency(self, tenant, old_sth, new_sth):  # type: ignore[no-untyped-def]
         return self._ledger.verify_consistency(tenant, old_sth, new_sth)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self._signer.close()
+        if self._repository is not None:
+            await self._repository.close()

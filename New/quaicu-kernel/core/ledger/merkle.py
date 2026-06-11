@@ -178,6 +178,26 @@ class MerkleTree:
         self._leaves.append(lh)
         return index, lh
 
+    def append_leaf_hash(self, lh: bytes) -> int:
+        """Append a precomputed leaf hash (used to rehydrate a tree from a durable store).
+
+        Unlike `append`, this does NOT apply `leaf_hash` again — `lh` is already a leaf hash
+        (e.g. a `LedgerEntry.leaf_hash` loaded from the repository). Returns the new index.
+        """
+        index = len(self._leaves)
+        self._leaves.append(lh)
+        return index
+
+    def pop_last(self) -> None:
+        """Remove the most recently appended leaf.
+
+        Used to roll back an in-memory append when the durable write of that entry fails, so the
+        in-memory tree never gets ahead of the persisted log. Raises IndexError if the tree is empty.
+        """
+        if not self._leaves:
+            raise IndexError("pop_last on an empty MerkleTree")
+        self._leaves.pop()
+
     def root(self) -> bytes:
         """Current Merkle Tree Head (MTH)."""
         return compute_root(list(self._leaves))

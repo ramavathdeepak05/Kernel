@@ -17,8 +17,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from collections import defaultdict
+
 from core.errors import LedgerSealError
 from core.ledger.merkle import MerkleTree
+from core.ledger.repository import LedgerRepository
 from core.ledger.signer import InMemoryEd25519Signer, SignedTreeHead, TreeSigner
 from core.types import (
     Action,
@@ -84,12 +87,20 @@ class TrustLedger:
     No tenant's entries ever appear in another tenant's tree.
     """
 
-    def __init__(self, signer: TreeSigner | None = None) -> None:
+    def __init__(
+        self,
+        signer: TreeSigner | None = None,
+        repository: LedgerRepository | None = None,
+    ) -> None:
         self._signer: TreeSigner = signer or InMemoryEd25519Signer()
         self._trees: dict[TenantId, MerkleTree] = {}
         self._sequences: dict[TenantId, int] = {}
         self._entries: dict[TenantId, list[LedgerEntry]] = {}
         self._sths: dict[TenantId, SignedTreeHead] = {}
+        # Optional durable backend. When set, `seal` persists each entry + STH write-through and
+        # `hydrate()` rebuilds the in-memory trees/entries/STHs from it on startup. The read/proof
+        # path never touches it — the in-memory trees stay the fast path (mirrors ADR-0005).
+        self._repository = repository
         # Single asyncio lock — seals are serialized to keep sequence numbers monotonic.
         self._lock: asyncio.Lock = asyncio.Lock()
 
@@ -134,27 +145,38 @@ class TrustLedger:
                 idx, lh = self._trees[tenant].append(entry_bytes)
                 now = datetime.now(tz=timezone.utc)
 
-                entry = LedgerEntry(
-                    ledger_seq=seq,
-                    tenant=tenant,
-                    action_id=action.id,
-                    action_type=action.type,
-                    actor_id=action.actor.id,
-                    decision=evaluation.decision,
-                    policy_versions=evaluation.policy_versions,
-                    leaf_hash=lh,
-                    sealed_at=now,
-                    approver=approver,
-                    consent_state=consent_state,
-                    recorded_result=recorded_result if isinstance(recorded_result, dict) else {},
-                    actor_roles=tuple(action.actor.roles),
-                )
+                # Build the entry, sign the new head, and (write-through) persist both BEFORE
+                # committing the rest of the in-memory state. If signing or the durable write
+                # fails, roll back the tree append so the in-memory tree never gets ahead of the
+                # durable log; the failure propagates → LedgerSealError → the action HALTs (F-03).
+                try:
+                    entry = LedgerEntry(
+                        ledger_seq=seq,
+                        tenant=tenant,
+                        action_id=action.id,
+                        action_type=action.type,
+                        actor_id=action.actor.id,
+                        decision=evaluation.decision,
+                        policy_versions=evaluation.policy_versions,
+                        leaf_hash=lh,
+                        sealed_at=now,
+                        approver=approver,
+                        consent_state=consent_state,
+                        recorded_result=recorded_result if isinstance(recorded_result, dict) else {},
+                        actor_roles=tuple(action.actor.roles),
+                    )
+                    root = self._trees[tenant].root()
+                    sth = self._signer.sign(self._trees[tenant].size, root, now)
+                    if self._repository is not None:
+                        await self._repository.append_entry(entry)
+                        await self._repository.save_sth(tenant, sth)
+                except Exception:
+                    self._trees[tenant].pop_last()  # undo the append; nothing else committed yet
+                    raise
 
+                # Durable write succeeded (or no repository) — now commit the in-memory state.
                 self._entries[tenant].append(entry)
                 self._sequences[tenant] = seq + 1
-
-                root = self._trees[tenant].root()
-                sth = self._signer.sign(self._trees[tenant].size, root, now)
                 self._sths[tenant] = sth
 
                 _log.debug(
@@ -175,6 +197,46 @@ class TrustLedger:
                 f"Failed to seal action {action.id} for tenant {action.tenant}: {exc}",
                 detail={"action_id": str(action.id), "tenant": str(action.tenant)},
             ) from exc
+
+    async def hydrate(self) -> None:
+        """Rebuild the in-memory trees, entries, and STHs from the durable repository.
+
+        Called once at startup (via the adapter / kernel). No-op when no repository is wired.
+        Idempotent: it resets and reloads, so calling it twice yields the same state. Each tenant's
+        Merkle tree is rebuilt from the stored leaf hashes (append-only, in seq order); the latest
+        STH is restored, or recomputed and re-signed if a tenant has entries but no stored head.
+        """
+        if self._repository is None:
+            return
+        async with self._lock:
+            entries = await self._repository.load_entries()
+            sths = await self._repository.load_sths()
+
+            self._trees.clear()
+            self._sequences.clear()
+            self._entries.clear()
+            self._sths.clear()
+
+            by_tenant: dict[TenantId, list[LedgerEntry]] = defaultdict(list)
+            for entry in entries:
+                by_tenant[entry.tenant].append(entry)
+
+            for tenant, tenant_entries in by_tenant.items():
+                tenant_entries.sort(key=lambda e: e.ledger_seq)
+                tree = MerkleTree()
+                for entry in tenant_entries:
+                    tree.append_leaf_hash(entry.leaf_hash)
+                self._trees[tenant] = tree
+                self._entries[tenant] = list(tenant_entries)
+                self._sequences[tenant] = tenant_entries[-1].ledger_seq + 1
+
+                sth = sths.get(str(tenant))
+                if sth is None:
+                    # Entries exist but no stored head — recompute the root and re-sign.
+                    sth = self._signer.sign(
+                        tree.size, tree.root(), datetime.now(tz=timezone.utc)
+                    )
+                self._sths[tenant] = sth
 
     # ── Read-side operations ──────────────────────────────────────────────────
 

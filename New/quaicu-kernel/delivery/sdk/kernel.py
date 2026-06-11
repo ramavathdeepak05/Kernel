@@ -33,6 +33,7 @@ from core.gateway.masking import MaskingConfig
 from core.lifecycle.context import async_actor_scope, actor_scope, get_current_actor, set_actor
 from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.engine import LifecycleEngine
+from core.ledger.repository import LedgerRepository
 from core.lifecycle.profile import GovernanceProfile, resolve_preset
 from core.lifecycle.protocols import ActionRepository, EventBus, Ledger, PolicyEvaluator
 from core.policy import (
@@ -116,6 +117,9 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     # Ledger
     "memory_ledger":           ("adapters.ledger.memory",            "InMemoryLedgerAdapter"),
     "openbao_ledger":          ("adapters.ledger.openbao",           "OpenBaoLedgerAdapter"),
+    # LedgerRepository (durable ledger backends; the TrustLedger writes through to these)
+    "memory_ledger_repo":      ("adapters.ledger.memory_repo",       "InMemoryLedgerRepository"),
+    "postgres_ledger":         ("adapters.ledger.postgres",          "PostgresLedgerRepository"),
     # EventBus
     "memory_events":           ("adapters.events.memory",            "InMemoryEventBusAdapter"),
 }
@@ -154,6 +158,9 @@ class Kernel:
     # management API (and the SDK write-through primitives below) can author and persist policies.
     policy_store: PolicyStore | None = None
     policy_repository: PolicyRepository | None = None
+    # Set when a durable ledger backend is wired ([adapters].ledger_store). Exposed so the kernel can
+    # close its pool on shutdown; the TrustLedger writes through to it and hydrates from it on boot.
+    ledger_repository: LedgerRepository | None = None
     # Control-plane roles permitted to author/manage policies via the management API. Normalised to
     # the ``role:<name>`` convention. An actor needs at least one of these to use ``/v1/policies``.
     policy_admin_roles: tuple[str, ...] = ("role:policy_admin",)
@@ -194,15 +201,24 @@ class Kernel:
     async def startup(self) -> None:
         """Initialise async resources. Call once before serving (the API does this via lifespan).
 
-        Hydrates the policy store from its durable repository so a restarted kernel enforces the
-        same policies. No-op when no durable policy store is wired.
+        Hydrates the policy store and the durable ledger from their repositories so a restarted
+        kernel enforces the same policies and serves the same transparency log. No-op for the
+        in-memory backends.
         """
         if self.policy_store is not None:
             await self.policy_store.hydrate()
+        ledger_hydrate = getattr(self.engine._ledger, "hydrate", None)  # type: ignore[attr-defined]
+        if ledger_hydrate is not None:
+            await ledger_hydrate()
 
     async def shutdown(self) -> None:
         """Release async resources (connection pools). Call once on shutdown."""
-        for collaborator in (self.policy_repository, self.gateway):
+        for collaborator in (
+            self.policy_repository,
+            self.ledger_repository,
+            self.engine._ledger,  # type: ignore[attr-defined]
+            self.gateway,
+        ):
             close = getattr(collaborator, "close", None)
             if close is not None:
                 try:
@@ -293,6 +309,7 @@ class Kernel:
         policy: PolicyEvaluator | None = None
         policy_store: PolicyStore | None = None
         policy_repository: PolicyRepository | None = None
+        ledger_repository: LedgerRepository | None = None
         hitl: HITLPort | None = None
         ledger: Ledger | None = None
         events: EventBus | None = None
@@ -311,7 +328,7 @@ class Kernel:
         if "hitl" in adapter_cfg:
             hitl = _load_adapter(adapter_cfg["hitl"], **cfg.get("hitl", {}))
         if "ledger" in adapter_cfg:
-            ledger = _load_adapter(adapter_cfg["ledger"], **cfg.get("ledger", {}))
+            ledger, ledger_repository = cls._build_ledger(adapter_cfg, cfg)
         if "events" in adapter_cfg:
             events = _load_adapter(adapter_cfg["events"])
         if "identity" in adapter_cfg:
@@ -354,8 +371,32 @@ class Kernel:
             action_profiles=action_profiles,
             policy_store=policy_store,
             policy_repository=policy_repository,
+            ledger_repository=ledger_repository,
             policy_admin_roles=policy_admin_roles,
         )
+
+    @staticmethod
+    def _build_ledger(
+        adapter_cfg: dict[str, Any], cfg: dict[str, Any]
+    ) -> tuple[Ledger, LedgerRepository | None]:
+        """Assemble the ledger adapter, optionally backed by a durable LedgerRepository.
+
+        ``[adapters].ledger_store`` selects the durable backend (``"postgres_ledger"`` /
+        ``"memory_ledger_repo"``); omit it for a non-durable in-memory ledger. Durability is wired
+        through the TrustLedger-based ``openbao_ledger`` adapter — the dev ``memory_ledger`` adapter
+        does not persist. The ledger hydrates from the repository at ``kernel.startup()``.
+        """
+        name = adapter_cfg["ledger"]
+        ledger_kwargs = cfg.get("ledger", {})
+        repository: LedgerRepository | None = None
+        if "ledger_store" in adapter_cfg:
+            repository = _load_adapter(adapter_cfg["ledger_store"], **cfg.get("ledger_store", {}))
+        if name == "openbao_ledger" and repository is not None:
+            ledger = _load_adapter(name, **ledger_kwargs, repository=repository)
+        else:
+            ledger = _load_adapter(name, **ledger_kwargs)
+            repository = None  # adapter does not support durability; don't expose an unused pool
+        return ledger, repository
 
     @staticmethod
     def _build_policy(
@@ -421,6 +462,7 @@ class Kernel:
         action_profiles: dict[str, GovernanceProfile] | None = None,
         policy_store: PolicyStore | None = None,
         policy_repository: PolicyRepository | None = None,
+        ledger_repository: LedgerRepository | None = None,
         policy_admin_roles: tuple[str, ...] | None = None,
         max_poll_attempts: int = 1,
     ) -> "Kernel":
@@ -445,6 +487,7 @@ class Kernel:
             action_profiles=action_profiles or {},
             policy_store=policy_store,
             policy_repository=policy_repository,
+            ledger_repository=ledger_repository,
             policy_admin_roles=(
                 _normalize_roles(policy_admin_roles)
                 if policy_admin_roles is not None

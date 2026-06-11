@@ -14,16 +14,16 @@ next cold agent doesn't know it happened.
 
 ## Current status (2026-06-11)
 
-**All 14 governance layers + the delivery phase are built and green. Suite: 627 tests passing,
-9 skipped on a bare checkout — and 636 passing / 0 skipped once the real external deps are live
-(the 9 skips are the Postgres + OpenBao integration tests, now validated against a GCP Cloud SQL
-instance and a Dockerized OpenBao; see the Log).** Seven feature waves have landed on top of the core kernel since the Wave-2 milestone
+**All 14 governance layers + the delivery phase are built and green. Suite: 647 tests passing,
+10 skipped on a bare checkout — and 657 passing / 0 skipped once the real external deps are live
+(the 10 skips are the Postgres + OpenBao integration tests — incl. the new durable-ledger Postgres
+round-trip — now validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the Log).** Seven feature waves have landed on top of the core kernel since the Wave-2 milestone
 below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
 (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
 layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the
 Policy Management HTTP API (`/v1/policies`) with route-level control-plane authz, and (7) the
 backtest→ImpactReport simulate bridge + dashboard read-model query routes. See the Log
-for the per-wave detail. Extension decisions are recorded as ADR-0002…0007 (`docs/adr/`).
+for the per-wave detail. Extension decisions are recorded as ADR-0002…0008 (`docs/adr/`).
 
 The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1/authorize`,
 `/v1/inference`, `/v1/ledger`), the Python SDK (`@kernel.guard` / `kernel.wrap` / `kernel.proxy` /
@@ -44,10 +44,13 @@ is in the 2026-06-10 "Pre-management-API gap audit" log entry.
   `ApprovalOutcome(decision, decided_by)`; the lifecycle seals the decider as `user:<id>` into
   `LedgerEntry.approver`, surfaced by the ledger-trail API. See the top Log entry.
 - **K·02 external cryptographic review (still open, pre-sale critical path).** OpenBao signer adapter
-  now provides durable Ed25519 signing, but the tree/entries are still in-memory and the RFC 6962
-  implementation has not had a third-party crypto review (spec §3.4). On the critical path for banks.
-- **Durable ledger persistence.** `OpenBaoLedgerAdapter` wraps an in-memory TrustLedger: durable
-  signing key, ephemeral tree/entries (lost on restart). Needs a persistent tree backend.
+  provides durable Ed25519 signing and the tree/entries are now durably persisted (ADR-0008), but the
+  RFC 6962 implementation has not had a third-party crypto review (spec §3.4). On the critical path
+  for banks.
+- **Durable ledger persistence (CLOSED 2026-06-12, ADR-0008).** `TrustLedger` now write-throughs each
+  sealed entry + STH to a `LedgerRepository` (Postgres adapter + migration 003) and rebuilds itself
+  on `hydrate()` at startup. Remaining ledger hardening: physical per-tenant tables (current design
+  is `tenant_id`-keyed, matching `quaicu_actions`) + the crypto review above.
 - **Policy content packs.** K·14 regmap catalog + K·01 CEL engine exist, but no actual RBI / EU AI
   Act / DPDP rule sets are written. The kernel enforces rules; the rules themselves are unwritten.
 
@@ -91,6 +94,24 @@ is in the 2026-06-10 "Pre-management-API gap audit" log entry.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-12 · Durable ledger persistence · ledger/adapters/delivery (ADR-0008)** — Closed the
+  heaviest pre-sale blocker: the K·02 transparency log survived only in process memory (lost on
+  restart) behind the durable OpenBao *signing key*. Mirroring ADR-0005's write-through policy store:
+  new async `LedgerRepository` port (`core/ledger/repository.py`) + `LedgerPersistenceError`;
+  `InMemoryLedgerRepository` (default/tests) + `PostgresLedgerRepository` (asyncpg, mock-tested) +
+  Alembic migration `003` (`quaicu_ledger_entries` keyed `(tenant_id, ledger_seq)`,
+  `quaicu_ledger_sth` keyed `tenant_id`). `TrustLedger` gains an optional `repository`: `seal()` is
+  write-through (append leaf → sign head → persist entry + STH **before** committing in-memory; on
+  any failure `MerkleTree.pop_last` rolls back and the action HALTs fail-closed), and `hydrate()`
+  rebuilds every tenant's tree from the stored leaf hashes (`append_leaf_hash`), restoring entries,
+  sequence, and the signed head. `OpenBaoLedgerAdapter` takes an optional `repository` + `hydrate`;
+  the kernel wires `[adapters].ledger_store` via `_build_ledger`, exposes `kernel.ledger_repository`,
+  hydrates the ledger in `startup()`, and closes it in `shutdown()`. Proofs stay on the fast
+  in-memory path (no DB round-trip). 20 new tests (merkle rehydrate/pop, write-through + hydrate
+  round-trip + tenant isolation + fail-closed rollback, mock Postgres adapter, kernel startup
+  hydrate) + a `DATABASE_URL`-gated Postgres round-trip; suite 627 → **647** (10 skipped on a bare
+  checkout). **Follow-ups:** physical per-tenant ledger tables + the K·02 crypto review remain.
 
 - **2026-06-12 · Capture the approving identity in the ledger · hitl/lifecycle (ADR-0007)** — Closed
   the "who approved this?" audit gap. The lifecycle sealed `approver=None` because `HITLPort.poll`
