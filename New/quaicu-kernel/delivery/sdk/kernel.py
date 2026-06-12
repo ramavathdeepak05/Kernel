@@ -196,6 +196,45 @@ class Kernel:
             return hitl._store.pending_count()
         return 0
 
+    def _in_process_hitl(self) -> Any:
+        """Return the wired HITL port if it is an in-process (queryable) one, else None.
+
+        Only the in-process adapter exposes a listable approval store; a webhook/external adapter
+        keeps its queue in another system, so the control-plane approvals surface is unavailable
+        (the route maps None → 503).
+        """
+        from core.hitl.engine import InProcessHITLPort
+
+        hitl = self.engine._hitl  # type: ignore[attr-defined]
+        return hitl if isinstance(hitl, InProcessHITLPort) else None
+
+    def list_pending_approvals(self) -> list[Any]:
+        """List pending HITL approval records (operator queue). Empty if no in-process port."""
+        hitl = self._in_process_hitl()
+        return hitl.list_pending() if hitl is not None else []
+
+    async def decide_approval(self, handle_id: str, *, decision: str, actor: Actor) -> Any:
+        """Approve or reject a pending HITL request as ``actor``.
+
+        ``decision`` is ``"approved"`` or ``"rejected"``. Delegates to the HITL port, which enforces
+        approver eligibility + the self-approval guard (raises ``HITLPortError`` otherwise). Returns
+        the updated ``ApprovalRecord``. Raises ``RuntimeError`` if no in-process HITL port is wired.
+        """
+        hitl = self._in_process_hitl()
+        if hitl is None:
+            raise RuntimeError("No in-process HITL port configured — approvals unavailable.")
+        if decision == "approved":
+            await hitl.approve(
+                handle_id, approver_actor_id=actor.id, approver_roles=tuple(actor.roles)
+            )
+        elif decision == "rejected":
+            await hitl.reject(
+                handle_id, approver_actor_id=actor.id, approver_roles=tuple(actor.roles)
+            )
+        else:
+            raise ValueError(f"decision must be 'approved' or 'rejected', got {decision!r}")
+        return hitl.get_record(handle_id)
+
     # ── Lifecycle hooks (startup / shutdown) ─────────────────────────────────────
 
     async def startup(self) -> None:

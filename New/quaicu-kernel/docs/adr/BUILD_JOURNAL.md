@@ -14,8 +14,9 @@ next cold agent doesn't know it happened.
 
 ## Current status (2026-06-11)
 
-**All 14 governance layers + the delivery phase are built and green. Suite: 647 tests passing,
-10 skipped on a bare checkout — and 657 passing / 0 skipped once the real external deps are live
+**All 14 governance layers + the delivery phase are built and green, and an operator console (web
+UI) now ships alongside. Suite: 658 tests passing,
+10 skipped on a bare checkout — and 668 passing / 0 skipped once the real external deps are live
 (the 10 skips are the Postgres + OpenBao integration tests — incl. the new durable-ledger Postgres
 round-trip — now validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the Log).** Seven feature waves have landed on top of the core kernel since the Wave-2 milestone
 below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
@@ -94,6 +95,25 @@ is in the 2026-06-10 "Pre-management-API gap audit" log entry.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-12 · Operator console + HITL approvals API · delivery/console** — Gave deployed clients a
+  UI to run the kernel. **Backend:** new `delivery/api/routes/approvals.py` (`GET /v1/approvals`,
+  `POST /v1/approvals/{id}/{approve,reject}`) over the in-process HITL port — token-resolved actor,
+  the port enforces approver eligibility + the self-approval guard; supported by
+  `ApprovalStore.list_pending`, `InProcessHITLPort.list_pending`, `Kernel.list_pending_approvals` /
+  `decide_approval`, and approval response schemas. `create_app` now mounts `CORSMiddleware`
+  (configurable `cors_origins`, default the Vite dev origin) so a separate console origin can call
+  the API. 11 new backend tests; suite 647 → **658**. **Frontend:** new `console/` — a plain
+  React + Vite + TypeScript app (no design system, per scope) with four areas: **Dashboard**
+  (overview, decision timeline, top actions, HITL depth), **Policies** (register → submit →
+  **simulate/backtest** → acknowledge-&-activate → deprecate), **Audit trail** (sealed ledger
+  entries), **Approvals** (pending queue + approve/reject). Typed `fetch` client over the existing
+  `/v1` API, token-paste auth (the kernel consumes tokens; the console doesn't mint them), dev proxy
+  to `:8000`. `npm run build` (tsc strict + vite) is green. **Caveat:** the approvals queue is the
+  operator surface over the in-process store; wiring an approval to *resume* a suspended action needs
+  the async K·06 process-engine deployment (the synchronous lifecycle times a gate out immediately).
+  **Follow-ups:** login/OIDC instead of token-paste; model-registry (K·08) + consent (K·04) config
+  surfaces; richer charts.
 
 - **2026-06-12 · Durable ledger persistence · ledger/adapters/delivery (ADR-0008)** — Closed the
   heaviest pre-sale blocker: the K·02 transparency log survived only in process memory (lost on

@@ -42,3 +42,12 @@ class ApprovalStore:
                 for r in self._by_handle.values()
                 if r.decision is ApprovalDecision.PENDING
             )
+
+    def list_pending(self) -> list[ApprovalRecord]:
+        """All approval records still awaiting a decision, oldest request first."""
+        with self._lock:
+            pending = [
+                r for r in self._by_handle.values()
+                if r.decision is ApprovalDecision.PENDING
+            ]
+        return sorted(pending, key=lambda r: r.requested_at)

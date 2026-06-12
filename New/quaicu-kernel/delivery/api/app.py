@@ -22,6 +22,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from core.errors import (
@@ -32,6 +33,7 @@ from core.errors import (
 )
 from delivery.api.middleware import GovernanceMiddleware
 from delivery.api.routes.actions import router as actions_router
+from delivery.api.routes.approvals import router as approvals_router
 from delivery.api.routes.authorize import router as authorize_router
 from delivery.api.routes.dashboard import router as dashboard_router
 from delivery.api.routes.inference import router as inference_router
@@ -44,11 +46,15 @@ def create_app(
     kernel: Kernel,
     *,
     enforce_paths: list[tuple[str, str]] | None = None,
+    cors_origins: list[str] | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         kernel: A fully wired ``Kernel`` instance.
+        enforce_paths: Optional reference-PEP enforcement-point path globs.
+        cors_origins: Browser origins allowed to call the API (the operator console runs on a
+            separate origin). Defaults to the Vite dev server (``http://localhost:5173``).
 
     Returns:
         A configured ``FastAPI`` app ready to serve.
@@ -77,6 +83,15 @@ def create_app(
     # Attach kernel to app state (no globals)
     app.state.kernel = kernel
 
+    # CORS so the operator console (a separate origin) can call the API. The Authorization bearer
+    # header is the credential; origins are an allowlist (defaults to the Vite dev server).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins or ["http://localhost:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # Routers
     app.include_router(actions_router)
     app.include_router(authorize_router)
@@ -84,6 +99,7 @@ def create_app(
     app.include_router(ledger_router)
     app.include_router(policies_router)
     app.include_router(dashboard_router)
+    app.include_router(approvals_router)
 
     # Optional reference PEP: governance enforcement middleware.
     # Wired only when the caller explicitly passes enforce_paths so existing tests are unaffected.

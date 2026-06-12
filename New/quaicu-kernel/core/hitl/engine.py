@@ -150,6 +150,10 @@ class InProcessHITLPort:
     def get_record(self, handle_id: str) -> ApprovalRecord | None:
         return self._store.get(handle_id)
 
+    def list_pending(self) -> list[ApprovalRecord]:
+        """All approval records still awaiting a decision (operator queue surface)."""
+        return self._store.list_pending()
+
     # ── Authority ────────────────────────────────────────────────────────────
 
     def _assert_authorized(

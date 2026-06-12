@@ -306,3 +306,28 @@ class HitlQueueResponse(BaseModel):
 
     tenant: str
     pending: int
+
+
+# ── HITL approvals (operator queue) ─────────────────────────────────────────────────
+
+
+class ApprovalRecordResponse(BaseModel):
+    """One pending/decided HITL approval record."""
+
+    handle_id: str
+    action_id: str
+    tenant: str
+    required_approvers: list[str]
+    requested_at: str  # ISO 8601
+    decision: str
+    decided_by: str | None = None
+    decided_at: str | None = None
+    expires_at: str | None = None
+    proposed_by: str | None = None
+
+
+class ApprovalListResponse(BaseModel):
+    """Response for GET /v1/approvals."""
+
+    approvals: list[ApprovalRecordResponse]
+    count: int
