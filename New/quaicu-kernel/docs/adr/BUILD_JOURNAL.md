@@ -16,8 +16,8 @@ next cold agent doesn't know it happened.
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 720 tests passing, 10 skipped on a bare
-checkout — and 730 passing / 0 skipped once the real external deps are live (the 10 skips are the
+landed and the WS-D auth/metering edge is in. Suite: 737 tests passing, 10 skipped on a bare
+checkout — and 747 passing / 0 skipped once the real external deps are live (the 10 skips are the
 Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
 OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
@@ -43,9 +43,10 @@ with per-agent identity, served either as a single dedicated kernel or via the n
 ### Next planned work — productization program (3 tiers from one codebase)
 Per the go-live plan, the work is sequenced in waves. **Wave 0 (entitlement/tiering foundation),
 Wave 1 (shared-plane API routing + self-serve provisioning), and the core of WS-D (API-key auth +
-RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** The remaining WS-D
-slice is **named IdP connectors** (Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on
-`JWTIdentityAdapter`) and **console OIDC login + per-tier UI gating** — both slotted into Wave 2.
+RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **Named IdP connectors**
+(Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on `JWTIdentityAdapter`) are now
+**done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
+UI gating**.
 Then **WS-C** (Stripe + Razorpay billing → tier flips; usage metering builds on the new access log),
 **WS-F** (regulator ledger-proof export), **WS-E** (Enterprise isolation hardening), and **WS-G**
 (GDPR crypto-shredding erasure). The pre-sale blockers below (K·02 crypto review, policy content
@@ -110,6 +111,25 @@ packs) remain open in parallel.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-D named IdP connectors — OIDC discovery + JWKS rotation · adapters/identity** —
+  Built the remaining WS-D slice: verify IdP-issued (asymmetric) JWTs against a named provider's
+  rotating JWKS, layered on the existing JWT claim mapping. New `adapters/identity/_claims.py`
+  (`actor_from_claims` — the shared, single-source claim→`Actor` mapper incl. the F-07 tenant
+  cross-check; `JWTIdentityAdapter` now delegates to it so the two adapters cannot drift). New
+  `adapters/identity/oidc.py` — `OIDCIdentityAdapter`: (1) OIDC **discovery** from
+  `{issuer}/.well-known/openid-configuration` when no `jwks_uri` is given, (2) JWKS fetch + `kid`
+  index cached for `jwks_ttl`, (3) **rotation** — an unknown `kid` triggers exactly one re-fetch,
+  still-missing → fail-closed, (4) `jwt.decode` with mandatory `issuer` + `audience` checks and
+  `require=[exp,iss,aud]`. Provider presets `OIDCIdentityAdapter.okta/auth0/keycloak` (issuer-URL
+  shaping only; Auth0's trailing slash preserved). HTTP fetch is injectable (`jwks_fetcher=`) so the
+  adapter is fully testable without a live IdP. Registered `oidc` in the kernel adapter registry
+  (`_build_identity` already reads `[identity]` kwargs → wireable via `identity = "oidc"`); documented
+  in `kernel.example.toml`. **Tests:** +16 (`test_oidc_identity.py` — valid/aud/iss/expiry/unknown-key/
+  unknown-kid/no-kid, tenant-mismatch isolation, rotation refetch + TTL cache hit, the three provider
+  presets), all 11 JWT-adapter tests unchanged after the refactor; suite 720 → **737**. **Follow-ups:**
+  console OIDC login + per-tier UI gating (the last Wave-2 slice; frontend); distributed JWKS cache if
+  the kernel is horizontally scaled (currently per-process).
 
 - **2026-06-13 · WS-D auth/metering edge — API-key auth, RBAC scopes, rate limiting, request logging · core/delivery (ADR-0011)** —
   Closed the unguarded edge left by ADR-0009/0010. **RBAC scopes:** new `core/account/scopes.py`

@@ -78,6 +78,22 @@ secret_or_key = "change-me-in-production"
 algorithms    = ["HS256"]
 verify        = true         # set false to skip signature check in local dev
 
+# ── OIDC identity adapter (named IdP: Okta / Auth0 / Keycloak) ────────────────
+# Set identity = "oidc" under [adapters] to verify IdP-issued JWTs against the provider's
+# rotating JWKS instead of a shared HMAC secret. The kernel discovers the JWKS from the issuer's
+# /.well-known/openid-configuration (or set jwks_uri explicitly), caches keys, and re-fetches on
+# rotation. issuer + audience are mandatory and checked on every token (fail-closed).
+#
+# [adapters]
+# identity = "oidc"
+# [identity]
+# issuer    = "https://dev-123.okta.com/oauth2/default"   # Auth0 keeps a trailing slash
+# audience  = "quaicu-kernel"
+# jwks_uri  = ""                # optional — discovered from the issuer when omitted
+# algorithms = ["RS256", "ES256"]
+# roles_claim = "roles"
+# jwks_ttl  = 3600              # seconds a fetched JWKS is trusted before refresh
+
 # ── AI Gateway (governed inference) ───────────────────────────────────────────
 # Set inference = "openai_compat" under [adapters] to enable kernel.generate() and the
 # POST /v1/inference route. Works with any OpenAI-compatible endpoint (OpenAI, Ollama,

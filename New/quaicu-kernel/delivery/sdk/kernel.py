@@ -106,6 +106,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "webhook":                 ("adapters.hitl.webhook",             "WebhookHITLAdapter"),
     # IdentityPort
     "jwt":                     ("adapters.identity.jwt_adapter",     "JWTIdentityAdapter"),
+    "oidc":                    ("adapters.identity.oidc",            "OIDCIdentityAdapter"),
     # StoragePort
     "memory_storage":          ("adapters.storage.memory",           "InMemoryStorageAdapter"),
     "postgres_storage":        ("adapters.storage.postgres",         "PostgresStorageAdapter"),

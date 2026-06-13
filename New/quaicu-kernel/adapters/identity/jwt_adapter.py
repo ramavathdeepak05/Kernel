@@ -16,8 +16,9 @@ from typing import Any
 
 import jwt as _jwt
 
-from core.errors import IdentityPortError, TenantIsolationError
-from core.types import Actor, ActorId, RequestContext, TenantId
+from adapters.identity._claims import actor_from_claims
+from core.errors import IdentityPortError
+from core.types import Actor, RequestContext, TenantId
 
 
 class JWTIdentityAdapter:
@@ -71,28 +72,5 @@ class JWTIdentityAdapter:
                 detail={"tenant": str(tenant)},
             ) from exc
 
-        actor_id = payload.get("sub")
-        if not actor_id:
-            raise IdentityPortError(
-                "JWT missing 'sub' claim",
-                detail={"claims": list(payload.keys())},
-            )
-
-        # Tenant isolation check: JWT tenant claim must match action tenant
-        jwt_tenant = str(payload.get("tenant") or payload.get("tid") or "")
-        if jwt_tenant and jwt_tenant != str(tenant):
-            raise TenantIsolationError(
-                f"JWT tenant {jwt_tenant!r} does not match action tenant {tenant!r}",
-                detail={"jwt_tenant": jwt_tenant, "action_tenant": str(tenant)},
-            )
-
-        roles_raw = payload.get("roles", [])
-        if isinstance(roles_raw, str):
-            roles_raw = [roles_raw]
-
-        return Actor(
-            id=ActorId(str(actor_id)),
-            tenant=tenant,
-            roles=tuple(str(r) for r in roles_raw),
-            attributes={k: v for k, v in payload.items() if k not in ("sub", "tenant", "tid", "roles", "exp", "iat")},
-        )
+        # Shared claim → Actor mapping (sub/tenant/roles), incl. the F-07 tenant cross-check.
+        return actor_from_claims(payload, tenant)
