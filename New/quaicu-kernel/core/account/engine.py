@@ -15,7 +15,10 @@ import re
 import secrets
 from datetime import datetime, timezone
 
-from core.account.model import Account, AccountStatus, ApiKey
+from collections.abc import Iterable
+
+from core.account.model import Account, AccountStatus, ApiKey, AuthenticatedPrincipal
+from core.account.scopes import normalize_scopes
 from core.account.store import AccountStore
 from core.entitlements import CustomerPlan, EntitlementStore, FeatureTier, PlanStatus
 from core.errors import AccountExistsError, ApiKeyInvalidError
@@ -85,8 +88,14 @@ class AccountEngine:
 
     # ── API keys ─────────────────────────────────────────────────────────────────
 
-    def issue_api_key(self, tenant: TenantId) -> tuple[ApiKey, str]:
-        """Mint a new API key for ``tenant``. Returns (record, plaintext). Plaintext shown once."""
+    def issue_api_key(
+        self, tenant: TenantId, *, scopes: Iterable[str] | None = None
+    ) -> tuple[ApiKey, str]:
+        """Mint a new API key for ``tenant``. Returns (record, plaintext). Plaintext shown once.
+
+        ``scopes`` restricts the key to a subset of `core/account/scopes.ALL_SCOPES` (fail-closed:
+        unknown scopes raise). ``None`` grants the full owner scope set — used for the signup key.
+        """
         key_id = secrets.token_hex(8)
         secret = secrets.token_urlsafe(32)
         record = ApiKey(
@@ -94,6 +103,7 @@ class AccountEngine:
             tenant_id=tenant,
             hashed_secret=_hash_secret(secret),
             created_at=datetime.now(timezone.utc),
+            scopes=normalize_scopes(scopes),
         )
         self._accounts.add_api_key(record)
         return record, f"qk_{key_id}_{secret}"
@@ -109,8 +119,8 @@ class AccountEngine:
             )
         self._accounts.replace_api_key(dataclasses.replace(existing, revoked=True))
 
-    def verify_api_key(self, presented: str) -> Account:
-        """Resolve the owning `Account` for a presented ``qk_<key_id>_<secret>`` key. Fail-closed.
+    def _verify(self, presented: str) -> tuple[Account, ApiKey]:
+        """Resolve (account, key) for a presented ``qk_<key_id>_<secret>`` key. Fail-closed.
 
         Raises `ApiKeyInvalidError` if the key is malformed, unknown, revoked, or the secret does not
         match. The comparison is constant-time.
@@ -133,4 +143,23 @@ class AccountEngine:
             raise ApiKeyInvalidError(
                 "API key has no owning account.", detail={"key_id": key_id}
             )
+        return account, record
+
+    def verify_api_key(self, presented: str) -> Account:
+        """Resolve the owning `Account` for a presented API key. Fail-closed (see `_verify`)."""
+        account, _ = self._verify(presented)
         return account
+
+    def resolve_principal(self, presented: str) -> AuthenticatedPrincipal:
+        """Resolve the full `AuthenticatedPrincipal` (tenant, account, key id, scopes) for a key.
+
+        This is what the API auth layer uses: it needs the key's scopes for RBAC, not just the
+        account. Fail-closed (see `_verify`).
+        """
+        account, record = self._verify(presented)
+        return AuthenticatedPrincipal(
+            tenant_id=record.tenant_id,
+            account_id=account.account_id,
+            key_id=record.key_id,
+            scopes=record.scopes,
+        )

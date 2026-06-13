@@ -33,7 +33,10 @@ from core.errors import (
 )
 from core.account import AccountEngine
 from core.entitlements import EntitlementStore
+from delivery.api.auth import ApiKeyAuthMiddleware
 from delivery.api.middleware import GovernanceMiddleware
+from delivery.api.observability import RequestLoggingMiddleware
+from delivery.api.ratelimit import RateLimitMiddleware
 from delivery.api.routes.actions import router as actions_router
 from delivery.api.routes.approvals import router as approvals_router
 from delivery.api.routes.authorize import router as authorize_router
@@ -56,6 +59,8 @@ def create_app(
     admin_token: str | None = None,
     enforce_paths: list[tuple[str, str]] | None = None,
     cors_origins: list[str] | None = None,
+    require_api_key: bool = False,
+    rate_limit: bool = True,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -70,6 +75,11 @@ def create_app(
         enforce_paths: Optional reference-PEP enforcement-point path globs.
         cors_origins: Browser origins allowed to call the API (the operator console runs on a
             separate origin). Defaults to the Vite dev server (``http://localhost:5173``).
+        require_api_key: When True, protected ``/v1/*`` routes require a valid, tenant-matched API
+            key (`ApiKeyAuthMiddleware`); requires ``account_engine``. Off by default so IdP-token
+            and single-kernel deployments are unaffected.
+        rate_limit: When True (default), enforce per-tenant tier rate limits at the edge. No-ops when
+            no entitlement source (provider or ``entitlement_store``) is wired.
 
     Returns:
         A configured ``FastAPI`` app ready to serve.
@@ -108,15 +118,6 @@ def create_app(
     app.state.entitlement_store = entitlement_store
     app.state.admin_token = admin_token
 
-    # CORS so the operator console (a separate origin) can call the API. The Authorization bearer
-    # header is the credential; origins are an allowlist (defaults to the Vite dev server).
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=cors_origins or ["http://localhost:5173"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
     # Routers
     app.include_router(actions_router)
     app.include_router(authorize_router)
@@ -128,13 +129,40 @@ def create_app(
     app.include_router(signup_router)
     app.include_router(admin_router)
 
-    # Optional reference PEP: governance enforcement middleware.
-    # Wired only when the caller explicitly passes enforce_paths so existing tests are unaffected.
-    # The reference PEP targets a single kernel; in shared-plane (provider) mode it is not applicable.
+    # ── Middleware stack ──────────────────────────────────────────────────────
+    # Starlette runs middleware in REVERSE order of registration (last added = outermost = runs
+    # first). We register inner→outer so the effective execution order is:
+    #   CORS → RequestLogging → RateLimit → ApiKeyAuth → GovernancePEP → routes
+    # i.e. CORS preflight is handled first; every request is logged; quota is checked before auth;
+    # auth runs before the route; the reference PEP (if any) is innermost.
+
+    # Optional reference PEP: governance enforcement middleware (single-kernel only).
     if enforce_paths:
         if kernel is None:
             raise ValueError("enforce_paths (reference PEP) is only supported in single-kernel mode.")
         app.add_middleware(GovernanceMiddleware, kernel=kernel, enforce_paths=enforce_paths)
+
+    # API-key authentication (opt-in). Requires an account engine to verify keys.
+    if require_api_key:
+        if account_engine is None:
+            raise ValueError("require_api_key=True requires an account_engine.")
+        app.add_middleware(ApiKeyAuthMiddleware, account_engine=account_engine)
+
+    # Per-tenant tier rate limiting (no-op without an entitlement source).
+    if rate_limit:
+        app.add_middleware(RateLimitMiddleware)
+
+    # Structured access logging + correlation ids (always on).
+    app.add_middleware(RequestLoggingMiddleware)
+
+    # CORS so the operator console (a separate origin) can call the API. Outermost so preflight is
+    # answered before any auth/rate-limit logic. The Authorization bearer header is the credential.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_origins or ["http://localhost:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # ── Exception handlers ────────────────────────────────────────────────────
 

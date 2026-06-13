@@ -19,9 +19,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from core.account.scopes import APPROVAL_DECIDE, APPROVAL_READ
 from core.errors import HITLPortError, IdentityPortError
 from core.hitl.model import ApprovalRecord
 from core.types import Actor, RequestContext, TenantId
+from delivery.api.auth import enforce_scope
 from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import ApprovalListResponse, ApprovalRecordResponse
@@ -30,12 +32,14 @@ from delivery.sdk.kernel import Kernel
 router = APIRouter(prefix="/v1/approvals", tags=["approvals"])
 
 
-async def _authenticate(request: Request) -> tuple[Kernel, Actor, TenantId]:
-    """Resolve the caller from the bearer token; require an in-process HITL port.
+async def _authenticate(request: Request, *, scope: str) -> tuple[Kernel, Actor, TenantId]:
+    """Resolve the caller from the bearer token; require an in-process HITL port and ``scope``.
 
-    503 if no identity adapter or no in-process HITL port; 401 if the token cannot be resolved.
-    Returns the serving kernel, the resolved actor, and the request's tenant.
+    503 if no identity adapter or no in-process HITL port; 401 if the token cannot be resolved; 403
+    if the API key lacks ``scope`` (no-op when API-key auth is disabled). Returns the serving kernel,
+    the resolved actor, and the request's tenant.
     """
+    enforce_scope(request, scope)
     kernel: Kernel = get_kernel(request)
     tenant = get_request_tenant(request)
     if kernel._in_process_hitl() is None:
@@ -86,7 +90,7 @@ def _to_response(record: ApprovalRecord) -> ApprovalRecordResponse:
 
 @router.get("", response_model=ApprovalListResponse, summary="List pending HITL approvals")
 async def list_approvals(request: Request) -> ApprovalListResponse:
-    kernel, _, tenant = await _authenticate(request)
+    kernel, _, tenant = await _authenticate(request, scope=APPROVAL_READ)
     records = [r for r in kernel.list_pending_approvals() if str(r.tenant) == str(tenant)]
     return ApprovalListResponse(
         approvals=[_to_response(r) for r in records], count=len(records)
@@ -114,7 +118,7 @@ async def reject(handle_id: str, request: Request) -> ApprovalRecordResponse:
 
 
 async def _decide(request: Request, handle_id: str, decision: str) -> ApprovalRecordResponse:
-    kernel, actor, tenant = await _authenticate(request)
+    kernel, actor, tenant = await _authenticate(request, scope=APPROVAL_DECIDE)
     record = kernel._in_process_hitl().get_record(handle_id)  # type: ignore[union-attr]
     if record is None:
         raise HTTPException(

@@ -90,6 +90,14 @@ class EntitlementEngine:
                 detail={"tenant": str(tenant), "tier": plan.tier.value, "profile": profile_name},
             )
 
+    def rate_limit_for(self, tenant: TenantId) -> int:
+        """The tenant's per-minute request rate limit (``-1`` = unbounded).
+
+        Honors per-tenant ``quota_overrides`` over the tier default. Raises (fail-closed) if the
+        tenant is unprovisioned/inactive; the rate-limit middleware treats that as "skip".
+        """
+        return self._quota(self.resolve_plan(tenant), "rate_limit_per_min")
+
     # ── Quota enforcement ──────────────────────────────────────────────────────────
 
     def assert_within_quota(

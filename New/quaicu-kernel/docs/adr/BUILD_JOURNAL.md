@@ -15,20 +15,22 @@ next cold agent doesn't know it happened.
 ## Current status (2026-06-13)
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
-alongside, and the commercial productization program (3-tier packaging) has begun — waves 0–1 are
-landed. Suite: 704 tests passing, 10 skipped on a bare checkout — and 714 passing / 0 skipped once the
-real external deps are live (the 10 skips are the Postgres + OpenBao integration tests, validated
-against a GCP Cloud SQL instance and a Dockerized OpenBao; see the Log).** Nine feature waves have
-landed on top of the core kernel since the Wave-2 milestone below: (1) full layer completion +
-delivery, (2) a security-hardening + composable-governance pass, (3) a decision-only
-authorize/monitor surface + reference PEP, (4) a zero-friction integration layer, (5) config-wiring
-the CEL policy engine + a durable (Postgres) policy store, (6) the Policy Management HTTP API
-(`/v1/policies`) with route-level control-plane authz, (7) the backtest→ImpactReport simulate bridge
-+ dashboard read-model query routes, (8) the operator console (React/Vite web UI) + HITL approvals
-API + CORS, and (9) **commercial tiering** — an entitlement/tier engine, an offline-licensed
-Enterprise path, self-serve account provisioning, and a shared multi-tenant SaaS plane that routes
-each request to its tier's kernel. See the Log for the per-wave detail. Extension decisions are
-recorded as ADR-0002…0010 (`docs/adr/`).
+alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
+landed and the WS-D auth/metering edge is in. Suite: 720 tests passing, 10 skipped on a bare
+checkout — and 730 passing / 0 skipped once the real external deps are live (the 10 skips are the
+Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
+OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
+milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
+pass, (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
+layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the Policy
+Management HTTP API (`/v1/policies`) with route-level control-plane authz, (7) the
+backtest→ImpactReport simulate bridge + dashboard read-model query routes, (8) the operator console
+(React/Vite web UI) + HITL approvals API + CORS, (9) **commercial tiering** — an entitlement/tier
+engine, an offline-licensed Enterprise path, self-serve account provisioning, and a shared
+multi-tenant SaaS plane that routes each request to its tier's kernel, and (10) the **WS-D
+auth/metering edge** — API-key authentication, fine-grained RBAC scopes, per-tier rate limiting, and
+request-logging/correlation-id middleware. See the Log for the per-wave detail. Extension decisions are
+recorded as ADR-0002…0011 (`docs/adr/`).
 
 The kernel now exposes four ways in — REST API (`/v1/actions`, `/v1/authorize`, `/v1/inference`,
 `/v1/ledger`, `/v1/policies`, `/v1/dashboard`, `/v1/approvals`, plus `/v1/signup` + `/v1/admin/*`),
@@ -39,14 +41,15 @@ with per-agent identity, served either as a single dedicated kernel or via the n
 `TieredKernelProvider` shared plane.
 
 ### Next planned work — productization program (3 tiers from one codebase)
-Per the go-live plan, the work is sequenced in waves. **Wave 0 (entitlement/tiering foundation) and
-Wave 1 (shared-plane API routing + self-serve provisioning) are done.** Next is **WS-D — the
-auth/metering edge**: per-tier rate limiting (quotas from `TIER_MATRIX`), request/usage logging
-middleware (also feeds billing), the API-key auth path wired into protected routes, fine-grained RBAC
-scopes, and named IdP connectors (Okta/Auth0/Keycloak via OIDC/JWKS). Then **WS-C** (Stripe +
-Razorpay billing → tier flips), **WS-F** (regulator ledger-proof export), **WS-E** (Enterprise
-isolation hardening), and **WS-G** (GDPR crypto-shredding erasure). The pre-sale blockers below
-(K·02 crypto review, policy content packs) remain open in parallel.
+Per the go-live plan, the work is sequenced in waves. **Wave 0 (entitlement/tiering foundation),
+Wave 1 (shared-plane API routing + self-serve provisioning), and the core of WS-D (API-key auth +
+RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** The remaining WS-D
+slice is **named IdP connectors** (Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on
+`JWTIdentityAdapter`) and **console OIDC login + per-tier UI gating** — both slotted into Wave 2.
+Then **WS-C** (Stripe + Razorpay billing → tier flips; usage metering builds on the new access log),
+**WS-F** (regulator ledger-proof export), **WS-E** (Enterprise isolation hardening), and **WS-G**
+(GDPR crypto-shredding erasure). The pre-sale blockers below (K·02 crypto review, policy content
+packs) remain open in parallel.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -107,6 +110,33 @@ isolation hardening), and **WS-G** (GDPR crypto-shredding erasure). The pre-sale
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-D auth/metering edge — API-key auth, RBAC scopes, rate limiting, request logging · core/delivery (ADR-0011)** —
+  Closed the unguarded edge left by ADR-0009/0010. **RBAC scopes:** new `core/account/scopes.py`
+  (`"resource:verb"` constants + fail-closed `normalize_scopes`); `ApiKey` now carries a
+  `frozenset` of scopes (signup key = `OWNER_SCOPES`, all), `issue_api_key(tenant, scopes=…)` mints
+  least-privilege keys, and `AccountEngine.resolve_principal` returns an `AuthenticatedPrincipal`
+  (tenant/account/key id/scopes) while `verify_api_key` keeps its `Account` return for compatibility.
+  **API-key auth:** new `delivery/api/auth.py` — `ApiKeyAuthMiddleware` (opt-in via
+  `create_app(require_api_key=True)`) requires a valid `qk_` key on protected `/v1/*` paths
+  (`/v1/signup` + admin-token-guarded `/v1/admin/*` exempt), verifies it, binds the key's tenant to the
+  request's routing tenant (403 `TENANT_ISOLATION` on mismatch), and stashes the principal.
+  `enforce_scope(request, scope)` is wired into every per-tenant route (`actions:write/read`,
+  `ledger:read`, `dashboard:read`, `approval:read/decide`, `inference:write`, `policy:admin`) and is a
+  **no-op when auth is disabled**, so IdP-token/single-kernel deployments and the existing suite are
+  untouched. **Rate limiting:** new `delivery/api/ratelimit.py` — `RateLimitMiddleware` enforces
+  `EntitlementEngine.rate_limit_for(tenant)` (tier default from `TIER_MATRIX`, honoring
+  `quota_overrides`) over a fixed 1-minute window → **429 + Retry-After**; fails open when no
+  entitlement source / unresolved tenant / unbounded tier. **Observability:** new
+  `delivery/api/observability.py` — `RequestLoggingMiddleware` (always on) assigns/propagates
+  `X-Request-ID` and emits a structured access log (method, path, status, duration, tenant) — the
+  substrate WS-C metering/billing builds on. `create_app` gained `require_api_key` (default off) and
+  `rate_limit` (default on, no-op without entitlements); middleware order is
+  CORS → RequestLogging → RateLimit → ApiKeyAuth → reference PEP → routes. ADR-0011. **Tests:** +16
+  (scopes, API-key auth incl. tenant-mismatch/revoked/insufficient-scope/signup-exempt, rate-limit
+  429 + exempt + fail-open, request-id propagation); suite 704 → **720**, all prior API tests
+  unchanged. **Follow-ups:** remaining WS-D slice = named IdP connectors (OIDC/JWKS) + console OIDC,
+  moved to Wave 2; distributed (Redis) rate-limit store when horizontal scale needs a shared counter.
 
 - **2026-06-13 · Commercial tiering + provisioning + shared-plane routing · core/delivery (ADR-0009, ADR-0010)** —
   Started the productization program: turn the feature-complete engine into a sellable 3-tier product

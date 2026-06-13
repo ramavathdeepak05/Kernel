@@ -35,7 +35,9 @@ from core.fairness.model import DecisionRecord
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
 from core.sandbox.bridge import assemble_impact_report
 from core.sandbox.engine import run_counterfactual_backtest
+from core.account.scopes import POLICY_ADMIN
 from core.types import ApproverRef, Actor, Decision, RequestContext
+from delivery.api.auth import enforce_scope
 from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import (
@@ -76,6 +78,7 @@ async def _require_policy_admin(request: Request) -> tuple[Kernel, Actor]:
             },
         )
     token = _bearer_token(request)
+    enforce_scope(request, POLICY_ADMIN)
     if not kernel.has_identity:
         raise HTTPException(
             status_code=503,

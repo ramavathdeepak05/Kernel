@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from core.account.scopes import INFERENCE_WRITE
 from core.errors import LifecycleDeniedError, LifecycleHaltedError, QUAICUError
 from core.types import Actor, ActorId, ModelRef, RequestContext
+from delivery.api.auth import enforce_scope
 from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import InferenceRequest, InferenceResponse
@@ -37,6 +39,7 @@ async def inference(body: InferenceRequest, request: Request) -> InferenceRespon
     tenant = get_request_tenant(request)
 
     token = _bearer_token(request)
+    enforce_scope(request, INFERENCE_WRITE)
     if not kernel.has_identity:
         raise HTTPException(
             status_code=503,

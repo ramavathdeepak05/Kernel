@@ -28,6 +28,8 @@ from core.types import (
     RequestContext,
     TenantId,
 )
+from core.account.scopes import ACTIONS_READ, ACTIONS_WRITE
+from delivery.api.auth import enforce_scope
 from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.schemas import ActionResponse, ProposeRequest
 from delivery.sdk.kernel import Kernel
@@ -80,6 +82,7 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
     # configured IdentityPort. The actor is resolved from the token by the engine — never trusted
     # from the request body.
     token = _bearer_token(request)
+    enforce_scope(request, ACTIONS_WRITE)
     if not kernel.has_identity:
         raise HTTPException(
             status_code=503,
@@ -141,6 +144,7 @@ async def get_action(action_id: str, request: Request) -> ActionResponse:
     Returns 404 if the action is not found (this implementation uses the in-memory
     repo; a postgres adapter would query the DB).
     """
+    enforce_scope(request, ACTIONS_READ)
     kernel: Kernel = get_kernel(request)
     repo = kernel.engine._repo  # type: ignore[attr-defined]
 

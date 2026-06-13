@@ -8,10 +8,11 @@ the key up. Immutable, like every other kernel domain model.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from core.account.scopes import OWNER_SCOPES
 from core.types import TenantId
 
 
@@ -46,3 +47,24 @@ class ApiKey:
     hashed_secret: str          # hex SHA-256 of the secret half
     created_at: datetime
     revoked: bool = False
+    # RBAC scopes this key may exercise (see core/account/scopes.py). The signup key gets all.
+    scopes: frozenset[str] = field(default_factory=lambda: OWNER_SCOPES)
+
+
+@dataclass(frozen=True)
+class AuthenticatedPrincipal:
+    """The resolved caller behind a verified API key — what the auth layer hands to routes.
+
+    Carries only what authorization needs: the tenant the key belongs to, its owning account, the
+    key id (for audit/revocation), and the scopes the key may exercise. Identity for *governance*
+    (the actor whose roles drive policy) is still resolved separately from the request's IdP token;
+    this principal authorizes access to the management surface itself.
+    """
+
+    tenant_id: TenantId
+    account_id: str
+    key_id: str
+    scopes: frozenset[str]
+
+    def has_scope(self, scope: str) -> bool:
+        return scope in self.scopes

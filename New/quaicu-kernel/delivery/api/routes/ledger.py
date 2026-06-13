@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
 
+from core.account.scopes import LEDGER_READ
 from core.types import TenantId
+from delivery.api.auth import enforce_scope
 from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import LedgerEntryResponse, LedgerTrailResponse
@@ -30,6 +32,7 @@ async def ledger_trail(tenant: str, request: Request) -> LedgerTrailResponse:
     API schema.
     """
     _bearer_token(request)  # require authentication
+    enforce_scope(request, LEDGER_READ)
 
     kernel = get_kernel(request)
     if tenant != str(get_request_tenant(request)):
