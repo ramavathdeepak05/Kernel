@@ -21,7 +21,8 @@ from fastapi import APIRouter, HTTPException, Request
 
 from core.errors import HITLPortError, IdentityPortError
 from core.hitl.model import ApprovalRecord
-from core.types import Actor, RequestContext
+from core.types import Actor, RequestContext, TenantId
+from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import ApprovalListResponse, ApprovalRecordResponse
 from delivery.sdk.kernel import Kernel
@@ -29,12 +30,14 @@ from delivery.sdk.kernel import Kernel
 router = APIRouter(prefix="/v1/approvals", tags=["approvals"])
 
 
-async def _authenticate(request: Request) -> tuple[Kernel, Actor]:
+async def _authenticate(request: Request) -> tuple[Kernel, Actor, TenantId]:
     """Resolve the caller from the bearer token; require an in-process HITL port.
 
     503 if no identity adapter or no in-process HITL port; 401 if the token cannot be resolved.
+    Returns the serving kernel, the resolved actor, and the request's tenant.
     """
-    kernel: Kernel = request.app.state.kernel
+    kernel: Kernel = get_kernel(request)
+    tenant = get_request_tenant(request)
     if kernel._in_process_hitl() is None:
         raise HTTPException(
             status_code=503,
@@ -57,13 +60,13 @@ async def _authenticate(request: Request) -> tuple[Kernel, Actor]:
         headers=dict(request.headers),
         source_ip=request.client.host if request.client else None,
         raw_token=token,
-        tenant_hint=kernel.tenant,
+        tenant_hint=tenant,
     )
     try:
-        actor = await kernel.resolve_actor(ctx)
+        actor = await kernel.resolve_actor(ctx, tenant=tenant)
     except IdentityPortError as exc:
         raise HTTPException(status_code=401, detail={"error": str(exc), "code": exc.code})
-    return kernel, actor
+    return kernel, actor, tenant
 
 
 def _to_response(record: ApprovalRecord) -> ApprovalRecordResponse:
@@ -83,8 +86,8 @@ def _to_response(record: ApprovalRecord) -> ApprovalRecordResponse:
 
 @router.get("", response_model=ApprovalListResponse, summary="List pending HITL approvals")
 async def list_approvals(request: Request) -> ApprovalListResponse:
-    kernel, _ = await _authenticate(request)
-    records = [r for r in kernel.list_pending_approvals() if str(r.tenant) == str(kernel.tenant)]
+    kernel, _, tenant = await _authenticate(request)
+    records = [r for r in kernel.list_pending_approvals() if str(r.tenant) == str(tenant)]
     return ApprovalListResponse(
         approvals=[_to_response(r) for r in records], count=len(records)
     )
@@ -111,14 +114,14 @@ async def reject(handle_id: str, request: Request) -> ApprovalRecordResponse:
 
 
 async def _decide(request: Request, handle_id: str, decision: str) -> ApprovalRecordResponse:
-    kernel, actor = await _authenticate(request)
+    kernel, actor, tenant = await _authenticate(request)
     record = kernel._in_process_hitl().get_record(handle_id)  # type: ignore[union-attr]
     if record is None:
         raise HTTPException(
             status_code=404,
             detail={"error": f"Approval {handle_id!r} not found", "code": "APPROVAL_NOT_FOUND"},
         )
-    if str(record.tenant) != str(kernel.tenant):
+    if str(record.tenant) != str(tenant):
         raise HTTPException(
             status_code=403,
             detail={"error": "Cannot decide another tenant's approval", "code": "TENANT_ISOLATION"},
