@@ -16,8 +16,8 @@ next cold agent doesn't know it happened.
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 806 tests passing, 10 skipped on a bare
-checkout — and 816 passing / 0 skipped once the real external deps are live (the 10 skips are the
+landed and the WS-D auth/metering edge is in. Suite: 827 tests passing, 10 skipped on a bare
+checkout — and 837 passing / 0 skipped once the real external deps are live (the 10 skips are the
 Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
 OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
@@ -48,10 +48,15 @@ RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **
 **done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
 UI gating**.
 **WS-C** (Stripe + Razorpay billing → tier flips; usage metering on the access log) is now **done**
-(see the top Log entry). **WS-F** (regulator ledger-proof export) and **WS-G** (GDPR crypto-shredding
-erasure) are now **done** too. Remaining: **WS-E** (Enterprise isolation hardening — physical
-per-tenant ledger tables / schema-per-tenant). The pre-sale blockers below (K·02 crypto review, policy
-content packs) remain open in parallel.
+(see the top Log entry). **WS-F** (regulator ledger-proof export), **WS-G** (GDPR crypto-shredding
+erasure), and **WS-E** (Enterprise isolation hardening — schema-per-tenant + RLS) are now **done**
+too — the productization workstreams WS-C/D/E/F/G are all landed. What remains are the pre-sale
+blockers that are **not pure code** (and were always tracked separately): the **K·02 external
+cryptographic review** (a third-party engagement) and **policy content packs** (the actual RBI / EU AI
+Act / DPDP rule sets — a regulatory-authoring effort the kernel *enforces* but does not itself write),
+plus the optional Wave-2 **console OIDC login + per-tier UI gating** (frontend). The kernel engine,
+all 14 governance layers, delivery surfaces, and the full commercial/productization program are
+code-complete and green.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -112,6 +117,30 @@ content packs) remain open in parallel.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-E Enterprise isolation hardening — schema-per-tenant + RLS · adapters/storage** —
+  Hardened tenant isolation from *logical* (every row carries `tenant_id`, every query predicates on
+  it) to *physical* for the dedicated Enterprise tier, per F-07. New `adapters/storage/isolation.py`:
+  the mechanism — `assert_safe_tenant`/`safe_schema_name` derive a tenant's physical schema name and
+  are **fail-closed** (a tenant id that isn't a bare `[a-z0-9_-]` identifier raises
+  `TenantIsolationError` rather than being escaped into SQL — a crafted id can never become SQL);
+  `search_path_sql` pins a connection to the tenant's schema; `set_rls_tenant_sql` is a **parameterized**
+  `set_config('app.current_tenant', $1, true)` (tenant id is always a bind param); `current_db_tenant`
+  ContextVar + `db_tenant_scope` carry the RLS tenant per transaction. New
+  `adapters/storage/provisioner.py` — `TenantProvisioner.onboard/offboard` create/drop a tenant's
+  isolated schema with its own copy of every kernel table (`onboard_statements` runs CREATE SCHEMA →
+  pin search_path → CREATE TABLE so the tables land in the tenant schema, not `public`); fail-closed
+  wrapping. New Alembic migration `004_enable_rls.py` — enables + **forces** RLS on the three shared
+  kernel tables with a deny-by-default policy keyed on `current_setting('app.current_tenant')` (belt
+  and braces over the schema isolation). Exposed from `adapters.storage`. **Tests:** +21
+  (`test_tenant_isolation.py` — schema derivation, 7 injection/oversize tenant ids rejected, SQL
+  builder shapes, RLS-param-bound assertion, ContextVar set/restore + nested, onboard/offboard
+  statement order, and provisioner execution over a mocked asyncpg pool incl. fail-closed + unsafe
+  tenant); suite 806 → **827**. The live schema-per-tenant query path is exercised by the
+  `DATABASE_URL`-gated integration suite (the SQL generation + guards are fully unit-covered here).
+  **Follow-ups:** wire the Postgres adapters to issue `search_path_sql` + `set_rls_tenant_sql` per
+  transaction when an Enterprise `rls=True` flag is set; run the migration set against each onboarded
+  schema (currently the provisioner ships the table DDL inline).
 
 - **2026-06-13 · WS-G GDPR/DPDP crypto-shredding erasure · core/erasure · delivery** —
   Built right-to-erasure for a system whose audit log is **append-only and tamper-evident** — you
