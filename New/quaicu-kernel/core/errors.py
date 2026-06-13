@@ -425,3 +425,27 @@ class BillingEventError(BillingError):
     Reject (422); the signature was valid but the payload is not actionable."""
 
     code = "BILLING_EVENT_UNMAPPABLE"
+
+
+# ── Erasure / crypto-shredding errors (WS-G — GDPR right to erasure) ────────────
+
+
+class ErasureError(QUAICUError):
+    """Base for crypto-shredding / right-to-erasure errors."""
+
+    code = "ERASURE_ERROR"
+
+
+class SubjectErasedError(ErasureError):
+    """The data subject's key was crypto-shredded; the ciphertext is permanently irrecoverable.
+
+    Raised on any attempt to decrypt PII for an erased subject. This is the *intended* terminal
+    state of a GDPR erasure — not a fault. Surfaced as 410 Gone."""
+
+    code = "SUBJECT_ERASED"
+
+
+class CipherTokenError(ErasureError):
+    """A PII cipher token is malformed or its key is unknown. Fail-closed."""
+
+    code = "CIPHER_TOKEN_INVALID"

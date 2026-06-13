@@ -16,8 +16,8 @@ next cold agent doesn't know it happened.
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 787 tests passing, 10 skipped on a bare
-checkout — and 797 passing / 0 skipped once the real external deps are live (the 10 skips are the
+landed and the WS-D auth/metering edge is in. Suite: 806 tests passing, 10 skipped on a bare
+checkout — and 816 passing / 0 skipped once the real external deps are live (the 10 skips are the
 Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
 OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
@@ -48,9 +48,10 @@ RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **
 **done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
 UI gating**.
 **WS-C** (Stripe + Razorpay billing → tier flips; usage metering on the access log) is now **done**
-(see the top Log entry). **WS-F** (regulator ledger-proof export) is now **done** too. Remaining:
-**WS-E** (Enterprise isolation hardening) and **WS-G** (GDPR crypto-shredding erasure). The pre-sale
-blockers below (K·02 crypto review, policy content packs) remain open in parallel.
+(see the top Log entry). **WS-F** (regulator ledger-proof export) and **WS-G** (GDPR crypto-shredding
+erasure) are now **done** too. Remaining: **WS-E** (Enterprise isolation hardening — physical
+per-tenant ledger tables / schema-per-tenant). The pre-sale blockers below (K·02 crypto review, policy
+content packs) remain open in parallel.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -111,6 +112,30 @@ blockers below (K·02 crypto review, policy content packs) remain open in parall
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-G GDPR/DPDP crypto-shredding erasure · core/erasure · delivery** —
+  Built right-to-erasure for a system whose audit log is **append-only and tamper-evident** — you
+  cannot delete a sealed K·02 entry without invalidating every downstream Merkle proof. Erasure is
+  therefore cryptographic: PII is stored as AES-256-GCM ciphertext under a **per-subject** key, and
+  "delete" = **destroy the key** (crypto-shredding) → the ciphertext is permanently irrecoverable
+  while the Merkle leaves (computed over the ciphertext token) stay byte-identical, so the trail's
+  integrity survives the deletion. New `core/erasure/`: `ShredKeyring` /
+  `InMemoryShredKeyring` (per-`(tenant, subject)` DEK, thread-safe, **tombstones** erased subjects —
+  no resurrection, F-07 tenant-scoped); `ErasureEngine` — `encrypt`/`decrypt` over a self-describing
+  `CipherToken` (AEAD; tamper → `CipherTokenError`), `erase` returning an `ErasureReceipt` (ledger-
+  sealable proof the right was honored), `is_erased`. Once shredded, `decrypt` raises
+  `SubjectErasedError` (the *intended* terminal state). New error subtree in the frozen
+  `core/errors.py` (`ErasureError`, `SubjectErasedError`, `CipherTokenError`); new
+  `erasure:write` RBAC scope. New routes `POST /v1/erasure/{tenant}/{subject}` (crypto-shred) +
+  `GET /v1/erasure/{tenant}/{subject}` (status) — bearer + tenant-isolation + scope guarded;
+  `create_app(erasure_engine=…)` wires it, and a `SubjectErasedError` handler returns **410 Gone**.
+  **Tests:** +19 (engine: round-trip, key reuse/isolation, erase→irrecoverable, idempotent,
+  no-resurrection, cross-subject + cross-tenant isolation, tamper/malformed fail-closed, **and the
+  WS-G invariant — a Merkle leaf over the cipher token is unchanged after erasure**; routes:
+  erase→status, pre-erase false, 401 no-token, 403 cross-tenant, 503 disabled, 410 on decrypt-after-
+  erase); suite 787 → **806**. **Follow-ups:** HSM/KMS-backed keyring (DEK never leaves the HSM;
+  destroy = KMS key-destruction API) behind the same `ShredKeyring` interface; durable keyring +
+  hydrate; seal the `ErasureReceipt` into the ledger as an erasure-evidence action.
 
 - **2026-06-13 · WS-F regulator ledger-proof export · core/regmap · core/ledger · delivery** —
   Turned the K·14 evidence pack (which took *opaque* proof-ref strings) into a **self-contained,
