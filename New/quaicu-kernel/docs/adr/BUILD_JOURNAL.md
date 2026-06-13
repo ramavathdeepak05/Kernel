@@ -16,8 +16,8 @@ next cold agent doesn't know it happened.
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 737 tests passing, 10 skipped on a bare
-checkout — and 747 passing / 0 skipped once the real external deps are live (the 10 skips are the
+landed and the WS-D auth/metering edge is in. Suite: 775 tests passing, 10 skipped on a bare
+checkout — and 785 passing / 0 skipped once the real external deps are live (the 10 skips are the
 Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
 OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
@@ -47,10 +47,10 @@ RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **
 (Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on `JWTIdentityAdapter`) are now
 **done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
 UI gating**.
-Then **WS-C** (Stripe + Razorpay billing → tier flips; usage metering builds on the new access log),
-**WS-F** (regulator ledger-proof export), **WS-E** (Enterprise isolation hardening), and **WS-G**
-(GDPR crypto-shredding erasure). The pre-sale blockers below (K·02 crypto review, policy content
-packs) remain open in parallel.
+**WS-C** (Stripe + Razorpay billing → tier flips; usage metering on the access log) is now **done**
+(see the top Log entry). Remaining: **WS-F** (regulator ledger-proof export), **WS-E** (Enterprise
+isolation hardening), and **WS-G** (GDPR crypto-shredding erasure). The pre-sale blockers below (K·02
+crypto review, policy content packs) remain open in parallel.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -111,6 +111,36 @@ packs) remain open in parallel.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-C billing → tier flips + usage metering · core/billing · core/metering · delivery** —
+  Turned the entitlement plumbing (which already carried `billing_provider`/`billing_ref` and a
+  `SUSPENDED` status) into a working billing edge. **Provider-agnostic core:** new `core/billing/`
+  — `BillingEvent`/`BillingEventType` (the normalized vocabulary: SUBSCRIPTION_ACTIVE,
+  PAYMENT_FAILED, PAYMENT_RECOVERED, SUBSCRIPTION_CANCELLED, IGNORED), `BillingPort`
+  (`verify_and_parse(payload, headers) -> BillingEvent` — signature-verify + normalize, fail-closed),
+  and `BillingEngine` which maps a verified event onto the existing fail-closed store mutations
+  (active → set tier + ACTIVE + stamp provider/ref; payment-failed → SUSPEND; recovered →
+  reactivate; cancelled → downgrade to free STARTER; unknown-tenant non-active events are no-ops;
+  idempotent). **Adapters:** `adapters/billing/stripe.py` (verifies the `Stripe-Signature` HMAC over
+  `"{t}.{body}"` within a timestamp tolerance; maps `customer.subscription.*` / `invoice.payment_failed`;
+  price→tier) and `adapters/billing/razorpay.py` (verifies the `X-Razorpay-Signature` body HMAC; maps
+  `subscription.activated/charged/halted/cancelled`; plan→tier) — **no Stripe/Razorpay SDK**, plain
+  `hmac`/`hashlib`/`json` so the verification path is auditable + testable. **Route:** `POST
+  /v1/billing/webhook/{provider}` reads the **raw** body (signature is over exact bytes), verifies +
+  applies; bad signature → 400 (no plan change), unmappable-but-verified → 422, provider not wired →
+  503. Webhooks are exempt from API-key auth (provider signature is the credential) and from rate
+  limiting. **Usage metering:** new `core/metering/UsageMeter` (per-tenant, per-UTC-day counter,
+  auto-rollover); `RequestLoggingMiddleware` records one tick per successful governed `/v1` request
+  (best-effort, never affects the response); `RateLimitMiddleware` now also enforces the tier's
+  `max_actions_per_day` (429 `QUOTA_EXCEEDED`, fail-open without a meter/plan); new admin route
+  `GET /v1/admin/tenants/{tenant}/usage`. `create_app` gained `billing_adapters` / `billing_engine` /
+  `usage_meter`. New `BillingError` subtree in the frozen `core/errors.py`
+  (`WebhookVerificationError`, `BillingEventError`). **Tests:** +38 (billing engine, Stripe + Razorpay
+  signature/parse incl. tamper/stale/wrong-secret/unmapped, usage meter, webhook route incl. flip /
+  bad-sig-no-flip / auth-exempt, metering on success, admin usage, daily-quota 429); suite 737 →
+  **775**. **Follow-ups:** distributed (Redis) usage counter for horizontal scale; emit a K·07 event on
+  tier flips so the audit trail records billing-driven plan changes; checkout-session creation
+  endpoints (the kernel currently only consumes provider webhooks).
 
 - **2026-06-13 · WS-D named IdP connectors — OIDC discovery + JWKS rotation · adapters/identity** —
   Built the remaining WS-D slice: verify IdP-issued (asymmetric) JWTs against a named provider's

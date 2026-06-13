@@ -400,3 +400,28 @@ class ApiKeyInvalidError(AccountError):
     """An API key is missing, malformed, unknown, or revoked. Reject (401)."""
 
     code = "API_KEY_INVALID"
+
+
+# ── Billing errors (WS-C — Stripe / Razorpay → tier flips) ─────────────────────
+
+
+class BillingError(QUAICUError):
+    """Base for billing/webhook errors."""
+
+    code = "BILLING_ERROR"
+
+
+class WebhookVerificationError(BillingError):
+    """A billing webhook's signature is missing, malformed, stale, or does not verify.
+
+    Fail-closed: an unverifiable webhook MUST NOT mutate a tenant's plan. Reject (400)."""
+
+    code = "WEBHOOK_VERIFICATION_FAILED"
+
+
+class BillingEventError(BillingError):
+    """A verified webhook could not be mapped to a plan change (unknown plan id, missing tenant).
+
+    Reject (422); the signature was valid but the payload is not actionable."""
+
+    code = "BILLING_EVENT_UNMAPPABLE"

@@ -29,6 +29,16 @@ log = logging.getLogger("quaicu.api.access")
 
 _REQUEST_ID_HEADER = "x-request-id"
 
+# Paths whose traffic is not metered against a tenant's daily usage (infra + onboarding/webhooks,
+# which either have no tenant or are provider-authenticated).
+_UNMETERED = ("/health", "/docs", "/redoc", "/openapi.json", "/v1/signup", "/v1/admin", "/v1/billing")
+
+
+def _is_metered(path: str) -> bool:
+    if not (path == "/v1" or path.startswith("/v1/")):
+        return False
+    return not any(path == p or path.startswith(p + "/") for p in _UNMETERED)
+
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Attach a correlation id and emit a structured access log line per request."""
@@ -49,6 +59,14 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             status_code = response.status_code
             response.headers[_REQUEST_ID_HEADER] = request_id
+            # Meter successful governed requests against the tenant's daily usage (WS-C). Best-effort:
+            # a metering failure must never affect the response.
+            meter = getattr(request.app.state, "usage_meter", None)
+            if meter is not None and tenant is not None and status_code < 400 and _is_metered(request.url.path):
+                try:
+                    meter.record(tenant)
+                except Exception:  # noqa: BLE001 — observability must not affect request handling
+                    pass
             return response
         finally:
             duration_ms = (time.perf_counter() - start) * 1000.0
