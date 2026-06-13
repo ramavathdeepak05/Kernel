@@ -36,6 +36,7 @@ from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
 from core.sandbox.bridge import assemble_impact_report
 from core.sandbox.engine import run_counterfactual_backtest
 from core.types import ApproverRef, Actor, Decision, RequestContext
+from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import (
     ActivateRequest,
@@ -64,7 +65,8 @@ async def _require_policy_admin(request: Request) -> tuple[Kernel, Actor]:
       - 403 (TenantIsolationError, via the global handler) if the token's tenant mismatches.
       - 403 if the resolved actor holds none of ``kernel.policy_admin_roles``.
     """
-    kernel: Kernel = request.app.state.kernel
+    kernel: Kernel = get_kernel(request)
+    tenant = get_request_tenant(request)
     if not kernel.has_policy_store:
         raise HTTPException(
             status_code=503,
@@ -87,10 +89,10 @@ async def _require_policy_admin(request: Request) -> tuple[Kernel, Actor]:
         headers=dict(request.headers),
         source_ip=request.client.host if request.client else None,
         raw_token=token,
-        tenant_hint=kernel.tenant,
+        tenant_hint=tenant,
     )
     try:
-        actor = await kernel.resolve_actor(ctx)
+        actor = await kernel.resolve_actor(ctx, tenant=tenant)
     except IdentityPortError as exc:
         # Without this catch the global QUAICUError handler would wrongly map an auth failure to 503.
         raise HTTPException(status_code=401, detail={"error": str(exc), "code": exc.code})
@@ -406,6 +408,7 @@ async def simulate_policy(
     it. 404 if the policy is absent; 409 if it is not in REVIEW.
     """
     kernel, _ = await _require_policy_admin(request)
+    tenant = get_request_tenant(request)
     envelope = _get_or_404(kernel, policy_id, version)
     if envelope.lifecycle is not PolicyLifecycle.REVIEW:
         raise HTTPException(
@@ -419,14 +422,14 @@ async def simulate_policy(
         )
 
     ledger = kernel.engine._ledger  # type: ignore[attr-defined]
-    entries = ledger.get_entries(kernel.tenant)
+    entries = ledger.get_entries(tenant)
 
     run, shadow = run_counterfactual_backtest(
         entries=entries,
         candidate_evaluator=_candidate_evaluator(envelope),
         policy_id=policy_id,
         policy_version=str(version),
-        tenant_id=str(kernel.tenant),
+        tenant_id=str(tenant),
     )
 
     fairness_delta = None
@@ -455,9 +458,9 @@ async def simulate_policy(
                     group_value=group_value,
                 )
             )
-        active_metrics = compute_fairness_metrics(active_records, body.group_key, str(kernel.tenant))
+        active_metrics = compute_fairness_metrics(active_records, body.group_key, str(tenant))
         candidate_metrics = compute_fairness_metrics(
-            candidate_records, body.group_key, str(kernel.tenant)
+            candidate_records, body.group_key, str(tenant)
         )
         fairness_delta = compute_fairness_delta(active_metrics, candidate_metrics)
 

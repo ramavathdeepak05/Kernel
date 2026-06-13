@@ -12,33 +12,41 @@ next cold agent doesn't know it happened.
 
 ---
 
-## Current status (2026-06-11)
+## Current status (2026-06-13)
 
-**All 14 governance layers + the delivery phase are built and green, and an operator console (web
-UI) now ships alongside. Suite: 658 tests passing,
-10 skipped on a bare checkout — and 668 passing / 0 skipped once the real external deps are live
-(the 10 skips are the Postgres + OpenBao integration tests — incl. the new durable-ledger Postgres
-round-trip — now validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the Log).** Seven feature waves have landed on top of the core kernel since the Wave-2 milestone
-below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance pass,
-(3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
-layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the
-Policy Management HTTP API (`/v1/policies`) with route-level control-plane authz, and (7) the
-backtest→ImpactReport simulate bridge + dashboard read-model query routes. See the Log
-for the per-wave detail. Extension decisions are recorded as ADR-0002…0008 (`docs/adr/`).
+**All 14 governance layers + the delivery phase are built and green, an operator console ships
+alongside, and the commercial productization program (3-tier packaging) has begun — waves 0–1 are
+landed. Suite: 704 tests passing, 10 skipped on a bare checkout — and 714 passing / 0 skipped once the
+real external deps are live (the 10 skips are the Postgres + OpenBao integration tests, validated
+against a GCP Cloud SQL instance and a Dockerized OpenBao; see the Log).** Nine feature waves have
+landed on top of the core kernel since the Wave-2 milestone below: (1) full layer completion +
+delivery, (2) a security-hardening + composable-governance pass, (3) a decision-only
+authorize/monitor surface + reference PEP, (4) a zero-friction integration layer, (5) config-wiring
+the CEL policy engine + a durable (Postgres) policy store, (6) the Policy Management HTTP API
+(`/v1/policies`) with route-level control-plane authz, (7) the backtest→ImpactReport simulate bridge
++ dashboard read-model query routes, (8) the operator console (React/Vite web UI) + HITL approvals
+API + CORS, and (9) **commercial tiering** — an entitlement/tier engine, an offline-licensed
+Enterprise path, self-serve account provisioning, and a shared multi-tenant SaaS plane that routes
+each request to its tier's kernel. See the Log for the per-wave detail. Extension decisions are
+recorded as ADR-0002…0010 (`docs/adr/`).
 
-The kernel now exposes three integration modes — REST API (`/v1/actions`, `/v1/authorize`,
-`/v1/inference`, `/v1/ledger`), the Python SDK (`@kernel.guard` / `kernel.wrap` / `kernel.proxy` /
-`kernel.check` / `kernel.generate` / `for_agent`), and a reference enforcement-point middleware —
-all running over one composable `GovernanceProfile` model with per-agent identity.
+The kernel now exposes four ways in — REST API (`/v1/actions`, `/v1/authorize`, `/v1/inference`,
+`/v1/ledger`, `/v1/policies`, `/v1/dashboard`, `/v1/approvals`, plus `/v1/signup` + `/v1/admin/*`),
+the Python SDK (`@kernel.guard` / `kernel.wrap` / `kernel.proxy` / `kernel.check` / `kernel.generate`
+/ `for_agent`), a reference enforcement-point middleware, and the **operator console** (`console/` —
+a plain React/Vite app over the REST API) — all running over one composable `GovernanceProfile` model
+with per-agent identity, served either as a single dedicated kernel or via the new
+`TieredKernelProvider` shared plane.
 
-### Next planned work — Policy Management API + Dashboards
-A gap audit (2026-06-10) found six items to close before this work; **all six are now CLOSED.**
-#1 (CEL engine config-wireable) + #2 (durable policy store) landed in commit `e121a9fe` (ADR-0005);
-#3 (policy CRUD surface) + #6 (control-plane authz) landed 2026-06-11 — the `/v1/policies` management
-API gated by a route-level policy-admin role check (`[governance] policy_admin_roles`). #4
-(backtest→`ImpactReport` bridge + `/v1/policies/{id}/versions/{v}/simulate`) and #5 (dashboard
-read-models + `/v1/dashboard` query routes) landed 2026-06-11 (see the top Log entry). Full gap list
-is in the 2026-06-10 "Pre-management-API gap audit" log entry.
+### Next planned work — productization program (3 tiers from one codebase)
+Per the go-live plan, the work is sequenced in waves. **Wave 0 (entitlement/tiering foundation) and
+Wave 1 (shared-plane API routing + self-serve provisioning) are done.** Next is **WS-D — the
+auth/metering edge**: per-tier rate limiting (quotas from `TIER_MATRIX`), request/usage logging
+middleware (also feeds billing), the API-key auth path wired into protected routes, fine-grained RBAC
+scopes, and named IdP connectors (Okta/Auth0/Keycloak via OIDC/JWKS). Then **WS-C** (Stripe +
+Razorpay billing → tier flips), **WS-F** (regulator ledger-proof export), **WS-E** (Enterprise
+isolation hardening), and **WS-G** (GDPR crypto-shredding erasure). The pre-sale blockers below
+(K·02 crypto review, policy content packs) remain open in parallel.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -54,6 +62,10 @@ is in the 2026-06-10 "Pre-management-API gap audit" log entry.
   is `tenant_id`-keyed, matching `quaicu_actions`) + the crypto review above.
 - **Policy content packs.** K·14 regmap catalog + K·01 CEL engine exist, but no actual RBI / EU AI
   Act / DPDP rule sets are written. The kernel enforces rules; the rules themselves are unwritten.
+- **Operator console hardening.** The `console/` web UI ships (policy admin · dashboard · audit ·
+  approvals), but auth is token-paste (no login/OIDC), there are no model-registry (K·08) / consent
+  (K·04) / tenant-config surfaces yet, and HITL approval→action-resumption needs the async K·06
+  deployment (the synchronous lifecycle times a gate out). Charts are minimal CSS.
 
 ---
 
@@ -95,6 +107,38 @@ is in the 2026-06-10 "Pre-management-API gap audit" log entry.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · Commercial tiering + provisioning + shared-plane routing · core/delivery (ADR-0009, ADR-0010)** —
+  Started the productization program: turn the feature-complete engine into a sellable 3-tier product
+  (STARTER / BUSINESS / ENTERPRISE) from one codebase. **Wave 0 — entitlement/tiering foundation:**
+  new `core/entitlements/` (`FeatureTier`, immutable `CustomerPlan`, and `TIER_MATRIX` — the single
+  source of truth mapping each tier to its allowed adapters, governance-profile presets, and quotas;
+  `EntitlementEngine` is a fail-closed query layer over an `EntitlementStore` with durable
+  write-through + `hydrate()`, mirroring `core/policy`). New `core/license/` — offline Ed25519-verified
+  Enterprise `License` (same `cryptography` primitives as the ledger signer), fail-closed on
+  missing/expired/forged tokens. New `delivery/sdk/provider.py` — `TieredKernelProvider` pre-builds one
+  STARTER and one BUSINESS kernel and routes each request to its tier's kernel (`for_saas`); the
+  ENTERPRISE path (`for_enterprise`) refuses to boot without a valid license. Isolation between
+  Starter and Business is **structural** — a Starter request lands on a kernel physically lacking the
+  CEL/Postgres adapters, not a runtime flag. ADR-0009. **Wave 1 — provisioning + API integration:**
+  new `core/account/` (`AccountEngine.signup` → mints a tenant, provisions a default STARTER plan, and
+  issues one hashed API key; `verify_api_key` is the fail-closed self-serve auth path). `create_app`
+  now takes `kernel=` **or** `provider=` plus control-plane singletons; new `delivery/api/deps.py`
+  (`get_kernel` / `get_request_tenant`) resolves the serving kernel + tenant in both single-kernel and
+  shared-plane modes — routing reads the (unverified) JWT tenant claim only to *select* the kernel,
+  which then cryptographically verifies the token (selection ≠ authorization). New routes
+  `/v1/signup` (the one intentionally open onboarding write) and `/v1/admin/tenants*` (admin-token
+  guarded; set-tier flips a tenant's plan). The SDK's `resolve_actor`/`check`/`generate` gained a
+  per-request `tenant` param (defaulting to the kernel's own), and **all** per-tenant routes
+  (`actions`, `authorize`, `inference`, `ledger`, `dashboard`, `approvals`, `policies`) were migrated
+  to the resolver so a shared tier-kernel scopes identity/data/isolation to the request's tenant, not
+  its fixed one. New error subtrees in the frozen `core/errors.py` (`EntitlementError`, `LicenseError`,
+  `AccountError`). ADR-0010. **Tests:** +46 (entitlements engine/store/license, account engine,
+  signup/admin routes, and provider-mode E2E routing incl. structural isolation + cross-tenant 403);
+  suite 658 → **704**, the 105 existing single-kernel API tests unchanged. **Follow-ups (next waves):**
+  WS-D auth/metering edge (rate limits from `TIER_MATRIX`, request/usage logging, API-key auth on
+  protected routes, RBAC scopes, named IdP connectors); WS-C Stripe + Razorpay billing → tier flips;
+  WS-F regulator proof export; WS-E Enterprise isolation hardening; WS-G GDPR crypto-shredding.
 
 - **2026-06-12 · Operator console + HITL approvals API · delivery/console** — Gave deployed clients a
   UI to run the kernel. **Backend:** new `delivery/api/routes/approvals.py` (`GET /v1/approvals`,

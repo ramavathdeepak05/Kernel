@@ -16,8 +16,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 
 from core.errors import (
-    LifecycleDeniedError,
-    LifecycleHaltedError,
     QUAICUError,
 )
 from core.types import (
@@ -30,7 +28,8 @@ from core.types import (
     RequestContext,
     TenantId,
 )
-from delivery.api.schemas import ActionResponse, ApproveRequest, ProposeRequest
+from delivery.api.deps import get_kernel, get_request_tenant
+from delivery.api.schemas import ActionResponse, ProposeRequest
 from delivery.sdk.kernel import Kernel
 
 router = APIRouter(prefix="/v1/actions", tags=["actions"])
@@ -74,8 +73,8 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
     Returns 202 on first submission; 200 on idempotency hit (same action returned).
     Returns 403 if policy denies; 422 if a lifecycle halt occurs.
     """
-    kernel: Kernel = request.app.state.kernel
-    tenant: TenantId = kernel.tenant
+    kernel: Kernel = get_kernel(request)
+    tenant: TenantId = get_request_tenant(request)
 
     # Authentication is mandatory on the standalone API: extract the bearer token and require a
     # configured IdentityPort. The actor is resolved from the token by the engine — never trusted
@@ -142,7 +141,7 @@ async def get_action(action_id: str, request: Request) -> ActionResponse:
     Returns 404 if the action is not found (this implementation uses the in-memory
     repo; a postgres adapter would query the DB).
     """
-    kernel: Kernel = request.app.state.kernel
+    kernel: Kernel = get_kernel(request)
     repo = kernel.engine._repo  # type: ignore[attr-defined]
 
     # Scan for action by id (in-memory repo is keyed by idempotency_key)

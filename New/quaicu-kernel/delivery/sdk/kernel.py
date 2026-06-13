@@ -30,7 +30,7 @@ from core.gateway.allowlist import InMemoryModelAllowlist
 from core.gateway.budget import InMemoryBudgetTracker
 from core.gateway.engine import AIGateway
 from core.gateway.masking import MaskingConfig
-from core.lifecycle.context import async_actor_scope, actor_scope, get_current_actor, set_actor
+from core.lifecycle.context import async_actor_scope, get_current_actor, set_actor
 from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.engine import LifecycleEngine
 from core.ledger.repository import LedgerRepository
@@ -267,17 +267,21 @@ class Kernel:
 
     # ── Identity (control-plane actor resolution) ────────────────────────────────
 
-    async def resolve_actor(self, context: RequestContext) -> Actor:
+    async def resolve_actor(
+        self, context: RequestContext, *, tenant: TenantId | None = None
+    ) -> Actor:
         """Resolve the authenticated actor from a request context via the IdentityPort.
 
         Used by control-plane surfaces (the policy management API) that authenticate a caller
-        outside the run lifecycle. Raises ``RuntimeError`` if no IdentityPort is wired;
-        propagates ``IdentityPortError`` / ``TenantIsolationError`` fail-closed.
+        outside the run lifecycle. ``tenant`` overrides the kernel's default tenant — required on a
+        shared tier-kernel that serves many tenants, so identity is verified against the *request's*
+        tenant (F-07), not the kernel's fixed one. Raises ``RuntimeError`` if no IdentityPort is
+        wired; propagates ``IdentityPortError`` / ``TenantIsolationError`` fail-closed.
         """
         identity = self.engine.identity
         if identity is None:
             raise RuntimeError("No identity adapter configured.")
-        return await identity.resolve_actor(context=context, tenant=self.tenant)
+        return await identity.resolve_actor(context=context, tenant=tenant or self.tenant)
 
     # ── Policy authoring (write-through primitives the management API wraps) ──────
 
@@ -565,6 +569,7 @@ class Kernel:
         idempotency_key: str | None = None,
         profile: GovernanceProfile | None = None,
         context: Any | None = None,
+        tenant: TenantId | None = None,
     ) -> ModelResponse:
         """Make a governed model call.
 
@@ -580,6 +585,7 @@ class Kernel:
             )
 
         action_type = "inference.generate"
+        tenant = tenant or self.tenant
         resolved = self.resolve_profile(action_type, profile)
         captured: dict[str, ModelResponse] = {}
 
@@ -592,7 +598,7 @@ class Kernel:
                 **(payload or {}),
             },
             actor=actor,
-            tenant=self.tenant,
+            tenant=tenant,
             idempotency_key=IdempotencyKey(idempotency_key or str(uuid.uuid4())),
             proposed_at=datetime.now(tz=timezone.utc),
         )
@@ -601,7 +607,7 @@ class Kernel:
             resp = await self.gateway.generate(
                 prompt_text=prompt_text,
                 model_ref=model_ref,
-                tenant=self.tenant,
+                tenant=tenant,
                 action_id=action.id,
                 payload=payload,
                 profile=resolved,
@@ -629,6 +635,7 @@ class Kernel:
         profile: GovernanceProfile | None = None,
         context: Any | None = None,
         record: bool | None = None,
+        tenant: TenantId | None = None,
     ) -> AuthorizationResult:
         """Ask the kernel: "is this action allowed?" without performing it.
 
@@ -640,7 +647,7 @@ class Kernel:
         tamper-evident ledger. Pass ``record=False`` to suppress sealing on the hot path.
         """
         resolved = self.resolve_profile(action_type, profile)
-        action = self._build_action(action_type, payload or {}, actor)
+        action = self._build_action(action_type, payload or {}, actor, tenant)
         if idempotency_key is not None:
             action = dataclasses.replace(action, idempotency_key=IdempotencyKey(idempotency_key))
         return await self.engine.decide(action, context=context, profile=resolved, record=record)
@@ -934,13 +941,19 @@ class Kernel:
 
     # ── Internal helpers ─────────────────────────────────────────────────────────
 
-    def _build_action(self, action_type: str, payload: dict[str, Any], actor: Actor) -> Action:
+    def _build_action(
+        self,
+        action_type: str,
+        payload: dict[str, Any],
+        actor: Actor,
+        tenant: TenantId | None = None,
+    ) -> Action:
         return Action(
             id=ActionId(str(uuid.uuid4())),
             type=action_type,
             payload=payload,
             actor=actor,
-            tenant=self.tenant,
+            tenant=tenant or self.tenant,
             idempotency_key=IdempotencyKey(str(uuid.uuid4())),
             proposed_at=datetime.now(tz=timezone.utc),
         )

@@ -31,27 +31,42 @@ from core.errors import (
     QUAICUError,
     TenantIsolationError,
 )
+from core.account import AccountEngine
+from core.entitlements import EntitlementStore
 from delivery.api.middleware import GovernanceMiddleware
 from delivery.api.routes.actions import router as actions_router
 from delivery.api.routes.approvals import router as approvals_router
 from delivery.api.routes.authorize import router as authorize_router
 from delivery.api.routes.dashboard import router as dashboard_router
 from delivery.api.routes.inference import router as inference_router
+from delivery.api.routes.admin import router as admin_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
+from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
+from delivery.sdk.provider import TieredKernelProvider
 
 
 def create_app(
-    kernel: Kernel,
+    kernel: Kernel | None = None,
     *,
+    provider: "TieredKernelProvider | None" = None,
+    account_engine: "AccountEngine | None" = None,
+    entitlement_store: "EntitlementStore | None" = None,
+    admin_token: str | None = None,
     enforce_paths: list[tuple[str, str]] | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
+    Provide exactly one of:
+      - ``kernel``: a single wired ``Kernel`` (dedicated / legacy single-tenant deployment), or
+      - ``provider``: a ``TieredKernelProvider`` for the shared SaaS plane, which routes each request
+        to the tenant's tier kernel (see ``delivery/api/deps.py``).
+
     Args:
-        kernel: A fully wired ``Kernel`` instance.
+        kernel: A fully wired ``Kernel`` instance (single-kernel mode).
+        provider: A tiered kernel provider (shared-plane mode).
         enforce_paths: Optional reference-PEP enforcement-point path globs.
         cors_origins: Browser origins allowed to call the API (the operator console runs on a
             separate origin). Defaults to the Vite dev server (``http://localhost:5173``).
@@ -59,14 +74,18 @@ def create_app(
     Returns:
         A configured ``FastAPI`` app ready to serve.
     """
+    if (kernel is None) == (provider is None):
+        raise ValueError("create_app requires exactly one of `kernel` or `provider`.")
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Initialise async resources (e.g. hydrate the durable policy store) before serving.
-        await kernel.startup()
+        target = provider if provider is not None else kernel
+        await target.startup()
         try:
             yield
         finally:
-            await kernel.shutdown()
+            await target.shutdown()
 
     app = FastAPI(
         title="QUAICU Governance Kernel",
@@ -80,8 +99,14 @@ def create_app(
         lifespan=lifespan,
     )
 
-    # Attach kernel to app state (no globals)
+    # Attach the request-resolution target to app state (no globals). Exactly one is non-None;
+    # routes resolve the serving kernel via delivery/api/deps.get_kernel.
     app.state.kernel = kernel
+    app.state.provider = provider
+    # Control-plane singletons (signup / admin). Routes 503 when their dependency is absent.
+    app.state.account_engine = account_engine
+    app.state.entitlement_store = entitlement_store
+    app.state.admin_token = admin_token
 
     # CORS so the operator console (a separate origin) can call the API. The Authorization bearer
     # header is the credential; origins are an allowlist (defaults to the Vite dev server).
@@ -100,10 +125,15 @@ def create_app(
     app.include_router(policies_router)
     app.include_router(dashboard_router)
     app.include_router(approvals_router)
+    app.include_router(signup_router)
+    app.include_router(admin_router)
 
     # Optional reference PEP: governance enforcement middleware.
     # Wired only when the caller explicitly passes enforce_paths so existing tests are unaffected.
+    # The reference PEP targets a single kernel; in shared-plane (provider) mode it is not applicable.
     if enforce_paths:
+        if kernel is None:
+            raise ValueError("enforce_paths (reference PEP) is only supported in single-kernel mode.")
         app.add_middleware(GovernanceMiddleware, kernel=kernel, enforce_paths=enforce_paths)
 
     # ── Exception handlers ────────────────────────────────────────────────────
@@ -140,6 +170,9 @@ def create_app(
 
     @app.get("/health", tags=["system"], summary="Health check")
     async def health() -> dict:
-        return {"ok": True, "tenant": str(kernel.tenant)}
+        if provider is not None:
+            return {"ok": True, "mode": "shared-plane",
+                    "served_tiers": sorted(t.value for t in provider.served_tiers())}
+        return {"ok": True, "mode": "single-kernel", "tenant": str(kernel.tenant)}
 
     return app

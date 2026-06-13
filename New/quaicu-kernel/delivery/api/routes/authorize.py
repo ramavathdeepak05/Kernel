@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from core.errors import QUAICUError
 from core.types import Actor, ActorId, RequestContext
+from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import AuthorizeRequest, AuthorizeResponse
 from delivery.sdk.kernel import Kernel
@@ -35,7 +36,8 @@ async def authorize(body: AuthorizeRequest, request: Request) -> AuthorizeRespon
     only raised for infrastructure errors (missing identity adapter, kernel fault). The caller is
     the enforcement point.
     """
-    kernel: Kernel = request.app.state.kernel
+    kernel: Kernel = get_kernel(request)
+    tenant = get_request_tenant(request)
 
     token = _bearer_token(request)
     if not kernel.has_identity:
@@ -48,9 +50,9 @@ async def authorize(body: AuthorizeRequest, request: Request) -> AuthorizeRespon
         headers=dict(request.headers),
         source_ip=request.client.host if request.client else None,
         raw_token=token,
-        tenant_hint=kernel.tenant,
+        tenant_hint=tenant,
     )
-    placeholder_actor = Actor(id=ActorId("unresolved"), tenant=kernel.tenant)
+    placeholder_actor = Actor(id=ActorId("unresolved"), tenant=tenant)
 
     try:
         result = await kernel.check(
@@ -60,6 +62,7 @@ async def authorize(body: AuthorizeRequest, request: Request) -> AuthorizeRespon
             idempotency_key=body.idempotency_key,
             context=ctx,
             record=body.record,
+            tenant=tenant,
         )
     except QUAICUError as exc:
         raise HTTPException(status_code=503, detail={"error": str(exc), "code": exc.code})

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from core.types import TenantId
+from delivery.api.deps import get_kernel, get_request_tenant
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import (
     DashboardOverviewResponse,
@@ -37,8 +38,8 @@ router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 def _authorize_tenant(request: Request, tenant: str):
     """Require a bearer token and enforce tenant isolation. Returns (kernel, entries)."""
     _bearer_token(request)  # 401 if absent
-    kernel = request.app.state.kernel
-    if tenant != str(kernel.tenant):
+    kernel = get_kernel(request)
+    if tenant != str(get_request_tenant(request)):
         raise HTTPException(
             status_code=403,
             detail={

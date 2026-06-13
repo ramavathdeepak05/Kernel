@@ -329,3 +329,74 @@ class TenantIsolationError(TenantError):
     """The token's tenant does not match the requested tenant. Reject (403)."""
 
     code = "TENANT_ISOLATION"
+
+
+# ── Entitlement / tiering errors (ADR-0009) ────────────────────────────────────
+
+
+class EntitlementError(QUAICUError):
+    """Base for all plan/tier entitlement errors."""
+
+    code = "ENTITLEMENT_ERROR"
+
+
+class PlanNotFoundError(EntitlementError):
+    """No CustomerPlan is provisioned for the tenant. Fail-closed (treat as no entitlements)."""
+
+    code = "PLAN_NOT_FOUND"
+
+
+class FeatureNotEntitledError(EntitlementError):
+    """The tenant's tier does not permit this feature, adapter, or governance profile. Reject (403)."""
+
+    code = "FEATURE_NOT_ENTITLED"
+
+
+class QuotaExceededError(EntitlementError):
+    """The tenant has exceeded a plan quota (e.g. max policies, action rate). Reject (429)."""
+
+    code = "QUOTA_EXCEEDED"
+
+
+# ── License errors (ADR-0009 — Enterprise dedicated deployments) ───────────────
+
+
+class LicenseError(QUAICUError):
+    """Base for offline Enterprise license validation errors."""
+
+    code = "LICENSE_ERROR"
+
+
+class LicenseInvalidError(LicenseError):
+    """The license token is missing, malformed, expired, or its signature does not verify.
+
+    An ENTERPRISE-config kernel MUST refuse to boot when this is raised (fail-closed)."""
+
+    code = "LICENSE_INVALID"
+
+
+# ── Account / provisioning errors (ADR-0010) ───────────────────────────────────
+
+
+class AccountError(QUAICUError):
+    """Base for tenant-account / provisioning errors."""
+
+    code = "ACCOUNT_ERROR"
+
+
+class AccountExistsError(AccountError):
+    """Signup attempted with an email that already owns an account. Reject (409)."""
+
+    code = "ACCOUNT_EXISTS"
+
+
+class AccountNotFoundError(AccountError):
+    """Requested account does not exist."""
+
+    code = "ACCOUNT_NOT_FOUND"
+
+
+class ApiKeyInvalidError(AccountError):
+    """An API key is missing, malformed, unknown, or revoked. Reject (401)."""
+
+    code = "API_KEY_INVALID"
