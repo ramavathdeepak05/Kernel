@@ -16,8 +16,8 @@ next cold agent doesn't know it happened.
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 775 tests passing, 10 skipped on a bare
-checkout — and 785 passing / 0 skipped once the real external deps are live (the 10 skips are the
+landed and the WS-D auth/metering edge is in. Suite: 787 tests passing, 10 skipped on a bare
+checkout — and 797 passing / 0 skipped once the real external deps are live (the 10 skips are the
 Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
 OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
@@ -48,9 +48,9 @@ RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **
 **done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
 UI gating**.
 **WS-C** (Stripe + Razorpay billing → tier flips; usage metering on the access log) is now **done**
-(see the top Log entry). Remaining: **WS-F** (regulator ledger-proof export), **WS-E** (Enterprise
-isolation hardening), and **WS-G** (GDPR crypto-shredding erasure). The pre-sale blockers below (K·02
-crypto review, policy content packs) remain open in parallel.
+(see the top Log entry). **WS-F** (regulator ledger-proof export) is now **done** too. Remaining:
+**WS-E** (Enterprise isolation hardening) and **WS-G** (GDPR crypto-shredding erasure). The pre-sale
+blockers below (K·02 crypto review, policy content packs) remain open in parallel.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -111,6 +111,30 @@ crypto review, policy content packs) remain open in parallel.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-F regulator ledger-proof export · core/regmap · core/ledger · delivery** —
+  Turned the K·14 evidence pack (which took *opaque* proof-ref strings) into a **self-contained,
+  independently verifiable** regulator export over the real K·02 transparency log. New
+  `core/regmap/export.py`: `build_ledger_proof_bundle` assembles, for a tenant + time window, a
+  `LedgerProofBundle` = the signed tree head (RFC 6962 STH: size, root, Ed25519 signature, **+ the
+  signing public key**) + one RFC 6962 inclusion proof per in-window action (leaf hash + audit path)
+  + the K·14 evidence narrative/manifest with *real* leaf-hash proof refs. Shipped alongside is
+  `verify_ledger_proof_bundle(dict) -> (ok, errors)` — the exact offline check a regulator runs: it
+  recomputes the Merkle root from each inclusion proof (`_recompute_root_from_path`) and asserts it
+  equals the **signed** root, then verifies the STH signature against the embedded public key. Tamper
+  anywhere (leaf, root, signature) → verification fails; a bundle with no public key is flagged
+  unverifiable. `InMemoryEd25519Signer` gained a `public_key_pem` property (SPKI PEM) so the export is
+  verifiable end-to-end (the OpenBao signer can expose the same — follow-up). New SDK method
+  `Kernel.export_ledger_proof(tenant, window_start=, window_end=, regulation_refs=, policy_versions=)`
+  (reads only sealed entries — no model re-calls, F-09; window-filters by `sealed_at`). New routes
+  `GET /v1/ledger/{tenant}/export` (same bearer + `ledger:read` scope + tenant-isolation guard as the
+  trail; ISO `from`/`to` + `regulations`/`policy_versions` query params) and `POST
+  /v1/ledger/export/verify` (stateless mirror of the offline verifier). **Tests:** +13
+  (`test_export.py` clean/single/tamper-leaf/tamper-sig/tamper-root/missing-key/malformed;
+  `test_ledger_export.py` export→verify round-trip, 401 no-token, 403 cross-tenant, tampered-bundle
+  rejected, window filter); suite 775 → **787**. **Follow-ups:** expose `public_key_pem` from the
+  OpenBao signer so production exports are offline-verifiable; consistency-proof export across two
+  STHs for append-only continuity attestation.
 
 - **2026-06-13 · WS-C billing → tier flips + usage metering · core/billing · core/metering · delivery** —
   Turned the entitlement plumbing (which already carried `billing_provider`/`billing_ref` and a

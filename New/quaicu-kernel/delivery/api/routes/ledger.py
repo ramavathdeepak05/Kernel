@@ -1,12 +1,17 @@
-"""Ledger routes — trail and verify.
+"""Ledger routes — trail, regulator export, and verify.
 
-GET /v1/ledger/{tenant}/trail  →  200 LedgerTrailResponse
-GET /v1/ledger/health          →  200 { "ok": true }
+GET  /v1/ledger/{tenant}/trail   →  200 LedgerTrailResponse
+GET  /v1/ledger/{tenant}/export  →  200 LedgerProofBundle (self-verifying regulator export, WS-F)
+POST /v1/ledger/export/verify    →  200 { ok, errors } (stateless offline-equivalent verifier)
+GET  /v1/ledger/health           →  200 { "ok": true }
 """
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from core.account.scopes import LEDGER_READ
 from core.types import TenantId
@@ -62,6 +67,75 @@ async def ledger_trail(tenant: str, request: Request) -> LedgerTrailResponse:
     ]
 
     return LedgerTrailResponse(tenant=tenant, entries=projected, count=len(projected))
+
+
+def _parse_window(value: str | None, field: str) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": f"{field} is not an ISO-8601 datetime", "code": "BAD_WINDOW"},
+        )
+
+
+@router.get(
+    "/{tenant}/export",
+    summary="Export a self-verifying ledger-proof bundle for a regulator (WS-F)",
+)
+async def ledger_export(tenant: str, request: Request) -> dict:
+    """Build a regulator proof bundle of the tenant's sealed actions in an optional time window.
+
+    Query params (all optional): ``from`` / ``to`` (ISO-8601 datetimes), ``regulations`` and
+    ``policy_versions`` (comma-separated). Same tenant-isolation + scope guard as the audit trail —
+    the bundle is tenant-private. The returned JSON is independently verifiable offline via
+    ``POST /v1/ledger/export/verify`` or `core.regmap.export.verify_ledger_proof_bundle`.
+    """
+    _bearer_token(request)
+    enforce_scope(request, LEDGER_READ)
+
+    kernel = get_kernel(request)
+    if tenant != str(get_request_tenant(request)):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "Cannot export another tenant's ledger", "code": "TENANT_ISOLATION"},
+        )
+
+    qp = request.query_params
+    window_start = _parse_window(qp.get("from"), "from")
+    window_end = _parse_window(qp.get("to"), "to")
+    regulations = [s for s in (qp.get("regulations", "").split(",")) if s]
+    policy_versions = [s for s in (qp.get("policy_versions", "").split(",")) if s]
+
+    bundle = kernel.export_ledger_proof(
+        TenantId(tenant),
+        window_start=window_start,
+        window_end=window_end,
+        regulation_refs=regulations or None,
+        policy_versions=policy_versions or None,
+    )
+    return bundle.to_dict()
+
+
+class VerifyResult(BaseModel):
+    ok: bool
+    errors: list[str]
+
+
+@router.post(
+    "/export/verify",
+    response_model=VerifyResult,
+    summary="Verify a ledger-proof bundle (stateless; the same check a regulator runs offline)",
+)
+async def ledger_export_verify(bundle: dict, request: Request) -> VerifyResult:
+    """Re-run the independent bundle verifier on a posted export. No kernel state is read — this is a
+    convenience mirror of the offline verifier so a regulator can confirm a bundle via the API too."""
+    from core.regmap.export import verify_ledger_proof_bundle
+
+    ok, errors = verify_ledger_proof_bundle(bundle)
+    return VerifyResult(ok=ok, errors=errors)
 
 
 @router.get("/health", summary="Ledger health check")

@@ -284,6 +284,58 @@ class Kernel:
             raise RuntimeError("No identity adapter configured.")
         return await identity.resolve_actor(context=context, tenant=tenant or self.tenant)
 
+    # ── Regulator ledger-proof export (WS-F) ─────────────────────────────────────
+
+    def export_ledger_proof(
+        self,
+        tenant: TenantId,
+        *,
+        window_start: "datetime | None" = None,
+        window_end: "datetime | None" = None,
+        regulation_refs: list[str] | None = None,
+        policy_versions: list[str] | None = None,
+    ):
+        """Build a self-verifying `LedgerProofBundle` of a tenant's sealed actions in a time window.
+
+        Reads only already-sealed K·02 entries (no model re-calls, F-09): collects the in-window
+        entries, computes each one's RFC 6962 inclusion proof against the tenant's signed tree head,
+        embeds the signing public key, and assembles the K·14 evidence pack with real proof refs. The
+        regulator verifies it offline via `core.regmap.export.verify_ledger_proof_bundle`.
+        """
+        from datetime import datetime, timezone
+
+        from core.regmap.export import build_ledger_proof_bundle
+
+        def _aware(dt: "datetime") -> "datetime":
+            return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+        ledger = self.engine._ledger  # type: ignore[attr-defined]
+        entries = ledger.get_entries(tenant)
+        ws = _aware(window_start) if window_start else datetime(1970, 1, 1, tzinfo=timezone.utc)
+        we = _aware(window_end) if window_end else datetime.now(tz=timezone.utc)
+
+        def _in_window(e) -> bool:
+            return ws <= _aware(e.sealed_at) <= we
+
+        selected = [e for e in entries if _in_window(e)]
+        entries_with_paths = [
+            (e, ledger.get_inclusion_proof(tenant, e.ledger_seq)[1]) for e in selected
+        ]
+        sth = ledger.get_signed_tree_head(tenant)
+        signer = getattr(ledger, "_signer", None)
+        public_key_pem = getattr(signer, "public_key_pem", None)
+
+        return build_ledger_proof_bundle(
+            tenant_id=str(tenant),
+            window_start=ws,
+            window_end=we,
+            entries_with_paths=entries_with_paths,
+            sth=sth,
+            public_key_pem=public_key_pem,
+            regulation_refs=regulation_refs,
+            policy_versions=policy_versions,
+        )
+
     # ── Policy authoring (write-through primitives the management API wraps) ──────
 
     async def register_policy(self, envelope: PolicyEnvelope) -> PolicyEnvelope:
