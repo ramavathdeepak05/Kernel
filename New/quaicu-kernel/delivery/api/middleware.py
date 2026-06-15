@@ -22,7 +22,6 @@ The ``action_type`` sent to ``kernel.check`` is derived as ``"{method}:{path}"``
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware

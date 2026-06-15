@@ -16,7 +16,7 @@ import pytest
 from core.errors import ModelNotFoundError, ModelNotPermittedError
 from core.registry.model import ModelRecord, ModelStatus
 from core.registry.store import InMemoryModelRegistry
-from core.types import ModelRef, TenantId
+from core.types import ModelRef
 
 NOW = datetime(2026, 6, 9, 12, 0, tzinfo=timezone.utc)
 TENANT_A = "tenant-alpha"

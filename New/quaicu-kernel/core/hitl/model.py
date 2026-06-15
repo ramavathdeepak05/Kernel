@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from core.types import ActionId, ActorId, ApprovalDecision, ApproverRef, TenantId

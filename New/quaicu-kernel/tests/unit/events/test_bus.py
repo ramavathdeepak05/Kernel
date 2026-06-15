@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 
-import pytest
 
 from core.events import ActionCompletedEvent, ActionDeniedEvent, InMemoryEventBus
 from core.events.model import DomainEvent

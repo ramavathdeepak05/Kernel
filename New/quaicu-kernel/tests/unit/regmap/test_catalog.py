@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
 from core.regmap.catalog import RegulationCatalog, generate_evidence_pack
 from core.regmap.model import (

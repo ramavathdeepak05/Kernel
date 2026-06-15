@@ -8,7 +8,6 @@ from core.errors import LifecycleDeniedError, LifecycleHaltedError
 from core.types import Actor, ActorId, Decision, TenantId
 from delivery.sdk.kernel import Kernel
 from tests.unit.lifecycle.fakes import (
-    FakeActionRepository,
     FakeEvents,
     FakeHITL,
     FakeLedger,
@@ -82,7 +81,6 @@ async def test_governed_missing_actor_raises_type_error():
 
 
 async def test_governed_passes_kwargs_as_payload():
-    received_payloads = []
     k = _kernel()
 
     @k.governed(policy="test.action")

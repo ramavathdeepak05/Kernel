@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 import pytest
 
 from core.regmap.catalog import RegulationCatalog, generate_evidence_pack
-from core.regmap.model import MappingStatus, PolicyMapping, Regime, RegulationRef
+from core.regmap.model import MappingStatus, PolicyMapping
 from core.types import ActionId, ActorId, Decision, LedgerEntry, TenantId
 
 NOW = datetime(2026, 6, 9, 12, 0, tzinfo=timezone.utc)

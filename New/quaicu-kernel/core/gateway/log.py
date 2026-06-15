@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from core.errors import GatewayLoggingError

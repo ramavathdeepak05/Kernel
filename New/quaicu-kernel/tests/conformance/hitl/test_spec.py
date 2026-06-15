@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Conformance: spec §6 K·03 DoD requirements."""
+
+from __future__ import annotations
 
 from datetime import UTC, datetime
 

@@ -4,7 +4,7 @@ import logging
 import threading
 from collections.abc import Awaitable, Callable
 
-from core.events.model import ActionCompletedEvent, DomainEvent, make_completed_event
+from core.events.model import DomainEvent, make_completed_event
 from core.types import Action, LedgerEntry
 
 log = logging.getLogger("quaicu.events")

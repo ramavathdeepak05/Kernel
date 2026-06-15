@@ -25,7 +25,6 @@ from datetime import datetime, timezone
 import pytest
 
 from adapters.storage.postgres import PostgresStorageAdapter
-from core.errors import StoragePortError
 from core.types import Action, ActionId, ActionState, Actor, ActorId, IdempotencyKey, TenantId
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")

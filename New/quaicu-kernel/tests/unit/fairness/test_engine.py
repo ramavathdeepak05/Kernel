@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from core.fairness.engine import compute_fairness_delta, compute_fairness_metrics
 from core.fairness.model import DecisionRecord, FairnessMetrics
 
@@ -154,6 +156,3 @@ def test_delta_threshold_preserved_in_output():
     candidate = _metrics({"A": 0.0})
     delta = compute_fairness_delta(active, candidate, threshold=0.12)
     assert delta.threshold == 0.12
-
-
-import pytest

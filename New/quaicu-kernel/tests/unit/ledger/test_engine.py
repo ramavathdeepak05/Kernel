@@ -146,7 +146,7 @@ async def test_cross_tenant_tree_independence() -> None:
     beta = _tenant("beta")
 
     a_act = _action(alpha)
-    a_entry = await ledger.seal(action=a_act, evaluation=_evaluation(), recorded_result={})
+    await ledger.seal(action=a_act, evaluation=_evaluation(), recorded_result={})
 
     b_act = Action(
         id=ActionId("b-act"),

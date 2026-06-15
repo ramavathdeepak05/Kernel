@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from core.errors import LifecycleDeniedError, LifecycleHaltedError
-from core.types import Action, ActionState, Actor, ActorId, ApprovalDecision, Decision, TenantId
+from core.types import ActionState, Actor, ActorId, ApprovalDecision, Decision, TenantId
 from delivery.sdk.kernel import Kernel
 from tests.unit.lifecycle.fakes import (
     FakeEvents,

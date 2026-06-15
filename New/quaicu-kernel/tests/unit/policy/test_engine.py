@@ -19,7 +19,7 @@ from core.errors import PolicyActivationError, PolicyCompileError, PolicyEvaluat
 from core.policy.evaluator import PolicyEngine
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
 from core.policy.store import PolicyStore
-from core.types import Action, ActionId, Actor, ActorId, ApproverRef, Decision, EvaluationResult, IdempotencyKey, TenantId
+from core.types import Action, ActionId, Actor, ActorId, ApproverRef, Decision, IdempotencyKey, TenantId
 
 # ── Fixtures / helpers ────────────────────────────────────────────────────────
 

@@ -6,7 +6,6 @@ without changing any ledger logic (F-04 / no-bypass: the ledger depends only on 
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from dataclasses import dataclass
 from datetime import datetime

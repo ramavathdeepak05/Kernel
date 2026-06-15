@@ -17,7 +17,7 @@ import pytest
 
 from core.consent.engine import ConsentEngine
 from core.errors import ConsentDeniedError
-from core.ports.consent import ConsentPort, ConsentRecord
+from core.ports.consent import ConsentRecord
 from core.types import (
     Action,
     ActionId,

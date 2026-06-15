@@ -20,8 +20,6 @@ from adapters.workflow.memory import InMemoryWorkflowAdapter
 from core.process.definitions import (
     GOVERNED_ACTION_PROCESS,
     TERMINAL_COMPLETED,
-    TERMINAL_DENIED,
-    TERMINAL_REJECTED,
 )
 from core.process.errors import WorkflowTenantIsolationError
 from core.types import ProcessDef, Signal, TenantId, WorkflowHandle

@@ -13,13 +13,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
 
 from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.engine import LifecycleEngine
 from core.lifecycle.profile import GovernanceProfile
 from core.ports.consent import ConsentRecord
-from core.types import ActionState, Actor, ActorId, Decision, RequestContext, TenantId
+from core.types import ActionState, Decision, RequestContext, TenantId
 
 from tests.unit.lifecycle.fakes import (
     FakeActionRepository,
