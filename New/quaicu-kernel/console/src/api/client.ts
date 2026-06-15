@@ -7,6 +7,7 @@ import type {
   ApprovalRecord,
   DashboardOverview,
   DecisionTimeline,
+  Entitlements,
   HitlQueue,
   ImpactReportBody,
   LedgerTrail,
@@ -62,6 +63,9 @@ function tenant(): string {
 }
 
 export const api = {
+  // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
+  entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),
+
   // ── Policies ──────────────────────────────────────────────────────────────
   listPolicies: (lifecycle?: string) =>
     request<PolicyListResponse>(

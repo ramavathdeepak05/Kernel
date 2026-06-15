@@ -43,6 +43,7 @@ from delivery.api.routes.approvals import router as approvals_router
 from delivery.api.routes.authorize import router as authorize_router
 from delivery.api.routes.billing import router as billing_router
 from delivery.api.routes.dashboard import router as dashboard_router
+from delivery.api.routes.entitlements import router as entitlements_router
 from delivery.api.routes.inference import router as inference_router
 from delivery.api.routes.admin import router as admin_router
 from delivery.api.routes.erasure import router as erasure_router
@@ -138,6 +139,7 @@ def create_app(
     app.include_router(ledger_router)
     app.include_router(policies_router)
     app.include_router(dashboard_router)
+    app.include_router(entitlements_router)
     app.include_router(approvals_router)
     app.include_router(signup_router)
     app.include_router(admin_router)

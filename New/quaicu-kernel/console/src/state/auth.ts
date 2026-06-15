@@ -44,6 +44,12 @@ export function isAuthenticated(): boolean {
   return cache.token.length > 0 && cache.tenant.length > 0;
 }
 
+// Sign out: drop the token + tenant (keep apiBase, a deployment setting). Used by the OIDC logout
+// button and the token-paste "clear" affordance.
+export function clearSession(): void {
+  setSession({ token: "", tenant: "" });
+}
+
 export function subscribe(l: Listener): () => void {
   listeners.add(l);
   return () => listeners.delete(l);

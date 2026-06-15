@@ -12,14 +12,15 @@ next cold agent doesn't know it happened.
 
 ---
 
-## Current status (2026-06-13)
+## Current status (2026-06-15)
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
-alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 827 tests passing, 10 skipped on a bare
-checkout — and 837 passing / 0 skipped once the real external deps are live (the 10 skips are the
-Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
-OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
+alongside, and the commercial productization program (3-tier packaging) is complete — waves 0–1 are
+landed, the WS-C/D/E/F/G workstreams are in, and the final Wave-2 slice (console OIDC login +
+per-tier UI gating) is done. Suite: 835 tests passing, 10 skipped on a bare checkout — and 845
+passing / 0 skipped once the real external deps are live (the 10 skips are the Postgres + OpenBao
+integration tests, validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the
+Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
 pass, (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
 layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the Policy
@@ -44,19 +45,21 @@ with per-agent identity, served either as a single dedicated kernel or via the n
 Per the go-live plan, the work is sequenced in waves. **Wave 0 (entitlement/tiering foundation),
 Wave 1 (shared-plane API routing + self-serve provisioning), and the core of WS-D (API-key auth +
 RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **Named IdP connectors**
-(Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on `JWTIdentityAdapter`) are now
-**done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
-UI gating**.
+(Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on `JWTIdentityAdapter`) are
+**done**, and the final WS-D/Wave-2 slice — **console OIDC login (Authorization Code + PKCE) +
+per-tier UI gating** over a new `GET /v1/me/entitlements` — is now **done** too (see the top Log
+entry).
 **WS-C** (Stripe + Razorpay billing → tier flips; usage metering on the access log) is now **done**
 (see the top Log entry). **WS-F** (regulator ledger-proof export), **WS-G** (GDPR crypto-shredding
 erasure), and **WS-E** (Enterprise isolation hardening — schema-per-tenant + RLS) are now **done**
 too — the productization workstreams WS-C/D/E/F/G are all landed. What remains are the pre-sale
 blockers that are **not pure code** (and were always tracked separately): the **K·02 external
 cryptographic review** (a third-party engagement) and **policy content packs** (the actual RBI / EU AI
-Act / DPDP rule sets — a regulatory-authoring effort the kernel *enforces* but does not itself write),
-plus the optional Wave-2 **console OIDC login + per-tier UI gating** (frontend). The kernel engine,
-all 14 governance layers, delivery surfaces, and the full commercial/productization program are
-code-complete and green.
+Act / DPDP rule sets — a regulatory-authoring effort the kernel *enforces* but does not itself write).
+With the console OIDC slice landed, **all planned code is complete**: the kernel engine, all 14
+governance layers, delivery surfaces (incl. the operator console with OIDC login + tier gating), and
+the full commercial/productization program are code-complete and green. The only remaining items are
+the two non-code pre-sale blockers above (K·02 crypto review + policy content packs).
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -73,9 +76,10 @@ code-complete and green.
 - **Policy content packs.** K·14 regmap catalog + K·01 CEL engine exist, but no actual RBI / EU AI
   Act / DPDP rule sets are written. The kernel enforces rules; the rules themselves are unwritten.
 - **Operator console hardening.** The `console/` web UI ships (policy admin · dashboard · audit ·
-  approvals), but auth is token-paste (no login/OIDC), there are no model-registry (K·08) / consent
-  (K·04) / tenant-config surfaces yet, and HITL approval→action-resumption needs the async K·06
-  deployment (the synchronous lifecycle times a gate out). Charts are minimal CSS.
+  approvals) with **OIDC login (Auth Code + PKCE) + per-tier UI gating** (token-paste remains a dev
+  fallback). Remaining: no model-registry (K·08) / consent (K·04) / tenant-config surfaces yet; no
+  silent token refresh (re-login on id_token expiry); HITL approval→action-resumption needs the async
+  K·06 deployment (the synchronous lifecycle times a gate out). Charts are minimal CSS.
 
 ---
 
@@ -117,6 +121,36 @@ code-complete and green.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-15 · Console OIDC login + per-tier UI gating · delivery/console · delivery/api (WS-D, Wave-2)** —
+  Closed the last Wave-2 code slice: the operator console moves from token-paste to a real
+  **OIDC Authorization Code + PKCE** login against the named IdP connectors (`adapters/identity/oidc.py`),
+  and gates its UI by the tenant's commercial tier. **Backend:** new read-only route
+  `GET /v1/me/entitlements` (`delivery/api/routes/entitlements.py`) returns the caller's tier + a
+  feature-flag/quota map **derived from `TIER_MATRIX`** (single source of truth — the console never
+  hard-codes tier→feature). Entitlement-source resolution mirrors the rate-limit middleware
+  (provider's engine → wired store → none): **no source** = dedicated single-kernel deploy, not
+  tier-limited (tier `null`, every feature on); **source present but unprovisioned/suspended** =
+  fail-closed (`NO_ACTIVE_PLAN`, every feature off). Bearer required (401 otherwise); API-key
+  protected when `require_api_key=True` (any valid tenant key reads its own tier). New
+  `EntitlementsResponse` schema; router wired into `create_app`. **Frontend (`console/`, still
+  dependency-free):** `src/oidc/` — PKCE helpers over Web Crypto (`pkce.ts`: S256 challenge, random
+  verifier/state, unverified JWT-claim decode), env-driven config (`config.ts`,
+  `VITE_OIDC_*`), and the flow (`oidc.ts`: discovery via `/.well-known/openid-configuration` or
+  pinned endpoints → redirect → `/callback` code exchange → store the **id_token as the session
+  bearer** + tenant from its claim). The kernel's OIDC IdentityPort still **cryptographically
+  verifies** that token (issuer/audience/JWKS) — the console only reads the tenant claim to scope its
+  calls (selection ≠ authorization). New `pages/Callback.tsx`, `state/entitlements.tsx`
+  (context provider fetching `/v1/me/entitlements` once post-auth + `useFeature` hook), `clearSession`
+  logout, tier badge, and nav/route gating (`FeatureGate` hides Policies/Approvals on tiers that lack
+  them). Token-paste remains as a documented dev fallback when `VITE_OIDC_*` is unset; `.env.example`
+  added. `npm run build` (tsc strict + vite) green. **Tests:** +8 (`test_entitlements.py` — 401,
+  no-source-unlimited, STARTER/BUSINESS/ENTERPRISE feature derivation, fail-closed unprovisioned +
+  suspended, provider-mode tenant resolution); suite 827 → **835**. **Follow-ups:** OIDC end-to-end
+  requires the kernel deployed with `identity = "oidc"` and `audience = VITE_OIDC_CLIENT_ID` (the
+  backend connectors landed in the prior WS-D entry); silent token refresh / `prompt=none` renewal
+  (the console currently re-logs in when the id_token expires); model-registry (K·08) / consent
+  (K·04) / tenant-config console surfaces remain unbuilt.
 
 - **2026-06-13 · WS-E Enterprise isolation hardening — schema-per-tenant + RLS · adapters/storage** —
   Hardened tenant isolation from *logical* (every row carries `tenant_id`, every query predicates on
