@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quaicu-kernel"
+version = "0.1.0"
+description = "QUAICU Sovereign-tier AI Governance Kernel"
+requires-python = ">=3.11"
+readme = { text = "QUAICU Governance Kernel — see docs/adr/BUILD_JOURNAL.md", content-type = "text/plain" }
+
+# Runtime dependencies. Single source of truth (previously pinned only in the Docker image).
+# Verified against actual imports in core/ adapters/ delivery/ — see the import audit in the
+# go-live build log. `requirements.lock` pins these transitively with hashes for reproducible builds.
+dependencies = [
+    "fastapi>=0.111",            # delivery/api — REST surface
+    "uvicorn[standard]>=0.29",   # delivery/entrypoint — ASGI server
+    "starlette>=0.37",           # delivery/api middleware (imported directly; ships with fastapi)
+    "pydantic>=2.0",             # delivery/api — request/response schemas
+    "PyJWT>=2.8",                # adapters/identity — JWT/OIDC token verification
+    "cel-python>=0.4.0",         # K·01 — CEL condition evaluation (F-05)
+    "cryptography>=42.0",        # K·02 — Ed25519 STH signing
+    "opentelemetry-api>=1.21",   # K·04 consent engine — tracing/metrics instrumentation
+    "httpx>=0.27",               # OpenBao signer + OIDC/HITL/inference adapters — HTTP client
+    "asyncpg>=0.29",             # Postgres adapters — async runtime driver
+    "alembic>=1.13",             # schema migrations
+    "sqlalchemy>=2.0",           # alembic env.py engine
+    "psycopg2-binary>=2.9",      # sync driver for alembic offline/migration mode
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "hypothesis>=6.0",           # property-based invariant tests
+]
+dev = [
+    "ruff>=0.4",
+    "mypy>=1.8",
+    "pip-tools>=7.0",            # pip-compile → requirements.lock
+]
+
+[project.scripts]
+quaicu-kernel = "delivery.entrypoint:main"
+quaicu-kernel-saas = "delivery.entrypoint_saas:main"
+
+[tool.setuptools.packages.find]
+include = ["core*", "adapters*", "delivery*"]
+exclude = ["tests*", "console*"]
+
+# ── Tooling (moved here from the former repo-root pyproject.toml; this is now the
+#    authoritative config, so pytest binds rootdir to New/quaicu-kernel/). ──────────
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "conformance: spec-derived golden/contract cases",
+    "property: Hypothesis property-based invariants",
+    "integration: requires real Postgres",
+    "chaos: random fault injection",
+    "tenant_isolation: adversarial cross-tenant tests",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+disallow_any_generics = true

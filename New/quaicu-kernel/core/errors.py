@@ -358,6 +358,17 @@ class QuotaExceededError(EntitlementError):
     code = "QUOTA_EXCEEDED"
 
 
+class EntitlementPersistenceError(EntitlementError):
+    """A durable entitlement-store operation (load/save/set) failed.
+
+    Raised by an EntitlementRepository adapter so a persistence fault on the plan write path (e.g. a
+    billing-driven tier flip) surfaces rather than silently leaving the durable plan store
+    inconsistent. Mirrors `PolicyPersistenceError` / `LedgerPersistenceError`.
+    """
+
+    code = "ENTITLEMENT_PERSISTENCE_ERROR"
+
+
 # ── License errors (ADR-0009 — Enterprise dedicated deployments) ───────────────
 
 

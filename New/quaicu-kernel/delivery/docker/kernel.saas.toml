@@ -1,0 +1,25 @@
+# QUAICU Kernel — shared SaaS-plane descriptor (ADR-0009).
+#
+# Pointed to by KERNEL_CONFIG_SAAS; consumed by delivery/entrypoint_saas.py (CLI: quaicu-kernel-saas).
+# One standard kernel config path per served tier. All STARTER tenants share the STARTER kernel and all
+# BUSINESS tenants the BUSINESS kernel — the provider routes per request by the tenant's tier (the
+# storage/ledger/consent adapters are already tenant-scoped internally, so no kernel-per-tenant).
+# ENTERPRISE is intentionally excluded: it ships as a dedicated, license-gated single-kernel deployment
+# (delivery/entrypoint.py + TieredKernelProvider.for_enterprise).
+
+[plane]
+starter  = "/etc/quaicu/kernel.starter.toml"    # in-memory tier
+business = "/etc/quaicu/kernel.business.toml"    # durable Postgres + CEL tier
+
+# Durable shared plan store so billing-driven tier flips survive a restart (run migration 005 first).
+# Omit `dsn` to inherit the per-tier [storage] DSN. Use ${ENV_VAR} to keep credentials out of the file.
+[entitlements]
+dsn = "${ENTITLEMENTS_DSN}"
+
+# Self-serve checkout + webhook tier flips (WS-C). Uncomment + configure to enable the console Billing
+# page and the /v1/billing/* routes. Secrets resolve from the environment at load.
+# [billing.stripe]
+# webhook_secret = "${STRIPE_WEBHOOK_SECRET}"
+# api_key        = "${STRIPE_API_KEY}"
+# [billing.stripe.price_to_tier]
+# "price_business" = "BUSINESS"

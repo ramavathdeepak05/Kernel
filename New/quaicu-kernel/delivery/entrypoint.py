@@ -21,9 +21,9 @@ from __future__ import annotations
 import os
 import tomllib
 
-from core.entitlements import EntitlementStore
 from delivery.api.app import create_app
 from delivery.sdk.billing_config import build_billing
+from delivery.sdk.entitlements_config import build_entitlement_store
 from delivery.sdk.kernel import Kernel
 
 _config_path = os.getenv("KERNEL_CONFIG", "kernel.toml")
@@ -37,7 +37,9 @@ with open(_config_path, "rb") as _f:
     _config = tomllib.load(_f)
 
 if "billing" in _config:
-    _entitlements = EntitlementStore()
+    # Durable when [entitlements]/[storage] supplies a DSN, else in-memory. The store is hydrated
+    # from its repository in create_app's lifespan, so a billing-driven tier flip survives a restart.
+    _entitlements = build_entitlement_store(_config)
     _billing_adapters, _billing_engine = build_billing(_config, _entitlements)
     app = create_app(
         kernel,

@@ -1,0 +1,23 @@
+# QUAICU Kernel — STARTER tier (shared SaaS plane, ADR-0009).
+# In-memory adapters: zero external dependencies. All STARTER tenants share this kernel; the per-request
+# tenant is resolved from the JWT/OIDC claim, not from [tenant] (which only labels the plane).
+
+[tenant]
+id = "saas-starter"
+
+[adapters]
+policy   = "always_allow"   # STARTER does not get the CEL policy engine (that's BUSINESS+)
+hitl     = "webhook"
+ledger   = "memory_ledger"
+events   = "memory_events"
+identity = "jwt"
+
+[hitl]
+dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"
+poll_url     = "http://host.docker.internal:9000/hitl/status"
+timeout      = 10
+
+[identity]
+secret_or_key = "${KERNEL_JWT_SECRET}"
+algorithms    = ["HS256"]
+verify        = true
