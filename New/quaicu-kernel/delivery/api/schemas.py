@@ -331,3 +331,23 @@ class ApprovalListResponse(BaseModel):
 
     approvals: list[ApprovalRecordResponse]
     count: int
+
+
+# ── Entitlements (console per-tier UI gating, WS-D) ──────────────────────────────────
+
+
+class EntitlementsResponse(BaseModel):
+    """The caller's commercial tier + the feature flags / quotas the console gates its UI on.
+
+    ``features`` and ``quotas`` are derived from ``TIER_MATRIX[tier]`` — the single source of truth —
+    so the console never hard-codes the tier→feature mapping. ``tier`` is ``None`` for a dedicated
+    single-kernel deployment with no entitlement source wired (the console then shows everything);
+    ``status`` is ``None`` in that case, or the plan status (or ``"NO_ACTIVE_PLAN"`` fail-closed) when
+    an entitlement source is present.
+    """
+
+    tenant: str
+    tier: str | None
+    status: str | None = None
+    features: dict[str, bool]
+    quotas: dict[str, int]

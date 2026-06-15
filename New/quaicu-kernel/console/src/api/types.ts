@@ -110,6 +110,14 @@ export interface ApprovalList {
   count: number;
 }
 
+export interface Entitlements {
+  tenant: string;
+  tier: string | null; // null = dedicated single-kernel deploy (not tier-limited)
+  status: string | null; // plan status, "NO_ACTIVE_PLAN", or null (dedicated)
+  features: Record<string, boolean>;
+  quotas: Record<string, number>;
+}
+
 // Request bodies
 export interface PolicyRegisterBody {
   id: string;
