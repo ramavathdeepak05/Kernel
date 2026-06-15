@@ -427,6 +427,15 @@ class BillingEventError(BillingError):
     code = "BILLING_EVENT_UNMAPPABLE"
 
 
+class CheckoutError(BillingError):
+    """Could not create a provider checkout/subscription (outbound payment initiation).
+
+    Covers a misconfigured adapter (no API key / unmapped tier) and a provider that rejected the
+    request. Distinct from the inbound webhook errors above — this is the kernel calling *out*."""
+
+    code = "CHECKOUT_FAILED"
+
+
 # ── Erasure / crypto-shredding errors (WS-G — GDPR right to erasure) ────────────
 
 

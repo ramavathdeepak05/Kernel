@@ -82,3 +82,7 @@ button.secondary { color: var(--muted); }
 .tier-badge.tier-starter { color: var(--muted); border-color: var(--line); }
 .tier-badge.tier-business { color: var(--accent); border-color: var(--accent); }
 .tier-badge.tier-enterprise { color: var(--warn); border-color: var(--warn); }
+
+/* ── Billing page ──────────────────────────────────────────────────────────── */
+.notice { background: rgba(46,163,107,.12); border: 1px solid var(--allow); color: #7fd6a8; padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; }
+.plan-options { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

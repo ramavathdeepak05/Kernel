@@ -126,3 +126,30 @@ default = "all"
 # Per-action-type overrides, e.g. run model calls under gateway-only protection:
 # [governance.action_profiles]
 # "inference.generate" = "gateway_only"
+
+# ── Billing (WS-C — Stripe / Razorpay → tier flips + self-serve checkout) ──────
+# Add a [billing] section to enable the payment edge: inbound webhooks flip a tenant's tier and the
+# console's Billing page can start a checkout. Omit the whole section to keep billing disabled
+# (the /v1/billing/* routes return 503). Configure either or both providers.
+#
+# Secrets use ${ENV_VAR} and are resolved from the environment at startup — keep live payment keys
+# OUT of this file. Provide api_key / key_id+key_secret only if you want outbound checkout (the
+# webhook path needs just webhook_secret). The price/plan tables map a provider's price/plan id to a
+# kernel tier (STARTER / BUSINESS / ENTERPRISE).
+#
+# [billing.stripe]
+# webhook_secret = "${STRIPE_WEBHOOK_SECRET}"
+# api_key        = "${STRIPE_API_KEY}"          # omit for webhook-only
+# # api_base       = "https://api.stripe.com"   # override for Stripe-mock / proxies
+# # tolerance_seconds = 300
+# [billing.stripe.price_to_tier]
+# "price_business"   = "BUSINESS"
+# "price_enterprise" = "ENTERPRISE"
+#
+# [billing.razorpay]
+# webhook_secret = "${RAZORPAY_WEBHOOK_SECRET}"
+# key_id         = "${RAZORPAY_KEY_ID}"         # omit key_id+key_secret for webhook-only
+# key_secret     = "${RAZORPAY_KEY_SECRET}"
+# # subscription_total_count = 12
+# [billing.razorpay.plan_to_tier]
+# "plan_business" = "BUSINESS"

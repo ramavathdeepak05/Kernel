@@ -51,3 +51,23 @@ class BillingEvent:
     def is_actionable(self) -> bool:
         """True if the engine should mutate state for this event."""
         return self.event_type is not BillingEventType.IGNORED
+
+
+@dataclass(frozen=True)
+class CheckoutSession:
+    """A provider-hosted payment page the tenant is redirected to, to start/upgrade a subscription.
+
+    This is the *outbound* half of billing (the kernel calling the processor), the counterpart to the
+    inbound `BillingEvent` webhook. The adapter stamps the tenant id into the provider's
+    metadata/notes when it creates the session, so the eventual webhook can attribute the resulting
+    subscription back to the tenant via the same `_tenant(...)` read.
+
+    ``url`` is where the caller redirects the end user to pay; ``reference`` is the provider's
+    session/subscription id (recorded for audit / correlation).
+    """
+
+    provider: str          # "stripe" | "razorpay"
+    tenant_id: TenantId
+    tier: FeatureTier
+    url: str
+    reference: str | None = None

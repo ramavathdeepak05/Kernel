@@ -88,6 +88,8 @@ async def test_no_entitlement_source_is_unlimited():
     # Everything is shown on a dedicated deploy.
     assert all(body["features"].values())
     assert body["quotas"] == {}
+    # No billing wired → no providers to offer.
+    assert body["billing_providers"] == []
 
 
 # ── Wired store: features derived from TIER_MATRIX ──────────────────────────────────
@@ -162,6 +164,27 @@ async def test_suspended_plan_fails_closed():
 
 
 # ── Shared-plane provider mode ──────────────────────────────────────────────────────
+
+
+class _FakeCheckout:
+    """A checkout-capable billing adapter stand-in (structural CheckoutPort)."""
+
+    provider = "stripe"
+
+    async def create_checkout(self, *, tenant, tier, success_url=None, cancel_url=None, customer_email=None):
+        raise NotImplementedError  # presence is enough for the providers list
+
+
+async def test_billing_providers_reported_when_checkout_wired():
+    app = create_app(
+        _kernel(),
+        entitlement_store=_store_with(FeatureTier.BUSINESS),
+        billing_adapters={"stripe": _FakeCheckout()},
+    )
+    async with _client(app) as c:
+        resp = await c.get("/v1/me/entitlements", headers=AUTH)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["billing_providers"] == ["stripe"]
 
 
 async def test_provider_mode_resolves_tenant_tier():

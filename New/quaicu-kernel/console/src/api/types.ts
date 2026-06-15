@@ -116,6 +116,23 @@ export interface Entitlements {
   status: string | null; // plan status, "NO_ACTIVE_PLAN", or null (dedicated)
   features: Record<string, boolean>;
   quotas: Record<string, number>;
+  billing_providers?: string[]; // checkout-capable providers wired on this deployment
+}
+
+export interface CheckoutRequest {
+  provider: string; // "stripe" | "razorpay"
+  tier: string; // "BUSINESS" | "ENTERPRISE"
+  success_url?: string;
+  cancel_url?: string;
+  customer_email?: string;
+}
+
+export interface CheckoutResponse {
+  provider: string;
+  tenant: string;
+  tier: string;
+  url: string; // redirect the user here to pay
+  reference: string | null;
 }
 
 // Request bodies
