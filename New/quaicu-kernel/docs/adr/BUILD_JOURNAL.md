@@ -16,8 +16,8 @@ next cold agent doesn't know it happened.
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is underway — waves 0–1 are
-landed and the WS-D auth/metering edge is in. Suite: 720 tests passing, 10 skipped on a bare
-checkout — and 730 passing / 0 skipped once the real external deps are live (the 10 skips are the
+landed and the WS-D auth/metering edge is in. Suite: 827 tests passing, 10 skipped on a bare
+checkout — and 837 passing / 0 skipped once the real external deps are live (the 10 skips are the
 Postgres + OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized
 OpenBao; see the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
@@ -43,13 +43,20 @@ with per-agent identity, served either as a single dedicated kernel or via the n
 ### Next planned work — productization program (3 tiers from one codebase)
 Per the go-live plan, the work is sequenced in waves. **Wave 0 (entitlement/tiering foundation),
 Wave 1 (shared-plane API routing + self-serve provisioning), and the core of WS-D (API-key auth +
-RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** The remaining WS-D
-slice is **named IdP connectors** (Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on
-`JWTIdentityAdapter`) and **console OIDC login + per-tier UI gating** — both slotted into Wave 2.
-Then **WS-C** (Stripe + Razorpay billing → tier flips; usage metering builds on the new access log),
-**WS-F** (regulator ledger-proof export), **WS-E** (Enterprise isolation hardening), and **WS-G**
-(GDPR crypto-shredding erasure). The pre-sale blockers below (K·02 crypto review, policy content
-packs) remain open in parallel.
+RBAC scopes + per-tier rate limiting + request logging, ADR-0011) are done.** **Named IdP connectors**
+(Okta/Auth0/Keycloak via OIDC discovery + JWKS rotation, layered on `JWTIdentityAdapter`) are now
+**done** (see the top Log entry); the remaining WS-D/Wave-2 slice is **console OIDC login + per-tier
+UI gating**.
+**WS-C** (Stripe + Razorpay billing → tier flips; usage metering on the access log) is now **done**
+(see the top Log entry). **WS-F** (regulator ledger-proof export), **WS-G** (GDPR crypto-shredding
+erasure), and **WS-E** (Enterprise isolation hardening — schema-per-tenant + RLS) are now **done**
+too — the productization workstreams WS-C/D/E/F/G are all landed. What remains are the pre-sale
+blockers that are **not pure code** (and were always tracked separately): the **K·02 external
+cryptographic review** (a third-party engagement) and **policy content packs** (the actual RBI / EU AI
+Act / DPDP rule sets — a regulatory-authoring effort the kernel *enforces* but does not itself write),
+plus the optional Wave-2 **console OIDC login + per-tier UI gating** (frontend). The kernel engine,
+all 14 governance layers, delivery surfaces, and the full commercial/productization program are
+code-complete and green.
 
 ### Open follow-ups (ADR candidates / pre-sale blockers)
 - **Capture the approving identity (CLOSED 2026-06-12, ADR-0007).** `HITLPort.poll` now returns
@@ -110,6 +117,127 @@ packs) remain open in parallel.
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-13 · WS-E Enterprise isolation hardening — schema-per-tenant + RLS · adapters/storage** —
+  Hardened tenant isolation from *logical* (every row carries `tenant_id`, every query predicates on
+  it) to *physical* for the dedicated Enterprise tier, per F-07. New `adapters/storage/isolation.py`:
+  the mechanism — `assert_safe_tenant`/`safe_schema_name` derive a tenant's physical schema name and
+  are **fail-closed** (a tenant id that isn't a bare `[a-z0-9_-]` identifier raises
+  `TenantIsolationError` rather than being escaped into SQL — a crafted id can never become SQL);
+  `search_path_sql` pins a connection to the tenant's schema; `set_rls_tenant_sql` is a **parameterized**
+  `set_config('app.current_tenant', $1, true)` (tenant id is always a bind param); `current_db_tenant`
+  ContextVar + `db_tenant_scope` carry the RLS tenant per transaction. New
+  `adapters/storage/provisioner.py` — `TenantProvisioner.onboard/offboard` create/drop a tenant's
+  isolated schema with its own copy of every kernel table (`onboard_statements` runs CREATE SCHEMA →
+  pin search_path → CREATE TABLE so the tables land in the tenant schema, not `public`); fail-closed
+  wrapping. New Alembic migration `004_enable_rls.py` — enables + **forces** RLS on the three shared
+  kernel tables with a deny-by-default policy keyed on `current_setting('app.current_tenant')` (belt
+  and braces over the schema isolation). Exposed from `adapters.storage`. **Tests:** +21
+  (`test_tenant_isolation.py` — schema derivation, 7 injection/oversize tenant ids rejected, SQL
+  builder shapes, RLS-param-bound assertion, ContextVar set/restore + nested, onboard/offboard
+  statement order, and provisioner execution over a mocked asyncpg pool incl. fail-closed + unsafe
+  tenant); suite 806 → **827**. The live schema-per-tenant query path is exercised by the
+  `DATABASE_URL`-gated integration suite (the SQL generation + guards are fully unit-covered here).
+  **Follow-ups:** wire the Postgres adapters to issue `search_path_sql` + `set_rls_tenant_sql` per
+  transaction when an Enterprise `rls=True` flag is set; run the migration set against each onboarded
+  schema (currently the provisioner ships the table DDL inline).
+
+- **2026-06-13 · WS-G GDPR/DPDP crypto-shredding erasure · core/erasure · delivery** —
+  Built right-to-erasure for a system whose audit log is **append-only and tamper-evident** — you
+  cannot delete a sealed K·02 entry without invalidating every downstream Merkle proof. Erasure is
+  therefore cryptographic: PII is stored as AES-256-GCM ciphertext under a **per-subject** key, and
+  "delete" = **destroy the key** (crypto-shredding) → the ciphertext is permanently irrecoverable
+  while the Merkle leaves (computed over the ciphertext token) stay byte-identical, so the trail's
+  integrity survives the deletion. New `core/erasure/`: `ShredKeyring` /
+  `InMemoryShredKeyring` (per-`(tenant, subject)` DEK, thread-safe, **tombstones** erased subjects —
+  no resurrection, F-07 tenant-scoped); `ErasureEngine` — `encrypt`/`decrypt` over a self-describing
+  `CipherToken` (AEAD; tamper → `CipherTokenError`), `erase` returning an `ErasureReceipt` (ledger-
+  sealable proof the right was honored), `is_erased`. Once shredded, `decrypt` raises
+  `SubjectErasedError` (the *intended* terminal state). New error subtree in the frozen
+  `core/errors.py` (`ErasureError`, `SubjectErasedError`, `CipherTokenError`); new
+  `erasure:write` RBAC scope. New routes `POST /v1/erasure/{tenant}/{subject}` (crypto-shred) +
+  `GET /v1/erasure/{tenant}/{subject}` (status) — bearer + tenant-isolation + scope guarded;
+  `create_app(erasure_engine=…)` wires it, and a `SubjectErasedError` handler returns **410 Gone**.
+  **Tests:** +19 (engine: round-trip, key reuse/isolation, erase→irrecoverable, idempotent,
+  no-resurrection, cross-subject + cross-tenant isolation, tamper/malformed fail-closed, **and the
+  WS-G invariant — a Merkle leaf over the cipher token is unchanged after erasure**; routes:
+  erase→status, pre-erase false, 401 no-token, 403 cross-tenant, 503 disabled, 410 on decrypt-after-
+  erase); suite 787 → **806**. **Follow-ups:** HSM/KMS-backed keyring (DEK never leaves the HSM;
+  destroy = KMS key-destruction API) behind the same `ShredKeyring` interface; durable keyring +
+  hydrate; seal the `ErasureReceipt` into the ledger as an erasure-evidence action.
+
+- **2026-06-13 · WS-F regulator ledger-proof export · core/regmap · core/ledger · delivery** —
+  Turned the K·14 evidence pack (which took *opaque* proof-ref strings) into a **self-contained,
+  independently verifiable** regulator export over the real K·02 transparency log. New
+  `core/regmap/export.py`: `build_ledger_proof_bundle` assembles, for a tenant + time window, a
+  `LedgerProofBundle` = the signed tree head (RFC 6962 STH: size, root, Ed25519 signature, **+ the
+  signing public key**) + one RFC 6962 inclusion proof per in-window action (leaf hash + audit path)
+  + the K·14 evidence narrative/manifest with *real* leaf-hash proof refs. Shipped alongside is
+  `verify_ledger_proof_bundle(dict) -> (ok, errors)` — the exact offline check a regulator runs: it
+  recomputes the Merkle root from each inclusion proof (`_recompute_root_from_path`) and asserts it
+  equals the **signed** root, then verifies the STH signature against the embedded public key. Tamper
+  anywhere (leaf, root, signature) → verification fails; a bundle with no public key is flagged
+  unverifiable. `InMemoryEd25519Signer` gained a `public_key_pem` property (SPKI PEM) so the export is
+  verifiable end-to-end (the OpenBao signer can expose the same — follow-up). New SDK method
+  `Kernel.export_ledger_proof(tenant, window_start=, window_end=, regulation_refs=, policy_versions=)`
+  (reads only sealed entries — no model re-calls, F-09; window-filters by `sealed_at`). New routes
+  `GET /v1/ledger/{tenant}/export` (same bearer + `ledger:read` scope + tenant-isolation guard as the
+  trail; ISO `from`/`to` + `regulations`/`policy_versions` query params) and `POST
+  /v1/ledger/export/verify` (stateless mirror of the offline verifier). **Tests:** +13
+  (`test_export.py` clean/single/tamper-leaf/tamper-sig/tamper-root/missing-key/malformed;
+  `test_ledger_export.py` export→verify round-trip, 401 no-token, 403 cross-tenant, tampered-bundle
+  rejected, window filter); suite 775 → **787**. **Follow-ups:** expose `public_key_pem` from the
+  OpenBao signer so production exports are offline-verifiable; consistency-proof export across two
+  STHs for append-only continuity attestation.
+
+- **2026-06-13 · WS-C billing → tier flips + usage metering · core/billing · core/metering · delivery** —
+  Turned the entitlement plumbing (which already carried `billing_provider`/`billing_ref` and a
+  `SUSPENDED` status) into a working billing edge. **Provider-agnostic core:** new `core/billing/`
+  — `BillingEvent`/`BillingEventType` (the normalized vocabulary: SUBSCRIPTION_ACTIVE,
+  PAYMENT_FAILED, PAYMENT_RECOVERED, SUBSCRIPTION_CANCELLED, IGNORED), `BillingPort`
+  (`verify_and_parse(payload, headers) -> BillingEvent` — signature-verify + normalize, fail-closed),
+  and `BillingEngine` which maps a verified event onto the existing fail-closed store mutations
+  (active → set tier + ACTIVE + stamp provider/ref; payment-failed → SUSPEND; recovered →
+  reactivate; cancelled → downgrade to free STARTER; unknown-tenant non-active events are no-ops;
+  idempotent). **Adapters:** `adapters/billing/stripe.py` (verifies the `Stripe-Signature` HMAC over
+  `"{t}.{body}"` within a timestamp tolerance; maps `customer.subscription.*` / `invoice.payment_failed`;
+  price→tier) and `adapters/billing/razorpay.py` (verifies the `X-Razorpay-Signature` body HMAC; maps
+  `subscription.activated/charged/halted/cancelled`; plan→tier) — **no Stripe/Razorpay SDK**, plain
+  `hmac`/`hashlib`/`json` so the verification path is auditable + testable. **Route:** `POST
+  /v1/billing/webhook/{provider}` reads the **raw** body (signature is over exact bytes), verifies +
+  applies; bad signature → 400 (no plan change), unmappable-but-verified → 422, provider not wired →
+  503. Webhooks are exempt from API-key auth (provider signature is the credential) and from rate
+  limiting. **Usage metering:** new `core/metering/UsageMeter` (per-tenant, per-UTC-day counter,
+  auto-rollover); `RequestLoggingMiddleware` records one tick per successful governed `/v1` request
+  (best-effort, never affects the response); `RateLimitMiddleware` now also enforces the tier's
+  `max_actions_per_day` (429 `QUOTA_EXCEEDED`, fail-open without a meter/plan); new admin route
+  `GET /v1/admin/tenants/{tenant}/usage`. `create_app` gained `billing_adapters` / `billing_engine` /
+  `usage_meter`. New `BillingError` subtree in the frozen `core/errors.py`
+  (`WebhookVerificationError`, `BillingEventError`). **Tests:** +38 (billing engine, Stripe + Razorpay
+  signature/parse incl. tamper/stale/wrong-secret/unmapped, usage meter, webhook route incl. flip /
+  bad-sig-no-flip / auth-exempt, metering on success, admin usage, daily-quota 429); suite 737 →
+  **775**. **Follow-ups:** distributed (Redis) usage counter for horizontal scale; emit a K·07 event on
+  tier flips so the audit trail records billing-driven plan changes; checkout-session creation
+  endpoints (the kernel currently only consumes provider webhooks).
+
+- **2026-06-13 · WS-D named IdP connectors — OIDC discovery + JWKS rotation · adapters/identity** —
+  Built the remaining WS-D slice: verify IdP-issued (asymmetric) JWTs against a named provider's
+  rotating JWKS, layered on the existing JWT claim mapping. New `adapters/identity/_claims.py`
+  (`actor_from_claims` — the shared, single-source claim→`Actor` mapper incl. the F-07 tenant
+  cross-check; `JWTIdentityAdapter` now delegates to it so the two adapters cannot drift). New
+  `adapters/identity/oidc.py` — `OIDCIdentityAdapter`: (1) OIDC **discovery** from
+  `{issuer}/.well-known/openid-configuration` when no `jwks_uri` is given, (2) JWKS fetch + `kid`
+  index cached for `jwks_ttl`, (3) **rotation** — an unknown `kid` triggers exactly one re-fetch,
+  still-missing → fail-closed, (4) `jwt.decode` with mandatory `issuer` + `audience` checks and
+  `require=[exp,iss,aud]`. Provider presets `OIDCIdentityAdapter.okta/auth0/keycloak` (issuer-URL
+  shaping only; Auth0's trailing slash preserved). HTTP fetch is injectable (`jwks_fetcher=`) so the
+  adapter is fully testable without a live IdP. Registered `oidc` in the kernel adapter registry
+  (`_build_identity` already reads `[identity]` kwargs → wireable via `identity = "oidc"`); documented
+  in `kernel.example.toml`. **Tests:** +16 (`test_oidc_identity.py` — valid/aud/iss/expiry/unknown-key/
+  unknown-kid/no-kid, tenant-mismatch isolation, rotation refetch + TTL cache hit, the three provider
+  presets), all 11 JWT-adapter tests unchanged after the refactor; suite 720 → **737**. **Follow-ups:**
+  console OIDC login + per-tier UI gating (the last Wave-2 slice; frontend); distributed JWKS cache if
+  the kernel is horizontally scaled (currently per-process).
 
 - **2026-06-13 · WS-D auth/metering edge — API-key auth, RBAC scopes, rate limiting, request logging · core/delivery (ADR-0011)** —
   Closed the unguarded edge left by ADR-0009/0010. **RBAC scopes:** new `core/account/scopes.py`

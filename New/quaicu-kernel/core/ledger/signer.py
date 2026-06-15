@@ -69,6 +69,17 @@ class InMemoryEd25519Signer:
     def key_id(self) -> str:
         return self._key_id
 
+    @property
+    def public_key_pem(self) -> str:
+        """The Ed25519 verification key as an SPKI PEM — embedded in regulator exports (WS-F) so an
+        STH signature can be verified offline."""
+        from cryptography.hazmat.primitives import serialization
+
+        return self._public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        ).decode()
+
     def sign(self, tree_size: int, root_hash: bytes, timestamp: datetime) -> SignedTreeHead:
         msg = _signing_message(tree_size, root_hash)
         signature = self._private_key.sign(msg)

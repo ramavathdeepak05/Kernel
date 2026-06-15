@@ -29,6 +29,7 @@ from core.errors import (
     LifecycleDeniedError,
     LifecycleHaltedError,
     QUAICUError,
+    SubjectErasedError,
     TenantIsolationError,
 )
 from core.account import AccountEngine
@@ -40,9 +41,11 @@ from delivery.api.ratelimit import RateLimitMiddleware
 from delivery.api.routes.actions import router as actions_router
 from delivery.api.routes.approvals import router as approvals_router
 from delivery.api.routes.authorize import router as authorize_router
+from delivery.api.routes.billing import router as billing_router
 from delivery.api.routes.dashboard import router as dashboard_router
 from delivery.api.routes.inference import router as inference_router
 from delivery.api.routes.admin import router as admin_router
+from delivery.api.routes.erasure import router as erasure_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
 from delivery.api.routes.signup import router as signup_router
@@ -57,6 +60,10 @@ def create_app(
     account_engine: "AccountEngine | None" = None,
     entitlement_store: "EntitlementStore | None" = None,
     admin_token: str | None = None,
+    billing_adapters: "dict[str, object] | None" = None,
+    billing_engine: "object | None" = None,
+    usage_meter: "object | None" = None,
+    erasure_engine: "object | None" = None,
     enforce_paths: list[tuple[str, str]] | None = None,
     cors_origins: list[str] | None = None,
     require_api_key: bool = False,
@@ -113,10 +120,16 @@ def create_app(
     # routes resolve the serving kernel via delivery/api/deps.get_kernel.
     app.state.kernel = kernel
     app.state.provider = provider
-    # Control-plane singletons (signup / admin). Routes 503 when their dependency is absent.
+    # Control-plane singletons (signup / admin / billing). Routes 503 when their dependency is absent.
     app.state.account_engine = account_engine
     app.state.entitlement_store = entitlement_store
     app.state.admin_token = admin_token
+    # Billing (WS-C): provider adapters keyed by name + the apply engine; usage meter for metering.
+    app.state.billing_adapters = billing_adapters or {}
+    app.state.billing_engine = billing_engine
+    app.state.usage_meter = usage_meter
+    # Erasure (WS-G): crypto-shredding engine for the GDPR/DPDP right-to-erasure routes.
+    app.state.erasure_engine = erasure_engine
 
     # Routers
     app.include_router(actions_router)
@@ -128,6 +141,8 @@ def create_app(
     app.include_router(approvals_router)
     app.include_router(signup_router)
     app.include_router(admin_router)
+    app.include_router(billing_router)
+    app.include_router(erasure_router)
 
     # ── Middleware stack ──────────────────────────────────────────────────────
     # Starlette runs middleware in REVERSE order of registration (last added = outermost = runs
@@ -184,6 +199,14 @@ def create_app(
     async def _tenant_handler(request: Request, exc: TenantIsolationError) -> JSONResponse:
         return JSONResponse(
             status_code=403,
+            content={"error": str(exc), "code": exc.code, "detail": exc.detail or {}},
+        )
+
+    @app.exception_handler(SubjectErasedError)
+    async def _erased_handler(request: Request, exc: SubjectErasedError) -> JSONResponse:
+        # 410 Gone: the data was crypto-shredded — its absence is the correct, intended state.
+        return JSONResponse(
+            status_code=410,
             content={"error": str(exc), "code": exc.code, "detail": exc.detail or {}},
         )
 

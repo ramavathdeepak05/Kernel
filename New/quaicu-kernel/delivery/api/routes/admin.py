@@ -7,6 +7,7 @@ is WS-D. If no admin token is configured, the routes return 503 (closed by defau
 
   GET  /v1/admin/tenants                  → list customer plans
   POST /v1/admin/tenants/{tenant}/tier    → change a tenant's tier (e.g. manual upgrade)
+  GET  /v1/admin/tenants/{tenant}/usage   → the tenant's metered usage for the current UTC day
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import hmac
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from core.entitlements import FeatureTier
+from core.entitlements import EntitlementEngine, FeatureTier
 from core.errors import EntitlementError
 from core.types import TenantId
 
@@ -90,3 +91,40 @@ async def set_tier(tenant: str, body: SetTierRequest, request: Request) -> Tenan
     except EntitlementError as exc:
         raise HTTPException(status_code=404, detail={"error": str(exc), "code": exc.code})
     return TenantPlanResponse(tenant_id=str(plan.tenant_id), tier=plan.tier.value, status=plan.status.value)
+
+
+class UsageResponse(BaseModel):
+    tenant_id: str
+    day: str
+    actions_today: int
+    tier: str
+    limit_per_day: int
+
+
+@router.get(
+    "/tenants/{tenant}/usage",
+    response_model=UsageResponse,
+    summary="A tenant's metered usage for the current UTC day",
+)
+async def tenant_usage(tenant: str, request: Request) -> UsageResponse:
+    _require_admin(request)
+    store = _store(request)
+    meter = getattr(request.app.state, "usage_meter", None)
+    if meter is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Usage metering not enabled", "code": "METERING_DISABLED"},
+        )
+    snap = meter.snapshot(TenantId(tenant))
+    try:
+        plan = EntitlementEngine(store).resolve_plan(TenantId(tenant))
+        tier, limit = plan.tier.value, EntitlementEngine(store)._quota(plan, "max_actions_per_day")
+    except EntitlementError as exc:
+        raise HTTPException(status_code=404, detail={"error": str(exc), "code": exc.code})
+    return UsageResponse(
+        tenant_id=snap.tenant_id,
+        day=snap.day,
+        actions_today=snap.actions_today,
+        tier=tier,
+        limit_per_day=limit,
+    )

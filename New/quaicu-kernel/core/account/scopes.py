@@ -26,6 +26,7 @@ APPROVAL_DECIDE = "approval:decide"    # approve / reject a pending HITL request
 POLICY_READ = "policy:read"            # list / inspect policies
 POLICY_ADMIN = "policy:admin"          # author / activate / deprecate policies
 INFERENCE_WRITE = "inference:write"    # make a governed model call
+ERASURE_WRITE = "erasure:write"        # crypto-shred a data subject (GDPR/DPDP right to erasure)
 
 
 # Every scope the kernel currently understands. The bootstrap (signup) key gets all of them.
@@ -40,6 +41,7 @@ ALL_SCOPES: frozenset[str] = frozenset(
         POLICY_READ,
         POLICY_ADMIN,
         INFERENCE_WRITE,
+        ERASURE_WRITE,
     }
 )
 

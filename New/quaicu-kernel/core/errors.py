@@ -400,3 +400,52 @@ class ApiKeyInvalidError(AccountError):
     """An API key is missing, malformed, unknown, or revoked. Reject (401)."""
 
     code = "API_KEY_INVALID"
+
+
+# ── Billing errors (WS-C — Stripe / Razorpay → tier flips) ─────────────────────
+
+
+class BillingError(QUAICUError):
+    """Base for billing/webhook errors."""
+
+    code = "BILLING_ERROR"
+
+
+class WebhookVerificationError(BillingError):
+    """A billing webhook's signature is missing, malformed, stale, or does not verify.
+
+    Fail-closed: an unverifiable webhook MUST NOT mutate a tenant's plan. Reject (400)."""
+
+    code = "WEBHOOK_VERIFICATION_FAILED"
+
+
+class BillingEventError(BillingError):
+    """A verified webhook could not be mapped to a plan change (unknown plan id, missing tenant).
+
+    Reject (422); the signature was valid but the payload is not actionable."""
+
+    code = "BILLING_EVENT_UNMAPPABLE"
+
+
+# ── Erasure / crypto-shredding errors (WS-G — GDPR right to erasure) ────────────
+
+
+class ErasureError(QUAICUError):
+    """Base for crypto-shredding / right-to-erasure errors."""
+
+    code = "ERASURE_ERROR"
+
+
+class SubjectErasedError(ErasureError):
+    """The data subject's key was crypto-shredded; the ciphertext is permanently irrecoverable.
+
+    Raised on any attempt to decrypt PII for an erased subject. This is the *intended* terminal
+    state of a GDPR erasure — not a fault. Surfaced as 410 Gone."""
+
+    code = "SUBJECT_ERASED"
+
+
+class CipherTokenError(ErasureError):
+    """A PII cipher token is malformed or its key is unknown. Fail-closed."""
+
+    code = "CIPHER_TOKEN_INVALID"
