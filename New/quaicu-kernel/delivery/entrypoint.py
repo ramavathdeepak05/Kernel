@@ -19,13 +19,34 @@ in ``[project.scripts]``.
 from __future__ import annotations
 
 import os
+import tomllib
 
+from core.entitlements import EntitlementStore
 from delivery.api.app import create_app
+from delivery.sdk.billing_config import build_billing
 from delivery.sdk.kernel import Kernel
 
 _config_path = os.getenv("KERNEL_CONFIG", "kernel.toml")
 kernel = Kernel.from_config(_config_path)
-app = create_app(kernel)
+
+# Enable billing (Stripe/Razorpay → tier flips + self-serve checkout) only when the config declares a
+# [billing] section. The shared EntitlementStore is what a verified webhook mutates and what the
+# entitlements/rate-limit edge reads — one source of truth for plans. Absent [billing], the kernel
+# serves exactly as before (billing routes 503; no entitlement_store ⇒ entitlements report unlimited).
+with open(_config_path, "rb") as _f:
+    _config = tomllib.load(_f)
+
+if "billing" in _config:
+    _entitlements = EntitlementStore()
+    _billing_adapters, _billing_engine = build_billing(_config, _entitlements)
+    app = create_app(
+        kernel,
+        entitlement_store=_entitlements,
+        billing_adapters=_billing_adapters,
+        billing_engine=_billing_engine,
+    )
+else:
+    app = create_app(kernel)
 
 
 def main() -> None:

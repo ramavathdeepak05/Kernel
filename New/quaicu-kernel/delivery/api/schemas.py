@@ -351,3 +351,6 @@ class EntitlementsResponse(BaseModel):
     status: str | None = None
     features: dict[str, bool]
     quotas: dict[str, int]
+    #: Payment providers wired for self-serve checkout on this deployment (e.g. ["stripe"]). Empty
+    #: when billing is not configured; the console shows the upgrade flow only when non-empty.
+    billing_providers: list[str] = []

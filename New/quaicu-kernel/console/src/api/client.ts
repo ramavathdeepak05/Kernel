@@ -5,6 +5,8 @@ import { getSession } from "../state/auth";
 import type {
   ApprovalList,
   ApprovalRecord,
+  CheckoutRequest,
+  CheckoutResponse,
   DashboardOverview,
   DecisionTimeline,
   Entitlements,
@@ -65,6 +67,9 @@ function tenant(): string {
 export const api = {
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),
+
+  // ── Billing (self-serve upgrade) ────────────────────────────────────────────
+  checkout: (b: CheckoutRequest) => request<CheckoutResponse>("POST", "/v1/billing/checkout", b),
 
   // ── Policies ──────────────────────────────────────────────────────────────
   listPolicies: (lifecycle?: string) =>

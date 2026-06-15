@@ -17,11 +17,12 @@ next cold agent doesn't know it happened.
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is complete — waves 0–1 are
 landed, the WS-C/D/E/F/G workstreams are in, and the final Wave-2 slice (console OIDC login +
-per-tier UI gating) is done, and the WS-C billing edge is now **end-to-end** (outbound checkout →
-provider → inbound webhook → tier flip). Suite: 851 tests passing, 10 skipped on a bare checkout —
-and 861 passing / 0 skipped once the real external deps are live (the 10 skips are the Postgres +
-OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see
-the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
+per-tier UI gating) is done, and the WS-C billing edge is now **end-to-end and
+turnkey** (config/env-driven adapters → outbound checkout → provider → inbound webhook → tier flip,
+with a console upgrade page). Suite: 861 tests passing, 10 skipped on a bare checkout — and 871
+passing / 0 skipped once the real external deps are live (the 10 skips are the Postgres + OpenBao
+integration tests, validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the
+Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
 pass, (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
 layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the Policy
@@ -122,6 +123,37 @@ the two non-code pre-sale blockers above (K·02 crypto review + policy content p
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-15 · WS-C billing productionized — config-driven wiring + console upgrade page · delivery/sdk · delivery/console** —
+  Made the billing edge turnkey: it now boots from config + environment (no longer test-only) and a
+  tenant can self-serve upgrade from the console. **Backend wiring:** new
+  `delivery/sdk/billing_config.py` — `build_billing(config, entitlements)` turns a `[billing]` TOML
+  section into the live `billing_adapters` + `BillingEngine`, reusing the existing adapter
+  constructors. Secrets are `${ENV_VAR}` references resolved at load (`os.path.expandvars`) so live
+  payment keys never sit in the committed file; provider price/plan tables map to `FeatureTier`
+  (fail-closed on an unknown tier); a configured provider missing `webhook_secret` raises at boot
+  (never silently disabled). `delivery/entrypoint.py` now reads the TOML and, **only when a
+  `[billing]` section exists**, builds a shared `EntitlementStore` and passes
+  `entitlement_store` + `billing_adapters` + `billing_engine` to `create_app` — the same store a
+  verified webhook mutates and the entitlements/rate-limit edge reads (one source of truth for plans).
+  Absent `[billing]`, the kernel serves exactly as before. Documented the full section in
+  `kernel.example.toml`. **Provider discovery:** `GET /v1/me/entitlements` now returns
+  `billing_providers` (the checkout-capable adapters, via `isinstance(..., CheckoutPort)`), so the
+  console offers only configured providers. **Console:** new **Billing** page (`console/src/pages/Billing.tsx`)
+  + `/billing` route and a nav link shown only when `billing_providers` is non-empty — shows the
+  current tier, the upgrade targets (tiers above the current one; both paid tiers when there's no
+  active plan), an optional provider selector, and an "Upgrade to X" button that calls
+  `POST /v1/billing/checkout` and **redirects to the provider's hosted payment page**
+  (`window.location.assign`), with a return banner on `?upgraded=1`/`?cancelled=1`. `customer_email`
+  is omitted (the providers collect it). `api.checkout()` + `CheckoutRequest`/`CheckoutResponse`
+  types added; `npm run build` (tsc strict + vite) green. **Tests:** +10 (`test_billing_config.py` —
+  absent/empty no-op, stripe/razorpay/both built, `${ENV}` substitution, missing-secret + bad-tier
+  fail-closed, webhook-only-not-checkout-capable; `test_entitlements.py` — `billing_providers`
+  reported/empty); suite 851 → **861**. **The payment gateway is now configurable end-to-end and
+  reachable from the UI.** **Follow-ups:** wire billing into the shared-plane `TieredKernelProvider`
+  composition (the single-kernel entrypoint is done; the provider has no production entrypoint yet);
+  durable `EntitlementRepository` so plans survive restart; a console "manage subscription" (provider
+  billing-portal) link.
 
 - **2026-06-15 · WS-C checkout / subscription creation — outbound payment initiation · core/billing · adapters/billing · delivery** —
   Closed the WS-C follow-up: the kernel only *consumed* provider webhooks (inbound) and never

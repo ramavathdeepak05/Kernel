@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Policies from "./pages/Policies";
 import Audit from "./pages/Audit";
 import Approvals from "./pages/Approvals";
+import Billing from "./pages/Billing";
 import Callback from "./pages/Callback";
 
 function useSession() {
@@ -112,12 +113,15 @@ function SettingsBar() {
 function Nav() {
   const policies = useFeature("policies");
   const approvals = useFeature("approvals");
+  const { data } = useEntitlements();
+  const billing = (data?.billing_providers?.length ?? 0) > 0;
   return (
     <nav className="nav">
       <NavLink to="/" end>Dashboard</NavLink>
       {policies && <NavLink to="/policies">Policies</NavLink>}
       <NavLink to="/audit">Audit trail</NavLink>
       {approvals && <NavLink to="/approvals">Approvals</NavLink>}
+      {billing && <NavLink to="/billing">Billing</NavLink>}
     </nav>
   );
 }
@@ -192,6 +196,7 @@ export default function App() {
                     </FeatureGate>
                   }
                 />
+                <Route path="/billing" element={<Billing />} />
               </>
             ) : (
               <Route path="*" element={<SignInGate />} />

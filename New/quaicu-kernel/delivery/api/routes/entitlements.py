@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from core.billing.port import CheckoutPort
 from core.entitlements import EntitlementEngine, TierSpec
 from core.errors import EntitlementError
 from delivery.api.deps import get_request_tenant
@@ -46,6 +47,12 @@ def _engine(request: Request) -> EntitlementEngine | None:
         return provider.entitlements
     store = getattr(request.app.state, "entitlement_store", None)
     return EntitlementEngine(store) if store is not None else None
+
+
+def _billing_providers(request: Request) -> list[str]:
+    """Deployment's checkout-capable billing providers (so the console only offers configured ones)."""
+    adapters = getattr(request.app.state, "billing_adapters", None) or {}
+    return sorted(name for name, a in adapters.items() if isinstance(a, CheckoutPort))
 
 
 def _features(spec: TierSpec) -> dict[str, bool]:
@@ -82,6 +89,7 @@ async def entitlements(request: Request) -> EntitlementsResponse:
     _bearer_token(request)  # 401 if absent
     tenant = get_request_tenant(request)
     engine = _engine(request)
+    billing_providers = _billing_providers(request)
 
     if engine is None:
         # Dedicated single-kernel deploy: not tier-limited — surface everything.
@@ -91,6 +99,7 @@ async def entitlements(request: Request) -> EntitlementsResponse:
             status=None,
             features=dict(_ALL_FEATURES),
             quotas={},
+            billing_providers=billing_providers,
         )
 
     try:
@@ -103,6 +112,7 @@ async def entitlements(request: Request) -> EntitlementsResponse:
             status="NO_ACTIVE_PLAN",
             features={k: False for k in _ALL_FEATURES},
             quotas={},
+            billing_providers=billing_providers,
         )
 
     spec = plan.spec
@@ -112,4 +122,5 @@ async def entitlements(request: Request) -> EntitlementsResponse:
         status=plan.status.value,
         features=_features(spec),
         quotas=_quotas(spec),
+        billing_providers=billing_providers,
     )
