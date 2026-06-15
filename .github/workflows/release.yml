@@ -25,25 +25,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install (runtime + test + dev extras)
+        # Single source of truth: New/quaicu-kernel/pyproject.toml (no hand-maintained dep list).
         run: |
           pip install --upgrade pip
-          pip install \
-            "cel-python>=0.4.0" \
-            "pyyaml>=6.0" \
-            "cryptography>=42.0" \
-            "httpx>=0.27" \
-            "asyncpg>=0.29" \
-            "alembic>=1.13" \
-            "sqlalchemy>=2.0" \
-            "psycopg2-binary>=2.9" \
-            "fastapi>=0.111" \
-            "uvicorn[standard]>=0.29" \
-            "pydantic>=2.0" \
-            "PyJWT>=2.8" \
-            "hypothesis>=6.0" \
-            "pytest>=7.0" \
-            "pytest-asyncio>=0.21"
+          cd New/quaicu-kernel
+          pip install -e ".[test,dev]"
 
       - name: Run test suite
         run: |
@@ -88,10 +75,21 @@ jobs:
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
+      - name: Scan image for vulnerabilities (Trivy)
+        # Fail the release on any fixable HIGH/CRITICAL CVE — marketplace listings require a clean scan.
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
 
       - name: Sign image (keyless via Sigstore OIDC)
+        # The build already attaches SBOM + provenance attestations (sbom/provenance: true above);
+        # cosign adds a keyless signature over the image digest so consumers can verify origin.
         run: |
           cosign sign --yes \
             "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}"

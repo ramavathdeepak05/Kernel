@@ -1,0 +1,53 @@
+# QUAICU Kernel — production single-kernel profile (durable, horizontally scalable).
+#
+# Every correctness-critical store is Postgres/OpenBao-backed — actions (idempotency), the RFC 6962
+# ledger, policies, and customer plans — so there is NO in-process mutable state on that path. This
+# profile is therefore safe to run with KERNEL_WORKERS > 1 (and across replicas) behind a load
+# balancer. Run migrations 001–005 first:
+#   DATABASE_URL=${KERNEL_DSN} alembic -c adapters/storage/migrations/alembic.ini upgrade head
+#
+# Caveat (not correctness-critical): the usage meter (core/metering) and the in-memory event bus are
+# per-process. With >1 worker, daily-usage counters are per-worker (quota enforcement is best-effort,
+# never over-counts) and events are not cross-worker. Move the meter to a shared store and the bus to
+# a broker if you need exact cross-worker metering. The dashboard read-model derives from the durable
+# ledger, not the event bus, so it is unaffected. (Tracked as a follow-up.)
+#
+# Secrets are ${ENV_VAR} references resolved at load — keep credentials in the environment, not here.
+
+[tenant]
+id = "${KERNEL_TENANT_ID}"
+
+[adapters]
+policy       = "cel_policy"        # real K·01 CEL evaluator (empty store fail-closed DENYs)
+policy_store = "postgres_policy"   # durable policy persistence
+hitl         = "webhook"
+ledger       = "openbao_ledger"    # OpenBao Transit Ed25519 signer
+ledger_store = "postgres_ledger"   # durable transparency-log persistence
+storage      = "postgres_storage"  # durable action persistence (idempotency)
+events       = "memory_events"
+identity     = "jwt"               # switch to "oidc" for named-IdP verification (see kernel.example.toml)
+
+[storage]
+dsn = "${KERNEL_DSN}"
+
+[policy_store]
+dsn = "${KERNEL_DSN}"
+
+[ledger]
+addr      = "${OPENBAO_ADDR}"
+token     = "${OPENBAO_TOKEN}"     # prefer an AppRole token
+key_name  = "quaicu-ledger"
+
+# Durable plan store so billing-driven tier flips survive a restart (migration 005).
+[entitlements]
+dsn = "${KERNEL_DSN}"
+
+[hitl]
+dispatch_url = "${HITL_DISPATCH_URL}"
+poll_url     = "${HITL_POLL_URL}"
+timeout      = 30
+
+[identity]
+secret_or_key = "${KERNEL_JWT_SECRET}"
+algorithms    = ["HS256"]
+verify        = true

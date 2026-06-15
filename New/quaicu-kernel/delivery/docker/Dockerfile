@@ -17,23 +17,17 @@ FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
+# Reproducible install: the pinned + hashed lockfile (generated from pyproject.toml via
+# `uv pip compile --generate-hashes`) is the single source of truth for runtime deps. Copy only the
+# manifest first so the dependency layer caches unless the lock changes.
+COPY pyproject.toml requirements.lock ./
 RUN pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir \
-        "fastapi>=0.111" \
-        "uvicorn[standard]>=0.29" \
-        "pydantic>=2.0" \
-        "httpx>=0.27" \
-        "PyJWT>=2.8" \
-        "cel-python>=0.4.0" \
-        "pyyaml>=6.0" \
-        "cryptography>=42.0" \
-        "asyncpg>=0.29" \
-        "alembic>=1.13" \
-        "sqlalchemy>=2.0" \
-        "psycopg2-binary>=2.9"
+ && pip install --no-cache-dir --require-hashes -r requirements.lock
 
-# Copy source after installing deps (layer cache: dep install cached unless pip args change)
+# Copy source and install the package itself (console scripts quaicu-kernel / quaicu-kernel-saas +
+# importable core/adapters/delivery). --no-deps: deps are already pinned from the lock above.
 COPY . .
+RUN pip install --no-cache-dir --no-deps .
 
 # ── Stage 2: runtime (non-root, minimal) ─────────────────────────────────────
 FROM python:3.12-slim AS runtime
@@ -57,13 +51,16 @@ EXPOSE 7000
 
 ENV KERNEL_CONFIG=/etc/quaicu/kernel.toml \
     KERNEL_HOST=0.0.0.0 \
-    KERNEL_PORT=7000
+    KERNEL_PORT=7000 \
+    KERNEL_WORKERS=1
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c \
     "import urllib.request; urllib.request.urlopen('http://localhost:7000/health')"
 
-# Single worker: _InMemoryActionRepository is in-process.
-# For horizontal scale, replace with postgres_ledger + shared store and set --workers > 1.
-CMD ["uvicorn", "delivery.entrypoint:app", \
-     "--host", "0.0.0.0", "--port", "7000", "--workers", "1"]
+# Worker count is configurable via KERNEL_WORKERS (default 1). The default in-memory config keeps in-
+# process state (action repo / ledger), so leave it at 1. With the all-durable profile
+# (delivery/docker/kernel.prod.toml: postgres_storage + postgres_ledger + cel/postgres policy +
+# durable entitlements) there is no correctness-critical in-process state, so KERNEL_WORKERS > 1 (and
+# multiple replicas) is safe. Use the shell form so $KERNEL_WORKERS / $KERNEL_PORT expand at runtime.
+CMD uvicorn delivery.entrypoint:app --host 0.0.0.0 --port "$KERNEL_PORT" --workers "$KERNEL_WORKERS"

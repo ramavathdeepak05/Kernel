@@ -1,0 +1,35 @@
+# QUAICU Kernel — BUSINESS tier (shared SaaS plane, ADR-0009).
+# Durable Postgres + the real K·01 CEL policy engine. All BUSINESS tenants share this kernel; storage,
+# ledger, and policy rows are tenant-scoped internally. Run migrations (001–005) before first boot.
+# An empty policy store fail-closed DENYs every governed action until policies are written + ACTIVATED.
+
+[tenant]
+id = "saas-business"
+
+[adapters]
+policy       = "cel_policy"        # real K·01 CEL evaluator
+policy_store = "postgres_policy"   # durable policy persistence
+hitl         = "webhook"
+ledger       = "postgres_ledger"   # durable RFC 6962 transparency log
+storage      = "postgres_storage"  # durable action persistence
+events       = "memory_events"
+identity     = "jwt"
+
+[storage]
+dsn = "${KERNEL_DSN}"
+
+[policy_store]
+dsn = "${KERNEL_DSN}"
+
+[ledger]
+dsn = "${KERNEL_DSN}"
+
+[hitl]
+dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"
+poll_url     = "http://host.docker.internal:9000/hitl/status"
+timeout      = 30
+
+[identity]
+secret_or_key = "${KERNEL_JWT_SECRET}"
+algorithms    = ["HS256"]
+verify        = true

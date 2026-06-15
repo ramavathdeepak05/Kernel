@@ -85,6 +85,65 @@ the two non-code pre-sale blockers above (K·02 crypto review + policy content p
 
 ---
 
+## Go-live readiness assessment — PM review (2026-06-16)
+
+A product-manager go-live review against two target markets — **(A) regulated enterprise**
+(banks / RBI / EU AI Act / DPDP) and **(B) cloud marketplace SaaS** (AWS/Azure/GCP). Derived from a
+full-codebase knowledge-graph pass (`graphify-out/`: `graph.html` · `GRAPH_REPORT.md` · `graph.json` —
+3,349 nodes / 245 communities, mapping ~1:1 to the 14 layers + delivery surfaces) plus this journal.
+**Bottom line: the governance *engine* is shippable** (code-complete, 861 green, fail-closed
+throughout, and the differentiators — RFC 6962 ledger, crypto-shredding erasure, regulator-verifiable
+proof export, RLS tenant isolation — are actually built), **but the *product* is not yet live-able to
+either market.** The remaining work is bounded packaging/operability + two non-code gates, not
+research.
+
+### Readiness scorecard
+| Dimension | State | Verdict |
+|---|---|---|
+| Governance engine (14 layers) | code-complete, conformance-tested | 🟢 ready |
+| Security (fail-closed · RBAC · OIDC · tenant isolation) | built & tested | 🟢 ready |
+| Auditability (ledger · proof export · erasure) | built | 🟢 differentiator |
+| Reproducible build / packaging | **no `pyproject.toml` / lockfile — deps pinned only in `delivery/docker/Dockerfile`** | 🔴 blocker |
+| Horizontal scale / HA | in-memory action repo → `--workers 1` hardcoded; in-memory `EntitlementStore` (plans lost on restart) | 🔴 blocker |
+| SaaS multi-tenant plane | `TieredKernelProvider` exists but **no production entrypoint** — only the single-kernel path boots | 🔴 blocker (SaaS) |
+| CI/CD · SBOM · image signing · vuln scan | none (`.github/workflows` absent) | 🔴 blocker (marketplace) |
+| Commercial/legal (LICENSE · SECURITY.md · README · pricing) | absent | 🔴 blocker (listing) |
+| K·02 cryptographic review (RFC 6962 ledger) | not done — third-party, ~6–8wk lead | 🔴 regulatory critical path |
+| Policy content packs (RBI / EU AI Act / DPDP rules) | engine enforces; **rules unwritten** | 🔴 regulatory critical path |
+
+### The two tracks have different blockers
+- **Track A — regulated enterprise (banks).** Gated by two *non-code* items: (1) an **independent
+  cryptographic review** of the K·02 ledger — procurement/risk won't accept an unaudited Merkle tree;
+  this is the **longest lead time in the whole program (~6–8wk), so commission it first**; and (2)
+  **≥1 populated policy pack** — the engine ships empty, so a demo can't show "DPDP consent enforced"
+  without live-authored rules. An empty enforcement engine doesn't sell to a regulator; a populated one
+  does.
+- **Track B — cloud marketplace SaaS.** Gated by *operability*, not regulation: cannot run a billable
+  SaaS on `--workers 1` + in-memory state (a pod restart resets every customer's paid tier — a
+  billing-integrity failure, not just an HA nit); the shared-plane provider needs a **production
+  entrypoint** before "multi-tenant SaaS" is even true; marketplaces require **CI + SBOM + signed
+  images + vuln scan** and a **LICENSE** before they will list.
+
+### Recommended sequencing
+- **P0 — unblock everything (week 1, in parallel):** (1) **kick off the K·02 crypto-review engagement**
+  (pure lead-time — every week of delay slips the bank deal); (2) add **`pyproject.toml` + lockfile**
+  (single source of truth for the deps currently buried in the Dockerfile; prerequisite for SBOM,
+  reproducible builds, and the installable package); (3) **durable `EntitlementRepository`** (plans must
+  survive restart before charging anyone).
+- **P1 — make it operable (weeks 2–4):** (4) production entrypoint for `TieredKernelProvider` (the
+  actual SaaS plane); (5) replace the in-memory action repo with the Postgres path so `--workers > 1` /
+  HA is real; (6) minimal CI: test → ruff → build → SBOM → sign → scan.
+- **P2 — make it sellable (parallel, weeks 2–6):** (7) one end-to-end **policy pack** (recommend
+  **DPDP** — consent is already enforced, shortest demo-to-value); (8) LICENSE · SECURITY.md · README ·
+  marketplace listing assets.
+
+**Single most important call:** A's blockers (crypto review + policy packs) and B's blockers (packaging
++ HA + SaaS entrypoint) barely overlap — run both tracks concurrently. The **external crypto-review lead
+time is the longest pole**, so commissioning it is the decision to make today regardless of which market
+is prioritized.
+
+---
+
 ## Work queue (dependency-ordered)
 
 | Wave | Unit | Dir | Owner | Status | Blocked by | DoD |
@@ -123,6 +182,53 @@ the two non-code pre-sale blockers above (K·02 crypto review + policy content p
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-16 · Go-live engineering build — packaging + durable entitlements + SaaS entrypoint + HA + CI · pyproject · adapters/entitlements · delivery** —
+  Closed the **code-completable** go-live blockers from the PM review (engineering only; the DPDP pack,
+  LICENSE/docs, K·02 crypto review, and pricing stay human-owned). **(A) Packaging:** new
+  `pyproject.toml` (PEP 621) is now the single source of truth for deps — previously pinned only in the
+  Dockerfile *and* the CI workflows, and **missing `opentelemetry-api`** (a hard import in
+  `core/consent/engine.py`), now declared. `starlette` (imported directly) added; `pyyaml` dropped
+  (unused — kept transitively via cel-python). Pinned+hashed `requirements.lock` generated via
+  `uv pip compile --generate-hashes` (42 dists); Dockerfile builder rewritten to
+  `pip install --require-hashes -r requirements.lock` + `pip install --no-deps .` (reproducible build;
+  registers the `quaicu-kernel` / `quaicu-kernel-saas` console scripts). The former repo-root
+  `pyproject.toml` (partial deps, the pytest/ruff config) was **removed**; the authoritative one lives
+  at `New/quaicu-kernel/` (matching the Docker context), with the pytest/ruff/mypy config moved into it
+  (pytest rootdir now binds there). Wheel builds clean (core/adapters/delivery + both scripts).
+  **(B) Durable entitlements:** the only missing durability piece — `EntitlementStore` write-through +
+  `BillingEngine`'s `*_persisted` calls already existed, but nothing backed them. Added migration `005`
+  (`quaicu_customer_plans`), `adapters/entitlements/postgres.PostgresEntitlementRepository` (mirrors the
+  policy adapter; fail-closed `EntitlementPersistenceError`), a `build_entitlement_store(config)` builder
+  (`[entitlements].dsn` → `[storage].dsn` fallback, `${ENV}`-resolved), wired into `delivery/entrypoint.py`,
+  and **entitlement-store hydration in create_app's lifespan** — so a billing-driven tier flip now
+  survives a restart. **(C) SaaS-plane entrypoint:** `delivery/sdk/saas_app.build_saas_app` (pure,
+  testable) + `delivery/entrypoint_saas.py` (CLI `quaicu-kernel-saas`) build a `TieredKernelProvider`
+  from a `[plane]` descriptor — the shared multi-tenant plane finally has a production entrypoint
+  (it was build-only before). Example `kernel.saas/starter/business.toml`. **(D) HA:** new all-durable
+  `kernel.prod.toml` (postgres storage/ledger/policy + durable entitlements — no correctness-critical
+  in-process state), Dockerfile `CMD` now honours `KERNEL_WORKERS` (default 1; safe >1 only with the
+  durable profile). **Follow-up noted:** the usage meter + in-memory event bus are per-process, so exact
+  cross-worker metering needs a shared meter/broker (best-effort, never over-counts; dashboard reads from
+  the durable ledger so is unaffected). **(E) CI/CD:** the existing `.github/workflows` (which my
+  assessment wrongly called absent) already did GHCR push + BuildKit SBOM/provenance + cosign keyless
+  signing — improved them to install from `pyproject` (kills the same dep drift + missing otel), added a
+  **ruff lint** gate to CI and a **Trivy HIGH/CRITICAL scan** gate to release. **Tests:** +20
+  (`test_postgres_repository.py`, `test_entitlements_config.py`, `test_saas_entrypoint.py`); suite
+  861 → **881 passed / 10 skipped**, ruff clean, wheel + lock verified. Branch `feat/go-live-engineering`.
+
+- **2026-06-16 · Go-live readiness assessment (PM review) · docs/adr · graphify-out** —
+  Added a product-manager go-live review — see the new section **"Go-live readiness assessment — PM
+  review (2026-06-16)"** above the Work queue. Scores readiness against two markets (regulated
+  enterprise vs cloud marketplace SaaS) and sequences the remaining work P0–P2. Backed by a
+  full-codebase knowledge-graph pass written to `graphify-out/` (`graph.html` · `GRAPH_REPORT.md` ·
+  `graph.json` — 3,349 nodes / 245 communities, ~1:1 to the 14 layers). **Key finding:** the engine is
+  code-complete and green, but live-ability is blocked by **packaging** (no `pyproject.toml`/lockfile —
+  deps live only in the Dockerfile), **operability** (in-memory action repo + `EntitlementStore` →
+  `--workers 1`, paid plans lost on restart), **no SaaS-plane production entrypoint**, **no
+  CI/SBOM/signing/LICENSE**, and the two known non-code gates (K·02 crypto review + policy content
+  packs). Longest pole = the external crypto-review lead time → commission first. **No code changed —
+  strategy/record only.**
 
 - **2026-06-15 · WS-C billing productionized — config-driven wiring + console upgrade page · delivery/sdk · delivery/console** —
   Made the billing edge turnkey: it now boots from config + environment (no longer test-only) and a

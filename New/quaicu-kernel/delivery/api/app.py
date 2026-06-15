@@ -100,6 +100,11 @@ def create_app(
         # Initialise async resources (e.g. hydrate the durable policy store) before serving.
         target = provider if provider is not None else kernel
         await target.startup()
+        # Repopulate the entitlement cache from its durable repository (if one is wired) so a
+        # restarted kernel resolves the same tiers a billing webhook last persisted. No-op for an
+        # in-memory store, so every existing deployment is unaffected.
+        if entitlement_store is not None:
+            await entitlement_store.hydrate()
         try:
             yield
         finally:

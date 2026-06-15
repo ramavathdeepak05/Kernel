@@ -17,27 +17,20 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
+      - name: Install (runtime + test + dev extras)
+        # Single source of truth: New/quaicu-kernel/pyproject.toml (no hand-maintained dep list).
         run: |
           pip install --upgrade pip
-          pip install \
-            "cel-python>=0.4.0" \
-            "pyyaml>=6.0" \
-            "cryptography>=42.0" \
-            "httpx>=0.27" \
-            "asyncpg>=0.29" \
-            "alembic>=1.13" \
-            "sqlalchemy>=2.0" \
-            "psycopg2-binary>=2.9" \
-            "fastapi>=0.111" \
-            "uvicorn[standard]>=0.29" \
-            "pydantic>=2.0" \
-            "PyJWT>=2.8" \
-            "hypothesis>=6.0" \
-            "pytest>=7.0" \
-            "pytest-asyncio>=0.21"
+          cd New/quaicu-kernel
+          pip install -e ".[test,dev]"
+
+      - name: Lint (ruff)
+        run: |
+          cd New/quaicu-kernel
+          ruff check .
 
       - name: Run test suite
+        # The Postgres + OpenBao integration tests self-skip without live services (10 skips).
         run: |
           cd New/quaicu-kernel
           python -m pytest --tb=short -q

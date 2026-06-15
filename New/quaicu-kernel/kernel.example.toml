@@ -65,6 +65,15 @@ key_name  = "quaicu-ledger"     # ed25519 key in OpenBao Transit
 [storage]
 dsn = "postgresql://quaicu:change-me@localhost:5432/quaicu"
 
+# ── Durable entitlement store (production billing) ───────────────────────────
+# Persists customer plans so billing-driven tier flips survive a restart (otherwise plans are
+# in-memory and reset on redeploy). Only takes effect when a [billing] section is also present.
+# Run migrations first (same alembic.ini as storage — migration 005 creates quaicu_customer_plans).
+# Omit `dsn` to inherit the [storage] DSN above; use ${ENV_VAR} to keep credentials out of the file.
+#
+# [entitlements]
+# dsn = "${ENTITLEMENTS_DSN}"   # optional; falls back to [storage].dsn
+
 # ── HITL webhook adapter config ───────────────────────────────────────────────
 [hitl]
 dispatch_url = "http://localhost:9000/hitl/dispatch"
