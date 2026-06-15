@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from core.errors import GatewayBudgetExceededError
 from core.types import TenantId

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from core.ledger.engine import TrustLedger
 from core.regmap.export import build_ledger_proof_bundle, verify_ledger_proof_bundle

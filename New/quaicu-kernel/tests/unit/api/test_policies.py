@@ -10,7 +10,6 @@ from httpx import ASGITransport, AsyncClient
 
 from adapters.policy.memory import InMemoryPolicyRepository
 from core.errors import PolicyPersistenceError
-from core.policy.evaluator import PolicyEngine
 from core.policy.store import PolicyStore
 from core.types import TenantId
 from delivery.api.app import create_app

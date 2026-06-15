@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.incident.model import IncidentSeverity, IncidentStatus
+from core.incident.model import Incident, IncidentSeverity, IncidentStatus
 from core.incident.store import IncidentNotFoundError, IncidentStore
 
 TENANT = "bank-a"
@@ -23,8 +23,6 @@ def _open(store: IncidentStore, tenant: str = TENANT, severity: IncidentSeverity
 
 
 # ── Open incident ─────────────────────────────────────────────────────────────────
-
-from core.incident.model import Incident
 
 
 def test_open_incident_returns_incident():

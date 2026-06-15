@@ -11,7 +11,7 @@ import pytest
 from core.errors import LifecycleDeniedError
 from core.lifecycle.context import get_current_actor
 from core.types import Actor, ActorId, Decision, TenantId
-from delivery.sdk import GovernedProxy, Kernel
+from delivery.sdk import Kernel
 
 from tests.unit.lifecycle.fakes import FakeEvents, FakeHITL, FakeLedger, FakePolicy
 

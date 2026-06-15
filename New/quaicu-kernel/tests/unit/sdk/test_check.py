@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 
 from core.lifecycle.decision import AuthorizationResult
-from core.lifecycle.profile import GovernanceProfile
 from core.types import ActorId, Decision, TenantId
 from delivery.sdk.kernel import Kernel
 

@@ -125,7 +125,7 @@ class _MethodProxy:
 
         # Sync method: run the check in the running event loop if available, else block.
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
         except RuntimeError:
             # No running loop — run synchronously via asyncio.run.
             return asyncio.run(_async_call())

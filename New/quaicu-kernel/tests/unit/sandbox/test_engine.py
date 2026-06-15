@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import pytest
 
 from core.sandbox.engine import run_counterfactual_backtest
-from core.sandbox.model import SandboxDecision, SandboxRun
+from core.sandbox.model import SandboxRun
 from core.types import ActionId, ActorId, Decision, LedgerEntry, TenantId
 
 NOW = datetime(2026, 6, 9, 12, 0, tzinfo=timezone.utc)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 
 import pytest
 
@@ -117,7 +116,6 @@ def test_drift_measure_threshold_preserved():
 
 
 def test_drift_measure_bins_bucket_numeric_values():
-    base = _baseline({"≤10": 0.5, "≤20": 0.3, ">20": 0.2})
     records = [{"score": v} for v in [5, 8, 15, 25, 30]]
     base_numeric = DriftBaseline(
         tenant_id=TENANT, model_id=MODEL, feature_key="score",

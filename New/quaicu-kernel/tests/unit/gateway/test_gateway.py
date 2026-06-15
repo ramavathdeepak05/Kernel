@@ -183,7 +183,7 @@ async def test_pii_masking_strips_sensitive_from_prompt() -> None:
 
 async def test_pii_masking_rehydrated_in_response() -> None:
     ssn_value = "123-45-6789"
-    fake = FakeInference(response_content=f"Processed [MASKED:placeholder] — done")
+    fake = FakeInference(response_content="Processed [MASKED:placeholder] — done")
     masking_configs = {str(TENANT_A): MaskingConfig(sensitive_fields=frozenset(["ssn"]))}
     gw, al, _, _ = _make_gateway(fake, masking_configs=masking_configs)
     al.permit(TENANT_A, MODEL_GPT4.id)

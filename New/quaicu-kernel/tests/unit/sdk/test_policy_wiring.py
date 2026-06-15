@@ -15,7 +15,7 @@ from core.errors import LifecycleDeniedError
 from core.policy.evaluator import PolicyEngine
 from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
 from core.policy.store import PolicyStore
-from core.types import Actor, ActorId, ApproverRef, Decision, TenantId
+from core.types import Actor, ActorId, Decision, TenantId
 from delivery.sdk.kernel import Kernel
 
 from tests.unit.lifecycle.fakes import FakeEvents, FakeHITL, FakeLedger

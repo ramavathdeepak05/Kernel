@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -36,7 +37,6 @@ def compute_psi(
     (not 0.0) to avoid ln(0). Input proportions need not sum to exactly 1.0 — they are
     re-normalized internally.
     """
-    from collections.abc import Mapping
 
     all_keys = set(baseline) | set(current)
     if not all_keys:

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from core.explain.model import Explanation, ExplainRequest
+from core.explain.model import Explanation
 from core.types import LedgerEntry
 
 

@@ -25,11 +25,8 @@ jobs:
           pip install -e ".[test,dev]"
 
       - name: Lint (ruff)
-        # Non-blocking for now: the tree carries ~60 pre-existing lint findings (mostly unused
-        # imports in tests) from before lint ran in CI. This step surfaces them as annotations
-        # without failing the build; flip to blocking once that backlog is cleared in a dedicated
-        # cleanup. New code is expected to be ruff-clean.
-        continue-on-error: true
+        # Blocking: the tree is ruff-clean (the pre-existing backlog was cleared in chore/ruff-clean).
+        # Any new violation fails the build.
         run: |
           cd New/quaicu-kernel
           ruff check .

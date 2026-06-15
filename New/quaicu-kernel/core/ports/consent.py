@@ -16,7 +16,7 @@ Source of truth: build spec §K·04 and DPDP Act 2023 §4 (purpose limitation).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 

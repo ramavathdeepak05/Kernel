@@ -9,7 +9,7 @@ Architecture invariant (F-08): no import of temporalio, asyncpg, or any DB/SDK.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 # ── Step definition ───────────────────────────────────────────────────────────

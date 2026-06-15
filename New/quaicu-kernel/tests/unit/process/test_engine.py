@@ -14,14 +14,13 @@ import pytest
 from adapters.workflow.memory import InMemoryWorkflowAdapter
 from core.process.definitions import (
     DEAD_LETTER,
-    GOVERNED_ACTION_PROCESS,
     TERMINAL_COMPLETED,
     TERMINAL_DENIED,
     TERMINAL_REJECTED,
     GovernedProcessDef,
     StepDef,
 )
-from core.process.errors import WorkflowNotFoundError, WorkflowTenantIsolationError
+from core.process.errors import WorkflowTenantIsolationError
 from core.types import ProcessDef, Signal, TenantId, WorkflowHandle
 
 TENANT = TenantId("t-1")
@@ -35,7 +34,6 @@ def _proc_def(
     allow: bool = True,
 ) -> GovernedProcessDef:
     """Minimal 3-step process: evaluate → execute → emit."""
-    outcome = "allow" if allow else "deny"
     return GovernedProcessDef(
         name=name,
         version=1,
