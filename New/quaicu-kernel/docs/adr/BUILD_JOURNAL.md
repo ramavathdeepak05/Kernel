@@ -17,10 +17,11 @@ next cold agent doesn't know it happened.
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is complete — waves 0–1 are
 landed, the WS-C/D/E/F/G workstreams are in, and the final Wave-2 slice (console OIDC login +
-per-tier UI gating) is done. Suite: 835 tests passing, 10 skipped on a bare checkout — and 845
-passing / 0 skipped once the real external deps are live (the 10 skips are the Postgres + OpenBao
-integration tests, validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see the
-Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
+per-tier UI gating) is done, and the WS-C billing edge is now **end-to-end** (outbound checkout →
+provider → inbound webhook → tier flip). Suite: 851 tests passing, 10 skipped on a bare checkout —
+and 861 passing / 0 skipped once the real external deps are live (the 10 skips are the Postgres +
+OpenBao integration tests, validated against a GCP Cloud SQL instance and a Dockerized OpenBao; see
+the Log).** Ten feature waves have landed on top of the core kernel since the Wave-2
 milestone below: (1) full layer completion + delivery, (2) a security-hardening + composable-governance
 pass, (3) a decision-only authorize/monitor surface + reference PEP, (4) a zero-friction integration
 layer, (5) config-wiring the CEL policy engine + a durable (Postgres) policy store, (6) the Policy
@@ -121,6 +122,32 @@ the two non-code pre-sale blockers above (K·02 crypto review + policy content p
 ## Log (append-only — newest first)
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
+
+- **2026-06-15 · WS-C checkout / subscription creation — outbound payment initiation · core/billing · adapters/billing · delivery** —
+  Closed the WS-C follow-up: the kernel only *consumed* provider webhooks (inbound) and never
+  *initiated* a payment, so it could flip a tier but not sell one. Added the **outbound** half.
+  New `CheckoutPort` protocol (`core/billing/port.py`) kept **separate** from `BillingPort` so the
+  webhook-verification path stays pure/synchronous (HMAC only) while checkout — which must call the
+  provider REST API — is async behind an **injectable HTTP transport** (`adapters/billing/_http.py`;
+  stdlib `urllib` run in a thread by default → **no SDK, no new dependency**, fully testable without a
+  processor). New `CheckoutSession` model + `CheckoutError` in the frozen `core/errors.py`. Both
+  adapters implement `create_checkout`: **Stripe** creates a Checkout Session
+  (`mode=subscription`, form-encoded, Bearer key) and **stamps `subscription_data[metadata][tenant]`**;
+  **Razorpay** creates a subscription (Basic auth, JSON) and **stamps `notes.tenant`**, returning the
+  hosted `short_url` — i.e. each stamps the tenant exactly where its own inbound webhook reads it back,
+  so checkout→webhook→tier-flip is a closed loop. New route `POST /v1/billing/checkout` — the
+  **authenticated, tenant-isolated, `billing:write`-scoped** counterpart to the signature-authed
+  webhook: it always bills the *authenticated* tenant (`get_request_tenant`), rejects STARTER/unknown
+  tiers (422), unconfigured providers (503), and provider failures (502). New `billing:write` scope.
+  **Narrowed the auth/rate-limit exemption** from `/v1/billing` to `/v1/billing/webhook` so checkout
+  is API-key-protected and rate-limited (only the webhook, authed by provider signature, is exempt).
+  **Tests:** +16 (`test_checkout.py` — Stripe/Razorpay request shape incl. tenant-stamp, auth header,
+  not-configured / unmapped-tier / provider-error; `test_billing_checkout.py` — 401/200/422/503/502 +
+  the exemption-narrowing assertion that checkout needs a key while the webhook stays exempt); suite
+  835 → **851**. **The payment gateway is now end-to-end** (initiate → pay → webhook → tier flip).
+  **Follow-ups:** checkout-session creation is unauthenticated-of-the-*provider* config (api keys are
+  deployment secrets — no production wiring/factory yet, adapters are constructed in code/tests); a
+  console "Upgrade" button calling this route; emit a K·07 event on checkout creation for the trail.
 
 - **2026-06-15 · Console OIDC login + per-tier UI gating · delivery/console · delivery/api (WS-D, Wave-2)** —
   Closed the last Wave-2 code slice: the operator console moves from token-paste to a real

@@ -30,8 +30,9 @@ from core.types import TenantId
 from delivery.api.deps import extract_tenant
 
 # Paths that are never rate-limited (infra + onboarding, which has no tenant yet; provider webhooks,
-# which are signature-authenticated and carry no tenant claim).
-_EXEMPT = ("/health", "/docs", "/redoc", "/openapi.json", "/v1/signup", "/v1/billing")
+# which are signature-authenticated and carry no tenant claim). /v1/billing/checkout is NOT exempt —
+# it is an authenticated tenant call and is rate-limited normally.
+_EXEMPT = ("/health", "/docs", "/redoc", "/openapi.json", "/v1/signup", "/v1/billing/webhook")
 
 _WINDOW_SECONDS = 60
 

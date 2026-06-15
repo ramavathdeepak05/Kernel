@@ -7,7 +7,14 @@ into `EntitlementStore` mutations (tier flip, suspend on payment failure, downgr
 """
 
 from core.billing.engine import BillingEngine
-from core.billing.model import BillingEvent, BillingEventType
-from core.billing.port import BillingPort
+from core.billing.model import BillingEvent, BillingEventType, CheckoutSession
+from core.billing.port import BillingPort, CheckoutPort
 
-__all__ = ["BillingEngine", "BillingEvent", "BillingEventType", "BillingPort"]
+__all__ = [
+    "BillingEngine",
+    "BillingEvent",
+    "BillingEventType",
+    "BillingPort",
+    "CheckoutPort",
+    "CheckoutSession",
+]
