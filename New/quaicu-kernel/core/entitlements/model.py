@@ -65,13 +65,18 @@ class TierSpec:
 TIER_MATRIX: dict[FeatureTier, TierSpec] = {
     FeatureTier.STARTER: TierSpec(
         tier=FeatureTier.STARTER,
-        # memory-only, log/audit-trail posture; no real policy gating
+        # In-memory, but governance-capable: the CEL engine + a small policy allowance so the free
+        # tier actually enforces (ships with a seeded allow-baseline + a deny guardrail — see
+        # kernel.starter.toml — and a tenant may author a few of their own).
         allowed_adapters=frozenset(
-            {"always_allow", "memory_ledger", "memory_storage", "memory_events"}
+            {
+                "always_allow", "cel_policy", "memory_policy",
+                "memory_ledger", "memory_storage", "memory_events", "webhook",
+            }
         ),
-        default_profile="audit_only",
-        allowed_profiles=frozenset({"audit_only", "monitor"}),
-        max_policies=0,
+        default_profile="standard",
+        allowed_profiles=frozenset({"standard", "audit_only", "monitor"}),
+        max_policies=5,
         max_actions_per_day=10_000,
         rate_limit_per_min=60,
     ),

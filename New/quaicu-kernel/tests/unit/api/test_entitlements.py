@@ -95,7 +95,7 @@ async def test_no_entitlement_source_is_unlimited():
 # ── Wired store: features derived from TIER_MATRIX ──────────────────────────────────
 
 
-async def test_starter_hides_policy_and_gateway_features():
+async def test_starter_governs_but_hides_inference():
     app = create_app(_kernel(), entitlement_store=_store_with(FeatureTier.STARTER))
     async with _client(app) as c:
         resp = await c.get("/v1/me/entitlements", headers=AUTH)
@@ -104,12 +104,13 @@ async def test_starter_hides_policy_and_gateway_features():
     assert body["tier"] == "STARTER"
     assert body["status"] == "ACTIVE"
     f = body["features"]
-    assert f["policies"] is False          # STARTER permits 0 policies
-    assert f["policy_simulate"] is False   # no CEL engine
-    assert f["inference"] is False         # no inference adapter
-    assert f["approvals"] is False         # only audit_only/monitor profiles
+    # STARTER is now governance-capable (in-memory CEL engine + a small policy allowance).
+    assert f["policies"] is True           # max_policies = 5
+    assert f["policy_simulate"] is True    # CEL engine present
+    assert f["approvals"] is True          # the enforcing `standard` profile is allowed
+    assert f["inference"] is False         # still no inference adapter on the free tier
     assert f["dashboard"] is True and f["audit"] is True
-    assert body["quotas"]["max_policies"] == 0
+    assert body["quotas"]["max_policies"] == 5
     assert body["quotas"]["rate_limit_per_min"] == 60
 
 
