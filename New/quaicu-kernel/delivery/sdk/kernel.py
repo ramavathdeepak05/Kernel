@@ -421,6 +421,7 @@ class Kernel:
                 # The real K·01 CEL engine needs composition (PolicyEngine over a PolicyStore over an
                 # optional durable repository), so it is built here rather than via the flat registry.
                 policy, policy_store, policy_repository = cls._build_policy(adapter_cfg, cfg)
+                cls._seed_policies(policy_store, cfg)
             else:
                 policy = _load_adapter(adapter_cfg["policy"])
         if "hitl" in adapter_cfg:
@@ -499,6 +500,37 @@ class Kernel:
             ledger = _load_adapter(name, **ledger_kwargs)
             repository = None  # adapter does not support durability; don't expose an unused pool
         return ledger, repository
+
+    @staticmethod
+    def _seed_policies(store: Any, cfg: dict[str, Any]) -> None:
+        """Register operator-provided ``[[policy.seed]]`` entries as ACTIVATED policies.
+
+        These are *trusted, config-time* seeds — equivalent to hydrating already-activated policies
+        from a durable store, so they do not go through (or bypass) the F-10 API activation gate. Used
+        to ship demo/guardrail policies with the free tier so a CEL-engine deployment isn't an empty
+        (fail-closed DENY) store. Each seed: ``id``, ``condition`` (CEL), ``decision``
+        (allow|deny|require_approval); optional ``governs`` (default "*"), ``version``, ``approvers``,
+        ``regulatory_refs``.
+        """
+        seeds = cfg.get("policy", {}).get("seed", [])
+        if not seeds:
+            return
+        from core.policy.model import PolicyEnvelope, PolicyLifecycle
+        from core.types import ApproverRef, Decision
+
+        for s in seeds:
+            envelope = PolicyEnvelope(
+                id=str(s["id"]),
+                version=int(s.get("version", 1)),
+                governs=str(s.get("governs", "*")),
+                scope={"tenant": str(s.get("tenant", "*"))},
+                condition=str(s["condition"]),
+                decision=Decision(str(s["decision"]).lower()),
+                approvers=tuple(ApproverRef(str(a)) for a in s.get("approvers", [])),
+                regulatory_refs=tuple(str(r) for r in s.get("regulatory_refs", [])),
+                lifecycle=PolicyLifecycle.ACTIVATED,
+            )
+            store.register(envelope)
 
     @staticmethod
     def _wire_event_sinks(events: Any, cfg: dict[str, Any]) -> None:

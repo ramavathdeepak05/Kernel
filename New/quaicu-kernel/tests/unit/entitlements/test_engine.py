@@ -56,7 +56,9 @@ def test_starter_adapter_gating():
     e = _engine(_plan("t", FeatureTier.STARTER))
     assert e.is_adapter_allowed("t", "always_allow")
     assert e.is_adapter_allowed("t", "memory_ledger")
-    assert not e.is_adapter_allowed("t", "cel_policy")
+    # STARTER is now governance-capable (in-memory CEL engine), but still no durable Postgres/HSM.
+    assert e.is_adapter_allowed("t", "cel_policy")
+    assert not e.is_adapter_allowed("t", "postgres_ledger")
     assert not e.is_adapter_allowed("t", "openbao_ledger")
 
 
@@ -75,9 +77,10 @@ def test_enterprise_includes_openbao():
 
 def test_profile_gating():
     e = _engine(_plan("t", FeatureTier.STARTER))
+    e.assert_profile_allowed("t", "standard")            # no raise (enforcing default on STARTER)
     e.assert_profile_allowed("t", "audit_only")          # no raise
     with pytest.raises(FeatureNotEntitledError):
-        e.assert_profile_allowed("t", "all")             # not on STARTER
+        e.assert_profile_allowed("t", "all")             # consent layer is BUSINESS+ only
 
 
 def test_policy_quota_enforced_for_business():
@@ -87,10 +90,11 @@ def test_policy_quota_enforced_for_business():
         e.assert_within_quota("t", current_policies=200)
 
 
-def test_starter_cannot_author_policies():
-    e = _engine(_plan("t", FeatureTier.STARTER))         # max_policies = 0
+def test_starter_policy_quota_is_small_but_nonzero():
+    e = _engine(_plan("t", FeatureTier.STARTER))         # max_policies = 5
+    e.assert_within_quota("t", current_policies=4)       # no raise (room for one more)
     with pytest.raises(QuotaExceededError):
-        e.assert_within_quota("t", current_policies=0)
+        e.assert_within_quota("t", current_policies=5)   # at the cap
 
 
 def test_enterprise_quota_unbounded():

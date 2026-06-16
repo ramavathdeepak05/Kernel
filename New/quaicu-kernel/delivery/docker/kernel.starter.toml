@@ -6,11 +6,33 @@
 id = "saas-starter"
 
 [adapters]
-policy   = "always_allow"   # STARTER does not get the CEL policy engine (that's BUSINESS+)
+policy   = "cel_policy"     # real K·01 CEL enforcement (in-memory store, seeded below)
 hitl     = "webhook"
 ledger   = "memory_ledger"
 events   = "memory_events"
 identity = "jwt"
+
+# Enforce policy decisions (allow/deny) + seal + emit; consent off (no consent adapter on STARTER).
+[governance]
+default = "standard"
+
+# Seeded ACTIVATED policies so the free tier demonstrates governance out of the box (a CEL engine with
+# an empty store fail-closes to DENY). A `true` allow-baseline keeps normal actions flowing; a deny
+# guardrail makes governance visible. Tenants may author up to `max_policies` of their own (see
+# TIER_MATRIX). CEL is written against action_type / actor_roles / payload_<field> (see
+# docs/CEL_POLICY_GUIDE.md).
+[[policy.seed]]
+id        = "starter-allow-baseline"
+condition = "true"
+decision  = "allow"
+
+# Scoped to a demo action type so the payload_amount reference is only evaluated for actions that
+# carry it (a CEL reference to an absent variable would otherwise fail-closed-DENY the whole call).
+[[policy.seed]]
+id        = "starter-high-value-guardrail"
+governs   = "demo.payment"
+condition = "payload_amount > 1000000"
+decision  = "deny"
 
 # The STARTER ledger is in-memory (ephemeral). Record every sealed governed action to the
 # `quaicu.audit` logger so the platform's log capture (e.g. Cloud Logging) is the durable audit
