@@ -16,6 +16,12 @@ business = "/etc/quaicu/kernel.business.toml"    # durable Postgres + CEL tier
 [entitlements]
 dsn = "${ENTITLEMENTS_DSN}"
 
+# Self-serve signup: POST /v1/signup provisions a STARTER tenant + API key, and protected /v1/* routes
+# then require that key. Set QUAICU_API_KEY_PEPPER in the environment. (Accounts are in-process until
+# the durable account store lands — see migration 006.)
+[account]
+enabled = true
+
 # Self-serve checkout + webhook tier flips (WS-C). Uncomment + configure to enable the console Billing
 # page and the /v1/billing/* routes. Secrets resolve from the environment at load.
 # [billing.stripe]

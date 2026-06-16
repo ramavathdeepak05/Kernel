@@ -22,6 +22,7 @@ import os
 import tomllib
 
 from delivery.api.app import create_app
+from delivery.sdk.account_config import account_enabled, build_account_engine, require_api_key
 from delivery.sdk.billing_config import build_billing
 from delivery.sdk.entitlements_config import build_entitlement_store
 from delivery.sdk.kernel import Kernel
@@ -42,20 +43,30 @@ with open(_config_path, "rb") as _f:
 # [metering].redis_url / REDIS_URL is set (exact cross-replica counts), else in-process.
 _meter = build_usage_meter(_config)
 
+# An entitlement store is needed for billing, accounts (signup provisions a STARTER plan), or an
+# explicit [entitlements] section. Durable when a DSN is configured, else in-memory; hydrated in
+# create_app's lifespan so billing-driven tier flips survive a restart.
+_needs_entitlements = "billing" in _config or account_enabled(_config) or "entitlements" in _config
+_entitlements = build_entitlement_store(_config) if _needs_entitlements else None
+
+# Self-serve signup + API-key auth ([account].enabled). Off by default (IdP deployments unaffected).
+_account_engine = build_account_engine(_config, _entitlements)
+
+# Billing (Stripe/Razorpay → tier flips + checkout) only when [billing] is declared.
 if "billing" in _config:
-    # Durable when [entitlements]/[storage] supplies a DSN, else in-memory. The store is hydrated
-    # from its repository in create_app's lifespan, so a billing-driven tier flip survives a restart.
-    _entitlements = build_entitlement_store(_config)
     _billing_adapters, _billing_engine = build_billing(_config, _entitlements)
-    app = create_app(
-        kernel,
-        entitlement_store=_entitlements,
-        usage_meter=_meter,
-        billing_adapters=_billing_adapters,
-        billing_engine=_billing_engine,
-    )
 else:
-    app = create_app(kernel, usage_meter=_meter)
+    _billing_adapters, _billing_engine = {}, None
+
+app = create_app(
+    kernel,
+    entitlement_store=_entitlements,
+    usage_meter=_meter,
+    account_engine=_account_engine,
+    require_api_key=require_api_key(_config),
+    billing_adapters=_billing_adapters,
+    billing_engine=_billing_engine,
+)
 
 
 def main() -> None:

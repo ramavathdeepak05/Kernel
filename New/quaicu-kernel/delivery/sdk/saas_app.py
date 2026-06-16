@@ -30,6 +30,7 @@ from fastapi import FastAPI
 
 from core.entitlements import FeatureTier
 from delivery.api.app import create_app
+from delivery.sdk.account_config import build_account_engine, require_api_key
 from delivery.sdk.billing_config import build_billing
 from delivery.sdk.entitlements_config import build_entitlement_store
 from delivery.sdk.metering_config import build_usage_meter
@@ -84,6 +85,8 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
         provider=provider,
         entitlement_store=store,
         usage_meter=build_usage_meter(config),  # per-tenant daily-quota + usage; shared Redis if configured
+        account_engine=build_account_engine(config, store),  # self-serve signup ([account].enabled)
+        require_api_key=require_api_key(config),
         billing_adapters=billing_adapters,
         billing_engine=billing_engine,
     )
