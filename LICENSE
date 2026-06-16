@@ -1,0 +1,63 @@
+QUAICU Kernel — Proprietary Software License
+Copyright (c) 2026 QUAICU. All rights reserved.
+
+[DRAFT — review with counsel before publishing. Confirm the legal entity name,
+notice address, and governing-law jurisdiction in the bracketed fields below.]
+
+1. Definitions.
+   "Software" means the QUAICU Kernel source code, binaries, container images,
+   documentation, and configuration in this repository. "Licensor" means
+   [QUAICU LEGAL ENTITY NAME]. "You" means the individual or entity exercising
+   rights under this License.
+
+2. Grant.
+   Subject to a separate, executed commercial or subscription agreement with
+   Licensor (including the applicable tier: STARTER, BUSINESS, or ENTERPRISE),
+   Licensor grants You a non-exclusive, non-transferable, non-sublicensable,
+   revocable license to install and use the Software solely for Your internal
+   business purposes and only as permitted by that agreement and the entitlements
+   of Your tier. Absent such an agreement, no rights are granted except to view
+   the source for evaluation.
+
+3. Restrictions.
+   You may not, except as expressly permitted by a separate written agreement
+   with Licensor: (a) redistribute, sublicense, sell, lease, or host the Software
+   as a service to third parties; (b) modify, fork, or create derivative works
+   for distribution; (c) remove or alter any proprietary notices; (d) reverse
+   engineer except to the extent applicable law expressly permits; or (e) use the
+   Software to build a competing product.
+
+4. Ownership.
+   The Software is licensed, not sold. Licensor retains all right, title, and
+   interest, including all intellectual-property rights, in and to the Software.
+
+5. Confidentiality.
+   The Software's non-public source and design are Licensor's confidential
+   information; You will protect them with at least reasonable care.
+
+6. No Warranty.
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+   PURPOSE, TITLE, AND NON-INFRINGEMENT. The Software is a governance control
+   plane and is not a substitute for the customer's own legal/regulatory
+   compliance obligations.
+
+7. Limitation of Liability.
+   TO THE MAXIMUM EXTENT PERMITTED BY LAW, LICENSOR WILL NOT BE LIABLE FOR ANY
+   INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR FOR LOST
+   PROFITS OR DATA, ARISING FROM OR RELATED TO THE SOFTWARE.
+
+8. Term and Termination.
+   This License terminates automatically on breach or on termination of the
+   governing commercial agreement. On termination You will cease all use and
+   destroy all copies.
+
+9. Governing Law.
+   This License is governed by the laws of [JURISDICTION], without regard to its
+   conflict-of-laws rules.
+
+Contact: [legal@quaicu.example] · [Licensor notice address]
+
+Third-party components are licensed under their own terms; see the SBOM published
+with each release image and the dependency manifests (pyproject.toml /
+requirements.lock).
