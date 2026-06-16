@@ -49,7 +49,6 @@ from delivery.api.routes.admin import router as admin_router
 from delivery.api.routes.erasure import router as erasure_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
-from delivery.api.routes.policy_assist import router as policy_assist_router
 from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
 from delivery.sdk.provider import TieredKernelProvider
@@ -66,7 +65,6 @@ def create_app(
     billing_engine: "object | None" = None,
     usage_meter: "object | None" = None,
     erasure_engine: "object | None" = None,
-    policy_assistant: "object | None" = None,
     enforce_paths: list[tuple[str, str]] | None = None,
     cors_origins: list[str] | None = None,
     require_api_key: bool = False,
@@ -138,8 +136,6 @@ def create_app(
     app.state.usage_meter = usage_meter
     # Erasure (WS-G): crypto-shredding engine for the GDPR/DPDP right-to-erasure routes.
     app.state.erasure_engine = erasure_engine
-    # Optional AI policy-authoring assistant (K·01 helper). Routes 503 when absent.
-    app.state.policy_assistant = policy_assistant
 
     # Routers
     app.include_router(actions_router)
@@ -147,7 +143,6 @@ def create_app(
     app.include_router(inference_router)
     app.include_router(ledger_router)
     app.include_router(policies_router)
-    app.include_router(policy_assist_router)
     app.include_router(dashboard_router)
     app.include_router(entitlements_router)
     app.include_router(approvals_router)

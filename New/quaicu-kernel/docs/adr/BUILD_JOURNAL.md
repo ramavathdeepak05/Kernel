@@ -183,24 +183,6 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
-- **2026-06-17 · AI-assisted CEL policy authoring (free NL→CEL helper) · core/policy · delivery · claude** —
-  Lets a non-expert describe a rule in plain English and get a candidate CEL policy. **(1)**
-  `core/policy/authoring.py` — `PolicyAuthoringAssistant.suggest()` builds a schema-aware prompt
-  (activation vars: `action_type`, `action_tenant`, `actor_id`, `actor_roles`, `payload_<field>`),
-  calls the wired `InferencePort` (no model SDK in core — F-08; model is config-pluggable: Vertex /
-  OpenAI-compat / **Ollama for free/local**), then **validates the returned CEL by actually compiling
-  it with celpy** — a non-compiling suggestion comes back `valid=false`, never a broken policy. Untrusted
-  LLM output is parsed defensively (tolerates fences/prose) and never raises; unknown decision →
-  `require_approval`; warns on payload vars unseen for the tenant. **(2)** Route `POST
-  /v1/policies/assist` (`delivery/api/routes/policy_assist.py`, `policy:admin` scope, 503 when
-  unconfigured); `create_app(policy_assistant=…)`; config-driven via `[policy_assistant]`
-  (`delivery/sdk/policy_assistant_config.py`) wired into both entrypoints. Uses a *vendor* model, so it
-  works for free-tier tenants with no inference entitlement. **(3)** `docs/POLICY_AUTHORING.md` (schema +
-  observe→draft→backtest→activate workflow + assistant usage). Advisory only — drafts still go through
-  the normal DRAFT→REVIEW→backtest→ACTIVATE lifecycle. Suite **928 passed / 10 skipped**, ruff clean.
-  **Follow-ups:** route the assist call through the governed gateway (logging/budget) for cost control;
-  a console UI for it; NL→CEL few-shot tuning per vertical.
-
 - **2026-06-17 · Event sinks for DB-less audit + postgres RLS unit-test repair · adapters/events · delivery/sdk · tests · claude** —
   **(1) Event sinks (K·07):** `adapters/events/sinks.py` — `LoggingEventSink` writes one structured
   audit line per sealed governed action to the `quaicu.audit` logger (→ Cloud Logging), and
