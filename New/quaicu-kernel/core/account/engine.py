@@ -64,6 +64,10 @@ class AccountEngine:
                 _PEPPER_ENV,
             )
 
+    def hydrate(self) -> None:
+        """Repopulate the account cache from its durable store at startup. No-op if in-memory."""
+        self._accounts.hydrate()
+
     def _hash_secret(self, secret: str) -> str:
         """HMAC-SHA256 of the key secret under the server-side pepper (hex digest)."""
         return hmac.new(self._pepper, secret.encode("utf-8"), hashlib.sha256).hexdigest()

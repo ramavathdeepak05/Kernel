@@ -11,12 +11,14 @@ Config shape::
 
     [account]
     enabled = true                # turn on self-serve signup + API-key auth
+    dsn = "${ACCOUNT_DSN}"        # optional — durable accounts (Postgres, migration 006); else in-memory
     # require_api_key defaults to `enabled`; set false to allow signup while leaving routes open.
     # The API-key pepper comes from the QUAICU_API_KEY_PEPPER env var (see core/account/engine.py).
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -46,4 +48,12 @@ def build_account_engine(config: Mapping[str, Any], entitlement_store: Any | Non
         )
     from core.account import AccountEngine, AccountStore
 
-    return AccountEngine(AccountStore(), entitlement_store)
+    # Durable accounts when [account].dsn is set (Postgres, migration 006); else in-process (cache
+    # only — fine for dev, but signups don't survive a restart / scale-out).
+    dsn = os.path.expandvars(str(config.get("account", {}).get("dsn", ""))) or ""
+    repository = None
+    if dsn:
+        from adapters.account import PostgresAccountRepository
+
+        repository = PostgresAccountRepository(dsn)
+    return AccountEngine(AccountStore(repository=repository), entitlement_store)
