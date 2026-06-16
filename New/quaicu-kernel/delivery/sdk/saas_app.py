@@ -32,6 +32,7 @@ from core.entitlements import FeatureTier
 from delivery.api.app import create_app
 from delivery.sdk.billing_config import build_billing
 from delivery.sdk.entitlements_config import build_entitlement_store
+from delivery.sdk.metering_config import build_usage_meter
 from delivery.sdk.provider import TieredKernelProvider
 
 # Plane keys → tier. STARTER + BUSINESS are the self-serve shared-plane tiers.
@@ -82,6 +83,7 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
     return create_app(
         provider=provider,
         entitlement_store=store,
+        usage_meter=build_usage_meter(config),  # per-tenant daily-quota + usage; shared Redis if configured
         billing_adapters=billing_adapters,
         billing_engine=billing_engine,
     )

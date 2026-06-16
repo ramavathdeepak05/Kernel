@@ -183,6 +183,43 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-16 · Metering activation + shared Redis meter + Marketplace metering scaffold + hosting docs · delivery · adapters/metering · adapters/billing · claude** —
+  Go-live SaaS plumbing. **(1) Metering gap closed:** `UsageMeter` is now wired into both entrypoints
+  (`delivery/entrypoint.py`, `delivery/sdk/saas_app.py`) via a config-driven `build_usage_meter`
+  (`delivery/sdk/metering_config.py`) — so daily-quota enforcement (`max_actions_per_day`) + admin
+  usage snapshots are live, not dormant. **(2) Shared meter:** `adapters/metering/redis_meter.py`
+  (`RedisUsageMeter`) is a drop-in for the in-process meter giving exact cross-replica counts; selected
+  by `[metering].redis_url` / `REDIS_URL` (optional `[redis]` extra, lazy import, fully tested with a
+  fake client). **(3) Marketplace metering (scaffold):** `adapters/billing/marketplace.py`
+  (`MarketplaceMeteringReporter`) computes per-tenant usage deltas from any `UsageMeter` and reports
+  them best-effort; the cloud API call is an injected `send` seam with `gcp_sender` (Service Control) /
+  `aws_sender` (BatchMeterUsage) lazy-SDK scaffolds. Delta/rollover/retry logic fully tested; cloud
+  send left as a marked seam. **(4) Hosting docs:** `docs/HOSTING.md`, `docs/DEPLOYMENT_MODELS.md`
+  (Model A you-host vs Model B customer-host), `docs/GO_LIVE_SETUP.md` (frontend/console, Stripe/Razorpay,
+  DB, OIDC, TLS, checklist). Suite **910 passed / 10 skipped**, ruff clean. **Follow-ups:** wire a
+  scheduler (Cloud Scheduler/EventBridge/ARQ) to call `report_all` periodically; finish the cloud
+  `send` seams against the real SDKs; still-specified cloud adapters (DLP masking port, KMS erasure,
+  Pub/Sub, Cloud Workflows HITL, IaC).
+
+- **2026-06-16 · Enterprise Cloud Strategy + reference cloud adapters (GCP-first) · adapters/ledger · adapters/inference · core/regmap · claude** —
+  Marketplace-readiness work for regulated buyers (banks/insurance/healthcare) who won't self-host
+  OpenBao/Kafka/Temporal. **(1) Security pass already landed earlier today** (4 code-review findings:
+  rate-limit DoS, OpenBao verify(), event-bus logging, API-key HMAC+pepper). **(2) Two reference
+  cloud adapters, fully tested with mocked clients (no cloud creds in CI):** `adapters/ledger/gcp_kms.py`
+  (`GcpKmsTreeSigner` + `GcpKmsLedgerAdapter`, registry `gcp_kms_ledger`) signs STHs in Cloud KMS
+  (FIPS 140-2 L3 HSM); `adapters/inference/vertex.py` (`VertexInferenceAdapter`, registry
+  `vertex_inference`) routes to Vertex AI (Gemini). **(3) Crypto change (ADR-0012):** GCP Cloud KMS has
+  **no Ed25519**, so the KMS signer uses **ECDSA P-256**; the offline regulator verifier
+  (`core/regmap/export.py`) is now **algorithm-aware by public-key type** (Ed25519 vs ECDSA-P256) — no
+  `SignedTreeHead` field, no storage migration; existing Ed25519/OpenBao paths unchanged. **(4)** Optional
+  `[gcp]`/`[aws]` extras in `pyproject.toml` (SDKs imported lazily, core stays SDK-free); new
+  `delivery/docker/kernel.gcp.toml` profile. **Exposes:** `docs/strategy/ENTERPRISE_CLOUD_STRATEGY.md`
+  (full GCP-first plan, AWS parity) + `docs/adr/0012-cloud-native-adapters.md`. Suite **897 passed / 10
+  skipped**, ruff clean. **Follow-ups (specified, not coded):** `MaskingPort` + Cloud DLP/Comprehend
+  adapter (masking is still concrete regex — the one un-ported component); KMS-envelope `ShredKeyring`;
+  Pub/Sub `EventPort`; Cloud Workflows/Step Functions HITL; Marketplace Metering billing adapter;
+  Terraform/Deployment Manager IaC. **K·02 external crypto review must now cover the ECDSA-P256 STH path.**
+
 - **2026-06-16 · Go-live engineering build — packaging + durable entitlements + SaaS entrypoint + HA + CI · pyproject · adapters/entitlements · delivery** —
   Closed the **code-completable** go-live blockers from the PM review (engineering only; the DPDP pack,
   LICENSE/docs, K·02 crypto review, and pricing stay human-owned). **(A) Packaging:** new

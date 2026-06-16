@@ -13,6 +13,10 @@
 # ledger, not the event bus, so it is unaffected. (Tracked as a follow-up.)
 #
 # Secrets are ${ENV_VAR} references resolved at load — keep credentials in the environment, not here.
+#
+# Set QUAICU_API_KEY_PEPPER in the environment: a strong server-side secret that keys the HMAC-SHA256
+# used to hash self-serve API keys (core/account). The AccountEngine reads it automatically; an empty
+# pepper is allowed for dev but logs a warning. Rotating it invalidates all existing keys.
 
 [tenant]
 id = "${KERNEL_TENANT_ID}"

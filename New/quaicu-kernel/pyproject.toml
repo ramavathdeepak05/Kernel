@@ -39,6 +39,21 @@ dev = [
     "mypy>=1.8",
     "pip-tools>=7.0",            # pip-compile → requirements.lock
 ]
+# Cloud-native adapters (ADR-0012). Optional so the core stays SDK-free; the adapters import these
+# lazily, so they are only required when the corresponding [adapters] key is wired. Not in
+# requirements.lock (the base reproducible build) — install with e.g. `pip install .[gcp]`.
+gcp = [
+    "google-cloud-kms>=3",       # adapters/ledger/gcp_kms — ECDSA-P256 STH signing (FIPS 140-2 L3 HSM)
+    "google-genai>=1",           # adapters/inference/vertex — Vertex AI (Gemini) inference
+]
+aws = [
+    # AWS-parity adapters (docs/strategy/ENTERPRISE_CLOUD_STRATEGY.md): KMS Ed25519 signer, Bedrock
+    # inference, and the AWS Marketplace BatchMeterUsage sender (adapters/billing/marketplace.py).
+    "boto3>=1.34",
+]
+redis = [
+    "redis>=5",                  # adapters/metering/redis_meter — shared cross-replica usage counts
+]
 
 [project.scripts]
 quaicu-kernel = "delivery.entrypoint:main"

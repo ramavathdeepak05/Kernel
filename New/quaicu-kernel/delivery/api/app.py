@@ -154,9 +154,11 @@ def create_app(
     # ── Middleware stack ──────────────────────────────────────────────────────
     # Starlette runs middleware in REVERSE order of registration (last added = outermost = runs
     # first). We register inner→outer so the effective execution order is:
-    #   CORS → RequestLogging → RateLimit → ApiKeyAuth → GovernancePEP → routes
-    # i.e. CORS preflight is handled first; every request is logged; quota is checked before auth;
-    # auth runs before the route; the reference PEP (if any) is innermost.
+    #   CORS → RequestLogging → ApiKeyAuth → RateLimit → GovernancePEP → routes
+    # i.e. CORS preflight is handled first; every request is logged; AUTH runs BEFORE the rate
+    # limiter so the limiter can key its per-tenant counter on the cryptographically-verified
+    # principal (not a spoofable JWT/header claim, which would let an attacker exhaust a victim
+    # tenant's quota — see delivery/api/ratelimit.py). The reference PEP (if any) is innermost.
 
     # Optional reference PEP: governance enforcement middleware (single-kernel only).
     if enforce_paths:
@@ -164,15 +166,17 @@ def create_app(
             raise ValueError("enforce_paths (reference PEP) is only supported in single-kernel mode.")
         app.add_middleware(GovernanceMiddleware, kernel=kernel, enforce_paths=enforce_paths)
 
+    # Per-tenant tier rate limiting (no-op without an entitlement source). Registered BEFORE auth so
+    # it executes AFTER auth (Starlette reverses order): it reads request.state.principal to key the
+    # counter on the verified tenant, falling back to client IP when auth is disabled.
+    if rate_limit:
+        app.add_middleware(RateLimitMiddleware)
+
     # API-key authentication (opt-in). Requires an account engine to verify keys.
     if require_api_key:
         if account_engine is None:
             raise ValueError("require_api_key=True requires an account_engine.")
         app.add_middleware(ApiKeyAuthMiddleware, account_engine=account_engine)
-
-    # Per-tenant tier rate limiting (no-op without an entitlement source).
-    if rate_limit:
-        app.add_middleware(RateLimitMiddleware)
 
     # Structured access logging + correlation ids (always on).
     app.add_middleware(RequestLoggingMiddleware)

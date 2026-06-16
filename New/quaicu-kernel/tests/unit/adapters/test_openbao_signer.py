@@ -155,22 +155,26 @@ def test_verify_returns_false_for_invalid_signature():
     assert signer.verify(_sth()) is False
 
 
-def test_verify_returns_false_on_http_error():
+def test_verify_raises_ledger_seal_error_on_http_error():
+    # An HTTP 5xx from OpenBao is an outage, not a verdict — verify() must surface it rather than
+    # silently return False (which would mask the outage as a failed audit).
     client = MagicMock()
     client.post.return_value = _mock_response({}, status_code=500)
     signer = _signer(client)
     signer._cached_key_id = "quaicu-ledger:v1"
 
-    assert signer.verify(_sth()) is False
+    with pytest.raises(LedgerSealError, match="OpenBao verify failed"):
+        signer.verify(_sth())
 
 
-def test_verify_returns_false_on_connection_error():
+def test_verify_raises_ledger_seal_error_on_connection_error():
     client = MagicMock()
     client.post.side_effect = Exception("timeout")
     signer = _signer(client)
     signer._cached_key_id = "quaicu-ledger:v1"
 
-    assert signer.verify(_sth()) is False
+    with pytest.raises(LedgerSealError, match="timeout"):
+        signer.verify(_sth())
 
 
 # ── OpenBaoLedgerAdapter ──────────────────────────────────────────────────────

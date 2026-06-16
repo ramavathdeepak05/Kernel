@@ -21,7 +21,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 class SignedTreeHead:
     """An RFC 6962 Signed Tree Head (STH).
 
-    `signature` is an Ed25519 signature over (tree_size as 8-byte big-endian || root_hash).
+    `signature` is a signature over (tree_size as 8-byte big-endian || root_hash). The scheme depends
+    on the `TreeSigner`: Ed25519 for the software/OpenBao signers, ECDSA P-256 for the Cloud KMS
+    signer (GCP Cloud KMS has no Ed25519). The offline verifier infers the scheme from the public-key
+    type, so no algorithm tag is carried on the wire.
     `key_id` identifies which signing key produced the signature.
     """
 

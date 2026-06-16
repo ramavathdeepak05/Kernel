@@ -207,7 +207,9 @@ def verify_ledger_proof_bundle(bundle_dict: dict) -> tuple[bool, list[str]]:
         if recomputed != root:
             errors.append(f"inclusion proof for seq {seq} does not match the signed root")
 
-    # (2) the STH signature must verify against the embedded public key.
+    # (2) the STH signature must verify against the embedded public key. The signing algorithm is
+    # inferred from the public key type (Ed25519 vs ECDSA P-256), so a GCP/AWS Cloud KMS-signed
+    # bundle verifies with the same offline code as the Ed25519 software/OpenBao signer.
     pem = sth.get("public_key_pem")
     if not pem:
         errors.append("no signing public key in bundle — STH signature cannot be verified")
@@ -216,8 +218,29 @@ def verify_ledger_proof_bundle(bundle_dict: dict) -> tuple[bool, list[str]]:
             from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
             public_key = load_pem_public_key(pem.encode())
-            public_key.verify(bytes.fromhex(sth["signature_hex"]), _signing_message(tree_size, root))
+            _verify_sth_signature(
+                public_key, bytes.fromhex(sth["signature_hex"]), _signing_message(tree_size, root)
+            )
         except Exception as exc:  # noqa: BLE001 — any failure is a verification failure
             errors.append(f"STH signature does not verify: {exc}")
 
     return (not errors), errors
+
+
+def _verify_sth_signature(public_key: object, signature: bytes, message: bytes) -> None:
+    """Verify an STH signature, dispatching on the public-key type. Raises on any failure.
+
+    - Ed25519 (software / OpenBao transit): pure EdDSA over the raw message.
+    - ECDSA P-256 (GCP Cloud KMS ``EC_SIGN_P256_SHA256`` / AWS KMS ``ECDSA_SHA_256``): DER signature
+      over SHA-256 of the message (the hash is applied internally by ``verify``).
+    """
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
+    if isinstance(public_key, Ed25519PublicKey):
+        public_key.verify(signature, message)
+    elif isinstance(public_key, ec.EllipticCurvePublicKey):
+        public_key.verify(signature, message, ec.ECDSA(hashes.SHA256()))
+    else:
+        raise ValueError(f"unsupported STH signing key type: {type(public_key).__name__}")

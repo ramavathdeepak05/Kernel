@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import re
 import secrets
 from datetime import datetime, timezone
@@ -28,22 +29,44 @@ log = logging.getLogger("quaicu.account")
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
+# Env var supplying the server-side pepper mixed into API-key hashes. Set this in production so the
+# stored hashes are keyed HMACs rather than bare digests (FIPS/PCI scanner-friendly, and a stolen
+# store alone is useless without the pepper).
+_PEPPER_ENV = "QUAICU_API_KEY_PEPPER"
+
 
 def _slugify(text: str) -> str:
     slug = _SLUG_RE.sub("-", text.lower()).strip("-")
     return slug[:32] or "tenant"
 
 
-def _hash_secret(secret: str) -> str:
-    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
-
-
 class AccountEngine:
     """Self-serve account provisioning and API-key authentication."""
 
-    def __init__(self, accounts: AccountStore, entitlements: EntitlementStore) -> None:
+    def __init__(
+        self,
+        accounts: AccountStore,
+        entitlements: EntitlementStore,
+        *,
+        pepper: bytes | str | None = None,
+    ) -> None:
         self._accounts = accounts
         self._entitlements = entitlements
+        # API keys are stored as HMAC-SHA256(pepper, secret), not a bare SHA-256 digest. The pepper
+        # is a server-side secret (never persisted with the hash). Falls back to env, then empty —
+        # an empty pepper is allowed for dev/tests but warned about so production wires a real one.
+        resolved = pepper if pepper is not None else os.getenv(_PEPPER_ENV, "")
+        self._pepper: bytes = resolved.encode("utf-8") if isinstance(resolved, str) else resolved
+        if not self._pepper:
+            log.warning(
+                "%s is not set — API-key hashes use an empty pepper. Set a strong secret in "
+                "production.",
+                _PEPPER_ENV,
+            )
+
+    def _hash_secret(self, secret: str) -> str:
+        """HMAC-SHA256 of the key secret under the server-side pepper (hex digest)."""
+        return hmac.new(self._pepper, secret.encode("utf-8"), hashlib.sha256).hexdigest()
 
     # ── Signup ───────────────────────────────────────────────────────────────────
 
@@ -101,7 +124,7 @@ class AccountEngine:
         record = ApiKey(
             key_id=key_id,
             tenant_id=tenant,
-            hashed_secret=_hash_secret(secret),
+            hashed_secret=self._hash_secret(secret),
             created_at=datetime.now(timezone.utc),
             scopes=normalize_scopes(scopes),
         )
@@ -135,7 +158,7 @@ class AccountEngine:
             raise ApiKeyInvalidError(
                 "API key is unknown or revoked.", detail={"key_id": key_id}
             )
-        if not hmac.compare_digest(record.hashed_secret, _hash_secret(secret)):
+        if not hmac.compare_digest(record.hashed_secret, self._hash_secret(secret)):
             raise ApiKeyInvalidError("API key secret does not match.", detail={"key_id": key_id})
 
         account = self._accounts.get_account_by_tenant(record.tenant_id)
