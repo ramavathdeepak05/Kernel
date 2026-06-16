@@ -183,6 +183,17 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-17 · CEL policy authoring guide for client AIs (reverted the in-product AI assistant) · docs · claude** —
+  Product call: instead of an in-product NL→CEL assistant (model cost/ops to run), ship a **shareable
+  context file** clients paste into their own AI (ChatGPT/Claude/Gemini) to draft compatible CEL.
+  **Reverted** the AI-assistant feature (`core/policy/authoring.py`, route `/v1/policies/assist`,
+  config wiring, tests — revert of `0dbe302b`). **Added** `docs/CEL_POLICY_GUIDE.md`: the exact
+  activation schema (only `action_type`, `action_tenant`, `actor_id`, `actor_roles`, `payload_<field>`
+  — no built-in time/context vars), decision values + deny-overrides + fail-closed, celpy syntax
+  cheat-sheet, gotchas (dot-free payload names, no invented functions, one boolean expr), output JSON
+  format, worked examples, and the draft→backtest→activate reminder. Suite **915 passed / 10 skipped**,
+  ruff clean. No code/API change.
+
 - **2026-06-17 · Event sinks for DB-less audit + postgres RLS unit-test repair · adapters/events · delivery/sdk · tests · claude** —
   **(1) Event sinks (K·07):** `adapters/events/sinks.py` — `LoggingEventSink` writes one structured
   audit line per sealed governed action to the `quaicu.audit` logger (→ Cloud Logging), and
