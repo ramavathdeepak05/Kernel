@@ -183,6 +183,19 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-17 · Integration tests verified live on GCP (Cloud SQL + Cloud KMS) · tests · claude** —
+  Resolved the 10 skipped integration tests against real GCP. **(1)** Ran the 6 Postgres conformance
+  tests (`tests/conformance/storage/test_spec.py` + `ledger/test_postgres_spec.py`) against the live
+  **Cloud SQL** instance via the Auth Proxy (ADC) → all pass (validates Gemini's RLS fix end-to-end).
+  **(2)** Added + ran `tests/conformance/ledger/test_gcp_kms_spec.py` against live **Cloud KMS** — the
+  managed-service replacement for OpenBao. The target key (`quaicu-ledger/sth-signer` v1, ECDSA P-256,
+  us-central1) was `DESTROY_SCHEDULED` from the prior revert; **restored + enabled** it (the adapter
+  had correctly fail-closed with `LedgerSealError` while it was disabled) → all 4 KMS tests pass. **Full
+  suite with both backends: 925 passed / 4 skipped** (the 4 skips are now only the OpenBao tests —
+  OpenBao kept as the sovereign/air-gapped option but not the live GCP signer). See [[integration-db]]
+  for run commands. **Follow-up:** a CI job that provisions Postgres + points KMS at a key via secrets
+  so the integration layer runs automatically on PRs.
+
 - **2026-06-17 · CEL policy authoring guide for client AIs (reverted the in-product AI assistant) · docs · claude** —
   Product call: instead of an in-product NL→CEL assistant (model cost/ops to run), ship a **shareable
   context file** clients paste into their own AI (ChatGPT/Claude/Gemini) to draft compatible CEL.
