@@ -200,21 +200,23 @@ class PostgresStorageAdapter:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                result = await conn.fetchval(
-                    _INSERT_SQL,
-                    row["id"], row["tenant_id"], row["idempotency_key"],
-                    row["type"], row["state"],
-                    row["actor_id"], row["actor_tenant"], row["actor_roles"],
-                    row["actor_attributes"], row["payload"], row["proposed_at"],
-                )
-                if result is not None:
-                    # Clean insert — row was created
-                    return None
-                # Conflict — fetch and return the existing action
-                existing = await conn.fetchrow(
-                    _SELECT_BY_IDEMPOTENCY_SQL,
-                    row["tenant_id"], row["idempotency_key"],
-                )
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(row["tenant_id"]))
+                    result = await conn.fetchval(
+                        _INSERT_SQL,
+                        row["id"], row["tenant_id"], row["idempotency_key"],
+                        row["type"], row["state"],
+                        row["actor_id"], row["actor_tenant"], row["actor_roles"],
+                        row["actor_attributes"], row["payload"], row["proposed_at"],
+                    )
+                    if result is not None:
+                        # Clean insert — row was created
+                        return None
+                    # Conflict — fetch and return the existing action
+                    existing = await conn.fetchrow(
+                        _SELECT_BY_IDEMPOTENCY_SQL,
+                        row["tenant_id"], row["idempotency_key"],
+                    )
                 if existing is None:
                     raise StoragePortError(
                         "insert_if_absent conflict but existing row not found",
@@ -231,10 +233,12 @@ class PostgresStorageAdapter:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                result = await conn.execute(
-                    _UPDATE_STATE_SQL,
-                    action.state.value, str(action.id), str(action.tenant),
-                )
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(action.tenant))
+                    result = await conn.execute(
+                        _UPDATE_STATE_SQL,
+                        action.state.value, str(action.id), str(action.tenant),
+                    )
             # asyncpg returns "UPDATE <count>" as a string
             count = int(result.split()[-1])
             if count == 0:
@@ -254,9 +258,11 @@ class PostgresStorageAdapter:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    _SELECT_BY_IDEMPOTENCY_SQL, str(tenant), str(key)
-                )
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(tenant))
+                    row = await conn.fetchrow(
+                        _SELECT_BY_IDEMPOTENCY_SQL, str(tenant), str(key)
+                    )
             return _row_to_action(row) if row is not None else None
         except StoragePortError:
             raise
