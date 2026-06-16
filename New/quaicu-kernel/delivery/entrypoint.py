@@ -26,6 +26,7 @@ from delivery.sdk.billing_config import build_billing
 from delivery.sdk.entitlements_config import build_entitlement_store
 from delivery.sdk.kernel import Kernel
 from delivery.sdk.metering_config import build_usage_meter
+from delivery.sdk.policy_assistant_config import build_policy_assistant
 
 _config_path = os.getenv("KERNEL_CONFIG", "kernel.toml")
 kernel = Kernel.from_config(_config_path)
@@ -41,6 +42,8 @@ with open(_config_path, "rb") as _f:
 # the admin usage snapshot whenever an entitlement source resolves a plan. Shared Redis meter when
 # [metering].redis_url / REDIS_URL is set (exact cross-replica counts), else in-process.
 _meter = build_usage_meter(_config)
+# Optional AI policy-authoring assistant (K·01 helper) — enabled by a [policy_assistant] section.
+_policy_assistant = build_policy_assistant(_config)
 
 if "billing" in _config:
     # Durable when [entitlements]/[storage] supplies a DSN, else in-memory. The store is hydrated
@@ -51,11 +54,12 @@ if "billing" in _config:
         kernel,
         entitlement_store=_entitlements,
         usage_meter=_meter,
+        policy_assistant=_policy_assistant,
         billing_adapters=_billing_adapters,
         billing_engine=_billing_engine,
     )
 else:
-    app = create_app(kernel, usage_meter=_meter)
+    app = create_app(kernel, usage_meter=_meter, policy_assistant=_policy_assistant)
 
 
 def main() -> None:
