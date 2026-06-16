@@ -105,6 +105,10 @@ def create_app(
         # in-memory store, so every existing deployment is unaffected.
         if entitlement_store is not None:
             await entitlement_store.hydrate()
+        # Repopulate the account/API-key cache from its durable store (if wired) so self-serve signups
+        # survive a restart / scale-out. Sync (psycopg2) + off the hot path; no-op when in-memory.
+        if account_engine is not None and hasattr(account_engine, "hydrate"):
+            account_engine.hydrate()
         try:
             yield
         finally:

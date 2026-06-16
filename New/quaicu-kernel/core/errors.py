@@ -413,6 +413,12 @@ class ApiKeyInvalidError(AccountError):
     code = "API_KEY_INVALID"
 
 
+class AccountPersistenceError(AccountError):
+    """A durable account/api-key store operation failed (connect / read / write)."""
+
+    code = "ACCOUNT_PERSISTENCE_FAILED"
+
+
 # ── Billing errors (WS-C — Stripe / Razorpay → tier flips) ─────────────────────
 
 

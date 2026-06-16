@@ -1,7 +1,9 @@
-"""Account & API-key — in-memory store (ADR-0010).
+"""Account & API-key — in-process registry, optionally backed by a durable store (ADR-0010).
 
-Holds accounts (by id, indexed by email and tenant) and API keys (by key_id). Thread-safe. A durable
-`AccountRepository` write-through can back it later; the in-memory store is the Wave-1 implementation.
+Holds accounts (by id, indexed by email and tenant) and API keys (by key_id). Thread-safe. The auth
+hot path reads this cache only. When a durable `AccountRepository` is wired, writes persist-through
+(DB first, then cache) and `hydrate()` repopulates the cache at startup so signups survive a restart /
+scale-out. Persistence is synchronous — it runs only on the infrequent signup / key-issue path.
 """
 
 from __future__ import annotations
@@ -10,20 +12,36 @@ import logging
 import threading
 
 from core.account.model import Account, ApiKey
+from core.account.repository import AccountRepository
 from core.types import TenantId
 
 log = logging.getLogger("quaicu.account")
 
 
 class AccountStore:
-    """In-process registry of accounts and API keys."""
+    """In-process registry of accounts and API keys, with optional durable write-through."""
 
-    def __init__(self) -> None:
+    def __init__(self, repository: AccountRepository | None = None) -> None:
         self._accounts: dict[str, Account] = {}            # account_id -> Account
         self._email_index: dict[str, str] = {}             # lower(email) -> account_id
         self._tenant_index: dict[str, str] = {}            # tenant_id -> account_id
         self._api_keys: dict[str, ApiKey] = {}             # key_id -> ApiKey
         self._lock = threading.Lock()
+        self._repository = repository
+
+    def hydrate(self) -> None:
+        """Repopulate the cache from the durable repository. No-op when none is wired."""
+        if self._repository is None:
+            return
+        accounts, keys = self._repository.load_all()
+        with self._lock:
+            for account in accounts:
+                self._accounts[account.account_id] = account
+                self._email_index[account.email.lower()] = account.account_id
+                self._tenant_index[str(account.tenant_id)] = account.account_id
+            for key in keys:
+                self._api_keys[key.key_id] = key
+        log.info("account store hydrated: %d account(s), %d key(s)", len(accounts), len(keys))
 
     # ── Accounts ─────────────────────────────────────────────────────────────────
 
@@ -42,6 +60,8 @@ class AccountStore:
             return self._accounts.get(aid) if aid else None
 
     def add_account(self, account: Account) -> Account:
+        if self._repository is not None:  # persist-first: a DB failure fails closed (no cache update)
+            self._repository.save_account(account)
         with self._lock:
             self._accounts[account.account_id] = account
             self._email_index[account.email.lower()] = account.account_id
@@ -56,6 +76,8 @@ class AccountStore:
     # ── API keys ─────────────────────────────────────────────────────────────────
 
     def add_api_key(self, key: ApiKey) -> ApiKey:
+        if self._repository is not None:
+            self._repository.save_api_key(key)
         with self._lock:
             self._api_keys[key.key_id] = key
         log.info("api key issued: key_id=%s tenant=%s", key.key_id, key.tenant_id)
@@ -66,6 +88,8 @@ class AccountStore:
             return self._api_keys.get(key_id)
 
     def replace_api_key(self, key: ApiKey) -> None:
+        if self._repository is not None:
+            self._repository.replace_api_key(key)
         with self._lock:
             self._api_keys[key.key_id] = key
 
