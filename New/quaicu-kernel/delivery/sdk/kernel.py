@@ -429,6 +429,7 @@ class Kernel:
             ledger, ledger_repository = cls._build_ledger(adapter_cfg, cfg)
         if "events" in adapter_cfg:
             events = _load_adapter(adapter_cfg["events"])
+            cls._wire_event_sinks(events, cfg)
         if "identity" in adapter_cfg:
             identity = _load_adapter(adapter_cfg["identity"], **cfg.get("identity", {}))
         if "consent" in adapter_cfg:
@@ -498,6 +499,28 @@ class Kernel:
             ledger = _load_adapter(name, **ledger_kwargs)
             repository = None  # adapter does not support durability; don't expose an unused pool
         return ledger, repository
+
+    @staticmethod
+    def _wire_event_sinks(events: Any, cfg: dict[str, Any]) -> None:
+        """Subscribe configured event sinks to the bus (no-op if the bus has no ``subscribe``).
+
+        ``[events].log_sink = true`` records every sealed governed action to the ``quaicu.audit``
+        logger (→ Cloud Logging) — a durable audit stream even when the ledger is in-memory (free
+        tier). ``[events].pubsub_topic = "…"`` additionally fans out to GCP Pub/Sub. Sinks are
+        best-effort; a sink failure never breaks the seal path.
+        """
+        if not hasattr(events, "subscribe"):
+            return
+        ev = cfg.get("events", {})
+        if ev.get("log_sink"):
+            from adapters.events.sinks import LoggingEventSink
+
+            events.subscribe(LoggingEventSink())
+        topic = ev.get("pubsub_topic")
+        if topic:
+            from adapters.events.sinks import PubSubEventSink
+
+            events.subscribe(PubSubEventSink(str(topic)))
 
     @staticmethod
     def _build_policy(

@@ -183,6 +183,21 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-17 · Event sinks for DB-less audit + postgres RLS unit-test repair · adapters/events · delivery/sdk · tests · claude** —
+  **(1) Event sinks (K·07):** `adapters/events/sinks.py` — `LoggingEventSink` writes one structured
+  audit line per sealed governed action to the `quaicu.audit` logger (→ Cloud Logging), and
+  `PubSubEventSink` fans out to GCP Pub/Sub (lazy `[gcp]`, best-effort). Wired config-driven in
+  `Kernel.from_config` via `[events].log_sink` / `[events].pubsub_topic` (`_wire_event_sinks`), and
+  **enabled on the STARTER/free tier** (`kernel.starter.toml`) so the in-memory-ledger free tier still
+  has a durable, queryable record of every governed decision with **no database** — the platform log
+  stream is the audit substrate. **(2)** Repaired the 10 unit-test failures introduced by the postgres
+  RLS fix (`b8d12126`, gemini): `_fake_pool` now models `conn.transaction()` as an async CM (storage +
+  ledger), the deadlock test sets its raising txn after the helper, and the append test expects 2
+  executes (set_config + insert). Suite **915 passed / 10 skipped**, ruff clean. **Follow-up:** the
+  ledger hydration RLS bypass uses `ALTER TABLE … NO FORCE/FORCE` per startup (needs the runtime role
+  to own the tables + takes ACCESS EXCLUSIVE locks); prefer a `BYPASSRLS` role + `SET LOCAL
+  row_security = off`.
+
 - **2026-06-16 · Metering activation + shared Redis meter + Marketplace metering scaffold + hosting docs · delivery · adapters/metering · adapters/billing · claude** —
   Go-live SaaS plumbing. **(1) Metering gap closed:** `UsageMeter` is now wired into both entrypoints
   (`delivery/entrypoint.py`, `delivery/sdk/saas_app.py`) via a config-driven `build_usage_meter`
