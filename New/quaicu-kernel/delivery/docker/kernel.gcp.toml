@@ -1,0 +1,63 @@
+# QUAICU Kernel — GCP-native single-kernel profile (ADR-0012).
+#
+# Managed-service variant of kernel.prod.toml for regulated GCP deployments: the ledger signing key
+# lives in Cloud KMS (FIPS 140-2 L3 HSM, ECDSA P-256 — GCP KMS has no Ed25519) and inference runs on
+# Vertex AI (Gemini) reached over Private Service Connect (no public egress). Durable state stays on
+# Cloud SQL for PostgreSQL (Aurora-equivalent). Safe with KERNEL_WORKERS > 1 across replicas.
+#
+# Requires the [gcp] extra:  pip install .[gcp]
+# Auth: Application Default Credentials / Workload Identity (no static keys here). Run migrations
+# 001–005 first (DATABASE_URL=${KERNEL_DSN} alembic -c adapters/storage/migrations/alembic.ini upgrade head).
+#
+# Caveat (not correctness-critical): usage meter + in-memory event bus are per-process — see the note
+# in kernel.prod.toml. Set QUAICU_API_KEY_PEPPER in the environment (see kernel.prod.toml).
+
+[tenant]
+id = "${KERNEL_TENANT_ID}"
+
+[adapters]
+policy       = "cel_policy"        # real K·01 CEL evaluator (empty store fail-closed DENYs)
+policy_store = "postgres_policy"   # durable policy persistence (Cloud SQL)
+hitl         = "webhook"
+ledger       = "gcp_kms_ledger"    # Cloud KMS ECDSA-P256 signer (FIPS 140-2 L3 HSM)
+ledger_store = "postgres_ledger"   # durable transparency-log persistence (Cloud SQL)
+storage      = "postgres_storage"  # durable action persistence (idempotency)
+events       = "memory_events"
+inference    = "vertex_inference"  # Vertex AI (Gemini) over Private Service Connect
+identity     = "oidc"              # federate to the customer IdP via Identity Platform / OIDC
+
+[storage]
+dsn = "${KERNEL_DSN}"
+
+[policy_store]
+dsn = "${KERNEL_DSN}"
+
+# Cloud KMS asymmetric signing key (purpose=asymmetric-signing, algorithm=ec-sign-p256-sha256).
+[ledger]
+project   = "${GCP_PROJECT}"
+location  = "${GCP_LOCATION}"
+key_ring  = "quaicu"
+key       = "ledger"
+version   = "1"
+
+[entitlements]
+dsn = "${KERNEL_DSN}"
+
+[hitl]
+dispatch_url = "${HITL_DISPATCH_URL}"
+poll_url     = "${HITL_POLL_URL}"
+timeout      = 30
+
+[inference]
+project       = "${GCP_PROJECT}"
+location      = "${GCP_LOCATION}"
+default_model = "gemini-2.5-pro"
+
+[gateway]
+permitted_models = ["gemini-2.5-pro"]
+mask_patterns    = true
+
+[identity]
+issuer   = "${OIDC_ISSUER}"      # e.g. GCP Identity Platform / customer IdP discovery URL
+audience = "${OIDC_AUDIENCE}"
+jwks_uri = "${OIDC_JWKS_URI}"    # optional — discovered from the issuer when omitted

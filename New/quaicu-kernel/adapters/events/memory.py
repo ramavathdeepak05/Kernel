@@ -11,11 +11,14 @@ adapter for cross-service fan-out.
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any
 
 from core.types import Action, LedgerEntry
+
+log = logging.getLogger("quaicu.events")
 
 
 class InMemoryEventBusAdapter:
@@ -37,7 +40,9 @@ class InMemoryEventBusAdapter:
                 if hasattr(result, "__await__"):
                     await result  # type: ignore[misc]
             except Exception:
-                pass  # subscribers are best-effort; never fail the emit path
+                # Subscribers are best-effort; never fail the emit path. But a swallowed exception
+                # would silently break side-effects (drift/fairness sweeps, webhooks), so log it.
+                log.exception("event subscriber failed during emit (action=%s)", action.id)
 
     def subscribe(self, fn: Callable[[Action, LedgerEntry], Any]) -> None:
         with self._lock:

@@ -1,16 +1,32 @@
 """Per-tenant, per-tier rate limiting (ADR-0011, WS-D).
 
-A fixed-window (1-minute) counter keyed by tenant. The limit is the tenant's
-``rate_limit_per_min`` from `TIER_MATRIX` (honoring per-tenant ``quota_overrides``), resolved through
-the `EntitlementEngine`. On breach the request is rejected with **429** and a ``Retry-After`` header
-before it reaches any route — quota breach fails closed (F-03) at the edge.
+A fixed-window (1-minute) counter. The limit is the tenant's ``rate_limit_per_min`` from
+`TIER_MATRIX` (honoring per-tenant ``quota_overrides``), resolved through the `EntitlementEngine`. On
+breach the request is rejected with **429** and a ``Retry-After`` header before it reaches any route —
+quota breach fails closed (F-03) at the edge.
 
-Resolution is best-effort and **fails open**: if no entitlement source is wired, the tenant cannot be
+**Counter key (anti-DoS).** This middleware runs *after* `ApiKeyAuthMiddleware` (see the stack order
+in ``delivery/api/app.py``). When a request is authenticated, the counter is keyed on the
+cryptographically-**verified** tenant (``request.state.principal.tenant_id``). When auth is disabled
+(IdP-token / single-kernel deployments have no middleware-level principal), the counter falls back to
+the **client IP** — never the routing tenant, which comes from an *unverified* JWT claim / header
+(``deps.extract_tenant``). Keying an unauthenticated counter on that spoofable tenant would let an
+attacker forge a victim's tenant id and exhaust the victim's quota (DoS). The unverified tenant is
+still used only to *look up the tier limit value* in the IP-keyed case — at worst that loosens the
+attacker's own IP bucket, never a victim's.
+
+Resolution is best-effort and **fails open**: if no entitlement source is wired, no key can be
 determined, the tenant has no plan, or the tier is unbounded (``-1``), the request passes through. The
 limiter is a quota control, not an auth control — authentication and routing still apply downstream.
 
 The window is in-process (one counter map per app instance). A distributed deployment swaps this for a
 shared store (Redis) behind the same middleware; the matrix-driven limit lookup is unchanged.
+
+Deployment note: the IP fallback uses ``request.client.host`` — the immediate peer. Behind a load
+balancer/reverse proxy this is the proxy's IP, so all unauthenticated traffic would share one bucket.
+Terminate the proxy with a *trusted* forwarded-for handler (so the real client IP is set on the scope)
+before relying on the IP path at scale; do NOT trust a raw ``X-Forwarded-For`` header here, as it is
+itself client-spoofable. Authenticated traffic is unaffected (keyed on the verified tenant).
 """
 
 from __future__ import annotations
@@ -54,36 +70,56 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         store = getattr(request.app.state, "entitlement_store", None)
         return EntitlementEngine(store) if store is not None else None
 
-    def _limit_for(self, request: Request) -> tuple[str, int] | None:
-        """Return (tenant, limit) to enforce, or None to skip (fail-open)."""
+    def _limit_for(self, request: Request) -> tuple[str, int, TenantId] | None:
+        """Return (counter_key, limit, tenant) to enforce, or None to skip (fail-open).
+
+        ``counter_key`` is what the fixed window is bucketed by: the **verified** tenant when the
+        request is authenticated, else the client IP (never the spoofable routing tenant). ``tenant``
+        is the resolved tenant used for the tier-limit lookup and the metered daily-quota check.
+        """
         if any(request.url.path == p or request.url.path.startswith(p + "/") for p in _EXEMPT):
             return None
         engine = self._engine(request)
         if engine is None:
             return None
-        tenant = extract_tenant(request)
-        if tenant is None:
-            return None
+
+        principal = getattr(request.state, "principal", None)
+        if principal is not None:
+            # Authenticated: key on the cryptographically-verified tenant.
+            tenant: TenantId = principal.tenant_id
+            counter_key = f"tenant:{tenant}"
+        else:
+            # Unauthenticated (auth disabled): the routing tenant is unverified, so it must NOT be the
+            # counter key. Bucket by client IP instead; use the routing tenant only to size the limit.
+            tenant_or_none = extract_tenant(request)
+            if tenant_or_none is None:
+                return None
+            tenant = tenant_or_none
+            client = request.client
+            if client is None:
+                return None  # no IP to key on → fail open
+            counter_key = f"ip:{client.host}"
+
         try:
             limit = engine.rate_limit_for(tenant)
         except EntitlementError:
             return None  # unprovisioned / inactive: routing & auth will reject downstream
         if limit < 0:
             return None  # unbounded
-        return str(tenant), limit
+        return counter_key, limit, tenant
 
-    def _check(self, tenant: str, limit: int) -> bool:
-        """Increment the tenant's window counter; return True if still within ``limit``."""
+    def _check(self, key: str, limit: int) -> bool:
+        """Increment the window counter for ``key``; return True if still within ``limit``."""
         now = time.monotonic()
         with self._lock:
-            start, count = self._counters.get(tenant, (now, 0))
+            start, count = self._counters.get(key, (now, 0))
             if now - start >= _WINDOW_SECONDS:
                 start, count = now, 0
             count += 1
-            self._counters[tenant] = (start, count)
+            self._counters[key] = (start, count)
             return count <= limit
 
-    def _daily_quota_exceeded(self, request: Request, tenant: str) -> int | None:
+    def _daily_quota_exceeded(self, request: Request, tenant: TenantId) -> int | None:
         """Return the daily action limit if the tenant has met/exceeded it, else None (fail-open).
 
         Reads usage from the wired `UsageMeter` and enforces the tier's ``max_actions_per_day`` via
@@ -97,7 +133,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if engine is None:
             return None
         try:
-            engine.assert_within_quota(TenantId(tenant), actions_today=meter.actions_today(tenant))
+            engine.assert_within_quota(tenant, actions_today=meter.actions_today(str(tenant)))
         except QuotaExceededError as exc:
             return int(exc.detail.get("limit")) if exc.detail else 0
         except EntitlementError:
@@ -108,15 +144,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         target = self._limit_for(request)
         if target is None:
             return await call_next(request)
-        tenant, limit = target
-        if not self._check(tenant, limit):
+        counter_key, limit, tenant = target
+        if not self._check(counter_key, limit):
             return JSONResponse(
                 status_code=429,
                 headers={"Retry-After": str(_WINDOW_SECONDS)},
                 content={
                     "error": f"Rate limit exceeded ({limit}/min for this tier)",
                     "code": "RATE_LIMITED",
-                    "detail": {"tenant": tenant, "limit_per_min": limit},
+                    "detail": {"tenant": str(tenant), "limit_per_min": limit},
                 },
             )
         daily_limit = self._daily_quota_exceeded(request, tenant)
@@ -126,7 +162,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 content={
                     "error": f"Daily action quota exceeded ({daily_limit}/day for this tier)",
                     "code": "QUOTA_EXCEEDED",
-                    "detail": {"tenant": tenant, "limit_per_day": daily_limit},
+                    "detail": {"tenant": str(tenant), "limit_per_day": daily_limit},
                 },
             )
         return await call_next(request)

@@ -102,6 +102,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "memory":                  ("adapters.workflow.memory",          "InMemoryWorkflowAdapter"),
     # InferencePort
     "openai_compat":           ("adapters.inference.openai_compat",  "OpenAICompatInferenceAdapter"),
+    "vertex_inference":        ("adapters.inference.vertex",         "VertexInferenceAdapter"),
     # HITLPort
     "webhook":                 ("adapters.hitl.webhook",             "WebhookHITLAdapter"),
     # IdentityPort
@@ -118,6 +119,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     # Ledger
     "memory_ledger":           ("adapters.ledger.memory",            "InMemoryLedgerAdapter"),
     "openbao_ledger":          ("adapters.ledger.openbao",           "OpenBaoLedgerAdapter"),
+    "gcp_kms_ledger":          ("adapters.ledger.gcp_kms",           "GcpKmsLedgerAdapter"),
     # LedgerRepository (durable ledger backends; the TrustLedger writes through to these)
     "memory_ledger_repo":      ("adapters.ledger.memory_repo",       "InMemoryLedgerRepository"),
     "postgres_ledger":         ("adapters.ledger.postgres",          "PostgresLedgerRepository"),
@@ -479,15 +481,18 @@ class Kernel:
 
         ``[adapters].ledger_store`` selects the durable backend (``"postgres_ledger"`` /
         ``"memory_ledger_repo"``); omit it for a non-durable in-memory ledger. Durability is wired
-        through the TrustLedger-based ``openbao_ledger`` adapter — the dev ``memory_ledger`` adapter
-        does not persist. The ledger hydrates from the repository at ``kernel.startup()``.
+        through the TrustLedger-based signing adapters (``openbao_ledger``, ``gcp_kms_ledger``) — the
+        dev ``memory_ledger`` adapter does not persist. The ledger hydrates from the repository at
+        ``kernel.startup()``.
         """
+        # TrustLedger-based signing adapters that accept a durable LedgerRepository kwarg.
+        _DURABLE_LEDGERS = {"openbao_ledger", "gcp_kms_ledger"}
         name = adapter_cfg["ledger"]
         ledger_kwargs = cfg.get("ledger", {})
         repository: LedgerRepository | None = None
         if "ledger_store" in adapter_cfg:
             repository = _load_adapter(adapter_cfg["ledger_store"], **cfg.get("ledger_store", {}))
-        if name == "openbao_ledger" and repository is not None:
+        if name in _DURABLE_LEDGERS and repository is not None:
             ledger = _load_adapter(name, **ledger_kwargs, repository=repository)
         else:
             ledger = _load_adapter(name, **ledger_kwargs)

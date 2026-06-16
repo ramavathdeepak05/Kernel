@@ -56,3 +56,29 @@ def test_each_signup_gets_distinct_tenant():
     a, _ = eng.signup(email="a@b.io", name="Acme")
     b, _ = eng.signup(email="c@d.io", name="Acme")  # same name, different email
     assert a.tenant_id != b.tenant_id
+
+
+def test_pepper_changes_stored_hash():
+    """The same secret hashes to different stored values under different peppers (HMAC keying)."""
+    tenant = "acme"
+    rec_a, _ = AccountEngine(AccountStore(), EntitlementStore(), pepper="pepper-a").issue_api_key(tenant)
+    rec_none, _ = AccountEngine(AccountStore(), EntitlementStore(), pepper="").issue_api_key(tenant)
+    # Both are HMAC-SHA256 hex digests (64 chars), but distinct because the pepper differs.
+    assert len(rec_a.hashed_secret) == 64
+    assert rec_a.hashed_secret != rec_none.hashed_secret
+
+
+def test_key_does_not_verify_under_a_different_pepper():
+    """A key issued under one pepper must not validate against an engine with another pepper."""
+    accounts, ents = AccountStore(), EntitlementStore()
+    issuer = AccountEngine(accounts, ents, pepper="secret-1")
+    _, key = issuer.signup(email="a@b.io", name="Acme")
+
+    # A second engine over the SAME store but a different pepper recomputes a different HMAC.
+    other = AccountEngine(accounts, ents, pepper="secret-2")
+    with pytest.raises(ApiKeyInvalidError):
+        other.verify_api_key(key)
+
+    # Same pepper still verifies.
+    same = AccountEngine(accounts, ents, pepper="secret-1")
+    assert same.verify_api_key(key) is not None

@@ -98,6 +98,11 @@ class OpenBaoTreeSigner:
         )
 
     def verify(self, sth: SignedTreeHead) -> bool:
+        # A successful response carries OpenBao's verdict: return it as-is (``valid=false`` means the
+        # signature is genuinely invalid → ``False``). A transport/HTTP failure is NOT a verdict — it
+        # is an outage, and silently returning False would turn an infrastructure problem into a
+        # false-negative audit failure. Raise so the caller (and the API's 503 handler) can tell the
+        # difference between "ledger is bad" and "we couldn't reach the ledger's signer".
         msg = _signing_message(sth.tree_size, sth.root_hash)
         b64_input = base64.b64encode(msg).decode("ascii")
         signature_str = sth.signature.decode("utf-8")
@@ -108,8 +113,11 @@ class OpenBaoTreeSigner:
             )
             resp.raise_for_status()
             return bool(resp.json()["data"]["valid"])
-        except Exception:
-            return False
+        except Exception as exc:
+            raise LedgerSealError(
+                f"OpenBao verify failed for key {self._key_name!r}: {exc}",
+                detail={"key_name": self._key_name},
+            ) from exc
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
