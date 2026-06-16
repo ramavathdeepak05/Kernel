@@ -12,6 +12,13 @@ ledger   = "memory_ledger"
 events   = "memory_events"
 identity = "jwt"
 
+# The STARTER ledger is in-memory (ephemeral). Record every sealed governed action to the
+# `quaicu.audit` logger so the platform's log capture (e.g. Cloud Logging) is the durable audit
+# stream — visibility into what each tenant's product is doing without a database. Add
+# `pubsub_topic = "projects/<p>/topics/<t>"` to also fan out to Pub/Sub.
+[events]
+log_sink = true
+
 [hitl]
 dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"
 poll_url     = "http://host.docker.internal:9000/hitl/status"
