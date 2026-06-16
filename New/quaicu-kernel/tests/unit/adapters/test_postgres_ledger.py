@@ -27,6 +27,11 @@ NOW = datetime(2026, 6, 12, 12, 0, tzinfo=timezone.utc)
 
 
 def _fake_pool(conn: AsyncMock) -> MagicMock:
+    # The repo opens a transaction to set the RLS tenant context (app.current_tenant) / toggle
+    # row_security for hydration reads, so conn.transaction() must be an async context manager.
+    conn.transaction = MagicMock()
+    conn.transaction.return_value.__aenter__ = AsyncMock(return_value=None)
+    conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     pool = MagicMock()
     acquire_cm = MagicMock()
     acquire_cm.__aenter__ = AsyncMock(return_value=conn)
@@ -115,7 +120,9 @@ async def test_append_entry_executes_insert() -> None:
     repo._pool = _fake_pool(conn)
 
     await repo.append_entry(_entry())
-    conn.execute.assert_awaited_once()
+    # Two executes now: set_config('app.current_tenant', …) then the insert. await_args is the last
+    # call (the insert), so the column assertions below validate the insert payload.
+    assert conn.execute.await_count == 2
     args = conn.execute.await_args.args
     assert args[1] == "acme"  # tenant_id
     assert args[2] == 3  # ledger_seq

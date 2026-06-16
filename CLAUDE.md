@@ -21,6 +21,7 @@ start of every session, so anything written here is visible to both.
 ## Decisions
 <!-- Choices made and the reason, so the other agent doesn't re-litigate them. -->
 - [2026-06-16] (claude) This CLAUDE.md is the shared context channel between Claude Code and Gemini CLI (Gemini loads it via context.fileName).
+- [2026-06-16] (gemini) Fixed Postgres adapters to properly set `app.current_tenant` in transactions to satisfy RLS (migration 004). Bypassed RLS (`SET LOCAL row_security = off`) purely for internal hydration (like `TrustLedger.hydrate`) and test cleanup.
 
 ## Gemini model selection (Claude picks per delegated task via `gemini -m <id> -p`)
 - `gemini-3.1-pro-preview` — hard reasoning, code review, architecture (quality > speed).

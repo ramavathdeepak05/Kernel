@@ -41,7 +41,14 @@ def _action(
 
 
 def _fake_pool(conn: AsyncMock) -> MagicMock:
-    """Build a fake pool whose acquire() yields conn as an async context manager."""
+    """Build a fake pool whose acquire() yields conn as an async context manager.
+
+    Also wires ``conn.transaction()`` as an async context manager: the adapter opens a transaction to
+    set the per-request RLS tenant context (``app.current_tenant``), so the mock must support it.
+    """
+    conn.transaction = MagicMock()
+    conn.transaction.return_value.__aenter__ = AsyncMock(return_value=None)
+    conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
     pool = MagicMock()
     acquire_cm = MagicMock()
     acquire_cm.__aenter__ = AsyncMock(return_value=conn)
@@ -80,9 +87,6 @@ def test_action_to_row_and_back():
 async def test_insert_if_absent_returns_none_on_clean_insert():
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value="action-001")  # RETURNING id — row created
-    conn.transaction = MagicMock()
-    conn.transaction.return_value.__aenter__ = AsyncMock(return_value=None)
-    conn.transaction.return_value.__aexit__ = AsyncMock(return_value=False)
 
     adapter = PostgresStorageAdapter(dsn="postgresql://fake/fake")
     adapter._pool = _fake_pool(conn)
@@ -229,13 +233,14 @@ async def test_transaction_yields_postgres_transaction():
 
 async def test_transaction_wraps_exception_as_storage_port_error():
     conn = AsyncMock()
+    adapter = PostgresStorageAdapter(dsn="postgresql://fake/fake")
+    adapter._pool = _fake_pool(conn)
+    # Override _fake_pool's default txn with one whose enter raises (e.g. a deadlock), set AFTER the
+    # helper so it isn't clobbered.
     txn_cm = MagicMock()
     txn_cm.__aenter__ = AsyncMock(side_effect=Exception("deadlock"))
     txn_cm.__aexit__ = AsyncMock(return_value=False)
     conn.transaction = MagicMock(return_value=txn_cm)
-
-    adapter = PostgresStorageAdapter(dsn="postgresql://fake/fake")
-    adapter._pool = _fake_pool(conn)
 
     with pytest.raises(StoragePortError, match="deadlock"):
         async with adapter.transaction():

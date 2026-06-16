@@ -143,8 +143,10 @@ class PostgresLedgerRepository:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                await conn.execute(
-                    _INSERT_ENTRY_SQL,
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(entry.tenant))
+                    await conn.execute(
+                        _INSERT_ENTRY_SQL,
                     str(entry.tenant),
                     entry.ledger_seq,
                     str(entry.action_id),
@@ -172,7 +174,11 @@ class PostgresLedgerRepository:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                rows = await conn.fetch(_SELECT_ALL_ENTRIES_SQL)
+                async with conn.transaction():
+                    await conn.execute("ALTER TABLE quaicu_ledger_entries NO FORCE ROW LEVEL SECURITY")
+                    await conn.execute("SET LOCAL row_security = off")
+                    rows = await conn.fetch(_SELECT_ALL_ENTRIES_SQL)
+                    await conn.execute("ALTER TABLE quaicu_ledger_entries FORCE ROW LEVEL SECURITY")
             return [_row_to_entry(r) for r in rows]
         except LedgerPersistenceError:
             raise
@@ -183,8 +189,10 @@ class PostgresLedgerRepository:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                await conn.execute(
-                    _UPSERT_STH_SQL,
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(tenant))
+                    await conn.execute(
+                        _UPSERT_STH_SQL,
                     str(tenant),
                     sth.tree_size,
                     bytes(sth.root_hash),
@@ -203,7 +211,11 @@ class PostgresLedgerRepository:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                rows = await conn.fetch(_SELECT_ALL_STH_SQL)
+                async with conn.transaction():
+                    await conn.execute("ALTER TABLE quaicu_ledger_sth NO FORCE ROW LEVEL SECURITY")
+                    await conn.execute("SET LOCAL row_security = off")
+                    rows = await conn.fetch(_SELECT_ALL_STH_SQL)
+                    await conn.execute("ALTER TABLE quaicu_ledger_sth FORCE ROW LEVEL SECURITY")
             return {r["tenant_id"]: _row_to_sth(r) for r in rows}
         except LedgerPersistenceError:
             raise

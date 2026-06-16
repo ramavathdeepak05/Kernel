@@ -60,9 +60,13 @@ async def adapter():
     # Clean up test rows
     pool = await a._get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            "DELETE FROM quaicu_actions WHERE tenant_id LIKE 'test-%'"
-        )
+        async with conn.transaction():
+            await conn.execute("ALTER TABLE quaicu_actions NO FORCE ROW LEVEL SECURITY")
+            await conn.execute("SET LOCAL row_security = off")
+            await conn.execute(
+                "DELETE FROM quaicu_actions WHERE tenant_id LIKE 'test-%'"
+            )
+            await conn.execute("ALTER TABLE quaicu_actions FORCE ROW LEVEL SECURITY")
     await a.close()
 
 
