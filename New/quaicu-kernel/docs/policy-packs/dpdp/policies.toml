@@ -1,0 +1,56 @@
+# QUAICU starter policy pack — India DPDP Act 2023 (DRAFT — review with counsel before relying on it).
+#
+# Drop these [[policy.seed]] entries into a kernel config's [policy] section (the engine seeds them as
+# ACTIVATED), or author them via POST /v1/policies and run the normal DRAFT→backtest→ACTIVATE flow.
+# CEL is written against the activation schema in docs/CEL_POLICY_GUIDE.md (action_type / actor_roles /
+# payload_<field>). See README.md for the per-action payload contract and the DPDP article mapping.
+#
+# Governs the action types `personal_data.process` and `personal_data.transfer`. Map your real action
+# types onto these (edit `governs`). Deny-overrides: a violation beats the allow-baseline. A REQUIRED
+# field that is ABSENT makes its condition error → fail-closed DENY — intended for a compliance pack
+# (no consent/purpose declared ⇒ deny).
+
+# ── personal_data.process ──────────────────────────────────────────────────────
+[[policy.seed]]
+id              = "dpdp-process-allow-baseline"
+governs         = "personal_data.process"
+condition       = "true"
+decision        = "allow"
+regulatory_refs = ["dpdp.process.art.4"]
+
+[[policy.seed]]
+id              = "dpdp-consent-required"
+governs         = "personal_data.process"
+condition       = "payload_consent_obtained == false"
+decision        = "deny"
+regulatory_refs = ["dpdp.consent.art.6"]
+
+[[policy.seed]]
+id              = "dpdp-purpose-limitation"
+governs         = "personal_data.process"
+condition       = "!(payload_purpose in [\"kyc\", \"billing\", \"support\", \"legal\"])"
+decision        = "deny"
+regulatory_refs = ["dpdp.purpose.art.6"]
+
+[[policy.seed]]
+id              = "dpdp-erased-subject"
+governs         = "personal_data.process"
+condition       = "payload_subject_erased == true"
+decision        = "deny"
+regulatory_refs = ["dpdp.erasure.art.12"]
+
+# ── personal_data.transfer ─────────────────────────────────────────────────────
+[[policy.seed]]
+id              = "dpdp-transfer-allow-baseline"
+governs         = "personal_data.transfer"
+condition       = "true"
+decision        = "allow"
+regulatory_refs = ["dpdp.transfer.art.16"]
+
+[[policy.seed]]
+id              = "dpdp-cross-border-review"
+governs         = "personal_data.transfer"
+condition       = "payload_destination_country != \"IN\""
+decision        = "require_approval"
+approvers       = ["role:dpo"]
+regulatory_refs = ["dpdp.transfer.art.16"]
