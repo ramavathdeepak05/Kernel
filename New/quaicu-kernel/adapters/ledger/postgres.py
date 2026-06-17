@@ -175,10 +175,11 @@ class PostgresLedgerRepository:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    await conn.execute("ALTER TABLE quaicu_ledger_entries NO FORCE ROW LEVEL SECURITY")
-                    await conn.execute("SET LOCAL row_security = off")
+                    # Cross-tenant hydration read via the RLS read-only sentinel (migration 007):
+                    # '*' matches every tenant in USING, but never in WITH CHECK, so this can read
+                    # all rows but can't write across tenants. No DDL / ACCESS EXCLUSIVE lock.
+                    await conn.execute("SELECT set_config('app.current_tenant', '*', true)")
                     rows = await conn.fetch(_SELECT_ALL_ENTRIES_SQL)
-                    await conn.execute("ALTER TABLE quaicu_ledger_entries FORCE ROW LEVEL SECURITY")
             return [_row_to_entry(r) for r in rows]
         except LedgerPersistenceError:
             raise
@@ -212,10 +213,9 @@ class PostgresLedgerRepository:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
                 async with conn.transaction():
-                    await conn.execute("ALTER TABLE quaicu_ledger_sth NO FORCE ROW LEVEL SECURITY")
-                    await conn.execute("SET LOCAL row_security = off")
+                    # Cross-tenant hydration read via the RLS read-only sentinel (migration 007).
+                    await conn.execute("SELECT set_config('app.current_tenant', '*', true)")
                     rows = await conn.fetch(_SELECT_ALL_STH_SQL)
-                    await conn.execute("ALTER TABLE quaicu_ledger_sth FORCE ROW LEVEL SECURITY")
             return {r["tenant_id"]: _row_to_sth(r) for r in rows}
         except LedgerPersistenceError:
             raise
