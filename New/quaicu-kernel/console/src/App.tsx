@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { clearSession, getSession, isAuthenticated, setSession, subscribe } from "./state/auth";
 import { EntitlementsProvider, useEntitlements, useFeature } from "./state/entitlements";
@@ -48,80 +48,63 @@ function SignInButton() {
   );
 }
 
-function SettingsBar() {
+// Top-bar account menu — only mounted once signed in. Shows the tenant + tier and a sign-out.
+function AccountMenu() {
   const session = useSession();
-  const authed = useAuthed();
-  const [open, setOpen] = useState(!authed);
-  const [devOpen, setDevOpen] = useState(false);
-  const [token, setToken] = useState(session.token);
-  const [tenant, setTenant] = useState(session.tenant);
-  const [apiBase, setApiBase] = useState(session.apiBase);
-
-  // Collapse the panel once a session exists (e.g. after an OIDC redirect completes).
-  useEffect(() => {
-    if (authed) setOpen(false);
-  }, [authed]);
-
-  function save() {
-    setSession({ token: token.trim(), tenant: tenant.trim(), apiBase: apiBase.trim() });
-    setOpen(false);
-    setDevOpen(false);
-  }
-
-  function signOut() {
-    clearSession();
-    setToken("");
-    setTenant("");
-    setOpen(true);
-  }
-
+  const [open, setOpen] = useState(false);
   return (
     <div className="settings">
       <TierBadge />
       <button className="settings-toggle" onClick={() => setOpen((o) => !o)}>
-        {authed ? `${session.tenant} ▾` : "Sign in ▾"}
+        {session.tenant} ▾
       </button>
       {open && (
         <div className="settings-panel">
-          {authed ? (
-            <>
-              <div className="muted small">Signed in as <strong>{session.tenant}</strong></div>
-              <div className="settings-actions">
-                <button className="secondary" onClick={signOut}>Sign out</button>
-              </div>
-            </>
-          ) : (
-            <>
-              {oidcEnabled() && <SignInButton />}
-              <Link className="signup-link" to="/signup" onClick={() => setOpen(false)}>
-                Create a free workspace →
-              </Link>
-              {/* Developer sign-in: paste a token directly (local dev, or a dedicated deploy with no
-                  OIDC). Collapsed by default so it stays off the main view. */}
-              <button className="dev-toggle" onClick={() => setDevOpen((d) => !d)}>
-                Developer sign-in {devOpen ? "▴" : "▾"}
-              </button>
-              {devOpen && (
-                <div className="dev-signin">
-                  <label>
-                    Tenant id
-                    <input value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="ciro-bank" />
-                  </label>
-                  <label>
-                    Bearer token
-                    <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="paste JWT or API key…" />
-                  </label>
-                  <label>
-                    API base (blank = built-in default)
-                    <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="" />
-                  </label>
-                  <div className="settings-actions">
-                    <button className="primary" onClick={save}>Save</button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+          <div className="muted small">Signed in as <strong>{session.tenant}</strong></div>
+          <div className="settings-actions">
+            <button className="secondary" onClick={clearSession}>Sign out</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Developer sign-in: paste a token directly (local dev, or a dedicated deploy with no OIDC).
+// Collapsed by default; lives inside the centered sign-in gate.
+function DevSignIn() {
+  const session = useSession();
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState(session.token);
+  const [tenant, setTenant] = useState(session.tenant);
+  const [apiBase, setApiBase] = useState(session.apiBase);
+
+  function save() {
+    setSession({ token: token.trim(), tenant: tenant.trim(), apiBase: apiBase.trim() });
+  }
+
+  return (
+    <div className="dev-block">
+      <button className="dev-toggle" onClick={() => setOpen((o) => !o)}>
+        Developer sign-in {open ? "▴" : "▾"}
+      </button>
+      {open && (
+        <div className="dev-signin">
+          <label>
+            Tenant id
+            <input value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="ciro-bank" />
+          </label>
+          <label>
+            Bearer token
+            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="paste JWT or API key…" />
+          </label>
+          <label>
+            API base (blank = built-in default)
+            <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="" />
+          </label>
+          <div className="settings-actions">
+            <button className="primary" onClick={save}>Save</button>
+          </div>
         </div>
       )}
     </div>
@@ -163,21 +146,19 @@ function SignInGate() {
   return (
     <div className="gate">
       <h2>Sign in to the console</h2>
-      {oidcEnabled() ? (
-        <>
-          <p className="muted">Authenticate with your organization's identity provider.</p>
-          <SignInButton />
-        </>
-      ) : (
-        <p className="muted">
-          Create a free workspace below to get an API key, or use <strong>Developer sign-in</strong>{" "}
-          (top-right) to paste a token your IdentityPort accepts.
-        </p>
-      )}
-      <div className="divider"><span>or</span></div>
-      <p>
-        New here? <Link className="signup-link" to="/signup">Create a free workspace →</Link>
-      </p>
+      <div className="signin-hub">
+        {oidcEnabled() && (
+          <>
+            <p className="muted small">Authenticate with your organization's identity provider.</p>
+            <SignInButton />
+            <div className="divider"><span>or</span></div>
+          </>
+        )}
+        <Link className="signup-cta" to="/signup">Create a free workspace →</Link>
+        <p className="muted small">No credit card — STARTER tier with real governance.</p>
+        <div className="divider"><span>developer</span></div>
+        <DevSignIn />
+      </div>
     </div>
   );
 }
@@ -190,7 +171,7 @@ export default function App() {
         <header className="topbar">
           <div className="brand">QUAICU&nbsp;<span className="muted">Console</span></div>
           {authed && <Nav />}
-          <SettingsBar />
+          {authed && <AccountMenu />}
         </header>
         <main className="content">
           <Routes>
