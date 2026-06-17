@@ -2,8 +2,8 @@
 
 Get the free (STARTER) + paid (BUSINESS) tiers live on Google Cloud Run. The image already honors
 Cloud Run's injected `$PORT` and selects its ASGI app via `KERNEL_APP`, so deploying is config + env.
-See also [HOSTING](HOSTING.md), [GO_LIVE_SETUP](GO_LIVE_SETUP.md), and
-[DEPLOY_ENTERPRISE_GCP](DEPLOY_ENTERPRISE_GCP.md) for the customer-hosted model.
+See also [HOSTING](../HOSTING.md), [GO_LIVE_SETUP](GO_LIVE_SETUP.md), and the customer-hosted
+ENTERPRISE Terraform at [deploy/terraform/gcp-enterprise](../../deploy/terraform/gcp-enterprise/README.md).
 
 ## 0. Prerequisites
 - `gcloud` authenticated; a project with billing; Artifact Registry + Cloud Run + Cloud SQL APIs on.
@@ -84,7 +84,7 @@ client id), and add the console origin to the API's CORS allow-list (`create_app
 
 ## Notes
 - **Payments (BUSINESS):** add a `[billing.stripe]` / `[billing.razorpay]` section to
-  `kernel.saas.toml` + the webhook endpoint; see [GO_LIVE_SETUP](GO_LIVE_SETUP.md) §4.
+  `kernel.saas.toml` + the webhook endpoint; see [GO_LIVE_SETUP](GO_LIVE_SETUP.md) §4 (same dir).
 - **Exact quotas across instances:** set `[metering].redis_url` (Memorystore) so daily-quota counts
   are exact when `--max-instances > 1`.
 - **Single-tenant / dedicated** instead of the plane: omit `KERNEL_APP` (defaults to

@@ -3,7 +3,7 @@
 Everything you need to stand up the hosted SaaS plane: the **API**, the **operator console
 (frontend)**, **Stripe/Razorpay** payments, the **database**, and the supporting config (secrets, CORS,
 DNS/TLS, OIDC). For the two delivery models see [DEPLOYMENT_MODELS](DEPLOYMENT_MODELS.md); for the
-hosting basics see [HOSTING](HOSTING.md).
+hosting basics see [HOSTING](../HOSTING.md).
 
 > Conventions: API on port **7000**; console (Vite/React) builds to static files. All secrets are
 > `${ENV_VAR}` references in TOML, resolved at load — **never commit live keys**.
@@ -94,7 +94,7 @@ locally with the Stripe CLI (`stripe listen --forward-to localhost:7000/v1/billi
 > `MarketplaceMeteringReporter` (`adapters/billing/marketplace.py`) — it reports per-tenant usage
 > deltas read from the `UsageMeter`. Finish the cloud `send` seam (`gcp_sender`/`aws_sender`) and call
 > `report_all(meter, tenants)` from a scheduler (Cloud Scheduler / EventBridge). See
-> [ENTERPRISE_CLOUD_STRATEGY](strategy/ENTERPRISE_CLOUD_STRATEGY.md) §5.
+> [ENTERPRISE_CLOUD_STRATEGY](../strategy/ENTERPRISE_CLOUD_STRATEGY.md) §5.
 
 ## 5. Frontend — operator console
 React/Vite app in `console/`. It calls the kernel REST API and sends the user's bearer token.
