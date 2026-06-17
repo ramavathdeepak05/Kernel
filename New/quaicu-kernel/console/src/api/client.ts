@@ -16,6 +16,8 @@ import type {
   PolicyListResponse,
   PolicyRegisterBody,
   PolicyResponse,
+  SignupBody,
+  SignupResponse,
   SimulateResponse,
   TopActions,
 } from "./types";
@@ -33,9 +35,13 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const { token, apiBase } = getSession();
+  const { token, tenant, apiBase } = getSession();
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
+  // Shared-plane routing reads the tenant from the JWT claim when present, else from this header.
+  // An API key (qk_…) isn't a JWT, so without X-Tenant-Id the kernel can't route the request
+  // (TENANT_UNRESOLVED). Sending it is harmless for JWT sessions (the verified claim wins).
+  if (tenant) headers["X-Tenant-Id"] = tenant;
   if (body !== undefined) headers["Content-Type"] = "application/json";
 
   let resp: Response;
@@ -65,6 +71,9 @@ function tenant(): string {
 }
 
 export const api = {
+  // ── Signup (unauthenticated self-serve onboarding) ─────────────────────────
+  signup: (b: SignupBody) => request<SignupResponse>("POST", "/v1/signup", b),
+
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),
 

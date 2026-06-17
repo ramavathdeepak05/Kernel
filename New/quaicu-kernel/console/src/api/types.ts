@@ -135,6 +135,19 @@ export interface CheckoutResponse {
   reference: string | null;
 }
 
+// ── Self-serve signup (POST /v1/signup, unauthenticated) ──────────────────────
+export interface SignupBody {
+  email: string;
+  name: string; // organisation / workspace name
+}
+
+export interface SignupResponse {
+  account_id: string;
+  tenant_id: string;
+  tier: string; // always "STARTER" on signup
+  api_key: string; // plaintext — shown ONCE
+}
+
 // Request bodies
 export interface PolicyRegisterBody {
   id: string;

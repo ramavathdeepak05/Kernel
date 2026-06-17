@@ -34,14 +34,23 @@ For production, serve `dist/` behind your web server and set the **API base** to
 ## What each page does
 | Page | Backing endpoints |
 |------|-------------------|
+| Signup (`/signup`) | `POST /v1/signup` — self-serve free STARTER workspace; reveals the one-time API key and signs you in |
 | Dashboard | `GET /v1/dashboard/{tenant}/{overview,decisions,actions/top,hitl/queue}` |
 | Policies | `/v1/policies/*` — register, submit, **simulate** (backtest), activate, deprecate |
 | Audit trail | `GET /v1/ledger/{tenant}/trail` |
 | Approvals | `GET /v1/approvals`, `POST /v1/approvals/{id}/{approve,reject}` |
 
+## Auth & tenant routing
+The console sends `Authorization: Bearer <token>` plus `X-Tenant-Id: <tenant>` on every API call.
+The bearer is either an OIDC `id_token` (tenant read from its claim) or a self-serve **API key**
+(`qk_…`, from `/signup`). Because an API key is not a JWT, the shared-plane router needs the
+`X-Tenant-Id` header to route the request — the console always sends it.
+
 ## Notes
-- **Auth** is token-paste for now (the kernel consumes tokens via its IdentityPort). A login/OIDC
-  flow is a later iteration.
+- **Auth** has three paths: self-serve **signup** (`/signup` → API key), **OIDC** Authorization
+  Code + PKCE login (when `VITE_OIDC_*` is configured), and manual **token paste** (top-right) for
+  local development. The kernel consumes whichever bearer it's given via its IdentityPort / API-key
+  middleware.
 - **Approvals**: the queue is the operator surface over the in-process HITL store. Wiring an
   approval to *resume* a suspended action depends on the async K·06 process-engine deployment; the
   synchronous in-process lifecycle times a gate out immediately. See the route docstring.
