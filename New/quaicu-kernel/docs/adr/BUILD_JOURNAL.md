@@ -12,7 +12,27 @@ next cold agent doesn't know it happened.
 
 ---
 
-## Current status (2026-06-15)
+## Current status (2026-06-17)
+
+### Launch-readiness update (2026-06-17)
+The go-live program (security hardening, GCP cloud adapters, onboarding, deploy, commercial drafts,
+final hardening) is **code-complete and merged to `main`** (PRs through #24 + the hardening branch).
+Suite **940 passed / 14 skipped** (14 skips = Cloud KMS + OpenBao integration tests, which self-skip
+without a managed signer; the 6 Postgres ones now run green in the new CI integration job and live on
+Cloud SQL). Shipped since the 06-15 baseline below: the 4 security fixes; GCP **Cloud KMS** ledger
+signer (ECDSA P-256) + **Vertex** inference; **self-serve signup** wired + a **durable Postgres
+account store** (migration 006); a **governance-capable free tier** (STARTER runs the CEL engine with
+seeded policies); `UsageMeter` activation + a **Redis shared meter** + **event sinks** (DB-less audit);
+a **marketplace-metering** scaffold; **Cloud Run** deploy + **ENTERPRISE Terraform**; the **RLS
+hydration sentinel** (migration 007) + an **integration CI** job; and the commercial drafts
+(LICENSE · SECURITY · CHANGELOG · PRICING · K·02 RFQ · a tested **DPDP policy pack**). Verified live on
+GCP (Cloud SQL + Cloud KMS). **Remaining = non-code (human):** commission the K·02 crypto review (RFQ
+drafted), finalize the legal/pricing drafts, tag a release (→ signed GHCR image), and stand up
+Stripe/Razorpay accounts. The historical baseline below is retained for context.
+
+---
+
+## Current status — baseline (2026-06-15)
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
 alongside, and the commercial productization program (3-tier packaging) is complete — waves 0–1 are
@@ -97,19 +117,23 @@ proof export, RLS tenant isolation — are actually built), **but the *product* 
 either market.** The remaining work is bounded packaging/operability + two non-code gates, not
 research.
 
-### Readiness scorecard
+### Readiness scorecard (updated 2026-06-17)
 | Dimension | State | Verdict |
 |---|---|---|
 | Governance engine (14 layers) | code-complete, conformance-tested | 🟢 ready |
-| Security (fail-closed · RBAC · OIDC · tenant isolation) | built & tested | 🟢 ready |
-| Auditability (ledger · proof export · erasure) | built | 🟢 differentiator |
-| Reproducible build / packaging | **no `pyproject.toml` / lockfile — deps pinned only in `delivery/docker/Dockerfile`** | 🔴 blocker |
-| Horizontal scale / HA | in-memory action repo → `--workers 1` hardcoded; in-memory `EntitlementStore` (plans lost on restart) | 🔴 blocker |
-| SaaS multi-tenant plane | `TieredKernelProvider` exists but **no production entrypoint** — only the single-kernel path boots | 🔴 blocker (SaaS) |
-| CI/CD · SBOM · image signing · vuln scan | none (`.github/workflows` absent) | 🔴 blocker (marketplace) |
-| Commercial/legal (LICENSE · SECURITY.md · README · pricing) | absent | 🔴 blocker (listing) |
-| K·02 cryptographic review (RFC 6962 ledger) | not done — third-party, ~6–8wk lead | 🔴 regulatory critical path |
-| Policy content packs (RBI / EU AI Act / DPDP rules) | engine enforces; **rules unwritten** | 🔴 regulatory critical path |
+| Security (fail-closed · RBAC · OIDC · tenant isolation) | built & tested; 4 review findings fixed; API-key HMAC+pepper; RLS per-txn + hydration sentinel | 🟢 ready |
+| Auditability (ledger · proof export · erasure) | built; Cloud KMS (FIPS L3) signer option; DB-less audit via event sinks | 🟢 differentiator |
+| Reproducible build / packaging | `pyproject.toml` + hashed lockfile; Cloud Run-ready image | 🟢 ready |
+| Horizontal scale / HA | durable Postgres profiles; durable entitlements + accounts; Redis shared meter | 🟢 ready |
+| SaaS multi-tenant plane | `entrypoint_saas` + `TieredKernelProvider`; Cloud Run deploy runbook; self-serve signup wired | 🟢 ready |
+| Onboarding (self-serve signup) | `/v1/signup` wired + durable account store (migration 006) | 🟢 ready |
+| Free tier demonstrates governance | STARTER runs the CEL engine + seeded policies (not pass-through) | 🟢 ready |
+| CI/CD · SBOM · image signing · vuln scan | test+ruff+integration jobs; release.yml: SBOM + Trivy + cosign | 🟢 ready |
+| Commercial/legal (LICENSE · SECURITY.md · CHANGELOG · pricing) | **drafts written; need counsel sign-off** | 🟡 draft |
+| GCP cloud adapters (KMS signer · Vertex · IaC) | built + verified live; ENTERPRISE Terraform module | 🟢 ready |
+| K·02 cryptographic review (RFC 6962 ledger incl. ECDSA-P256 STH) | RFQ drafted; **not yet commissioned** — third-party, ~6–8wk | 🔴 regulatory critical path |
+| Policy content packs | starter **DPDP pack shipped + tested**; RBI / EU AI Act unwritten | 🟡 partial |
+| Release published | not yet tagged (merge + tag → signed GHCR image) | 🟡 pending |
 
 ### The two tracks have different blockers
 - **Track A — regulated enterprise (banks).** Gated by two *non-code* items: (1) an **independent
