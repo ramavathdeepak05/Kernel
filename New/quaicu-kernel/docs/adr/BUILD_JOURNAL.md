@@ -183,6 +183,19 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-17 · Launch hardening — RLS hydration sentinel + integration CI · adapters/ledger · migrations · .github · claude** —
+  Final launch bucket (D). **(1)** Replaced the per-startup `ALTER TABLE … NO FORCE/FORCE` hydration
+  hack (ACCESS EXCLUSIVE lock per boot, needs table ownership) with a **read-only RLS sentinel**
+  (migration 007): the tenant-isolation `USING` clause also matches `app.current_tenant = '*'`, while
+  `WITH CHECK` stays strict — cross-tenant *read* for hydration, never cross-tenant *write*. `'*'` is
+  unreachable via the per-request path (tenant ids are validated). Works on Cloud SQL without
+  BYPASSRLS/superuser. **Verified live**: migration 007 applies + the 6 Postgres conformance tests
+  pass (hydrate-after-restart + cross-tenant isolation). **(2)** New CI `integration` job: a postgres:16
+  service container runs migrations 001–007 + the storage/ledger conformance suite (`-m integration`)
+  on every PR (Cloud KMS/OpenBao still self-skip). Suite 940/14, ruff clean. **Remaining (human):**
+  merge + tag a release (`release.yml` publishes the cosign-signed `ghcr.io/<owner>/kernel:<tag>`);
+  commission the K·02 crypto review (RFQ drafted); finalize LICENSE/SECURITY/PRICING.
+
 - **2026-06-17 · Integration tests verified live on GCP (Cloud SQL + Cloud KMS) · tests · claude** —
   Resolved the 10 skipped integration tests against real GCP. **(1)** Ran the 6 Postgres conformance
   tests (`tests/conformance/storage/test_spec.py` + `ledger/test_postgres_spec.py`) against the live
