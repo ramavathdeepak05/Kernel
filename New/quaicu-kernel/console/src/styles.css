@@ -83,6 +83,19 @@ button.secondary { color: var(--muted); }
 .tier-badge.tier-business { color: var(--accent); border-color: var(--accent); }
 .tier-badge.tier-enterprise { color: var(--warn); border-color: var(--warn); }
 
+/* ── Signup (self-serve onboarding) ───────────────────────────────────────────── */
+.signup-card { max-width: 460px; margin: 18px auto; text-align: left; }
+.signup-form .card-body { display: grid; gap: 14px; }
+.signup-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.signup-form input { font-size: 14px; padding: 8px 10px; }
+.key-reveal { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+.key-value { flex: 1; background: #12151c; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; word-break: break-all; }
+.signup-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+.signup-link:hover { text-decoration: underline; }
+.gate .divider { display: flex; align-items: center; text-align: center; color: var(--muted); font-size: 11px; max-width: 320px; margin: 20px auto; }
+.gate .divider::before, .gate .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.gate .divider span { padding: 0 10px; }
+
 /* ── Billing page ──────────────────────────────────────────────────────────── */
 .notice { background: rgba(46,163,107,.12); border: 1px solid var(--allow); color: #7fd6a8; padding: 10px 12px; border-radius: 8px; margin-bottom: 14px; }
 .plan-options { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }

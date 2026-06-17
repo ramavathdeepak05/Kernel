@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes } from "react-router-dom";
 import { clearSession, getSession, isAuthenticated, setSession, subscribe } from "./state/auth";
 import { EntitlementsProvider, useEntitlements, useFeature } from "./state/entitlements";
 import { beginLogin, oidcEnabled } from "./oidc/oidc";
@@ -9,6 +9,7 @@ import Audit from "./pages/Audit";
 import Approvals from "./pages/Approvals";
 import Billing from "./pages/Billing";
 import Callback from "./pages/Callback";
+import Signup from "./pages/Signup";
 
 function useSession() {
   return useSyncExternalStore(subscribe, getSession);
@@ -159,6 +160,10 @@ function SignInGate() {
           kernel API. The console does not mint tokens — paste one your IdentityPort accepts.
         </p>
       )}
+      <div className="divider"><span>or</span></div>
+      <p>
+        New here? <Link className="signup-link" to="/signup">Create a free workspace →</Link>
+      </p>
     </div>
   );
 }
@@ -176,6 +181,7 @@ export default function App() {
         <main className="content">
           <Routes>
             <Route path="/callback" element={<Callback />} />
+            <Route path="/signup" element={<Signup />} />
             {authed ? (
               <>
                 <Route path="/" element={<Dashboard />} />
