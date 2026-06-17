@@ -32,7 +32,48 @@ jobs:
           ruff check .
 
       - name: Run test suite
-        # The Postgres + OpenBao integration tests self-skip without live services (10 skips).
+        # The Postgres + OpenBao + Cloud KMS integration tests self-skip without live services.
         run: |
           cd New/quaicu-kernel
           python -m pytest --tb=short -q
+
+  # Exercises the Postgres-backed adapters (storage + durable ledger, incl. RLS + hydration) against a
+  # real Postgres so migrations and the RLS sentinel are tested on every PR — not just locally. The
+  # Cloud KMS / OpenBao integration tests still self-skip here (no managed signer in CI).
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: quaicu
+          POSTGRES_PASSWORD: quaicu-dev
+          POSTGRES_DB: quaicu
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U quaicu"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (runtime + test extras)
+        run: |
+          pip install --upgrade pip
+          cd New/quaicu-kernel
+          pip install -e ".[test,dev]"
+      - name: Apply migrations (001–007)
+        env:
+          DATABASE_URL: postgresql+asyncpg://quaicu:quaicu-dev@localhost:5432/quaicu
+        run: |
+          cd New/quaicu-kernel
+          python -m alembic -c adapters/storage/migrations/alembic.ini upgrade head
+      - name: Run integration conformance tests
+        env:
+          DATABASE_URL: postgresql://quaicu:quaicu-dev@localhost:5432/quaicu
+        run: |
+          cd New/quaicu-kernel
+          python -m pytest -m integration --tb=short -q \
+            tests/conformance/storage tests/conformance/ledger/test_postgres_spec.py
