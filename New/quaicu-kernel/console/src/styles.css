@@ -76,6 +76,12 @@ input:focus, select:focus { outline: none; border-color: var(--ink); }
 .gate { text-align: center; padding: 72px 0; }
 .gate h2 { font-size: 28px; }
 .gate p { max-width: 520px; margin: 14px auto; color: var(--smoke); }
+.signin-hub { max-width: 360px; margin: 24px auto 0; display: grid; gap: 14px; text-align: center; }
+.signin-hub button.primary { width: 100%; }
+.signin-hub p { margin: 0; }
+.signup-cta { display: block; text-align: center; background: var(--ink); color: var(--paper); border: 1px solid var(--ink); padding: 11px 14px; font-family: var(--f-body); font-size: 13px; font-weight: 600; text-decoration: none; }
+.signup-cta:hover { background: var(--ember); border-color: var(--ember); color: #fff; }
+.dev-block { text-align: left; }
 
 /* ── Settings / sign-in dropdown ───────────────────────────────────────────── */
 .settings { position: relative; }
