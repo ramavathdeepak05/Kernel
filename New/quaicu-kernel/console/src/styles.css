@@ -27,7 +27,8 @@ h1 { font-size: 20px; margin: 0 0 16px; } h2 { font-size: 16px; }
 .gate { text-align: center; padding: 60px 0; } .gate p { max-width: 520px; margin: 12px auto; }
 
 .settings { position: relative; }
-.settings-panel { position: absolute; right: 0; top: 36px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; width: 280px; box-shadow: 0 8px 24px rgba(0,0,0,.4); }
+.settings-panel { position: absolute; right: 0; top: 36px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; display: grid; gap: 10px; width: 280px; max-width: calc(100vw - 24px); box-shadow: 0 8px 24px rgba(0,0,0,.4); z-index: 20; }
+.settings-panel > * { min-width: 0; }
 .settings-panel label, .form-grid label, label.inline { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
 label.inline { flex-direction: row; align-items: center; gap: 8px; }
 
@@ -90,9 +91,9 @@ button.secondary { color: var(--muted); }
 .signup-form input { font-size: 14px; padding: 8px 10px; }
 .key-reveal { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
 .key-value { flex: 1; background: #12151c; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; word-break: break-all; }
-.signup-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+.signup-link { display: block; color: var(--accent); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
 .signup-link:hover { text-decoration: underline; }
-.dev-toggle { width: 100%; background: transparent; border: none; color: var(--muted); font-size: 12px; text-align: left; padding: 4px 0; }
+.dev-toggle { display: block; width: 100%; background: transparent; border: none; color: var(--muted); font-size: 12px; text-align: left; padding: 4px 0; }
 .dev-toggle:hover { color: var(--text); border: none; }
 .dev-signin { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
 .gate .divider { display: flex; align-items: center; text-align: center; color: var(--muted); font-size: 11px; max-width: 320px; margin: 20px auto; }
