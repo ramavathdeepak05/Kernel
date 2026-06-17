@@ -1,8 +1,8 @@
 # QUAICU Kernel — Hosting (SDK / FastAPI / Docker)
 
 Three ways to consume the kernel. For the commercial delivery models see
-[DEPLOYMENT_MODELS](DEPLOYMENT_MODELS.md); for the full SaaS launch checklist (payments, console,
-DNS/TLS) see [GO_LIVE_SETUP](GO_LIVE_SETUP.md).
+[DEPLOYMENT_MODELS](operations/DEPLOYMENT_MODELS.md); for the full SaaS launch checklist (payments,
+console, DNS/TLS) see [GO_LIVE_SETUP](operations/GO_LIVE_SETUP.md).
 
 Key paths: SDK `delivery/sdk/`, FastAPI app `delivery/api/app.py`, runnable apps
 `delivery/entrypoint.py` (`:app`) + `delivery/entrypoint_saas.py` (`:app`), Docker

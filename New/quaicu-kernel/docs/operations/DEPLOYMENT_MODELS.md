@@ -1,8 +1,8 @@
 # QUAICU Kernel — Deployment Models (for sales & solution architects)
 
 One codebase, two delivery models. The buyer's **risk appetite and data-residency rules** pick the
-model — you don't choose one, you offer both. See also [HOSTING](HOSTING.md),
-[GO_LIVE_SETUP](GO_LIVE_SETUP.md), and [ENTERPRISE_CLOUD_STRATEGY](strategy/ENTERPRISE_CLOUD_STRATEGY.md).
+model — you don't choose one, you offer both. See also [HOSTING](../HOSTING.md),
+[GO_LIVE_SETUP](GO_LIVE_SETUP.md), and [ENTERPRISE_CLOUD_STRATEGY](../strategy/ENTERPRISE_CLOUD_STRATEGY.md).
 
 ---
 
