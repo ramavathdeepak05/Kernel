@@ -15,11 +15,15 @@ export interface Session {
   apiBase: string; // "" → relative URLs (dev proxy handles /v1)
 }
 
+// Production deployments point the console at the kernel with a build-time VITE_API_BASE; in dev it
+// is unset and the Vite proxy serves /v1 same-origin. A manually-saved API base still overrides it.
+const ENV_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.trim() ?? "";
+
 function readFromStorage(): Session {
   return {
     token: localStorage.getItem(TOKEN_KEY) ?? "",
     tenant: localStorage.getItem(TENANT_KEY) ?? "",
-    apiBase: localStorage.getItem(API_BASE_KEY) ?? "",
+    apiBase: localStorage.getItem(API_BASE_KEY) ?? ENV_API_BASE,
   };
 }
 
