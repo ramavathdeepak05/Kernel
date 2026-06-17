@@ -52,6 +52,7 @@ function SettingsBar() {
   const session = useSession();
   const authed = useAuthed();
   const [open, setOpen] = useState(!authed);
+  const [devOpen, setDevOpen] = useState(false);
   const [token, setToken] = useState(session.token);
   const [tenant, setTenant] = useState(session.tenant);
   const [apiBase, setApiBase] = useState(session.apiBase);
@@ -64,6 +65,7 @@ function SettingsBar() {
   function save() {
     setSession({ token: token.trim(), tenant: tenant.trim(), apiBase: apiBase.trim() });
     setOpen(false);
+    setDevOpen(false);
   }
 
   function signOut() {
@@ -81,30 +83,45 @@ function SettingsBar() {
       </button>
       {open && (
         <div className="settings-panel">
-          {oidcEnabled() && !authed && (
-            <div className="oidc-row">
-              <SignInButton />
-              <div className="divider"><span>or set a token manually</span></div>
-            </div>
+          {authed ? (
+            <>
+              <div className="muted small">Signed in as <strong>{session.tenant}</strong></div>
+              <div className="settings-actions">
+                <button className="secondary" onClick={signOut}>Sign out</button>
+              </div>
+            </>
+          ) : (
+            <>
+              {oidcEnabled() && <SignInButton />}
+              <Link className="signup-link" to="/signup" onClick={() => setOpen(false)}>
+                Create a free workspace →
+              </Link>
+              {/* Developer sign-in: paste a token directly (local dev, or a dedicated deploy with no
+                  OIDC). Collapsed by default so it stays off the main view. */}
+              <button className="dev-toggle" onClick={() => setDevOpen((d) => !d)}>
+                Developer sign-in {devOpen ? "▴" : "▾"}
+              </button>
+              {devOpen && (
+                <div className="dev-signin">
+                  <label>
+                    Tenant id
+                    <input value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="ciro-bank" />
+                  </label>
+                  <label>
+                    Bearer token
+                    <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="paste JWT or API key…" />
+                  </label>
+                  <label>
+                    API base (blank = built-in default)
+                    <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="" />
+                  </label>
+                  <div className="settings-actions">
+                    <button className="primary" onClick={save}>Save</button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
-          <label>
-            Tenant id
-            <input value={tenant} onChange={(e) => setTenant(e.target.value)} placeholder="ciro-bank" />
-          </label>
-          <label>
-            Bearer token
-            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="paste JWT…" />
-          </label>
-          <label>
-            API base (blank = dev proxy)
-            <input value={apiBase} onChange={(e) => setApiBase(e.target.value)} placeholder="" />
-          </label>
-          <div className="settings-actions">
-            <button className="primary" onClick={save}>Save</button>
-            {authed && (
-              <button className="secondary" onClick={signOut}>Sign out</button>
-            )}
-          </div>
         </div>
       )}
     </div>
@@ -150,14 +167,11 @@ function SignInGate() {
         <>
           <p className="muted">Authenticate with your organization's identity provider.</p>
           <SignInButton />
-          <p className="muted small">
-            Or set a token manually from the menu (top-right) for local development.
-          </p>
         </>
       ) : (
         <p className="muted">
-          Set a <strong>tenant id</strong> and a <strong>bearer token</strong> (top-right) to reach the
-          kernel API. The console does not mint tokens — paste one your IdentityPort accepts.
+          Create a free workspace below to get an API key, or use <strong>Developer sign-in</strong>{" "}
+          (top-right) to paste a token your IdentityPort accepts.
         </p>
       )}
       <div className="divider"><span>or</span></div>

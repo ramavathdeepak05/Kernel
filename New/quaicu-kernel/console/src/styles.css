@@ -92,6 +92,9 @@ button.secondary { color: var(--muted); }
 .key-value { flex: 1; background: #12151c; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; word-break: break-all; }
 .signup-link { color: var(--accent); text-decoration: none; font-weight: 600; }
 .signup-link:hover { text-decoration: underline; }
+.dev-toggle { width: 100%; background: transparent; border: none; color: var(--muted); font-size: 12px; text-align: left; padding: 4px 0; }
+.dev-toggle:hover { color: var(--text); border: none; }
+.dev-signin { display: grid; gap: 10px; border-top: 1px solid var(--line); padding-top: 10px; }
 .gate .divider { display: flex; align-items: center; text-align: center; color: var(--muted); font-size: 11px; max-width: 320px; margin: 20px auto; }
 .gate .divider::before, .gate .divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .gate .divider span { padding: 0 10px; }
