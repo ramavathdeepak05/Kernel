@@ -28,7 +28,7 @@ dsn = "${ACCOUNT_DSN}"   # durable accounts (Postgres, migration 006) — signup
 # this section (or set enabled=false) to make signup free again.
 [signup_fee]
 enabled      = true
-amount_paise = 200       # ₹2
+amount_paise = 1000000   # ₹10,000 (starter entry fee, per year)
 currency     = "INR"
 key_id       = "${RAZORPAY_KEY_ID}"
 key_secret   = "${RAZORPAY_KEY_SECRET}"
