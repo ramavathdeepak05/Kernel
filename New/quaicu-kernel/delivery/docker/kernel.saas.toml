@@ -21,7 +21,7 @@ dsn = "${ENTITLEMENTS_DSN}"
 # (Postgres, migration 006) so signups survive a restart / scale-out; omit it for in-process accounts.
 [account]
 enabled = true
-# dsn = "${ACCOUNT_DSN}"   # e.g. reuse the entitlements/storage Postgres DSN
+dsn = "${ACCOUNT_DSN}"   # durable accounts (Postgres, migration 006) — signups survive restart / scale-out
 
 # Self-serve checkout + webhook tier flips (WS-C). Uncomment + configure to enable the console Billing
 # page and the /v1/billing/* routes. Secrets resolve from the environment at load.

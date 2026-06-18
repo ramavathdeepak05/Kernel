@@ -10,7 +10,8 @@ id = "saas-business"
 policy       = "cel_policy"        # real K·01 CEL evaluator
 policy_store = "postgres_policy"   # durable policy persistence
 hitl         = "webhook"
-ledger       = "postgres_ledger"   # durable RFC 6962 transparency log
+ledger       = "gcp_kms_ledger"    # RFC 6962 transparency log, Cloud KMS-signed STHs (FIPS 140-2)
+ledger_store = "postgres_ledger"   # durable Merkle backend (the signer above persists through it)
 storage      = "postgres_storage"  # durable action persistence
 events       = "memory_events"
 identity     = "jwt"
@@ -21,7 +22,17 @@ dsn = "${KERNEL_DSN}"
 [policy_store]
 dsn = "${KERNEL_DSN}"
 
+# Cloud KMS asymmetric signing key (EC_SIGN_P256_SHA256) for signed tree heads. These identifiers are
+# NOT secrets — the private key never leaves KMS; the Cloud Run service account is granted
+# roles/cloudkms.signerVerifier on it. Auth is ADC / Workload Identity (no key files).
 [ledger]
+project  = "ordinal-quarter-499114-s2"
+location = "us-central1"
+key_ring = "quaicu-ledger"
+key      = "sth-signer"
+
+# Durable Merkle storage for the KMS-signed ledger above (per-tenant tables, F-07).
+[ledger_store]
 dsn = "${KERNEL_DSN}"
 
 [hitl]

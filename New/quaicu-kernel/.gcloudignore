@@ -1,0 +1,17 @@
+# Files NOT uploaded to Cloud Build. The kernel image is Python-only; the console + tests + caches are
+# not needed in the build context (smaller upload, faster builds, slimmer image).
+.git/
+**/node_modules/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/
+.hypothesis/
+htmlcov/
+.coverage
+console/
+graphify-out/
+*.egg-info/
+.venv/
+venv/

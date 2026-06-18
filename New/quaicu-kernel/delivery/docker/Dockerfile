@@ -29,6 +29,12 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY . .
 RUN pip install --no-cache-dir --no-deps .
 
+# The shared SaaS plane's BUSINESS tier signs its K·02 ledger with Cloud KMS
+# (adapters/ledger/gcp_kms → GcpKmsTreeSigner). google-cloud-kms is an optional [gcp] extra not in the
+# hash-locked base, so install it explicitly. It layers on top of the reproducible locked base; pin it
+# into requirements.lock for a fully hash-reproducible production build.
+RUN pip install --no-cache-dir google-cloud-kms
+
 # ── Stage 2: runtime (non-root, minimal) ─────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
@@ -44,6 +50,16 @@ COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 
 # Copy kernel source
 COPY --from=builder /build .
+
+# Bake the shared SaaS-plane configs to the path the plane descriptor references. The SaaS entrypoint
+# reads KERNEL_CONFIG_SAAS=/etc/quaicu/kernel.saas.toml, whose [plane] points at the per-tier configs
+# below. These files carry NO secrets — DSNs/keys are ${ENV} placeholders injected at runtime — so
+# baking them is safe. (The single-kernel default path, KERNEL_CONFIG=/etc/quaicu/kernel.toml, is
+# unaffected; mount that one when running delivery.entrypoint:app.)
+RUN mkdir -p /etc/quaicu \
+ && cp delivery/docker/kernel.saas.toml \
+       delivery/docker/kernel.starter.toml \
+       delivery/docker/kernel.business.toml /etc/quaicu/
 
 USER kernel
 

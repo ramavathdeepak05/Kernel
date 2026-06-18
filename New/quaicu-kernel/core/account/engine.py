@@ -8,8 +8,10 @@ once; only its SHA-256 hash is persisted.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -18,12 +20,22 @@ from datetime import datetime, timezone
 
 from collections.abc import Iterable
 
-from core.account.model import Account, AccountStatus, ApiKey, AuthenticatedPrincipal
+from core.account.email_domains import assert_company_email
+from core.account.model import (
+    Account,
+    AccountStatus,
+    ApiKey,
+    AuthenticatedPrincipal,
+    SignupDetails,
+)
 from core.account.scopes import normalize_scopes
 from core.account.store import AccountStore
 from core.entitlements import CustomerPlan, EntitlementStore, FeatureTier, PlanStatus
-from core.errors import AccountExistsError, ApiKeyInvalidError
+from core.errors import AccountExistsError, ApiKeyInvalidError, SignupVerificationError
 from core.types import TenantId
+
+# How long a signup OTP / verification token is valid.
+_SIGNUP_TTL_SECONDS = 600
 
 log = logging.getLogger("quaicu.account")
 
@@ -74,11 +86,21 @@ class AccountEngine:
 
     # ── Signup ───────────────────────────────────────────────────────────────────
 
-    def signup(self, *, email: str, name: str) -> tuple[Account, str]:
+    def signup(
+        self,
+        *,
+        email: str,
+        name: str,
+        full_name: str = "",
+        job_title: str = "",
+        phone: str = "",
+    ) -> tuple[Account, str]:
         """Provision a new account on the STARTER tier. Returns (account, plaintext_api_key).
 
-        Raises `AccountExistsError` if the email already owns an account. The plaintext key is the
-        only time the full credential is available — the store keeps only its hash.
+        The provisioning primitive: the verified flow (`verify_signup`) calls this only after an OTP
+        proves email ownership; admin/tests may call it directly. Raises `AccountExistsError` if the
+        email already owns an account. The plaintext key is the only time the full credential is
+        available — the store keeps only its hash.
         """
         if self._accounts.get_account_by_email(email) is not None:
             raise AccountExistsError(
@@ -95,6 +117,9 @@ class AccountEngine:
             name=name,
             status=AccountStatus.ACTIVE,
             created_at=now,
+            full_name=full_name,
+            job_title=job_title,
+            phone=phone,
         )
         self._accounts.add_account(account)
 
@@ -112,6 +137,95 @@ class AccountEngine:
         _, plaintext = self.issue_api_key(tenant)
         log.info("signup complete: tenant=%s tier=STARTER", tenant)
         return account, plaintext
+
+    # ── Verified signup (OTP) ──────────────────────────────────────────────────────
+
+    def start_signup(self, details: SignupDetails) -> tuple[str, str]:
+        """Begin a verified signup. Returns ``(verification_token, otp)`` — does NOT provision yet.
+
+        Validates the company email and that no account exists, then mints a 6-digit OTP and a signed,
+        self-contained verification token carrying the (HMAC-hashed) OTP, the customer details, and an
+        expiry. The caller emails the OTP and hands the opaque token back to the browser; provisioning
+        happens only in `verify_signup` once the user proves they received the code. Stateless: no
+        server-side pending store, so it works across stateless/replicated instances.
+
+        Raises `EmailDomainNotAllowedError` (free/personal email) or `AccountExistsError`.
+        """
+        assert_company_email(details.email)
+        if self._accounts.get_account_by_email(details.email) is not None:
+            raise AccountExistsError(
+                f"An account already exists for {details.email!r}.",
+                detail={"email": details.email},
+            )
+
+        otp = f"{secrets.randbelow(1_000_000):06d}"
+        exp = datetime.now(timezone.utc).timestamp() + _SIGNUP_TTL_SECONDS
+        token = self._seal_token(
+            {
+                "v": 1,
+                "otp_hash": self._hash_secret(otp),
+                "exp": exp,
+                "details": {
+                    "full_name": details.full_name,
+                    "email": details.email,
+                    "company_name": details.company_name,
+                    "job_title": details.job_title,
+                    "phone": details.phone,
+                },
+            }
+        )
+        log.info("signup started (OTP issued): email=%s", details.email)
+        return token, otp
+
+    def verify_signup(self, *, verification_token: str, otp: str) -> tuple[Account, str]:
+        """Complete a verified signup: check the OTP against the token, then provision.
+
+        Raises `SignupVerificationError` if the token is forged/expired or the OTP is wrong, and
+        `AccountExistsError` if the email was claimed in the meantime. On success, provisions the
+        STARTER account (with the collected details) and returns ``(account, plaintext_api_key)``.
+        """
+        payload = self._open_token(verification_token)
+        expected = str(payload.get("otp_hash", ""))
+        if not expected or not hmac.compare_digest(expected, self._hash_secret(otp.strip())):
+            raise SignupVerificationError("Incorrect verification code.")
+        d = payload.get("details", {})
+        return self.signup(
+            email=str(d["email"]),
+            name=str(d["company_name"]),
+            full_name=str(d.get("full_name", "")),
+            job_title=str(d.get("job_title", "")),
+            phone=str(d.get("phone", "")),
+        )
+
+    # ── Encrypted, self-contained verification token (AES-256-GCM over the pepper) ──
+
+    def _token_key(self) -> bytes:
+        """Derive a stable 32-byte AES key from the server pepper (domain-separated)."""
+        return hashlib.sha256(self._pepper + b"|quaicu-signup-token-v1").digest()
+
+    def _seal_token(self, payload: dict) -> str:
+        """Encrypt+authenticate the signup payload. Confidential (details hidden) and tamper-proof."""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        raw = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        nonce = secrets.token_bytes(12)
+        ciphertext = AESGCM(self._token_key()).encrypt(nonce, raw, None)
+        return base64.urlsafe_b64encode(nonce + ciphertext).rstrip(b"=").decode()
+
+    def _open_token(self, token: str) -> dict:
+        """Decrypt + verify a verification token. Raises `SignupVerificationError` on any failure."""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        try:
+            blob = base64.urlsafe_b64decode((token or "") + "=" * (-len(token or "") % 4))
+            nonce, ciphertext = blob[:12], blob[12:]
+            raw = AESGCM(self._token_key()).decrypt(nonce, ciphertext, None)
+            payload = json.loads(raw)
+        except Exception as exc:  # noqa: BLE001 — bad base64 / wrong key / forged tag / bad JSON
+            raise SignupVerificationError("Verification token is invalid.") from exc
+        if float(payload.get("exp", 0)) < datetime.now(timezone.utc).timestamp():
+            raise SignupVerificationError("Verification code expired — request a new one.")
+        return payload
 
     # ── API keys ─────────────────────────────────────────────────────────────────
 

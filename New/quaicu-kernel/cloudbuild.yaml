@@ -1,0 +1,18 @@
+# Cloud Build: build the SaaS-plane kernel image and push it to Artifact Registry.
+# Uses delivery/docker/Dockerfile (the shared-plane image with KERNEL_APP selection + baked
+# /etc/quaicu configs) — NOT the root single-kernel Dockerfile.
+#
+#   gcloud builds submit --config cloudbuild.yaml .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - delivery/docker/Dockerfile
+      - -t
+      - us-central1-docker.pkg.dev/ordinal-quarter-499114-s2/quaicu/kernel:v1
+      - .
+images:
+  - us-central1-docker.pkg.dev/ordinal-quarter-499114-s2/quaicu/kernel:v1
+options:
+  logging: CLOUD_LOGGING_ONLY

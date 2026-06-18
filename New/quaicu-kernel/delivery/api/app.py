@@ -63,6 +63,7 @@ def create_app(
     admin_token: str | None = None,
     billing_adapters: "dict[str, object] | None" = None,
     billing_engine: "object | None" = None,
+    email_sender: "object | None" = None,
     usage_meter: "object | None" = None,
     erasure_engine: "object | None" = None,
     enforce_paths: list[tuple[str, str]] | None = None,
@@ -137,6 +138,9 @@ def create_app(
     # Billing (WS-C): provider adapters keyed by name + the apply engine; usage meter for metering.
     app.state.billing_adapters = billing_adapters or {}
     app.state.billing_engine = billing_engine
+    # Transactional email (verified-signup OTP / recovery). None → /v1/signup/start emails nothing and
+    # the legacy one-step /v1/signup stays open; a wired sender makes the OTP flow mandatory.
+    app.state.email_sender = email_sender
     app.state.usage_meter = usage_meter
     # Erasure (WS-G): crypto-shredding engine for the GDPR/DPDP right-to-erasure routes.
     app.state.erasure_engine = erasure_engine
@@ -187,11 +191,14 @@ def create_app(
 
     # CORS so the operator console (a separate origin) can call the API. Outermost so preflight is
     # answered before any auth/rate-limit logic. The Authorization bearer header is the credential.
+    # allow_headers is listed explicitly rather than "*": per the Fetch spec the wildcard does not
+    # match Authorization, so a strict browser would drop it from a cross-origin preflight. These are
+    # exactly the request headers the console sends (see console/src/api/client.ts).
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins or ["http://localhost:5173"],
         allow_methods=["*"],
-        allow_headers=["*"],
+        allow_headers=["Authorization", "Content-Type", "X-Tenant-Id"],
     )
 
     # ── Exception handlers ────────────────────────────────────────────────────

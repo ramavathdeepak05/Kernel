@@ -129,7 +129,9 @@ class PostgresLedgerRepository:
         async with self._pool_lock:
             if self._pool is None:
                 try:
-                    self._pool = await asyncpg.create_pool(self._dsn)
+                    # Bounded pool — shared SaaS plane runs several pools on one instance (see
+                    # entitlements adapter). asyncpg's default (10) exhausts a small instance.
+                    self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=4)
                 except Exception as exc:
                     raise LedgerPersistenceError(
                         f"Failed to create Postgres pool: {exc}",

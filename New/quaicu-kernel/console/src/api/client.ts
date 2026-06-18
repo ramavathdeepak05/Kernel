@@ -16,7 +16,9 @@ import type {
   PolicyListResponse,
   PolicyRegisterBody,
   PolicyResponse,
-  SignupBody,
+  SignupStartBody,
+  SignupStartResponse,
+  SignupVerifyBody,
   SignupResponse,
   SimulateResponse,
   TopActions,
@@ -71,8 +73,11 @@ function tenant(): string {
 }
 
 export const api = {
-  // ── Signup (unauthenticated self-serve onboarding) ─────────────────────────
-  signup: (b: SignupBody) => request<SignupResponse>("POST", "/v1/signup", b),
+  // ── Verified signup (unauthenticated self-serve onboarding) ────────────────
+  startSignup: (b: SignupStartBody) =>
+    request<SignupStartResponse>("POST", "/v1/signup/start", b),
+  verifySignup: (b: SignupVerifyBody) =>
+    request<SignupResponse>("POST", "/v1/signup/verify", b),
 
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),

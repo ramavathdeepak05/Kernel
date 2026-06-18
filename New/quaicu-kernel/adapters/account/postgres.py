@@ -25,13 +25,17 @@ from core.errors import AccountPersistenceError
 from core.types import TenantId
 
 _UPSERT_ACCOUNT_SQL = """
-INSERT INTO quaicu_accounts (account_id, tenant_id, email, name, status, created_at)
-VALUES (%s, %s, %s, %s, %s, %s)
+INSERT INTO quaicu_accounts
+    (account_id, tenant_id, email, name, status, created_at, full_name, job_title, phone)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (account_id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    email     = EXCLUDED.email,
-    name      = EXCLUDED.name,
-    status    = EXCLUDED.status
+    tenant_id  = EXCLUDED.tenant_id,
+    email      = EXCLUDED.email,
+    name       = EXCLUDED.name,
+    status     = EXCLUDED.status,
+    full_name  = EXCLUDED.full_name,
+    job_title  = EXCLUDED.job_title,
+    phone      = EXCLUDED.phone
 """
 
 _UPSERT_API_KEY_SQL = """
@@ -44,7 +48,10 @@ ON CONFLICT (key_id) DO UPDATE SET
     scopes        = EXCLUDED.scopes
 """
 
-_SELECT_ACCOUNTS_SQL = "SELECT account_id, tenant_id, email, name, status, created_at FROM quaicu_accounts"
+_SELECT_ACCOUNTS_SQL = (
+    "SELECT account_id, tenant_id, email, name, status, created_at, "
+    "COALESCE(full_name, ''), COALESCE(job_title, ''), COALESCE(phone, '') FROM quaicu_accounts"
+)
 _SELECT_API_KEYS_SQL = (
     "SELECT key_id, tenant_id, hashed_secret, created_at, revoked, scopes FROM quaicu_api_keys"
 )
@@ -98,6 +105,9 @@ class PostgresAccountRepository:
                     name=r[3],
                     status=AccountStatus(r[4]),
                     created_at=r[5],
+                    full_name=r[6],
+                    job_title=r[7],
+                    phone=r[8],
                 )
                 for r in cur.fetchall()
             ]
@@ -128,6 +138,9 @@ class PostgresAccountRepository:
                     account.name,
                     account.status.value,
                     account.created_at,
+                    account.full_name,
+                    account.job_title,
+                    account.phone,
                 ),
             ),
             "save_account",
