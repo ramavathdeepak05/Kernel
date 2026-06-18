@@ -16,12 +16,14 @@ import type {
   PolicyListResponse,
   PolicyRegisterBody,
   PolicyResponse,
+  ApiKeyList,
+  CreatedApiKey,
   LoginBody,
   LoginResponse,
   SignupStartBody,
   SignupStartResponse,
   SignupVerifyBody,
-  SignupResponse,
+  SignupVerifyResponse,
   SimulateResponse,
   TopActions,
 } from "./types";
@@ -79,10 +81,16 @@ export const api = {
   startSignup: (b: SignupStartBody) =>
     request<SignupStartResponse>("POST", "/v1/signup/start", b),
   verifySignup: (b: SignupVerifyBody) =>
-    request<SignupResponse>("POST", "/v1/signup/verify", b),
+    request<SignupVerifyResponse>("POST", "/v1/signup/verify", b),
 
   // ── Login (email + password → session token) ───────────────────────────────
   login: (b: LoginBody) => request<LoginResponse>("POST", "/v1/auth/login", b),
+
+  // ── API keys (programmatic access) ─────────────────────────────────────────
+  listKeys: () => request<ApiKeyList>("GET", "/v1/keys"),
+  createKey: () => request<CreatedApiKey>("POST", "/v1/keys"),
+  revokeKey: (keyId: string) =>
+    request<{ key_id: string; revoked: boolean }>("POST", `/v1/keys/${encodeURIComponent(keyId)}/revoke`),
 
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),

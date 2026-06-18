@@ -60,7 +60,17 @@ class SignupVerifyRequest(BaseModel):
     otp: str = Field(..., description="The 6-digit code emailed to the customer.")
 
 
+class SignupVerifyResponse(BaseModel):
+    account_id: str
+    tenant_id: str
+    tier: str
+    session_token: str = Field(..., description="Session JWT — the console auto-logs-in with this.")
+    expires_in: int
+
+
 class SignupResponse(BaseModel):
+    """Legacy one-step response (dev / no-email) — returns the API key, since no password is set."""
+
     account_id: str
     tenant_id: str
     tier: str
@@ -169,26 +179,26 @@ async def signup_start(body: SignupStartRequest, request: Request) -> SignupStar
 @router.post(
     "/signup/verify",
     status_code=status.HTTP_201_CREATED,
-    response_model=SignupResponse,
-    summary="Complete verified signup — exchange the code for a tenant + API key",
+    response_model=SignupVerifyResponse,
+    summary="Complete verified signup — provision the tenant and return a session (auto-login)",
 )
-async def signup_verify(body: SignupVerifyRequest, request: Request) -> SignupResponse:
+async def signup_verify(body: SignupVerifyRequest, request: Request) -> SignupVerifyResponse:
     engine = _require_engine(request)
     try:
-        account, api_key = engine.verify_signup(
-            verification_token=body.verification_token, otp=body.otp
-        )
+        account = engine.verify_signup(verification_token=body.verification_token, otp=body.otp)
     except SignupVerificationError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc), "code": exc.code})
     except AccountExistsError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
 
     await _persist_starter_plan(request, account)
-    return SignupResponse(
+    session_token, expires_in = engine.mint_session(account)
+    return SignupVerifyResponse(
         account_id=account.account_id,
         tenant_id=str(account.tenant_id),
         tier="STARTER",
-        api_key=api_key,
+        session_token=session_token,
+        expires_in=expires_in,
     )
 
 

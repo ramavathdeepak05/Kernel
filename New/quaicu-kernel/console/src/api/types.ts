@@ -174,11 +174,29 @@ export interface SignupVerifyBody {
   otp: string;
 }
 
-export interface SignupResponse {
+// Verify provisions the tenant and returns a session (auto-login) — no API key on the welcome screen.
+export interface SignupVerifyResponse {
   account_id: string;
   tenant_id: string;
   tier: string; // always "STARTER" on signup
+  session_token: string;
+  expires_in: number;
+}
+
+// ── API keys (programmatic access — managed from the API Keys page) ───────────
+export interface ApiKeyInfo {
+  key_id: string;
+  created_at: string;
+  revoked: boolean;
+  scopes: string[];
+}
+export interface ApiKeyList {
+  keys: ApiKeyInfo[];
+}
+export interface CreatedApiKey {
+  key_id: string;
   api_key: string; // plaintext — shown ONCE
+  created_at: string;
 }
 
 // Request bodies

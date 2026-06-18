@@ -12,6 +12,7 @@ import Approvals from "./pages/Approvals";
 import Billing from "./pages/Billing";
 import Callback from "./pages/Callback";
 import Signup from "./pages/Signup";
+import ApiKeys from "./pages/ApiKeys";
 
 function useSession() {
   return useSyncExternalStore(subscribe, getSession);
@@ -124,6 +125,7 @@ function Nav() {
       {policies && <NavLink to="/policies">Policies</NavLink>}
       <NavLink to="/audit">Audit trail</NavLink>
       {approvals && <NavLink to="/approvals">Approvals</NavLink>}
+      <NavLink to="/keys">API keys</NavLink>
       {billing && <NavLink to="/billing">Billing</NavLink>}
     </nav>
   );
@@ -246,6 +248,7 @@ export default function App() {
                     </FeatureGate>
                   }
                 />
+                <Route path="/keys" element={<ApiKeys />} />
                 <Route path="/billing" element={<Billing />} />
               </>
             ) : (
