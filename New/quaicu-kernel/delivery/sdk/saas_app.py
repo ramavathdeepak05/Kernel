@@ -94,6 +94,7 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
         billing_engine=billing_engine,
         email_sender=build_email_sender(config),  # Resend when RESEND_API_KEY set, else log-only
         signup_payment=build_signup_payment(config),  # ₹2 fee gate when [signup_fee].enabled
+        consultation=dict(config.get("consultation", {})),  # Business/Enterprise consultation config
         cors_origins=_cors_origins(config),
     )
 

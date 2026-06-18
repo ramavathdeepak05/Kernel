@@ -17,6 +17,9 @@ import type {
   PolicyRegisterBody,
   PolicyResponse,
   ApiKeyList,
+  ConsultCompleteBody,
+  ConsultLeadBody,
+  ConsultStartResponse,
   CreatedApiKey,
   LoginBody,
   LoginResponse,
@@ -88,6 +91,12 @@ export const api = {
 
   // ── Login (email + password → session token) ───────────────────────────────
   login: (b: LoginBody) => request<LoginResponse>("POST", "/v1/auth/login", b),
+
+  // ── Business/Enterprise consultation (₹50,000) ─────────────────────────────
+  startConsultation: (b: ConsultLeadBody) =>
+    request<ConsultStartResponse>("POST", "/v1/consultation/start", b),
+  completeConsultation: (b: ConsultCompleteBody) =>
+    request<{ ok: boolean; tier: string }>("POST", "/v1/consultation/complete", b),
 
   // ── API keys (programmatic access) ─────────────────────────────────────────
   listKeys: () => request<ApiKeyList>("GET", "/v1/keys"),

@@ -199,6 +199,26 @@ export interface SignupCompleteBody {
   razorpay_signature: string;
 }
 
+// ── Business / Enterprise consultation (₹50,000 → talk to integrations team) ──
+export interface ConsultLeadBody {
+  tier: string; // BUSINESS | ENTERPRISE
+  full_name: string;
+  email: string;
+  company_name: string;
+  phone: string;
+}
+export interface ConsultStartResponse {
+  order_id: string;
+  razorpay_key_id: string;
+  amount_paise: number;
+  currency: string;
+}
+export interface ConsultCompleteBody extends ConsultLeadBody {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
 // ── API keys (programmatic access — managed from the API Keys page) ───────────
 export interface ApiKeyInfo {
   key_id: string;

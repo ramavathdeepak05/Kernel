@@ -50,6 +50,7 @@ from delivery.api.routes.erasure import router as erasure_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
 from delivery.api.routes.auth import router as auth_router
+from delivery.api.routes.consultation import router as consultation_router
 from delivery.api.routes.keys import router as keys_router
 from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
@@ -67,6 +68,7 @@ def create_app(
     billing_engine: "object | None" = None,
     email_sender: "object | None" = None,
     signup_payment: "object | None" = None,
+    consultation: "dict | None" = None,
     usage_meter: "object | None" = None,
     erasure_engine: "object | None" = None,
     enforce_paths: list[tuple[str, str]] | None = None,
@@ -146,6 +148,8 @@ def create_app(
     app.state.email_sender = email_sender
     # Signup-fee gateway (₹2 at signup). None → no fee; /v1/signup/verify provisions on OTP directly.
     app.state.signup_payment = signup_payment
+    # Business/Enterprise consultation config ({amount_paise, notify_email}). Empty → defaults apply.
+    app.state.consultation = consultation or {}
     app.state.usage_meter = usage_meter
     # Erasure (WS-G): crypto-shredding engine for the GDPR/DPDP right-to-erasure routes.
     app.state.erasure_engine = erasure_engine
@@ -162,6 +166,7 @@ def create_app(
     app.include_router(signup_router)
     app.include_router(auth_router)
     app.include_router(keys_router)
+    app.include_router(consultation_router)
     app.include_router(admin_router)
     app.include_router(billing_router)
     app.include_router(erasure_router)

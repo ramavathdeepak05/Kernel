@@ -12,6 +12,7 @@ import Approvals from "./pages/Approvals";
 import Billing from "./pages/Billing";
 import Callback from "./pages/Callback";
 import Signup from "./pages/Signup";
+import Plans from "./pages/Plans";
 import ApiKeys from "./pages/ApiKeys";
 
 function useSession() {
@@ -205,8 +206,8 @@ function SignInGate() {
           </>
         )}
         <div className="divider"><span>new here?</span></div>
-        <Link className="signup-cta" to="/signup">Create a free workspace →</Link>
-        <p className="muted small">No credit card — STARTER tier with real governance.</p>
+        <Link className="signup-cta" to="/plans">View plans &amp; sign up →</Link>
+        <p className="muted small">Starter, Business, or Enterprise — pick your tier.</p>
         <div className="divider"><span>advanced</span></div>
         <DevSignIn />
       </div>
@@ -228,6 +229,7 @@ export default function App() {
           <Routes>
             <Route path="/callback" element={<Callback />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/plans" element={<Plans />} />
             {authed ? (
               <>
                 <Route path="/" element={<Dashboard />} />

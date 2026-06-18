@@ -69,10 +69,10 @@ class RazorpaySignupGateway:
     def currency(self) -> str:
         return self._currency
 
-    async def create_order(self, *, receipt: str) -> str:
+    async def create_order(self, *, receipt: str, amount_paise: int | None = None) -> str:
         body = json.dumps(
             {
-                "amount": self._amount,
+                "amount": int(amount_paise) if amount_paise is not None else self._amount,
                 "currency": self._currency,
                 "receipt": receipt[:40],
                 "payment_capture": 1,
