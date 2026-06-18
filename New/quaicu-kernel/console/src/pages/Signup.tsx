@@ -12,6 +12,9 @@ import { ErrorBox } from "../components";
 import { setSession } from "../state/auth";
 import type { SignupVerifyResponse } from "../api/types";
 
+// Format paise → "₹10,000" (Indian grouping). The amount comes from the backend, not hardcoded.
+const inr = (paise?: number) => `₹${Math.round((paise ?? 0) / 100).toLocaleString("en-IN")}`;
+
 // Lazily load Razorpay Checkout (their hosted, PCI-compliant widget) — only when a fee is due.
 function loadRazorpayScript(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -168,7 +171,7 @@ export default function Signup() {
       amount: info.amount_paise,
       currency: info.currency,
       name: "QUAICU",
-      description: "Signup fee — ₹2 / year",
+      description: `Signup fee — ${inr(info.amount_paise)} / year`,
       prefill: { email: email.trim(), name: fullName.trim(), contact: phone.trim() },
       theme: { color: "#111111" },
       handler: async (r: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
@@ -217,13 +220,14 @@ export default function Signup() {
         {paymentInfo ? (
           <>
             <p className="muted">
-              A one-time <strong>₹2</strong> registration fee (covers one year) activates your account.
+              A one-time <strong>{inr(paymentInfo.amount_paise)}</strong> registration fee (covers one
+              year) activates your account.
             </p>
             <div className="card signup-card">
               <div className="card-body">
                 {error && <ErrorBox message={error} />}
                 <button className="primary" onClick={() => openRazorpay(paymentInfo)} disabled={busy}>
-                  Pay ₹2 &amp; finish
+                  Pay {inr(paymentInfo.amount_paise)} &amp; finish
                 </button>
                 <p className="muted small">Your account is created only after the ₹2 payment succeeds.</p>
               </div>
