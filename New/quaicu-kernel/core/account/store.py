@@ -59,6 +59,20 @@ class AccountStore:
             aid = self._tenant_index.get(str(tenant))
             return self._accounts.get(aid) if aid else None
 
+    def email_exists(self, email: str) -> bool:
+        """Authoritative 'does this email already own an account?' check, used by signup.
+
+        Fast path: the in-memory cache. Fallback: the durable repository — a brand-new account
+        created on another instance isn't in this instance's cache yet, so the cache alone could let a
+        duplicate signup through (and send a needless OTP). Only invoked on the infrequent signup path.
+        """
+        if self.get_account_by_email(email) is not None:
+            return True
+        getter = getattr(self._repository, "get_account_by_email", None)
+        if getter is not None:
+            return getter(email) is not None
+        return False
+
     def add_account(self, account: Account) -> Account:
         if self._repository is not None:  # persist-first: a DB failure fails closed (no cache update)
             self._repository.save_account(account)
