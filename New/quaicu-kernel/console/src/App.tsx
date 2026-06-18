@@ -1,5 +1,7 @@
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { api, ApiError } from "./api/client";
+import { ErrorBox } from "./components";
 import { clearSession, getSession, isAuthenticated, setSession, subscribe } from "./state/auth";
 import { EntitlementsProvider, useEntitlements, useFeature } from "./state/entitlements";
 import { beginLogin, oidcEnabled } from "./oidc/oidc";
@@ -142,21 +144,68 @@ function FeatureGate({ feature, label, children }: { feature: string; label: str
   );
 }
 
+// Primary sign-in: email + password → session token.
+function LoginForm() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const resp = await api.login({ email: email.trim(), password });
+      setSession({ token: resp.session_token, tenant: resp.tenant_id });
+      navigate("/", { replace: true });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "INVALID_CREDENTIALS") {
+        setError("Invalid email or password.");
+      } else {
+        setError(err instanceof ApiError ? `${err.code}: ${err.message}` : String(err));
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="signin-form" onSubmit={submit}>
+      {error && <ErrorBox message={error} />}
+      <label>
+        Email
+        <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" autoComplete="email" />
+      </label>
+      <label>
+        Password
+        <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
+      </label>
+      <button className="primary" type="submit" disabled={busy || !email.trim() || !password}>
+        {busy ? "Signing in…" : "Sign in"}
+      </button>
+    </form>
+  );
+}
+
 function SignInGate() {
   return (
     <div className="gate">
       <h2>Sign in to the console</h2>
       <div className="signin-hub">
+        <LoginForm />
         {oidcEnabled() && (
           <>
+            <div className="divider"><span>or</span></div>
             <p className="muted small">Authenticate with your organization's identity provider.</p>
             <SignInButton />
-            <div className="divider"><span>or</span></div>
           </>
         )}
+        <div className="divider"><span>new here?</span></div>
         <Link className="signup-cta" to="/signup">Create a free workspace →</Link>
         <p className="muted small">No credit card — STARTER tier with real governance.</p>
-        <div className="divider"><span>developer</span></div>
+        <div className="divider"><span>advanced</span></div>
         <DevSignIn />
       </div>
     </div>

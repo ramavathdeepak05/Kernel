@@ -16,9 +16,10 @@ import logging
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping
+from datetime import datetime, timedelta, timezone
 
-from collections.abc import Iterable
+import jwt as _jwt
 
 from core.account.email_domains import assert_company_email
 from core.account.model import (
@@ -28,14 +29,22 @@ from core.account.model import (
     AuthenticatedPrincipal,
     SignupDetails,
 )
-from core.account.scopes import normalize_scopes
+from core.account.passwords import hash_password, verify_password
+from core.account.scopes import OWNER_SCOPES, normalize_scopes
 from core.account.store import AccountStore
 from core.entitlements import CustomerPlan, EntitlementStore, FeatureTier, PlanStatus
-from core.errors import AccountExistsError, ApiKeyInvalidError, SignupVerificationError
+from core.errors import (
+    AccountExistsError,
+    AccountNotFoundError,
+    ApiKeyInvalidError,
+    SignupVerificationError,
+)
 from core.types import TenantId
 
 # How long a signup OTP / verification token is valid.
 _SIGNUP_TTL_SECONDS = 600
+# How long a console session JWT is valid.
+_SESSION_TTL_HOURS = 24
 
 log = logging.getLogger("quaicu.account")
 
@@ -61,9 +70,16 @@ class AccountEngine:
         entitlements: EntitlementStore,
         *,
         pepper: bytes | str | None = None,
+        session_secret: bytes | str | None = None,
     ) -> None:
         self._accounts = accounts
         self._entitlements = entitlements
+        # HS256 secret for console session JWTs. Same secret as the kernel's JWT IdentityPort
+        # (KERNEL_JWT_SECRET) so a session token works for both management auth and governance identity.
+        resolved_session = session_secret if session_secret is not None else os.getenv("KERNEL_JWT_SECRET", "")
+        self._session_secret: bytes = (
+            resolved_session.encode("utf-8") if isinstance(resolved_session, str) else resolved_session
+        )
         # API keys are stored as HMAC-SHA256(pepper, secret), not a bare SHA-256 digest. The pepper
         # is a server-side secret (never persisted with the hash). Falls back to env, then empty —
         # an empty pepper is allowed for dev/tests but warned about so production wires a real one.
@@ -94,6 +110,8 @@ class AccountEngine:
         full_name: str = "",
         job_title: str = "",
         phone: str = "",
+        password_hash: str = "",
+        profile: Mapping[str, object] | None = None,
     ) -> tuple[Account, str]:
         """Provision a new account on the STARTER tier. Returns (account, plaintext_api_key).
 
@@ -120,6 +138,8 @@ class AccountEngine:
             full_name=full_name,
             job_title=job_title,
             phone=phone,
+            password_hash=password_hash,
+            profile=dict(profile or {}),
         )
         self._accounts.add_account(account)
 
@@ -158,6 +178,8 @@ class AccountEngine:
                 detail={"email": details.email},
             )
 
+        # Hash the password now so the plaintext never persists — not even inside the (encrypted) token.
+        password_hash = hash_password(details.password)
         otp = f"{secrets.randbelow(1_000_000):06d}"
         exp = datetime.now(timezone.utc).timestamp() + _SIGNUP_TTL_SECONDS
         token = self._seal_token(
@@ -171,6 +193,11 @@ class AccountEngine:
                     "company_name": details.company_name,
                     "job_title": details.job_title,
                     "phone": details.phone,
+                    "password_hash": password_hash,
+                    "use_case": details.use_case,
+                    "industry": details.industry,
+                    "company_size": details.company_size,
+                    "regulations": list(details.regulations),
                 },
             }
         )
@@ -195,6 +222,69 @@ class AccountEngine:
             full_name=str(d.get("full_name", "")),
             job_title=str(d.get("job_title", "")),
             phone=str(d.get("phone", "")),
+            password_hash=str(d.get("password_hash", "")),
+            profile={
+                "use_case": d.get("use_case", ""),
+                "industry": d.get("industry", ""),
+                "company_size": d.get("company_size", ""),
+                "regulations": list(d.get("regulations", [])),
+            },
+        )
+
+    # ── Console login (email + password → session JWT) ──────────────────────────────
+
+    def authenticate(self, *, email: str, password: str) -> Account:
+        """Verify an email + password against the durable account.
+
+        Raises `AccountNotFoundError` on a missing account OR a wrong password (same error for both —
+        no user enumeration). Returns the `Account` on success.
+        """
+        account = self._accounts.find_account_by_email(email)
+        if (
+            account is None
+            or not account.password_hash
+            or not verify_password(password, account.password_hash)
+        ):
+            raise AccountNotFoundError("Invalid email or password.", detail={"email": email})
+        return account
+
+    def mint_session(self, account: Account) -> tuple[str, int]:
+        """Mint a short-lived HS256 session JWT for the console. Returns (token, expires_in_seconds).
+
+        Carries tenant + account + roles/scopes so the same token satisfies the API auth middleware
+        (management RBAC via scopes) AND the kernel's JWT IdentityPort (governance actor via roles) —
+        no separate API key needed to drive the console.
+        """
+        now = datetime.now(timezone.utc)
+        ttl = timedelta(hours=_SESSION_TTL_HOURS)
+        payload = {
+            "sub": account.account_id,
+            "tenant": str(account.tenant_id),
+            "email": account.email,
+            "roles": ["policy_admin", "owner"],
+            "scopes": sorted(OWNER_SCOPES),
+            "iat": int(now.timestamp()),
+            "exp": int((now + ttl).timestamp()),
+        }
+        token = _jwt.encode(payload, self._session_secret, algorithm="HS256")
+        return token, int(ttl.total_seconds())
+
+    def _resolve_session(self, token: str) -> AuthenticatedPrincipal:
+        """Verify a console session JWT → principal. Raises `ApiKeyInvalidError` (→ 401) on failure."""
+        try:
+            payload = _jwt.decode(token, self._session_secret, algorithms=["HS256"])
+        except _jwt.PyJWTError as exc:
+            raise ApiKeyInvalidError(f"Invalid or expired session: {exc}") from exc
+        tenant = payload.get("tenant")
+        account_id = payload.get("sub")
+        if not tenant or not account_id:
+            raise ApiKeyInvalidError("Session token missing tenant/subject.")
+        scopes = payload.get("scopes") or sorted(OWNER_SCOPES)
+        return AuthenticatedPrincipal(
+            tenant_id=TenantId(str(tenant)),
+            account_id=str(account_id),
+            key_id="session",
+            scopes=frozenset(str(s) for s in scopes),
         )
 
     # ── Encrypted, self-contained verification token (AES-256-GCM over the pepper) ──
@@ -292,15 +382,18 @@ class AccountEngine:
         return account
 
     def resolve_principal(self, presented: str) -> AuthenticatedPrincipal:
-        """Resolve the full `AuthenticatedPrincipal` (tenant, account, key id, scopes) for a key.
+        """Resolve the `AuthenticatedPrincipal` for a presented bearer — an API key OR a session JWT.
 
-        This is what the API auth layer uses: it needs the key's scopes for RBAC, not just the
-        account. Fail-closed (see `_verify`).
+        This is what the API auth layer uses. A ``qk_…`` bearer is an API key (programmatic access); any
+        other bearer is treated as a console session JWT (email+password login). Both yield a principal
+        with tenant + scopes. Fail-closed (raises `ApiKeyInvalidError`).
         """
-        account, record = self._verify(presented)
-        return AuthenticatedPrincipal(
-            tenant_id=record.tenant_id,
-            account_id=account.account_id,
-            key_id=record.key_id,
-            scopes=record.scopes,
-        )
+        if (presented or "").startswith("qk_"):
+            account, record = self._verify(presented)
+            return AuthenticatedPrincipal(
+                tenant_id=record.tenant_id,
+                account_id=account.account_id,
+                key_id=record.key_id,
+                scopes=record.scopes,
+            )
+        return self._resolve_session(presented or "")

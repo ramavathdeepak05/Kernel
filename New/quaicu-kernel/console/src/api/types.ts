@@ -142,8 +142,25 @@ export interface SignupStartBody {
   full_name: string;
   email: string; // company email (free/personal providers rejected)
   company_name: string;
-  job_title?: string;
-  phone?: string;
+  password: string; // console login password (min 8)
+  job_title: string;
+  phone: string;
+  use_case: string;
+  industry: string;
+  company_size: string;
+  regulations: string[]; // >= 1
+}
+
+// ── Console login (email + password → session token) ─────────────────────────
+export interface LoginBody {
+  email: string;
+  password: string;
+}
+
+export interface LoginResponse {
+  session_token: string; // JWT — used as the Bearer token
+  tenant_id: string;
+  expires_in: number;
 }
 
 export interface SignupStartResponse {

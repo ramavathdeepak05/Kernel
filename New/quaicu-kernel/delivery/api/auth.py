@@ -35,7 +35,7 @@ from delivery.api.deps import extract_tenant
 #   - /v1/admin/* is guarded by its own deployment admin token, not tenant API keys.
 #   - /v1/billing/webhook/* is authenticated by the payment provider's signature, not an API key.
 #     (NOTE: /v1/billing/checkout IS protected — it is the tenant initiating its own upgrade.)
-_EXEMPT_PREFIXES = ("/v1/signup", "/v1/admin", "/v1/billing/webhook")
+_EXEMPT_PREFIXES = ("/v1/signup", "/v1/auth", "/v1/admin", "/v1/billing/webhook")
 
 
 def _bearer(request: Request) -> str | None:

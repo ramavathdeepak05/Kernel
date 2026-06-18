@@ -20,6 +20,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from core.account.model import Account, SignupDetails
+from core.account.passwords import PasswordError
 from core.email import EmailMessage
 from core.entitlements import CustomerPlan, FeatureTier, PlanStatus
 from core.errors import (
@@ -38,8 +39,14 @@ class SignupStartRequest(BaseModel):
     full_name: str = Field(..., min_length=1, description="Name of the person signing up.")
     email: str = Field(..., description="Company email (free/personal providers are rejected).")
     company_name: str = Field(..., min_length=1, description="Organisation / workspace name.")
-    job_title: str = Field("", description="Role, e.g. 'Compliance Lead'.")
-    phone: str = Field("", description="Contact number.")
+    password: str = Field(..., min_length=8, description="Console login password (min 8 chars).")
+    job_title: str = Field(..., min_length=1, description="Role, e.g. 'Compliance Lead'.")
+    phone: str = Field(..., min_length=1, description="Contact number.")
+    # Onboarding survey — all required.
+    use_case: str = Field(..., min_length=1, description="How they plan to use the kernel.")
+    industry: str = Field(..., min_length=1, description="Industry / sector.")
+    company_size: str = Field(..., min_length=1, description="Headcount band.")
+    regulations: list[str] = Field(..., min_length=1, description="Regulations of interest (>=1).")
 
 
 class SignupStartResponse(BaseModel):
@@ -136,13 +143,20 @@ async def signup_start(body: SignupStartRequest, request: Request) -> SignupStar
         full_name=body.full_name.strip(),
         email=body.email.strip(),
         company_name=body.company_name.strip(),
+        password=body.password,
         job_title=body.job_title.strip(),
         phone=body.phone.strip(),
+        use_case=body.use_case.strip(),
+        industry=body.industry.strip(),
+        company_size=body.company_size.strip(),
+        regulations=tuple(r.strip() for r in body.regulations if r.strip()),
     )
     try:
         token, otp = engine.start_signup(details)
     except EmailDomainNotAllowedError as exc:
         raise HTTPException(status_code=422, detail={"error": str(exc), "code": exc.code})
+    except PasswordError as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc), "code": "PASSWORD_TOO_WEAK"})
     except AccountExistsError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
 

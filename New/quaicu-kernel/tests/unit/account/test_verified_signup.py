@@ -11,18 +11,30 @@ from core.account.store import AccountStore
 from core.entitlements import EntitlementStore
 from core.errors import (
     AccountExistsError,
+    AccountNotFoundError,
     EmailDomainNotAllowedError,
     SignupVerificationError,
 )
 
 
 def _engine() -> AccountEngine:
-    return AccountEngine(AccountStore(), EntitlementStore(), pepper="test-pepper")
+    return AccountEngine(
+        AccountStore(), EntitlementStore(), pepper="test-pepper", session_secret="test-session-secret"
+    )
 
 
 def _details(email: str = "ada@acme-bank.com") -> SignupDetails:
     return SignupDetails(
-        full_name="Ada Lovelace", email=email, company_name="Acme Bank", job_title="CTO", phone="+1"
+        full_name="Ada Lovelace",
+        email=email,
+        company_name="Acme Bank",
+        password="hunter2pass",
+        job_title="CTO",
+        phone="+1",
+        use_case="AI governance",
+        industry="Banking",
+        company_size="51-200",
+        regulations=("RBI", "DPDP"),
     )
 
 
@@ -51,9 +63,32 @@ def test_start_then_verify_provisions_account():
     account, key = eng.verify_signup(verification_token=token, otp=otp)
     assert account.email == "ada@acme-bank.com"
     assert account.full_name == "Ada Lovelace" and account.job_title == "CTO"
+    assert account.profile["use_case"] == "AI governance"
+    assert account.profile["regulations"] == ["RBI", "DPDP"]
+    assert account.password_hash.startswith("scrypt$")  # password hashed, not stored plaintext
     assert key.startswith("qk_")
     # The provisioned key authenticates.
     assert eng.verify_api_key(key).account_id == account.account_id
+
+
+def test_login_with_email_password_and_session_token():
+    eng = _engine()
+    token, otp = eng.start_signup(_details())
+    account, api_key = eng.verify_signup(verification_token=token, otp=otp)
+
+    # Correct password → account; session JWT resolves to the right principal.
+    authed = eng.authenticate(email="ada@acme-bank.com", password="hunter2pass")
+    assert authed.account_id == account.account_id
+    session, expires_in = eng.mint_session(authed)
+    assert expires_in > 0
+    principal = eng.resolve_principal(session)
+    assert str(principal.tenant_id) == str(account.tenant_id)
+    assert principal.account_id == account.account_id
+
+    # Wrong password rejected; the API key still resolves too (both bearer types work).
+    with pytest.raises(AccountNotFoundError):
+        eng.authenticate(email="ada@acme-bank.com", password="wrong-password")
+    assert eng.resolve_principal(api_key).account_id == account.account_id
 
 
 def test_start_does_not_provision_until_verified():

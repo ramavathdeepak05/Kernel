@@ -8,6 +8,7 @@ the key up. Immutable, like every other kernel domain model.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -40,6 +41,9 @@ class Account:
     full_name: str = ""     # the person who signed up
     job_title: str = ""     # their role (e.g. "Compliance Lead")
     phone: str = ""         # contact number (E.164 or free-form)
+    password_hash: str = ""  # scrypt hash for console email+password login (see passwords.py)
+    # Onboarding survey answers (use_case, industry, company_size, regulations) — stored as JSON.
+    profile: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -47,14 +51,20 @@ class SignupDetails:
     """The customer details collected by the verified-signup form (POST /v1/signup/start).
 
     ``company_name`` becomes the `Account.name` / tenant label. ``email`` must be a company address
-    (see `core/account/email_domains`). Carried (signed) through the OTP step, then provisioned.
+    (see `core/account/email_domains`). Carried (encrypted) through the OTP step, then provisioned.
     """
 
     full_name: str
     email: str
     company_name: str
+    password: str            # plaintext only in transit; hashed at provisioning, never stored
     job_title: str = ""
     phone: str = ""
+    # Onboarding survey (all required by product): how they'll use the kernel + segmentation.
+    use_case: str = ""
+    industry: str = ""
+    company_size: str = ""
+    regulations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
