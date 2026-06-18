@@ -16,6 +16,8 @@ import type {
   PolicyListResponse,
   PolicyRegisterBody,
   PolicyResponse,
+  LoginBody,
+  LoginResponse,
   SignupStartBody,
   SignupStartResponse,
   SignupVerifyBody,
@@ -78,6 +80,9 @@ export const api = {
     request<SignupStartResponse>("POST", "/v1/signup/start", b),
   verifySignup: (b: SignupVerifyBody) =>
     request<SignupResponse>("POST", "/v1/signup/verify", b),
+
+  // ── Login (email + password → session token) ───────────────────────────────
+  login: (b: LoginBody) => request<LoginResponse>("POST", "/v1/auth/login", b),
 
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),

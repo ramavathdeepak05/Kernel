@@ -49,6 +49,7 @@ from delivery.api.routes.admin import router as admin_router
 from delivery.api.routes.erasure import router as erasure_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
+from delivery.api.routes.auth import router as auth_router
 from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
 from delivery.sdk.provider import TieredKernelProvider
@@ -155,6 +156,7 @@ def create_app(
     app.include_router(entitlements_router)
     app.include_router(approvals_router)
     app.include_router(signup_router)
+    app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(billing_router)
     app.include_router(erasure_router)

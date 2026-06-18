@@ -59,19 +59,22 @@ class AccountStore:
             aid = self._tenant_index.get(str(tenant))
             return self._accounts.get(aid) if aid else None
 
-    def email_exists(self, email: str) -> bool:
-        """Authoritative 'does this email already own an account?' check, used by signup.
+    def find_account_by_email(self, email: str) -> Account | None:
+        """Authoritative lookup by email: cache fast-path, durable-repository fallback.
 
-        Fast path: the in-memory cache. Fallback: the durable repository — a brand-new account
-        created on another instance isn't in this instance's cache yet, so the cache alone could let a
-        duplicate signup through (and send a needless OTP). Only invoked on the infrequent signup path.
+        A brand-new account created on another instance isn't in this instance's cache yet, so the
+        cache alone could miss it (let a duplicate signup through, or fail a valid login). Only on the
+        infrequent signup / login path. Returns the full `Account` (incl. its password hash).
         """
-        if self.get_account_by_email(email) is not None:
-            return True
+        cached = self.get_account_by_email(email)
+        if cached is not None:
+            return cached
         getter = getattr(self._repository, "get_account_by_email", None)
-        if getter is not None:
-            return getter(email) is not None
-        return False
+        return getter(email) if getter is not None else None
+
+    def email_exists(self, email: str) -> bool:
+        """Authoritative 'does this email already own an account?' check, used by signup."""
+        return self.find_account_by_email(email) is not None
 
     def add_account(self, account: Account) -> Account:
         if self._repository is not None:  # persist-first: a DB failure fails closed (no cache update)

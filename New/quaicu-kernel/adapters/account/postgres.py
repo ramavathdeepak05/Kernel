@@ -26,16 +26,19 @@ from core.types import TenantId
 
 _UPSERT_ACCOUNT_SQL = """
 INSERT INTO quaicu_accounts
-    (account_id, tenant_id, email, name, status, created_at, full_name, job_title, phone)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    (account_id, tenant_id, email, name, status, created_at, full_name, job_title, phone,
+     password_hash, profile)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
 ON CONFLICT (account_id) DO UPDATE SET
-    tenant_id  = EXCLUDED.tenant_id,
-    email      = EXCLUDED.email,
-    name       = EXCLUDED.name,
-    status     = EXCLUDED.status,
-    full_name  = EXCLUDED.full_name,
-    job_title  = EXCLUDED.job_title,
-    phone      = EXCLUDED.phone
+    tenant_id     = EXCLUDED.tenant_id,
+    email         = EXCLUDED.email,
+    name          = EXCLUDED.name,
+    status        = EXCLUDED.status,
+    full_name     = EXCLUDED.full_name,
+    job_title     = EXCLUDED.job_title,
+    phone         = EXCLUDED.phone,
+    password_hash = EXCLUDED.password_hash,
+    profile       = EXCLUDED.profile
 """
 
 _UPSERT_API_KEY_SQL = """
@@ -50,7 +53,8 @@ ON CONFLICT (key_id) DO UPDATE SET
 
 _SELECT_ACCOUNTS_SQL = (
     "SELECT account_id, tenant_id, email, name, status, created_at, "
-    "COALESCE(full_name, ''), COALESCE(job_title, ''), COALESCE(phone, '') FROM quaicu_accounts"
+    "COALESCE(full_name, ''), COALESCE(job_title, ''), COALESCE(phone, ''), "
+    "COALESCE(password_hash, ''), COALESCE(profile, '{}') FROM quaicu_accounts"
 )
 _SELECT_API_KEYS_SQL = (
     "SELECT key_id, tenant_id, hashed_secret, created_at, revoked, scopes FROM quaicu_api_keys"
@@ -66,6 +70,9 @@ def _scopes_from(raw: Any) -> frozenset[str]:
 
 
 def _row_to_account(r: Any) -> Account:
+    profile = r[10]
+    if isinstance(profile, str):  # some drivers return jsonb as text
+        profile = json.loads(profile or "{}")
     return Account(
         account_id=r[0],
         tenant_id=TenantId(r[1]),
@@ -76,6 +83,8 @@ def _row_to_account(r: Any) -> Account:
         full_name=r[6],
         job_title=r[7],
         phone=r[8],
+        password_hash=r[9],
+        profile=profile or {},
     )
 
 
@@ -152,6 +161,8 @@ class PostgresAccountRepository:
                     account.full_name,
                     account.job_title,
                     account.phone,
+                    account.password_hash,
+                    json.dumps(dict(account.profile)),
                 ),
             ),
             "save_account",
