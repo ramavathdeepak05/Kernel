@@ -97,7 +97,10 @@ class PostgresEntitlementRepository:
         async with self._pool_lock:
             if self._pool is None:
                 try:
-                    self._pool = await asyncpg.create_pool(self._dsn)
+                    # Bounded pool: the shared SaaS plane runs several pools (entitlements + each
+                    # business-tier adapter) on one instance; asyncpg's default of 10 exhausts a small
+                    # instance's connection slots. 4 is ample for a shared plane — raise with the DB tier.
+                    self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=4)
                 except Exception as exc:
                     raise EntitlementPersistenceError(
                         f"Failed to create Postgres pool: {exc}",

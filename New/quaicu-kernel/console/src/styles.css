@@ -167,3 +167,8 @@ tr.clickable { cursor: pointer; } tr.clickable:hover td { background: var(--pape
 .dev-toggle { display: block; width: 100%; background: transparent; border: none; font-family: var(--f-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--smoke); text-align: left; padding: 4px 0; }
 .dev-toggle:hover { color: var(--ink); border: none; }
 .dev-signin { display: grid; gap: 12px; border-top: 1px solid var(--rule); padding-top: 12px; }
+
+/* Inline link-style buttons (signup OTP step: resend / change details). */
+.linklike { background: transparent; border: none; padding: 0; font: inherit; color: var(--ember); cursor: pointer; text-decoration: underline; }
+.linklike:hover { color: var(--ink); border: none; }
+.linklike:disabled { color: var(--smoke); cursor: default; text-decoration: none; }

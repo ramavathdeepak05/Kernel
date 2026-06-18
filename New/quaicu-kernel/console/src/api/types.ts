@@ -135,10 +135,26 @@ export interface CheckoutResponse {
   reference: string | null;
 }
 
-// ── Self-serve signup (POST /v1/signup, unauthenticated) ──────────────────────
-export interface SignupBody {
+// ── Self-serve verified signup (unauthenticated) ─────────────────────────────
+// Two steps: POST /v1/signup/start (collect details → email OTP) then
+// POST /v1/signup/verify (OTP → provisioned tenant + key).
+export interface SignupStartBody {
+  full_name: string;
+  email: string; // company email (free/personal providers rejected)
+  company_name: string;
+  job_title?: string;
+  phone?: string;
+}
+
+export interface SignupStartResponse {
+  verification_token: string; // opaque; returned with the OTP on /verify
   email: string;
-  name: string; // organisation / workspace name
+  expires_in: number; // seconds
+}
+
+export interface SignupVerifyBody {
+  verification_token: string;
+  otp: string;
 }
 
 export interface SignupResponse {

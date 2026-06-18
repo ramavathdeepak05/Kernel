@@ -100,10 +100,12 @@ def test_save_api_key_serializes_scopes_as_json():
 
 def test_load_all_maps_rows():
     b = _FakeBackend()
-    b.account_rows = [("acct_1", "acme", "a@b.io", "Acme", "ACTIVE", NOW)]
+    # 9 columns: …, full_name, job_title, phone (migration 008).
+    b.account_rows = [("acct_1", "acme", "a@b.io", "Acme", "ACTIVE", NOW, "Ada Lovelace", "CTO", "+1")]
     b.key_rows = [("k1", "acme", "hash", NOW, False, ["read"])]
     accounts, keys = _repo(b).load_all()
     assert accounts[0].account_id == "acct_1" and accounts[0].status is AccountStatus.ACTIVE
+    assert accounts[0].full_name == "Ada Lovelace" and accounts[0].job_title == "CTO"
     assert keys[0].key_id == "k1" and keys[0].scopes == frozenset({"read"})
 
 

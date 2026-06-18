@@ -77,3 +77,25 @@ jobs:
           cd New/quaicu-kernel
           python -m pytest -m integration --tb=short -q \
             tests/conformance/storage tests/conformance/ledger/test_postgres_spec.py
+
+  # Type-checks and builds the operator console so a TS or build break fails CI (the console was
+  # previously untested + not in CI — see ship-readiness review item A4). No deploy here; this only
+  # proves the SPA compiles. The signup flow, auto-login, and the X-Tenant-Id routing fix live here.
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: New/quaicu-kernel/console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: New/quaicu-kernel/console/package-lock.json
+      - name: Install (clean, lockfile-pinned)
+        run: npm ci
+      - name: Type-check
+        run: npm run typecheck
+      - name: Build
+        run: npm run build

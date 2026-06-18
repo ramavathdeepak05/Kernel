@@ -298,6 +298,12 @@ class StoragePortError(PortError):
     code = "PORT_STORAGE_ERROR"
 
 
+class EmailPortError(PortError):
+    """EmailSender adapter error (provider rejected the send, transport failed)."""
+
+    code = "PORT_EMAIL_ERROR"
+
+
 class WorkflowPortError(PortError):
     """WorkflowPort adapter error (start/signal/state failed)."""
 
@@ -417,6 +423,21 @@ class AccountPersistenceError(AccountError):
     """A durable account/api-key store operation failed (connect / read / write)."""
 
     code = "ACCOUNT_PERSISTENCE_FAILED"
+
+
+class EmailDomainNotAllowedError(AccountError):
+    """Signup used a free/personal email domain (gmail/yahoo/…). Company email required. Reject (422)."""
+
+    code = "EMAIL_DOMAIN_NOT_ALLOWED"
+
+
+class SignupVerificationError(AccountError):
+    """The signup verification token is missing/forged/expired, or the OTP code does not match.
+
+    Fail-closed: no account is provisioned until a valid OTP proves the caller controls the email.
+    Reject (400)."""
+
+    code = "SIGNUP_VERIFICATION_FAILED"
 
 
 # ── Billing errors (WS-C — Stripe / Razorpay → tier flips) ─────────────────────

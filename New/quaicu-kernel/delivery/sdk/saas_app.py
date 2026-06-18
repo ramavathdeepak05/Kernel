@@ -23,6 +23,7 @@ ENTERPRISE is intentionally not a plane tier: it ships as a dedicated single-ker
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -32,6 +33,7 @@ from core.entitlements import FeatureTier
 from delivery.api.app import create_app
 from delivery.sdk.account_config import build_account_engine, require_api_key
 from delivery.sdk.billing_config import build_billing
+from delivery.sdk.email_config import build_email_sender
 from delivery.sdk.entitlements_config import build_entitlement_store
 from delivery.sdk.metering_config import build_usage_meter
 from delivery.sdk.provider import TieredKernelProvider
@@ -89,4 +91,23 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
         require_api_key=require_api_key(config),
         billing_adapters=billing_adapters,
         billing_engine=billing_engine,
+        email_sender=build_email_sender(config),  # Resend when RESEND_API_KEY set, else log-only
+        cors_origins=_cors_origins(config),
     )
+
+
+def _cors_origins(config: Mapping[str, Any]) -> list[str] | None:
+    """Browser origins allowed to call the API (the deployed console runs on a separate origin).
+
+    Resolution order: the ``CORS_ORIGINS`` env var (comma-separated — convenient for Cloud Run /
+    container envs) → a ``[cors] origins = [...]`` config list → ``None`` (which falls back to
+    ``create_app``'s localhost-dev default). A production deploy MUST set one of the first two to the
+    console's origin, else its cross-origin requests are blocked by CORS.
+    """
+    env = os.getenv("CORS_ORIGINS", "")
+    if env.strip():
+        return [o.strip() for o in env.split(",") if o.strip()]
+    section = config.get("cors")
+    if isinstance(section, Mapping) and section.get("origins"):
+        return [str(o) for o in section["origins"]]
+    return None

@@ -1,24 +1,56 @@
-"""Self-serve signup route (ADR-0010).
+"""Self-serve signup routes (ADR-0010) — verified, two-step.
 
-POST /v1/signup → 201 — provisions a STARTER tenant and returns a one-time API key.
+  POST /v1/signup/start  → collect customer details, email a 6-digit OTP, return a signed token (201)
+  POST /v1/signup/verify → exchange (token + OTP) for a provisioned STARTER tenant + API key (201)
+  POST /v1/signup        → legacy one-step provisioning; ENABLED ONLY when no email sender is wired
+                           (dev / no-email deploys). In production (email configured) it returns 409
+                           pointing at the verified flow, so OTP can't be bypassed.
 
-This is the only intentionally **unauthenticated** write endpoint: it is how a new customer onboards
-without a pre-existing identity. It is rate-limit-sensitive (see WS-D); the handler stays thin.
+These are the only intentionally **unauthenticated** write endpoints — how a new customer onboards
+without a pre-existing identity. They are rate-limit-sensitive (WS-D); handlers stay thin. Signup
+requires a **company email** (free/personal providers are rejected) and proof of email control (OTP).
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from core.errors import AccountExistsError
+from core.account.model import Account, SignupDetails
+from core.email import EmailMessage
+from core.entitlements import CustomerPlan, FeatureTier, PlanStatus
+from core.errors import (
+    AccountExistsError,
+    EmailDomainNotAllowedError,
+    SignupVerificationError,
+)
 
 router = APIRouter(prefix="/v1", tags=["signup"])
 
 
-class SignupRequest(BaseModel):
-    email: str = Field(..., description="Account owner email (unique).")
-    name: str = Field(..., description="Organisation / workspace name.")
+# ── Schemas ────────────────────────────────────────────────────────────────────
+
+
+class SignupStartRequest(BaseModel):
+    full_name: str = Field(..., min_length=1, description="Name of the person signing up.")
+    email: str = Field(..., description="Company email (free/personal providers are rejected).")
+    company_name: str = Field(..., min_length=1, description="Organisation / workspace name.")
+    job_title: str = Field("", description="Role, e.g. 'Compliance Lead'.")
+    phone: str = Field("", description="Contact number.")
+
+
+class SignupStartResponse(BaseModel):
+    verification_token: str = Field(..., description="Opaque token to return with the OTP on /verify.")
+    email: str
+    expires_in: int = Field(..., description="Seconds until the OTP/token expires.")
+
+
+class SignupVerifyRequest(BaseModel):
+    verification_token: str
+    otp: str = Field(..., description="The 6-digit code emailed to the customer.")
 
 
 class SignupResponse(BaseModel):
@@ -28,24 +60,147 @@ class SignupResponse(BaseModel):
     api_key: str = Field(..., description="Plaintext API key — shown ONCE; store it securely.")
 
 
-@router.post(
-    "/signup",
-    status_code=status.HTTP_201_CREATED,
-    response_model=SignupResponse,
-    summary="Self-serve signup (creates a STARTER tenant + API key)",
-)
-async def signup(body: SignupRequest, request: Request) -> SignupResponse:
+class SignupRequest(BaseModel):
+    """Legacy one-step (no-OTP) request, kept for dev / no-email deploys."""
+
+    email: str = Field(..., description="Account owner email (unique).")
+    name: str = Field(..., description="Organisation / workspace name.")
+
+
+# ── OTP email body ───────────────────────────────────────────────────────────────
+
+
+def _otp_email(otp: str, company: str) -> EmailMessage:
+    html = (
+        '<div style="font-family:system-ui,sans-serif;max-width:480px">'
+        '<h2 style="margin:0 0 8px">Verify your email</h2>'
+        f"<p>Use this code to finish creating your QUAICU workspace for <strong>{company}</strong>:</p>"
+        f'<p style="font-size:32px;font-weight:700;letter-spacing:6px;margin:16px 0">{otp}</p>'
+        '<p style="color:#666;font-size:13px">This code expires in 10 minutes. '
+        "If you didn't request it, you can ignore this email.</p></div>"
+    )
+    return EmailMessage(
+        to="",  # set by the caller
+        subject=f"Your QUAICU verification code: {otp}",
+        html=html,
+        text=f"Your QUAICU verification code is {otp}. It expires in 10 minutes.",
+    )
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────────
+
+
+def _require_engine(request: Request):
     engine = getattr(request.app.state, "account_engine", None)
     if engine is None:
         raise HTTPException(
             status_code=503,
             detail={"error": "Signup is not enabled on this deployment", "code": "SIGNUP_DISABLED"},
         )
+    return engine
+
+
+async def _persist_starter_plan(request: Request, account: Account) -> None:
+    """Durably persist the new tenant's STARTER plan.
+
+    `AccountEngine.signup` only writes the plan to the entitlement *cache* (its durable write is async,
+    the engine is sync). Without this, the plan is lost on the next restart/redeploy and tenant→kernel
+    routing fails PLAN_NOT_FOUND (dashboard/audit/approvals 503). Persisting here (the route is async)
+    closes that gap. Idempotent re-cache of what the engine already cached this process.
+    """
+    store = getattr(request.app.state, "entitlement_store", None)
+    if store is None or not hasattr(store, "upsert_persisted"):
+        return
+    now = datetime.now(timezone.utc)
+    await store.upsert_persisted(
+        CustomerPlan(
+            tenant_id=account.tenant_id,
+            tier=FeatureTier.STARTER,
+            status=PlanStatus.ACTIVE,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
+@router.post(
+    "/signup/start",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SignupStartResponse,
+    summary="Begin verified signup — emails a one-time code",
+)
+async def signup_start(body: SignupStartRequest, request: Request) -> SignupStartResponse:
+    engine = _require_engine(request)
+    sender = getattr(request.app.state, "email_sender", None)
+    details = SignupDetails(
+        full_name=body.full_name.strip(),
+        email=body.email.strip(),
+        company_name=body.company_name.strip(),
+        job_title=body.job_title.strip(),
+        phone=body.phone.strip(),
+    )
+    try:
+        token, otp = engine.start_signup(details)
+    except EmailDomainNotAllowedError as exc:
+        raise HTTPException(status_code=422, detail={"error": str(exc), "code": exc.code})
+    except AccountExistsError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
+
+    if sender is not None:
+        await sender.send(replace(_otp_email(otp, details.company_name), to=details.email))
+
+    return SignupStartResponse(verification_token=token, email=details.email, expires_in=600)
+
+
+@router.post(
+    "/signup/verify",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SignupResponse,
+    summary="Complete verified signup — exchange the code for a tenant + API key",
+)
+async def signup_verify(body: SignupVerifyRequest, request: Request) -> SignupResponse:
+    engine = _require_engine(request)
+    try:
+        account, api_key = engine.verify_signup(
+            verification_token=body.verification_token, otp=body.otp
+        )
+    except SignupVerificationError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc), "code": exc.code})
+    except AccountExistsError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
+
+    await _persist_starter_plan(request, account)
+    return SignupResponse(
+        account_id=account.account_id,
+        tenant_id=str(account.tenant_id),
+        tier="STARTER",
+        api_key=api_key,
+    )
+
+
+@router.post(
+    "/signup",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SignupResponse,
+    summary="Legacy one-step signup (only on deploys without email/OTP)",
+)
+async def signup(body: SignupRequest, request: Request) -> SignupResponse:
+    engine = _require_engine(request)
+    # In production an email sender is wired → the OTP flow is mandatory; refuse the no-OTP path.
+    if getattr(request.app.state, "email_sender", None) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "Use the verified signup flow (/v1/signup/start then /v1/signup/verify).",
+                "code": "SIGNUP_VERIFICATION_REQUIRED",
+            },
+        )
     try:
         account, api_key = engine.signup(email=body.email, name=body.name)
     except AccountExistsError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
 
+    await _persist_starter_plan(request, account)
     return SignupResponse(
         account_id=account.account_id,
         tenant_id=str(account.tenant_id),

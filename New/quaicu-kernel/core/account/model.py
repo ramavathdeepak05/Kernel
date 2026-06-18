@@ -24,7 +24,12 @@ class AccountStatus(str, Enum):
 
 @dataclass(frozen=True)
 class Account:
-    """A customer organisation, 1:1 with a tenant on signup."""
+    """A customer organisation, 1:1 with a tenant on signup.
+
+    ``name`` is the organisation / workspace name (also the tenant-id slug source). The professional
+    contact fields (collected by the verified-signup form) default to empty for backward compatibility
+    with accounts created before they existed.
+    """
 
     account_id: str
     tenant_id: TenantId
@@ -32,6 +37,24 @@ class Account:
     name: str
     status: AccountStatus
     created_at: datetime
+    full_name: str = ""     # the person who signed up
+    job_title: str = ""     # their role (e.g. "Compliance Lead")
+    phone: str = ""         # contact number (E.164 or free-form)
+
+
+@dataclass(frozen=True)
+class SignupDetails:
+    """The customer details collected by the verified-signup form (POST /v1/signup/start).
+
+    ``company_name`` becomes the `Account.name` / tenant label. ``email`` must be a company address
+    (see `core/account/email_domains`). Carried (signed) through the OTP step, then provisioned.
+    """
+
+    full_name: str
+    email: str
+    company_name: str
+    job_title: str = ""
+    phone: str = ""
 
 
 @dataclass(frozen=True)

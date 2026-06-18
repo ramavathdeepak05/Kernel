@@ -395,10 +395,23 @@ class Kernel:
         wires the AI Gateway (``[adapters].inference`` + ``[gateway]``) and the governance
         profiles (``[governance]``).
         """
+        import os
         import tomllib
 
+        def _expand(node: Any) -> Any:
+            """Resolve ``${ENV_VAR}`` references in string values so configs can keep secrets
+            (DSNs, signing keys) out of the file and inject them from the environment at load —
+            matching the SaaS-plane builders. Unset vars are left literal."""
+            if isinstance(node, str):
+                return os.path.expandvars(node)
+            if isinstance(node, dict):
+                return {k: _expand(v) for k, v in node.items()}
+            if isinstance(node, list):
+                return [_expand(v) for v in node]
+            return node
+
         with open(path, "rb") as f:
-            cfg = tomllib.load(f)
+            cfg = _expand(tomllib.load(f))
 
         tenant = TenantId(cfg.get("tenant", {}).get("id", "default"))
         adapter_cfg = cfg.get("adapters", {})
