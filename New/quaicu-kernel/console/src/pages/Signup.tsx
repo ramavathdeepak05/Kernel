@@ -10,7 +10,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { ErrorBox } from "../components";
 import { setSession } from "../state/auth";
-import type { SignupResponse } from "../api/types";
 
 const FREE_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com",
@@ -30,7 +29,7 @@ const SIZES = ["1-10", "11-50", "51-200", "201-1000", "1000+"];
 const USE_CASES = ["AI governance", "Audit & compliance", "Policy enforcement", "Model risk management", "Other"];
 const REGULATIONS = ["RBI", "DPDP", "GDPR", "EU AI Act", "NAAC"];
 
-type Step = "account" | "about" | "otp" | "done";
+type Step = "account" | "about" | "otp";
 
 export default function Signup() {
   const navigate = useNavigate();
@@ -54,10 +53,6 @@ export default function Signup() {
   // Step 3 — otp
   const [token, setToken] = useState("");
   const [otp, setOtp] = useState("");
-
-  // Step 4 — result
-  const [result, setResult] = useState<SignupResponse | null>(null);
-  const [copied, setCopied] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -116,8 +111,9 @@ export default function Signup() {
     setError(null);
     try {
       const resp = await api.verifySignup({ verification_token: token, otp: otp.trim() });
-      setResult(resp);
-      setStep("done");
+      // Auto-login with the returned session, then into the console — no API key shown here.
+      setSession({ token: resp.session_token, tenant: resp.tenant_id });
+      navigate("/", { replace: true });
     } catch (err) {
       setError(mapError(err));
     } finally {
@@ -141,50 +137,6 @@ export default function Signup() {
     } finally {
       setBusy(false);
     }
-  }
-
-  async function copyKey() {
-    if (!result) return;
-    try {
-      await navigator.clipboard.writeText(result.api_key);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  function enterConsole() {
-    if (!result) return;
-    setSession({ token: result.api_key, tenant: result.tenant_id });
-    navigate("/", { replace: true });
-  }
-
-  // ── Step 4: key reveal ──────────────────────────────────────────────────────
-  if (step === "done" && result) {
-    return (
-      <div className="gate">
-        <h2>Your free workspace is ready</h2>
-        <p className="muted">
-          You're on the <span className="tier-badge tier-starter">STARTER</span> tier. Sign in next time
-          with your email + password — the API key below is for programmatic access.
-        </p>
-        <div className="card signup-card">
-          <div className="card-title">Your API key</div>
-          <div className="card-body">
-            <p className="muted small">
-              Copy this now — shown <strong>once</strong>. Authenticates API calls as tenant{" "}
-              <code>{result.tenant_id}</code>.
-            </p>
-            <div className="key-reveal">
-              <code className="key-value">{result.api_key}</code>
-              <button onClick={copyKey}>{copied ? "Copied ✓" : "Copy"}</button>
-            </div>
-          </div>
-        </div>
-        <button className="primary" onClick={enterConsole}>Enter the console →</button>
-      </div>
-    );
   }
 
   // ── Step 3: OTP ─────────────────────────────────────────────────────────────

@@ -112,6 +112,7 @@ class AccountEngine:
         phone: str = "",
         password_hash: str = "",
         profile: Mapping[str, object] | None = None,
+        issue_key: bool = True,
     ) -> tuple[Account, str]:
         """Provision a new account on the STARTER tier. Returns (account, plaintext_api_key).
 
@@ -154,7 +155,9 @@ class AccountEngine:
             )
         )
 
-        _, plaintext = self.issue_api_key(tenant)
+        plaintext = ""
+        if issue_key:  # keys are now minted on demand from the console; signup-via-OTP skips this.
+            _, plaintext = self.issue_api_key(tenant)
         log.info("signup complete: tenant=%s tier=STARTER", tenant)
         return account, plaintext
 
@@ -204,19 +207,19 @@ class AccountEngine:
         log.info("signup started (OTP issued): email=%s", details.email)
         return token, otp
 
-    def verify_signup(self, *, verification_token: str, otp: str) -> tuple[Account, str]:
-        """Complete a verified signup: check the OTP against the token, then provision.
+    def verify_signup(self, *, verification_token: str, otp: str) -> Account:
+        """Complete a verified signup: check the OTP, then provision the STARTER account.
 
-        Raises `SignupVerificationError` if the token is forged/expired or the OTP is wrong, and
-        `AccountExistsError` if the email was claimed in the meantime. On success, provisions the
-        STARTER account (with the collected details) and returns ``(account, plaintext_api_key)``.
+        No API key is issued — the user authenticates with their password; keys are minted on demand
+        from the console (see `list_api_keys` / `issue_api_key`). Raises `SignupVerificationError` (bad
+        / expired token or OTP) or `AccountExistsError`. Returns the new `Account`.
         """
         payload = self._open_token(verification_token)
         expected = str(payload.get("otp_hash", ""))
         if not expected or not hmac.compare_digest(expected, self._hash_secret(otp.strip())):
             raise SignupVerificationError("Incorrect verification code.")
         d = payload.get("details", {})
-        return self.signup(
+        account, _ = self.signup(
             email=str(d["email"]),
             name=str(d["company_name"]),
             full_name=str(d.get("full_name", "")),
@@ -229,7 +232,9 @@ class AccountEngine:
                 "company_size": d.get("company_size", ""),
                 "regulations": list(d.get("regulations", [])),
             },
+            issue_key=False,
         )
+        return account
 
     # ── Console login (email + password → session JWT) ──────────────────────────────
 
@@ -339,12 +344,20 @@ class AccountEngine:
         self._accounts.add_api_key(record)
         return record, f"qk_{key_id}_{secret}"
 
-    def revoke_api_key(self, key_id: str) -> None:
-        """Revoke a key so it can no longer authenticate. Idempotent."""
+    def list_api_keys(self, tenant: TenantId) -> list[ApiKey]:
+        """All API-key records for ``tenant`` (metadata only — secrets are never stored)."""
+        return self._accounts.list_api_keys(tenant)
+
+    def revoke_api_key(self, key_id: str, *, tenant: TenantId | None = None) -> None:
+        """Revoke a key so it can no longer authenticate. Idempotent.
+
+        When ``tenant`` is given, the key must belong to it (a tenant can only revoke its own keys);
+        a mismatch raises `ApiKeyInvalidError` (no cross-tenant revocation, no key-existence leak).
+        """
         import dataclasses
 
         existing = self._accounts.get_api_key(key_id)
-        if existing is None:
+        if existing is None or (tenant is not None and str(existing.tenant_id) != str(tenant)):
             raise ApiKeyInvalidError(
                 f"No API key {key_id!r} to revoke.", detail={"key_id": key_id}
             )

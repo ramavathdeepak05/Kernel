@@ -12,9 +12,11 @@ from core.entitlements import EntitlementStore
 from core.errors import (
     AccountExistsError,
     AccountNotFoundError,
+    ApiKeyInvalidError,
     EmailDomainNotAllowedError,
     SignupVerificationError,
 )
+from core.types import TenantId
 
 
 def _engine() -> AccountEngine:
@@ -60,21 +62,20 @@ def test_start_then_verify_provisions_account():
     eng = _engine()
     token, otp = eng.start_signup(_details())
     assert len(otp) == 6 and otp.isdigit()
-    account, key = eng.verify_signup(verification_token=token, otp=otp)
+    account = eng.verify_signup(verification_token=token, otp=otp)
     assert account.email == "ada@acme-bank.com"
     assert account.full_name == "Ada Lovelace" and account.job_title == "CTO"
     assert account.profile["use_case"] == "AI governance"
     assert account.profile["regulations"] == ["RBI", "DPDP"]
     assert account.password_hash.startswith("scrypt$")  # password hashed, not stored plaintext
-    assert key.startswith("qk_")
-    # The provisioned key authenticates.
-    assert eng.verify_api_key(key).account_id == account.account_id
+    # No API key issued at signup — keys are minted on demand from the console.
+    assert eng.list_api_keys(account.tenant_id) == []
 
 
 def test_login_with_email_password_and_session_token():
     eng = _engine()
     token, otp = eng.start_signup(_details())
-    account, api_key = eng.verify_signup(verification_token=token, otp=otp)
+    account = eng.verify_signup(verification_token=token, otp=otp)
 
     # Correct password → account; session JWT resolves to the right principal.
     authed = eng.authenticate(email="ada@acme-bank.com", password="hunter2pass")
@@ -85,10 +86,34 @@ def test_login_with_email_password_and_session_token():
     assert str(principal.tenant_id) == str(account.tenant_id)
     assert principal.account_id == account.account_id
 
-    # Wrong password rejected; the API key still resolves too (both bearer types work).
+    # Wrong password rejected; a minted API key also resolves (both bearer types work).
     with pytest.raises(AccountNotFoundError):
         eng.authenticate(email="ada@acme-bank.com", password="wrong-password")
+    _, api_key = eng.issue_api_key(account.tenant_id)
     assert eng.resolve_principal(api_key).account_id == account.account_id
+
+
+def test_api_key_create_list_revoke():
+    eng = _engine()
+    token, otp = eng.start_signup(_details())
+    account = eng.verify_signup(verification_token=token, otp=otp)
+    t = account.tenant_id
+
+    assert eng.list_api_keys(t) == []
+    rec, plaintext = eng.issue_api_key(t)
+    keys = eng.list_api_keys(t)
+    assert len(keys) == 1 and keys[0].key_id == rec.key_id and not keys[0].revoked
+    assert eng.verify_api_key(plaintext).account_id == account.account_id
+
+    eng.revoke_api_key(rec.key_id, tenant=t)
+    assert eng.list_api_keys(t)[0].revoked is True
+    with pytest.raises(ApiKeyInvalidError):
+        eng.verify_api_key(plaintext)  # revoked → no longer authenticates
+
+    # A tenant cannot revoke another tenant's key.
+    rec2, _ = eng.issue_api_key(t)
+    with pytest.raises(ApiKeyInvalidError):
+        eng.revoke_api_key(rec2.key_id, tenant=TenantId("someone-else"))
 
 
 def test_start_does_not_provision_until_verified():
