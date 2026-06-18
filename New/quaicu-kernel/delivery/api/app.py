@@ -66,6 +66,7 @@ def create_app(
     billing_adapters: "dict[str, object] | None" = None,
     billing_engine: "object | None" = None,
     email_sender: "object | None" = None,
+    signup_payment: "object | None" = None,
     usage_meter: "object | None" = None,
     erasure_engine: "object | None" = None,
     enforce_paths: list[tuple[str, str]] | None = None,
@@ -143,6 +144,8 @@ def create_app(
     # Transactional email (verified-signup OTP / recovery). None → /v1/signup/start emails nothing and
     # the legacy one-step /v1/signup stays open; a wired sender makes the OTP flow mandatory.
     app.state.email_sender = email_sender
+    # Signup-fee gateway (₹2 at signup). None → no fee; /v1/signup/verify provisions on OTP directly.
+    app.state.signup_payment = signup_payment
     app.state.usage_meter = usage_meter
     # Erasure (WS-G): crypto-shredding engine for the GDPR/DPDP right-to-erasure routes.
     app.state.erasure_engine = erasure_engine

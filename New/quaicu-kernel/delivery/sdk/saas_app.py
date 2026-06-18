@@ -35,6 +35,7 @@ from delivery.sdk.account_config import build_account_engine, require_api_key
 from delivery.sdk.billing_config import build_billing
 from delivery.sdk.email_config import build_email_sender
 from delivery.sdk.entitlements_config import build_entitlement_store
+from delivery.sdk.signup_payment_config import build_signup_payment
 from delivery.sdk.metering_config import build_usage_meter
 from delivery.sdk.provider import TieredKernelProvider
 
@@ -92,6 +93,7 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
         billing_adapters=billing_adapters,
         billing_engine=billing_engine,
         email_sender=build_email_sender(config),  # Resend when RESEND_API_KEY set, else log-only
+        signup_payment=build_signup_payment(config),  # ₹2 fee gate when [signup_fee].enabled
         cors_origins=_cors_origins(config),
     )
 

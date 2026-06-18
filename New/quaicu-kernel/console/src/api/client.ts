@@ -20,6 +20,7 @@ import type {
   CreatedApiKey,
   LoginBody,
   LoginResponse,
+  SignupCompleteBody,
   SignupStartBody,
   SignupStartResponse,
   SignupVerifyBody,
@@ -82,6 +83,8 @@ export const api = {
     request<SignupStartResponse>("POST", "/v1/signup/start", b),
   verifySignup: (b: SignupVerifyBody) =>
     request<SignupVerifyResponse>("POST", "/v1/signup/verify", b),
+  completeSignup: (b: SignupCompleteBody) =>
+    request<SignupVerifyResponse>("POST", "/v1/signup/complete", b),
 
   // ── Login (email + password → session token) ───────────────────────────────
   login: (b: LoginBody) => request<LoginResponse>("POST", "/v1/auth/login", b),

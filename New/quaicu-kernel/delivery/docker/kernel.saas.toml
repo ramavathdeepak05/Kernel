@@ -23,6 +23,16 @@ dsn = "${ENTITLEMENTS_DSN}"
 enabled = true
 dsn = "${ACCOUNT_DSN}"   # durable accounts (Postgres, migration 006) — signups survive restart / scale-out
 
+# ₹2 signup fee (ADR-0011): every signup (incl. free STARTER) pays a ₹2/yr fee via Razorpay before the
+# account is created. Keys resolve from RAZORPAY_KEY_ID / RAZORPAY_KEY_SECRET (Secret Manager). Remove
+# this section (or set enabled=false) to make signup free again.
+[signup_fee]
+enabled      = true
+amount_paise = 200       # ₹2
+currency     = "INR"
+key_id       = "${RAZORPAY_KEY_ID}"
+key_secret   = "${RAZORPAY_KEY_SECRET}"
+
 # Self-serve checkout + webhook tier flips (WS-C). Uncomment + configure to enable the console Billing
 # page and the /v1/billing/* routes. Secrets resolve from the environment at load.
 # [billing.stripe]

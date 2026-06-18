@@ -10,6 +10,26 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { ErrorBox } from "../components";
 import { setSession } from "../state/auth";
+import type { SignupVerifyResponse } from "../api/types";
+
+// Lazily load Razorpay Checkout (their hosted, PCI-compliant widget) — only when a fee is due.
+function loadRazorpayScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as unknown as { Razorpay?: unknown }).Razorpay) return resolve();
+    const existing = document.getElementById("rzp-checkout-js");
+    if (existing) {
+      existing.addEventListener("load", () => resolve());
+      existing.addEventListener("error", () => reject(new Error("load failed")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.id = "rzp-checkout-js";
+    s.src = "https://checkout.razorpay.com/v1/checkout.js";
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("load failed"));
+    document.body.appendChild(s);
+  });
+}
 
 const FREE_DOMAINS = new Set([
   "gmail.com", "googlemail.com", "yahoo.com", "ymail.com", "outlook.com", "hotmail.com",
@@ -50,9 +70,10 @@ export default function Signup() {
   const [useCase, setUseCase] = useState("");
   const [regulations, setRegulations] = useState<string[]>([]);
 
-  // Step 3 — otp
+  // Step 3 — otp / payment
   const [token, setToken] = useState("");
   const [otp, setOtp] = useState("");
+  const [paymentInfo, setPaymentInfo] = useState<SignupVerifyResponse | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,20 +126,69 @@ export default function Signup() {
     }
   }
 
+  function finishLogin(resp: SignupVerifyResponse) {
+    if (resp.session_token && resp.tenant_id) {
+      setSession({ token: resp.session_token, tenant: resp.tenant_id });
+      navigate("/", { replace: true });
+    }
+  }
+
   async function verifySubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
       const resp = await api.verifySignup({ verification_token: token, otp: otp.trim() });
-      // Auto-login with the returned session, then into the console — no API key shown here.
-      setSession({ token: resp.session_token, tenant: resp.tenant_id });
-      navigate("/", { replace: true });
+      if (resp.requires_payment) {
+        setPaymentInfo(resp);     // show the "Pay ₹2" panel
+        await openRazorpay(resp); // and open the widget right away
+      } else {
+        finishLogin(resp);        // free path → straight into the console
+      }
     } catch (err) {
       setError(mapError(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function openRazorpay(info: SignupVerifyResponse) {
+    setError(null);
+    try {
+      await loadRazorpayScript();
+    } catch {
+      setError("Couldn't load the payment widget. Check your connection and try again.");
+      return;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Razorpay = (window as unknown as { Razorpay: any }).Razorpay;
+    const rzp = new Razorpay({
+      key: info.razorpay_key_id,
+      order_id: info.order_id,
+      amount: info.amount_paise,
+      currency: info.currency,
+      name: "QUAICU",
+      description: "Signup fee — ₹2 / year",
+      prefill: { email: email.trim(), name: fullName.trim(), contact: phone.trim() },
+      theme: { color: "#111111" },
+      handler: async (r: { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string }) => {
+        try {
+          const done = await api.completeSignup({
+            payment_token: info.payment_token!,
+            razorpay_order_id: r.razorpay_order_id,
+            razorpay_payment_id: r.razorpay_payment_id,
+            razorpay_signature: r.razorpay_signature,
+          });
+          finishLogin(done);
+        } catch (err) {
+          setError(mapError(err));
+        }
+      },
+      modal: {
+        ondismiss: () => setError("Payment cancelled — your account isn't created until the ₹2 fee is paid."),
+      },
+    });
+    rzp.open();
   }
 
   async function resendCode() {
@@ -139,34 +209,53 @@ export default function Signup() {
     }
   }
 
-  // ── Step 3: OTP ─────────────────────────────────────────────────────────────
+  // ── Step 3: OTP, then (if a fee is due) payment ─────────────────────────────
   if (step === "otp") {
     return (
       <div className="gate">
-        <h2>Verify your email</h2>
-        <p className="muted">We sent a 6-digit code to <strong>{email.trim()}</strong>.</p>
-        <form className="card signup-card signup-form" onSubmit={verifySubmit}>
-          <div className="card-body">
-            {error && <ErrorBox message={error} />}
-            <label>
-              Verification code
-              <input
-                inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]*" maxLength={6} required
-                value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="123456"
-                style={{ letterSpacing: "0.4em", fontSize: "1.25rem", textAlign: "center" }}
-              />
-            </label>
-            <button className="primary" type="submit" disabled={busy || otp.trim().length !== 6}>
-              {busy ? "Verifying…" : "Verify & create workspace"}
-            </button>
-          </div>
-        </form>
-        <p className="muted small">
-          Didn't get it?{" "}
-          <button className="linklike" type="button" onClick={resendCode} disabled={busy}>Resend code</button>{" "}
-          ·{" "}
-          <button className="linklike" type="button" onClick={() => { setStep("about"); setError(null); setOtp(""); }}>Back</button>
-        </p>
+        <h2>{paymentInfo ? "Activate your workspace" : "Verify your email"}</h2>
+        {paymentInfo ? (
+          <>
+            <p className="muted">
+              A one-time <strong>₹2</strong> registration fee (covers one year) activates your account.
+            </p>
+            <div className="card signup-card">
+              <div className="card-body">
+                {error && <ErrorBox message={error} />}
+                <button className="primary" onClick={() => openRazorpay(paymentInfo)} disabled={busy}>
+                  Pay ₹2 &amp; finish
+                </button>
+                <p className="muted small">Your account is created only after the ₹2 payment succeeds.</p>
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="muted">We sent a 6-digit code to <strong>{email.trim()}</strong>.</p>
+            <form className="card signup-card signup-form" onSubmit={verifySubmit}>
+              <div className="card-body">
+                {error && <ErrorBox message={error} />}
+                <label>
+                  Verification code
+                  <input
+                    inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]*" maxLength={6} required
+                    value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="123456"
+                    style={{ letterSpacing: "0.4em", fontSize: "1.25rem", textAlign: "center" }}
+                  />
+                </label>
+                <button className="primary" type="submit" disabled={busy || otp.trim().length !== 6}>
+                  {busy ? "Verifying…" : "Verify"}
+                </button>
+              </div>
+            </form>
+            <p className="muted small">
+              Didn't get it?{" "}
+              <button className="linklike" type="button" onClick={resendCode} disabled={busy}>Resend code</button>{" "}
+              ·{" "}
+              <button className="linklike" type="button" onClick={() => { setStep("about"); setError(null); setOtp(""); }}>Back</button>
+            </p>
+          </>
+        )}
       </div>
     );
   }
