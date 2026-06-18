@@ -1,6 +1,11 @@
 name = "quaicu-console"
+main = "worker.js"
 compatibility_date = "2024-09-25"
 
+# Workers Static Assets: serve the built SPA from ./dist. The Worker (main, above) runs for any
+# request that isn't a static asset — it proxies /v1/* to the kernel and falls back to the SPA
+# (index.html) for client-side routes. `binding` exposes the assets to the Worker as env.ASSETS.
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
