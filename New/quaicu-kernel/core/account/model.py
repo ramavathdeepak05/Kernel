@@ -44,6 +44,7 @@ class Account:
     password_hash: str = ""  # scrypt hash for console email+password login (see passwords.py)
     # Onboarding survey answers (use_case, industry, company_size, regulations) — stored as JSON.
     profile: Mapping[str, object] = field(default_factory=dict)
+    paid_until: datetime | None = None  # ₹2/yr signup fee — account is paid through this date
 
 
 @dataclass(frozen=True)

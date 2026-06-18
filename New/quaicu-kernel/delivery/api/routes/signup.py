@@ -14,7 +14,7 @@ requires a **company email** (free/personal providers are rejected) and proof of
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -25,6 +25,7 @@ from core.email import EmailMessage
 from core.entitlements import CustomerPlan, FeatureTier, PlanStatus
 from core.errors import (
     AccountExistsError,
+    CheckoutError,
     EmailDomainNotAllowedError,
     SignupVerificationError,
 )
@@ -61,11 +62,26 @@ class SignupVerifyRequest(BaseModel):
 
 
 class SignupVerifyResponse(BaseModel):
-    account_id: str
-    tenant_id: str
-    tier: str
-    session_token: str = Field(..., description="Session JWT — the console auto-logs-in with this.")
-    expires_in: int
+    # When no fee is configured (or after payment), the account is provisioned and a session returned:
+    requires_payment: bool = False
+    account_id: str | None = None
+    tenant_id: str | None = None
+    tier: str | None = None
+    session_token: str | None = Field(None, description="Session JWT — the console auto-logs-in.")
+    expires_in: int | None = None
+    # When a fee is configured, /verify returns an order to pay before the account is created:
+    order_id: str | None = None
+    razorpay_key_id: str | None = None
+    amount_paise: int | None = None
+    currency: str | None = None
+    payment_token: str | None = Field(None, description="Return with the payment result on /complete.")
+
+
+class SignupCompleteRequest(BaseModel):
+    payment_token: str
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
 
 
 class SignupResponse(BaseModel):
@@ -184,22 +200,89 @@ async def signup_start(body: SignupStartRequest, request: Request) -> SignupStar
 )
 async def signup_verify(body: SignupVerifyRequest, request: Request) -> SignupVerifyResponse:
     engine = _require_engine(request)
+    gateway = getattr(request.app.state, "signup_payment", None)
+
+    # No fee configured → provision immediately on a valid OTP (auto-login).
+    if gateway is None:
+        try:
+            account = engine.verify_signup(verification_token=body.verification_token, otp=body.otp)
+        except SignupVerificationError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc), "code": exc.code})
+        except AccountExistsError as exc:
+            raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
+        return await _provisioned_response(request, engine, account)
+
+    # Fee configured → validate the OTP, then mint a payment order; provisioning happens on /complete.
     try:
-        account = engine.verify_signup(verification_token=body.verification_token, otp=body.otp)
+        details = engine.details_after_otp(verification_token=body.verification_token, otp=body.otp)
     except SignupVerificationError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc), "code": exc.code})
-    except AccountExistsError as exc:
-        raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
+    if engine.email_exists(str(details.get("email", ""))):
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "An account already exists for that email.", "code": "ACCOUNT_EXISTS"},
+        )
+    try:
+        order_id = await gateway.create_order(receipt=f"signup-{details.get('email', '')}")
+    except CheckoutError as exc:
+        raise HTTPException(status_code=502, detail={"error": str(exc), "code": exc.code})
 
+    payment_token = engine.seal_order_token(details=details, order_id=order_id)
+    return SignupVerifyResponse(
+        requires_payment=True,
+        order_id=order_id,
+        razorpay_key_id=gateway.key_id,
+        amount_paise=gateway.amount_paise,
+        currency=gateway.currency,
+        payment_token=payment_token,
+    )
+
+
+async def _provisioned_response(request: Request, engine, account) -> SignupVerifyResponse:
+    """Persist the plan, mint a session, and shape the auto-login response."""
     await _persist_starter_plan(request, account)
     session_token, expires_in = engine.mint_session(account)
     return SignupVerifyResponse(
+        requires_payment=False,
         account_id=account.account_id,
         tenant_id=str(account.tenant_id),
         tier="STARTER",
         session_token=session_token,
         expires_in=expires_in,
     )
+
+
+@router.post(
+    "/signup/complete",
+    status_code=status.HTTP_201_CREATED,
+    response_model=SignupVerifyResponse,
+    summary="Complete a fee-gated signup — verify the ₹2 payment, then provision (auto-login)",
+)
+async def signup_complete(body: SignupCompleteRequest, request: Request) -> SignupVerifyResponse:
+    engine = _require_engine(request)
+    gateway = getattr(request.app.state, "signup_payment", None)
+    if gateway is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "No signup fee is configured on this deployment.", "code": "NO_FEE"},
+        )
+    paid_until = datetime.now(timezone.utc) + timedelta(days=365)
+    try:
+        account = engine.complete_paid_signup(
+            payment_token=body.payment_token,
+            order_id=body.razorpay_order_id,
+            verify_payment=lambda: gateway.verify_payment(
+                order_id=body.razorpay_order_id,
+                payment_id=body.razorpay_payment_id,
+                signature=body.razorpay_signature,
+            ),
+            paid_until=paid_until,
+        )
+    except SignupVerificationError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc), "code": exc.code})
+    except AccountExistsError as exc:
+        raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
+    return await _provisioned_response(request, engine, account)
 
 
 @router.post(

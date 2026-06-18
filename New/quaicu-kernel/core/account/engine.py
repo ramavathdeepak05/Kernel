@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import secrets
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 
 import jwt as _jwt
@@ -96,6 +96,10 @@ class AccountEngine:
         """Repopulate the account cache from its durable store at startup. No-op if in-memory."""
         self._accounts.hydrate()
 
+    def email_exists(self, email: str) -> bool:
+        """True if an account already owns ``email`` (cache + durable check)."""
+        return self._accounts.email_exists(email)
+
     def _hash_secret(self, secret: str) -> str:
         """HMAC-SHA256 of the key secret under the server-side pepper (hex digest)."""
         return hmac.new(self._pepper, secret.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -113,6 +117,7 @@ class AccountEngine:
         password_hash: str = "",
         profile: Mapping[str, object] | None = None,
         issue_key: bool = True,
+        paid_until: datetime | None = None,
     ) -> tuple[Account, str]:
         """Provision a new account on the STARTER tier. Returns (account, plaintext_api_key).
 
@@ -141,6 +146,7 @@ class AccountEngine:
             phone=phone,
             password_hash=password_hash,
             profile=dict(profile or {}),
+            paid_until=paid_until,
         )
         self._accounts.add_account(account)
 
@@ -207,18 +213,15 @@ class AccountEngine:
         log.info("signup started (OTP issued): email=%s", details.email)
         return token, otp
 
-    def verify_signup(self, *, verification_token: str, otp: str) -> Account:
-        """Complete a verified signup: check the OTP, then provision the STARTER account.
-
-        No API key is issued — the user authenticates with their password; keys are minted on demand
-        from the console (see `list_api_keys` / `issue_api_key`). Raises `SignupVerificationError` (bad
-        / expired token or OTP) or `AccountExistsError`. Returns the new `Account`.
-        """
+    def _validate_otp(self, verification_token: str, otp: str) -> dict:
+        """Open the verification token, check the OTP, return the carried details dict."""
         payload = self._open_token(verification_token)
         expected = str(payload.get("otp_hash", ""))
         if not expected or not hmac.compare_digest(expected, self._hash_secret(otp.strip())):
             raise SignupVerificationError("Incorrect verification code.")
-        d = payload.get("details", {})
+        return payload.get("details", {})
+
+    def _provision_from_details(self, d: Mapping, *, paid_until: datetime | None = None) -> Account:
         account, _ = self.signup(
             email=str(d["email"]),
             name=str(d["company_name"]),
@@ -233,8 +236,55 @@ class AccountEngine:
                 "regulations": list(d.get("regulations", [])),
             },
             issue_key=False,
+            paid_until=paid_until,
         )
         return account
+
+    def verify_signup(self, *, verification_token: str, otp: str) -> Account:
+        """Check the OTP, then provision the STARTER account (no fee path).
+
+        No API key is issued — the user logs in with their password; keys are minted on demand. Raises
+        `SignupVerificationError` (bad/expired token or OTP) or `AccountExistsError`.
+        """
+        return self._provision_from_details(self._validate_otp(verification_token, otp))
+
+    # ── Fee-gated signup (₹2): OTP → order → pay → provision ────────────────────────
+
+    def details_after_otp(self, *, verification_token: str, otp: str) -> dict:
+        """Validate the OTP and return the carried signup details — used by the fee-gated flow to mint
+        a payment order before provisioning. Raises `SignupVerificationError`."""
+        return self._validate_otp(verification_token, otp)
+
+    def seal_order_token(self, *, details: Mapping, order_id: str, ttl_seconds: int = 600) -> str:
+        """Encrypt a token binding the (email-verified) signup details to a payment order id."""
+        return self._seal_token(
+            {
+                "v": 1,
+                "order_id": str(order_id),
+                "exp": datetime.now(timezone.utc).timestamp() + ttl_seconds,
+                "details": dict(details),
+            }
+        )
+
+    def complete_paid_signup(
+        self,
+        *,
+        payment_token: str,
+        order_id: str,
+        verify_payment: "Callable[[], bool]",
+        paid_until: datetime,
+    ) -> Account:
+        """Open the payment token, confirm the order matches + the payment verifies, then provision.
+
+        ``verify_payment`` is a no-arg callable (the gateway signature check). Raises
+        `SignupVerificationError` on a forged/expired token, order mismatch, or failed payment.
+        """
+        payload = self._open_token(payment_token)
+        if str(payload.get("order_id")) != str(order_id):
+            raise SignupVerificationError("Payment order does not match this signup.")
+        if not verify_payment():
+            raise SignupVerificationError("Payment could not be verified.")
+        return self._provision_from_details(payload.get("details", {}), paid_until=paid_until)
 
     # ── Console login (email + password → session JWT) ──────────────────────────────
 

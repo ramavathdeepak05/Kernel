@@ -27,8 +27,8 @@ from core.types import TenantId
 _UPSERT_ACCOUNT_SQL = """
 INSERT INTO quaicu_accounts
     (account_id, tenant_id, email, name, status, created_at, full_name, job_title, phone,
-     password_hash, profile)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+     password_hash, profile, paid_until)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
 ON CONFLICT (account_id) DO UPDATE SET
     tenant_id     = EXCLUDED.tenant_id,
     email         = EXCLUDED.email,
@@ -38,7 +38,8 @@ ON CONFLICT (account_id) DO UPDATE SET
     job_title     = EXCLUDED.job_title,
     phone         = EXCLUDED.phone,
     password_hash = EXCLUDED.password_hash,
-    profile       = EXCLUDED.profile
+    profile       = EXCLUDED.profile,
+    paid_until    = EXCLUDED.paid_until
 """
 
 _UPSERT_API_KEY_SQL = """
@@ -54,7 +55,7 @@ ON CONFLICT (key_id) DO UPDATE SET
 _SELECT_ACCOUNTS_SQL = (
     "SELECT account_id, tenant_id, email, name, status, created_at, "
     "COALESCE(full_name, ''), COALESCE(job_title, ''), COALESCE(phone, ''), "
-    "COALESCE(password_hash, ''), COALESCE(profile, '{}') FROM quaicu_accounts"
+    "COALESCE(password_hash, ''), COALESCE(profile, '{}'), paid_until FROM quaicu_accounts"
 )
 _SELECT_API_KEYS_SQL = (
     "SELECT key_id, tenant_id, hashed_secret, created_at, revoked, scopes FROM quaicu_api_keys"
@@ -85,6 +86,7 @@ def _row_to_account(r: Any) -> Account:
         phone=r[8],
         password_hash=r[9],
         profile=profile or {},
+        paid_until=r[11],
     )
 
 
@@ -163,6 +165,7 @@ class PostgresAccountRepository:
                     account.phone,
                     account.password_hash,
                     json.dumps(dict(account.profile)),
+                    account.paid_until,
                 ),
             ),
             "save_account",

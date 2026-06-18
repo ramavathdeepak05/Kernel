@@ -152,6 +152,45 @@ def test_existing_account_blocks_start():
         eng.start_signup(_details())
 
 
+def test_razorpay_signup_gateway_verifies_signature():
+    import hashlib
+    import hmac as _hmac
+
+    from adapters.billing.razorpay_signup import RazorpaySignupGateway
+
+    gw = RazorpaySignupGateway(key_id="rzp_test_x", key_secret="secret")
+    order_id, payment_id = "order_1", "pay_1"
+    good = _hmac.new(b"secret", f"{order_id}|{payment_id}".encode(), hashlib.sha256).hexdigest()
+    assert gw.verify_payment(order_id=order_id, payment_id=payment_id, signature=good)
+    assert not gw.verify_payment(order_id=order_id, payment_id=payment_id, signature="forged")
+    assert gw.key_id == "rzp_test_x" and gw.amount_paise == 200 and gw.currency == "INR"
+
+
+def test_fee_gated_signup_provisions_only_after_verified_payment():
+    import datetime as _dt
+
+    eng = _engine()
+    token, otp = eng.start_signup(_details())
+    details = eng.details_after_otp(verification_token=token, otp=otp)
+    assert details["email"] == "ada@acme-bank.com"
+    assert not eng.email_exists("ada@acme-bank.com")  # not provisioned yet
+
+    paytoken = eng.seal_order_token(details=details, order_id="order_xyz")
+    paid_until = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(days=365)
+
+    # Order mismatch and failed payment both reject — and never provision.
+    with pytest.raises(SignupVerificationError):
+        eng.complete_paid_signup(payment_token=paytoken, order_id="order_OTHER", verify_payment=lambda: True, paid_until=paid_until)
+    with pytest.raises(SignupVerificationError):
+        eng.complete_paid_signup(payment_token=paytoken, order_id="order_xyz", verify_payment=lambda: False, paid_until=paid_until)
+    assert not eng.email_exists("ada@acme-bank.com")
+
+    # Verified payment → provisioned with paid_until stamped.
+    account = eng.complete_paid_signup(payment_token=paytoken, order_id="order_xyz", verify_payment=lambda: True, paid_until=paid_until)
+    assert account.email == "ada@acme-bank.com" and account.paid_until == paid_until
+    assert eng.email_exists("ada@acme-bank.com")
+
+
 def test_start_blocks_duplicate_present_only_in_durable_store():
     """Cross-instance: the account exists in the DB but not in THIS instance's cache — start_signup
     must still reject it (no needless OTP), via the durable email_exists fallback."""

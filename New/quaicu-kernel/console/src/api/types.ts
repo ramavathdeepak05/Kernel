@@ -174,13 +174,29 @@ export interface SignupVerifyBody {
   otp: string;
 }
 
-// Verify provisions the tenant and returns a session (auto-login) — no API key on the welcome screen.
+// Verify either provisions + returns a session (free / post-payment), or — when a signup fee is
+// configured — returns a Razorpay order to pay before the account is created.
 export interface SignupVerifyResponse {
-  account_id: string;
-  tenant_id: string;
-  tier: string; // always "STARTER" on signup
-  session_token: string;
-  expires_in: number;
+  requires_payment: boolean;
+  // provisioned (free path, or after /complete):
+  account_id?: string;
+  tenant_id?: string;
+  tier?: string;
+  session_token?: string;
+  expires_in?: number;
+  // fee path — open Razorpay Checkout with these, then call completeSignup:
+  order_id?: string;
+  razorpay_key_id?: string;
+  amount_paise?: number;
+  currency?: string;
+  payment_token?: string;
+}
+
+export interface SignupCompleteBody {
+  payment_token: string;
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
 }
 
 // ── API keys (programmatic access — managed from the API Keys page) ───────────
