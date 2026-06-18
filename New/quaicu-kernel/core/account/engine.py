@@ -102,7 +102,7 @@ class AccountEngine:
         email already owns an account. The plaintext key is the only time the full credential is
         available — the store keeps only its hash.
         """
-        if self._accounts.get_account_by_email(email) is not None:
+        if self._accounts.email_exists(email):
             raise AccountExistsError(
                 f"An account already exists for {email!r}.",
                 detail={"email": email},
@@ -152,7 +152,7 @@ class AccountEngine:
         Raises `EmailDomainNotAllowedError` (free/personal email) or `AccountExistsError`.
         """
         assert_company_email(details.email)
-        if self._accounts.get_account_by_email(details.email) is not None:
+        if self._accounts.email_exists(details.email):
             raise AccountExistsError(
                 f"An account already exists for {details.email!r}.",
                 detail={"email": details.email},

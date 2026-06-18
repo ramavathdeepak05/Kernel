@@ -56,11 +56,27 @@ _SELECT_API_KEYS_SQL = (
     "SELECT key_id, tenant_id, hashed_secret, created_at, revoked, scopes FROM quaicu_api_keys"
 )
 
+_SELECT_ACCOUNT_BY_EMAIL_SQL = _SELECT_ACCOUNTS_SQL + " WHERE lower(email) = lower(%s)"
+
 
 def _scopes_from(raw: Any) -> frozenset[str]:
     if isinstance(raw, str):
         raw = json.loads(raw)
     return frozenset(str(s) for s in (raw or []))
+
+
+def _row_to_account(r: Any) -> Account:
+    return Account(
+        account_id=r[0],
+        tenant_id=TenantId(r[1]),
+        email=r[2],
+        name=r[3],
+        status=AccountStatus(r[4]),
+        created_at=r[5],
+        full_name=r[6],
+        job_title=r[7],
+        phone=r[8],
+    )
 
 
 class PostgresAccountRepository:
@@ -97,20 +113,7 @@ class PostgresAccountRepository:
     def load_all(self) -> tuple[list[Account], list[ApiKey]]:
         def _load(cur: Any) -> tuple[list[Account], list[ApiKey]]:
             cur.execute(_SELECT_ACCOUNTS_SQL)
-            accounts = [
-                Account(
-                    account_id=r[0],
-                    tenant_id=TenantId(r[1]),
-                    email=r[2],
-                    name=r[3],
-                    status=AccountStatus(r[4]),
-                    created_at=r[5],
-                    full_name=r[6],
-                    job_title=r[7],
-                    phone=r[8],
-                )
-                for r in cur.fetchall()
-            ]
+            accounts = [_row_to_account(r) for r in cur.fetchall()]
             cur.execute(_SELECT_API_KEYS_SQL)
             keys = [
                 ApiKey(
@@ -126,6 +129,14 @@ class PostgresAccountRepository:
             return accounts, keys
 
         return self._run(_load, "load_all")
+
+    def get_account_by_email(self, email: str) -> Account | None:
+        def _q(cur: Any) -> Account | None:
+            cur.execute(_SELECT_ACCOUNT_BY_EMAIL_SQL, (email,))
+            row = cur.fetchone()
+            return _row_to_account(row) if row else None
+
+        return self._run(_q, "get_account_by_email")
 
     def save_account(self, account: Account) -> None:
         self._run(

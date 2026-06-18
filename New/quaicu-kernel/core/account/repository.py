@@ -25,6 +25,13 @@ class AccountRepository(Protocol):
         """Return (accounts, api_keys). Called once at startup to hydrate the cache."""
         ...
 
+    def get_account_by_email(self, email: str) -> Account | None:
+        """Durable lookup by email (case-insensitive). Used to make the signup duplicate check
+        authoritative across instances — a brand-new account created on another instance isn't yet in
+        this instance's cache, so the cache alone could let a duplicate signup through. Returns None
+        when no account owns ``email``."""
+        ...
+
     def save_account(self, account: Account) -> None:
         """Upsert an account keyed by ``account_id`` (idempotent)."""
         ...

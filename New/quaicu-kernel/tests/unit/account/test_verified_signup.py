@@ -90,3 +90,34 @@ def test_existing_account_blocks_start():
     eng.signup(email="ada@acme-bank.com", name="Acme")
     with pytest.raises(AccountExistsError):
         eng.start_signup(_details())
+
+
+def test_start_blocks_duplicate_present_only_in_durable_store():
+    """Cross-instance: the account exists in the DB but not in THIS instance's cache — start_signup
+    must still reject it (no needless OTP), via the durable email_exists fallback."""
+    import datetime as _dt
+
+    from core.account.model import Account, AccountStatus
+    from core.types import TenantId
+
+    class _Repo:
+        def load_all(self):
+            return ([], [])
+
+        def get_account_by_email(self, email):
+            if email.lower() == "ada@acme-bank.com":
+                return Account(
+                    "acct_x", TenantId("acme"), email, "Acme", AccountStatus.ACTIVE,
+                    _dt.datetime.now(_dt.timezone.utc),
+                )
+            return None
+
+        def save_account(self, a): ...
+        def save_api_key(self, k): ...
+        def replace_api_key(self, k): ...
+        def close(self): ...
+
+    eng = AccountEngine(AccountStore(repository=_Repo()), EntitlementStore(), pepper="t")
+    # Cache is empty (never hydrated), but the durable store has the account.
+    with pytest.raises(AccountExistsError):
+        eng.start_signup(_details())
