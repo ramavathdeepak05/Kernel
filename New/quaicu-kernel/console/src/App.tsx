@@ -14,6 +14,7 @@ import Callback from "./pages/Callback";
 import Signup from "./pages/Signup";
 import Plans from "./pages/Plans";
 import ApiKeys from "./pages/ApiKeys";
+import Legal from "./pages/Legal";
 
 function useSession() {
   return useSyncExternalStore(subscribe, getSession);
@@ -215,6 +216,20 @@ function SignInGate() {
   );
 }
 
+function Footer() {
+  return (
+    <footer className="footer">
+      <span className="muted small">© {new Date().getFullYear()} QUAICU</span>
+      <nav className="footer-links">
+        <Link to="/legal/terms">Terms</Link>
+        <Link to="/legal/privacy">Privacy</Link>
+        <Link to="/legal/refunds">Refunds</Link>
+        <Link to="/legal/contact">Contact</Link>
+      </nav>
+    </footer>
+  );
+}
+
 export default function App() {
   const authed = useAuthed();
   return (
@@ -230,6 +245,7 @@ export default function App() {
             <Route path="/callback" element={<Callback />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/plans" element={<Plans />} />
+            <Route path="/legal/:doc" element={<Legal />} />
             {authed ? (
               <>
                 <Route path="/" element={<Dashboard />} />
@@ -258,6 +274,7 @@ export default function App() {
             )}
           </Routes>
         </main>
+        <Footer />
       </div>
     </EntitlementsProvider>
   );
