@@ -21,7 +21,10 @@ import type {
   ConsultLeadBody,
   ConsultStartResponse,
   CreatedApiKey,
+  ForgotBody,
+  ForgotResponse,
   LoginBody,
+  ResetBody,
   LoginResponse,
   SignupCompleteBody,
   SignupStartBody,
@@ -89,8 +92,10 @@ export const api = {
   completeSignup: (b: SignupCompleteBody) =>
     request<SignupVerifyResponse>("POST", "/v1/signup/complete", b),
 
-  // ── Login (email + password → session token) ───────────────────────────────
+  // ── Login + password reset ─────────────────────────────────────────────────
   login: (b: LoginBody) => request<LoginResponse>("POST", "/v1/auth/login", b),
+  forgotPassword: (b: ForgotBody) => request<ForgotResponse>("POST", "/v1/auth/forgot", b),
+  resetPassword: (b: ResetBody) => request<LoginResponse>("POST", "/v1/auth/reset", b),
 
   // ── Business/Enterprise consultation (₹50,000) ─────────────────────────────
   startConsultation: (b: ConsultLeadBody) =>

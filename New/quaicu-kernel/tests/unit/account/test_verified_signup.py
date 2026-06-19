@@ -152,6 +152,32 @@ def test_existing_account_blocks_start():
         eng.start_signup(_details())
 
 
+def test_password_reset_roundtrip():
+    eng = _engine()
+    token, otp = eng.start_signup(_details())
+    account = eng.verify_signup(verification_token=token, otp=otp)
+
+    reset_token, reset_otp = eng.start_password_reset(email="ada@acme-bank.com")
+    assert reset_otp is not None and len(reset_otp) == 6
+
+    bad = "000000" if reset_otp != "000000" else "111111"
+    with pytest.raises(SignupVerificationError):
+        eng.complete_password_reset(reset_token=reset_token, otp=bad, new_password="newpass123")
+
+    eng.complete_password_reset(reset_token=reset_token, otp=reset_otp, new_password="newpass123")
+    # Old password no longer works; new one does.
+    with pytest.raises(AccountNotFoundError):
+        eng.authenticate(email="ada@acme-bank.com", password="hunter2pass")
+    assert eng.authenticate(email="ada@acme-bank.com", password="newpass123").account_id == account.account_id
+
+
+def test_forgot_unknown_email_returns_token_without_otp():
+    # No account enumeration: a token comes back, but no OTP (so the route sends no email).
+    eng = _engine()
+    reset_token, reset_otp = eng.start_password_reset(email="nobody@acme-bank.com")
+    assert reset_token and reset_otp is None
+
+
 def test_razorpay_signup_gateway_verifies_signature():
     import hashlib
     import hmac as _hmac

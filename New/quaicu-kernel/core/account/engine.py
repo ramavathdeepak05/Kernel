@@ -45,6 +45,8 @@ from core.types import TenantId
 _SIGNUP_TTL_SECONDS = 600
 # How long a console session JWT is valid.
 _SESSION_TTL_HOURS = 24
+# How long a password-reset OTP / token is valid.
+_RESET_TTL_SECONDS = 900
 
 log = logging.getLogger("quaicu.account")
 
@@ -323,6 +325,48 @@ class AccountEngine:
         }
         token = _jwt.encode(payload, self._session_secret, algorithm="HS256")
         return token, int(ttl.total_seconds())
+
+    # ── Password reset (email OTP → new password) ───────────────────────────────────
+
+    def start_password_reset(self, *, email: str) -> tuple[str, str | None]:
+        """Begin a reset. Returns ``(reset_token, otp)``; ``otp`` is None when no account owns the
+        email — the caller still returns the token (so the response doesn't reveal whether the account
+        exists) but sends no email. Stateless: the token carries the hashed OTP + email + expiry.
+        """
+        account = self._accounts.find_account_by_email(email)
+        otp = f"{secrets.randbelow(1_000_000):06d}" if account is not None else None
+        token = self._seal_token(
+            {
+                "v": 1,
+                "purpose": "reset",
+                "email": email.strip().lower(),
+                "otp_hash": self._hash_secret(otp) if otp else "",
+                "exp": datetime.now(timezone.utc).timestamp() + _RESET_TTL_SECONDS,
+            }
+        )
+        return token, otp
+
+    def complete_password_reset(self, *, reset_token: str, otp: str, new_password: str) -> Account:
+        """Verify the reset token + OTP and set the new password (scrypt). Returns the updated account.
+
+        Raises `SignupVerificationError` (bad/expired token or OTP), `AccountNotFoundError`, or
+        `PasswordError` (new password too weak).
+        """
+        import dataclasses
+
+        payload = self._open_token(reset_token)
+        if payload.get("purpose") != "reset":
+            raise SignupVerificationError("Invalid reset token.")
+        expected = str(payload.get("otp_hash", ""))
+        if not expected or not hmac.compare_digest(expected, self._hash_secret(otp.strip())):
+            raise SignupVerificationError("Incorrect reset code.")
+        account = self._accounts.find_account_by_email(str(payload.get("email", "")))
+        if account is None:
+            raise AccountNotFoundError("No account to reset.", detail={})
+        updated = dataclasses.replace(account, password_hash=hash_password(new_password))
+        self._accounts.add_account(updated)  # upsert (same account_id) — persists + refreshes cache
+        log.info("password reset: tenant=%s", updated.tenant_id)
+        return updated
 
     def _resolve_session(self, token: str) -> AuthenticatedPrincipal:
         """Verify a console session JWT → principal. Raises `ApiKeyInvalidError` (→ 401) on failure."""
