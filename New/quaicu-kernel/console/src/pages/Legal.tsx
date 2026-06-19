@@ -19,8 +19,7 @@ export default function Legal() {
   return (
     <div className="legal-page">
       <div className="legal-draft">
-        ⚠ Draft template — not legal advice. Have counsel review and replace the [placeholders] before
-        relying on this.
+        ⚠ Draft — not legal advice. Please have your counsel review before relying on this.
       </div>
       <h1>{d.title}</h1>
       <p className="muted small">Last updated: {d.updated}</p>
