@@ -15,6 +15,7 @@ import Signup from "./pages/Signup";
 import Plans from "./pages/Plans";
 import ApiKeys from "./pages/ApiKeys";
 import Legal from "./pages/Legal";
+import ResetPassword from "./pages/ResetPassword";
 
 function useSession() {
   return useSyncExternalStore(subscribe, getSession);
@@ -189,6 +190,7 @@ function LoginForm() {
       <button className="primary" type="submit" disabled={busy || !email.trim() || !password}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
+      <Link className="forgot-link" to="/reset">Forgot password?</Link>
     </form>
   );
 }
@@ -245,6 +247,7 @@ export default function App() {
             <Route path="/callback" element={<Callback />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/plans" element={<Plans />} />
+            <Route path="/reset" element={<ResetPassword />} />
             <Route path="/legal/:doc" element={<Legal />} />
             {authed ? (
               <>

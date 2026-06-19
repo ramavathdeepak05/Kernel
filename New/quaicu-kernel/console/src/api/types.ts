@@ -163,6 +163,20 @@ export interface LoginResponse {
   expires_in: number;
 }
 
+// ── Password reset (forgot → email OTP → new password) ───────────────────────
+export interface ForgotBody {
+  email: string;
+}
+export interface ForgotResponse {
+  reset_token: string;
+  expires_in: number;
+}
+export interface ResetBody {
+  reset_token: string;
+  otp: string;
+  new_password: string;
+}
+
 export interface SignupStartResponse {
   verification_token: string; // opaque; returned with the OTP on /verify
   email: string;
