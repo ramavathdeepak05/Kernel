@@ -9,9 +9,9 @@ export interface LegalDoc {
   sections: { heading: string; paras: string[] }[];
 }
 
-const ENTITY = "[Legal Entity Name]";
-const ADDRESS = "[Registered Address]";
-const JURISDICTION = "[City, State], India";
+const ENTITY = "QUAICU Solutions Private Limited";
+const ADDRESS = "T-Hub, Hyderabad, Telangana, India";
+const JURISDICTION = "Hyderabad, Telangana";
 const UPDATED = "2026-06-19";
 
 export const LEGAL_DOCS: LegalDoc[] = [
