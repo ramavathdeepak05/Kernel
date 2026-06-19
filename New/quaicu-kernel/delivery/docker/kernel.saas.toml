@@ -33,6 +33,13 @@ currency     = "INR"
 key_id       = "${RAZORPAY_KEY_ID}"
 key_secret   = "${RAZORPAY_KEY_SECRET}"
 
+# Business / Enterprise are quote-based: a prospect pays this consultation deposit to connect with the
+# integrations team (the tier is NOT auto-changed). Reuses the Razorpay keys above. The lead + payment
+# ref are emailed to notify_email.
+[consultation]
+amount_paise = 5000000        # ₹50,000
+notify_email = "ceo@quaicu.org"
+
 # Self-serve checkout + webhook tier flips (WS-C). Uncomment + configure to enable the console Billing
 # page and the /v1/billing/* routes. Secrets resolve from the environment at load.
 # [billing.stripe]
