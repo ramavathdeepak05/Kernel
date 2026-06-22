@@ -1,0 +1,11 @@
+# Project-scoped override of Domain Restricted Sharing (constraints/iam.allowedPolicyMemberDomains).
+# Effect: on THIS project only, IAM may grant any member type — including allUsers /
+# allAuthenticatedUsers — so the public signup API on Cloud Run can be made reachable.
+# DRS remains fully enforced across the rest of the organization.
+#
+# To revert (instantly re-blocks public IAM grants on this project):
+#   gcloud org-policies reset iam.allowedPolicyMemberDomains --project=ordinal-quarter-499114-s2
+name: projects/152046316624/policies/iam.allowedPolicyMemberDomains
+spec:
+  rules:
+    - allowAll: true
