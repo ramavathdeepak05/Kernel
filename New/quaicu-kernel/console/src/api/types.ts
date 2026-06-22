@@ -269,6 +269,7 @@ export interface SignupStartResponse {
 export interface SignupVerifyBody {
   verification_token: string;
   otp: string;
+  coupon_code?: string;
 }
 
 // Verify either provisions + returns a session (free / post-payment), or — when a signup fee is
@@ -287,6 +288,8 @@ export interface SignupVerifyResponse {
   amount_paise?: number;
   currency?: string;
   payment_token?: string;
+  coupon_code?: string | null;
+  discount_paise?: number | null;
 }
 
 export interface SignupCompleteBody {
@@ -303,12 +306,15 @@ export interface ConsultLeadBody {
   email: string;
   company_name: string;
   phone: string;
+  coupon_code?: string;
 }
 export interface ConsultStartResponse {
   order_id: string;
   razorpay_key_id: string;
   amount_paise: number;
   currency: string;
+  coupon_code?: string | null;
+  discount_paise?: number | null;
 }
 export interface ConsultCompleteBody extends ConsultLeadBody {
   razorpay_order_id: string;

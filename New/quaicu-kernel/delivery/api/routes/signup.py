@@ -23,6 +23,7 @@ from core.account.model import Account, SignupDetails
 from core.account.passwords import PasswordError
 from core.email import EmailMessage
 from core.entitlements import CustomerPlan, FeatureTier, PlanStatus
+from core.billing.coupons import CouponError
 from core.errors import (
     AccountExistsError,
     CheckoutError,
@@ -59,6 +60,7 @@ class SignupStartResponse(BaseModel):
 class SignupVerifyRequest(BaseModel):
     verification_token: str
     otp: str = Field(..., description="The 6-digit code emailed to the customer.")
+    coupon_code: str | None = Field(None, description="Optional discount code applied to the fee.")
 
 
 class SignupVerifyResponse(BaseModel):
@@ -75,6 +77,9 @@ class SignupVerifyResponse(BaseModel):
     amount_paise: int | None = None
     currency: str | None = None
     payment_token: str | None = Field(None, description="Return with the payment result on /complete.")
+    # Set when a coupon was applied — the console shows the saving and the discounted total.
+    coupon_code: str | None = None
+    discount_paise: int | None = None
 
 
 class SignupCompleteRequest(BaseModel):
@@ -222,8 +227,25 @@ async def signup_verify(body: SignupVerifyRequest, request: Request) -> SignupVe
             status_code=409,
             detail={"error": "An account already exists for that email.", "code": "ACCOUNT_EXISTS"},
         )
+    # Apply a discount coupon (if any) to the fee before creating the order. An invalid code fails
+    # the request so the console can show the error and let the user fix or drop it.
+    amount_paise = gateway.amount_paise
+    coupon_code: str | None = None
+    discount_paise: int | None = None
+    book = getattr(request.app.state, "coupon_book", None)
+    if body.coupon_code and book is not None:
+        try:
+            applied = book.apply(body.coupon_code, gateway.amount_paise, "starter")
+        except CouponError as exc:
+            raise HTTPException(status_code=422, detail={"error": str(exc), "code": exc.code})
+        amount_paise = applied.final_paise
+        coupon_code = applied.code
+        discount_paise = applied.discount_paise
+
     try:
-        order_id = await gateway.create_order(receipt=f"signup-{details.get('email', '')}")
+        order_id = await gateway.create_order(
+            receipt=f"signup-{details.get('email', '')}", amount_paise=amount_paise
+        )
     except CheckoutError as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc), "code": exc.code})
 
@@ -232,9 +254,11 @@ async def signup_verify(body: SignupVerifyRequest, request: Request) -> SignupVe
         requires_payment=True,
         order_id=order_id,
         razorpay_key_id=gateway.key_id,
-        amount_paise=gateway.amount_paise,
+        amount_paise=amount_paise,
         currency=gateway.currency,
         payment_token=payment_token,
+        coupon_code=coupon_code,
+        discount_paise=discount_paise,
     )
 
 

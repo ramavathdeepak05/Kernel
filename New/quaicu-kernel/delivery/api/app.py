@@ -71,6 +71,7 @@ def create_app(
     email_sender: "object | None" = None,
     signup_payment: "object | None" = None,
     consultation: "dict | None" = None,
+    coupon_book: "object | None" = None,
     usage_meter: "object | None" = None,
     erasure_engine: "object | None" = None,
     enforce_paths: list[tuple[str, str]] | None = None,
@@ -152,6 +153,8 @@ def create_app(
     app.state.signup_payment = signup_payment
     # Business/Enterprise consultation config ({amount_paise, notify_email}). Empty → defaults apply.
     app.state.consultation = consultation or {}
+    # Discount coupons applied to the signup fee / consultation before the Razorpay order is created.
+    app.state.coupon_book = coupon_book
     app.state.usage_meter = usage_meter
     # Erasure (WS-G): crypto-shredding engine for the GDPR/DPDP right-to-erasure routes.
     app.state.erasure_engine = erasure_engine
