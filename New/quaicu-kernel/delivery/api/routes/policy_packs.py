@@ -19,6 +19,7 @@ from core.policy.model import PolicyEnvelope, PolicyLifecycle
 from core.types import ApproverRef, Decision
 from delivery.api.routes.policies import _require_policy_admin
 from delivery.api.schemas import (
+    PolicyPackActionTypeResponse,
     PolicyPackImportResponse,
     PolicyPackListResponse,
     PolicyPackPolicyResponse,
@@ -34,11 +35,21 @@ def _pack_response(pack: packs_mod.PolicyPack) -> PolicyPackResponse:
         name=pack.name,
         regulation=pack.regulation,
         description=pack.description,
+        summary=pack.summary,
+        usage=pack.usage,
         action_types=list(pack.action_types),
+        action_specs=[
+            PolicyPackActionTypeResponse(
+                name=a.name, use_case=a.use_case, payload=a.payload, example=a.example
+            )
+            for a in pack.action_specs
+        ],
         policy_count=len(pack.policies),
         policies=[
             PolicyPackPolicyResponse(
                 id=p.id,
+                title=p.title,
+                description=p.description,
                 governs=p.governs,
                 condition=p.condition,
                 decision=p.decision,

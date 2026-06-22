@@ -231,7 +231,7 @@ function PackCard({ pack, onImported, setErr }: {
     <div className="pack-card">
       <div className="pack-title">{pack.name}</div>
       <div className="pack-reg mono small">{pack.regulation}</div>
-      <p className="muted small">{pack.description}</p>
+      <p className="muted small">{pack.summary || pack.description}</p>
       <div className="pack-meta mono small">
         {pack.policy_count} policies · {pack.action_types.join(", ")}
       </div>
@@ -240,7 +240,7 @@ function PackCard({ pack, onImported, setErr }: {
           {busy ? "Importing…" : "Import as DRAFTs"}
         </button>
         <button className="linklike" onClick={() => setShowRules((s) => !s)}>
-          {showRules ? "Hide rules" : "Preview rules"}
+          {showRules ? "Hide details" : "Show details"}
         </button>
       </div>
       {result && (
@@ -253,18 +253,40 @@ function PackCard({ pack, onImported, setErr }: {
         </div>
       )}
       {showRules && (
-        <table className="data pack-rules">
-          <thead><tr><th>Policy</th><th>Governs</th><th>Decision</th></tr></thead>
-          <tbody>
+        <div className="pack-details">
+          {pack.usage && <p className="muted small">{pack.usage}</p>}
+
+          {pack.action_specs.length > 0 && (
+            <>
+              <div className="pack-subhead">How to use</div>
+              {pack.action_specs.map((a) => (
+                <div className="action-spec" key={a.name}>
+                  <div><code>{a.name}</code> <span className="muted small">— {a.use_case}</span></div>
+                  <div className="small"><span className="kv-label">payload</span> <span className="mono">{a.payload}</span></div>
+                  {a.example && <pre className="action-example">{a.example}</pre>}
+                </div>
+              ))}
+            </>
+          )}
+
+          <div className="pack-subhead">Policies ({pack.policy_count})</div>
+          <ul className="policy-list">
             {pack.policies.map((pol) => (
-              <tr key={pol.id}>
-                <td><code>{pol.id}</code></td>
-                <td className="mono small">{pol.governs}</td>
-                <td><Badge value={pol.decision} /></td>
-              </tr>
+              <li className="policy-item" key={pol.id}>
+                <div className="policy-item-head">
+                  <Badge value={pol.decision} />
+                  <strong>{pol.title}</strong>
+                </div>
+                {pol.description && <div className="muted small">{pol.description}</div>}
+                <div className="policy-item-meta mono small">
+                  governs {pol.governs}
+                  {pol.regulatory_refs.length > 0 && <> · {pol.regulatory_refs.join(", ")}</>}
+                  {pol.approvers.length > 0 && <> · approver {pol.approvers.join(", ")}</>}
+                </div>
+              </li>
             ))}
-          </tbody>
-        </table>
+          </ul>
+        </div>
       )}
     </div>
   );
