@@ -1,0 +1,73 @@
+# QUAICU starter policy pack — EU AI Act, Regulation (EU) 2024/1689 (DRAFT — review with counsel
+# before relying on it).
+#
+# Drop these [[policy.seed]] entries into a kernel config's [policy] section (the engine seeds them as
+# ACTIVATED), or author them via POST /v1/policies and run the normal DRAFT→backtest→ACTIVATE flow.
+# CEL is written against the activation schema in docs/CEL_POLICY_GUIDE.md (action_type / actor_roles /
+# payload_<field>). See README.md for the per-action payload contract and the Article mapping.
+#
+# Governs two action types: `ai_system.invoke` (using an AI system to produce an output/decision) and
+# `ai_content.generate` (producing AI/synthetic content). Map your real action types onto these (edit
+# `governs`). Deny-overrides: a prohibited-practice DENY beats the allow-baseline; REQUIRE_APPROVAL
+# routes a human into the loop (which is itself the Art. 14 oversight control). A REQUIRED field that
+# is ABSENT makes its condition error → fail-closed DENY — intended for a compliance pack (an
+# unclassified, undisclosed system ⇒ block).
+
+# ── ai_system.invoke ────────────────────────────────────────────────────────────
+[[policy.seed]]
+id              = "eu-ai-act-invoke-allow-baseline"
+governs         = "ai_system.invoke"
+condition       = "true"
+decision        = "allow"
+regulatory_refs = ["eu_ai_act.scope.art.6"]
+
+# Art. 5 — unacceptable-risk systems are banned outright.
+[[policy.seed]]
+id              = "eu-ai-act-prohibited-risk"
+governs         = "ai_system.invoke"
+condition       = "payload_risk_category == \"prohibited\""
+decision        = "deny"
+regulatory_refs = ["eu_ai_act.prohibited.art.5"]
+
+# Art. 5 — the enumerated banned practices, matched by use case.
+[[policy.seed]]
+id              = "eu-ai-act-prohibited-use"
+governs         = "ai_system.invoke"
+condition       = "payload_use_case in [\"social_scoring\", \"subliminal_manipulation\", \"emotion_recognition_workplace\", \"biometric_categorization\", \"untargeted_facial_scraping\"]"
+decision        = "deny"
+regulatory_refs = ["eu_ai_act.prohibited.art.5"]
+
+# Art. 14 — high-risk systems require human oversight; absent it, route to a human reviewer.
+[[policy.seed]]
+id              = "eu-ai-act-high-risk-oversight"
+governs         = "ai_system.invoke"
+condition       = "payload_risk_category == \"high\" && payload_human_oversight == false"
+decision        = "require_approval"
+approvers       = ["role:compliance_officer"]
+regulatory_refs = ["eu_ai_act.oversight.art.14"]
+
+# Art. 50 — systems interacting with people must disclose they are AI; undisclosed ⇒ review.
+[[policy.seed]]
+id              = "eu-ai-act-transparency-disclosure"
+governs         = "ai_system.invoke"
+condition       = "payload_discloses_ai == false"
+decision        = "require_approval"
+approvers       = ["role:compliance_officer"]
+regulatory_refs = ["eu_ai_act.transparency.art.50"]
+
+# ── ai_content.generate ───────────────────────────────────────────────────────
+[[policy.seed]]
+id              = "eu-ai-act-content-allow-baseline"
+governs         = "ai_content.generate"
+condition       = "true"
+decision        = "allow"
+regulatory_refs = ["eu_ai_act.transparency.art.50"]
+
+# Art. 50 — synthetic/"deepfake" content must be marked as artificially generated; unlabeled ⇒ review.
+[[policy.seed]]
+id              = "eu-ai-act-deepfake-labeling"
+governs         = "ai_content.generate"
+condition       = "payload_synthetic == true && payload_labeled == false"
+decision        = "require_approval"
+approvers       = ["role:compliance_officer"]
+regulatory_refs = ["eu_ai_act.transparency.art.50"]
