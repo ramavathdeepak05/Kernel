@@ -19,6 +19,8 @@ import type {
   PolicyPackList,
   PolicyPackImportResult,
   ApiKeyList,
+  AIConnectionStatus,
+  AIConnectionBody,
   AuthorizeRequest,
   AuthorizeResponse,
   ConsultCompleteBody,
@@ -115,6 +117,11 @@ export const api = {
 
   // ── Authorize (pure policy decision — powers the Get-started "try it" panel) ─
   authorize: (b: AuthorizeRequest) => request<AuthorizeResponse>("POST", "/v1/authorize", b),
+
+  // ── AI gateway (BYO upstream connection — the governed OpenAI passthrough) ───
+  getAIConnection: () => request<AIConnectionStatus>("GET", "/v1/ai/connection"),
+  setAIConnection: (b: AIConnectionBody) => request<AIConnectionStatus>("PUT", "/v1/ai/connection", b),
+  deleteAIConnection: () => request<AIConnectionStatus>("DELETE", "/v1/ai/connection"),
 
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),

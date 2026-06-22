@@ -48,6 +48,21 @@ class Account:
 
 
 @dataclass(frozen=True)
+class AIConnection:
+    """A tenant's BYO upstream LLM provider — used by the governed AI gateway to forward calls.
+
+    The ``api_key`` is the customer's own provider key. It is encrypted at rest (the account engine
+    seals it into the account profile) and only ever materialised here for the outbound call.
+    """
+
+    provider: str          # display label, e.g. "openai" | "together" | "azure" | "custom"
+    base_url: str          # OpenAI-compatible base, e.g. "https://api.openai.com/v1"
+    api_key: str           # the customer's provider key (plaintext in memory only)
+    default_model: str = ""  # used when a request omits "model"
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class SignupDetails:
     """The customer details collected by the verified-signup form (POST /v1/signup/start).
 

@@ -157,6 +157,23 @@ export interface AuthorizeResponse {
   ledger_seq?: number | null;
 }
 
+// ── AI gateway (BYO upstream connection) ─────────────────────────────────────
+export interface AIConnectionStatus {
+  connected: boolean;
+  provider?: string;
+  base_url?: string;
+  default_model?: string;
+  key_hint?: string;
+  updated_at?: string | null;
+}
+
+export interface AIConnectionBody {
+  provider: string;
+  base_url: string;
+  api_key: string;
+  default_model: string;
+}
+
 // ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────
 export interface PolicyPackPolicy {
   id: string;

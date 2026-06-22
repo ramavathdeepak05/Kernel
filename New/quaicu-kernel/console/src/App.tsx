@@ -7,6 +7,7 @@ import { EntitlementsProvider, useEntitlements, useFeature } from "./state/entit
 import { beginLogin, oidcEnabled } from "./oidc/oidc";
 import Dashboard from "./pages/Dashboard";
 import GetStarted from "./pages/GetStarted";
+import AIGateway from "./pages/AIGateway";
 import Policies from "./pages/Policies";
 import Audit from "./pages/Audit";
 import Approvals from "./pages/Approvals";
@@ -130,6 +131,7 @@ function Nav() {
       {policies && <NavLink to="/policies">Policies</NavLink>}
       <NavLink to="/audit">Audit trail</NavLink>
       {approvals && <NavLink to="/approvals">Approvals</NavLink>}
+      <NavLink to="/ai">AI gateway</NavLink>
       <NavLink to="/keys">API keys</NavLink>
       {billing && <NavLink to="/billing">Billing</NavLink>}
     </nav>
@@ -272,6 +274,7 @@ export default function App() {
                     </FeatureGate>
                   }
                 />
+                <Route path="/ai" element={<AIGateway />} />
                 <Route path="/keys" element={<ApiKeys />} />
                 <Route path="/billing" element={<Billing />} />
               </>
