@@ -15,10 +15,37 @@ kernel's IdentityPort still cryptographically verifies the token and enforces te
 
 from __future__ import annotations
 
+import hmac
+import os
+
 from fastapi import Request
 
 from core.types import TenantId
 from delivery.sdk.kernel import Kernel
+
+# Shared secret proving a request arrived via our Cloudflare Worker edge. When set, the edge-forwarded
+# client IP is trusted; unset → the trusted-IP path is disabled and we fall back to the peer address.
+_EDGE_SECRET = os.getenv("QUAICU_EDGE_SECRET", "")
+
+
+def trusted_client_ip(request: Request) -> str | None:
+    """The originating client IP, safe to use as a rate-limit key.
+
+    The Cloud Run origin is publicly reachable, so a raw forwarded header is spoofable. Our Cloudflare
+    Worker forwards the real IP as ``X-Real-Client-IP`` and authenticates itself with
+    ``X-Edge-Auth == QUAICU_EDGE_SECRET`` (and strips any client-supplied copies). We therefore trust
+    the forwarded IP **only** when that shared secret matches (constant-time); a direct caller to the
+    run.app origin can't forge it. Falls back to the immediate peer (``request.client.host``) when the
+    secret is unset or the edge header is missing/wrong.
+    """
+    if _EDGE_SECRET:
+        edge = request.headers.get("x-edge-auth", "")
+        if edge and hmac.compare_digest(edge, _EDGE_SECRET):
+            real = request.headers.get("x-real-client-ip", "").strip()
+            if real:
+                return real
+    client = request.client
+    return client.host if client is not None else None
 
 
 def _bearer_token_or_none(request: Request) -> str | None:

@@ -43,7 +43,7 @@ from starlette.types import ASGIApp
 from core.entitlements import EntitlementEngine
 from core.errors import EntitlementError, QuotaExceededError
 from core.types import TenantId
-from delivery.api.deps import extract_tenant
+from delivery.api.deps import extract_tenant, trusted_client_ip
 
 # Paths that are never rate-limited (infra + onboarding, which has no tenant yet; provider webhooks,
 # which are signature-authenticated and carry no tenant claim). /v1/billing/checkout is NOT exempt —
@@ -95,10 +95,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if tenant_or_none is None:
                 return None
             tenant = tenant_or_none
-            client = request.client
-            if client is None:
+            # Real client IP via the trusted edge header (falls back to the immediate peer). Behind
+            # the Cloudflare Worker this is the originating client, not the Worker, so unauthenticated
+            # buckets no longer collapse to a single shared (proxy) IP.
+            ip = trusted_client_ip(request)
+            if ip is None:
                 return None  # no IP to key on → fail open
-            counter_key = f"ip:{client.host}"
+            counter_key = f"ip:{ip}"
 
         try:
             limit = engine.rate_limit_for(tenant)
