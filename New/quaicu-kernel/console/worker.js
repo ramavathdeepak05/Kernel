@@ -18,6 +18,16 @@ export default {
       const target = KERNEL_ORIGIN + url.pathname + url.search;
       const headers = new Headers(request.headers);
       headers.delete("host");
+      // Forward the real client IP for the kernel's rate limiter, authenticated with the edge secret
+      // so a direct caller to the run.app origin can't spoof it. Strip any client-supplied copies
+      // first, then set the trusted values. Inert until EDGE_SECRET is configured on both sides.
+      headers.delete("x-edge-auth");
+      headers.delete("x-real-client-ip");
+      const clientIp = request.headers.get("CF-Connecting-IP");
+      if (clientIp && env.EDGE_SECRET) {
+        headers.set("X-Real-Client-IP", clientIp);
+        headers.set("X-Edge-Auth", env.EDGE_SECRET);
+      }
       const hasBody = request.method !== "GET" && request.method !== "HEAD";
       return fetch(target, {
         method: request.method,
