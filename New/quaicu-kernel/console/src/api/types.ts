@@ -157,6 +157,38 @@ export interface AuthorizeResponse {
   ledger_seq?: number | null;
 }
 
+// ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────
+export interface PolicyPackPolicy {
+  id: string;
+  governs: string;
+  condition: string;
+  decision: string;
+  approvers: string[];
+  regulatory_refs: string[];
+}
+
+export interface PolicyPack {
+  id: string;
+  name: string;
+  regulation: string;
+  description: string;
+  action_types: string[];
+  policy_count: number;
+  policies: PolicyPackPolicy[];
+}
+
+export interface PolicyPackList {
+  packs: PolicyPack[];
+  count: number;
+}
+
+export interface PolicyPackImportResult {
+  pack_id: string;
+  imported: string[];
+  skipped: { id: string; reason: string }[];
+  count: number;
+}
+
 // ── Self-serve verified signup (unauthenticated) ─────────────────────────────
 // Two steps: POST /v1/signup/start (collect details → email OTP) then
 // POST /v1/signup/verify (OTP → provisioned tenant + key).

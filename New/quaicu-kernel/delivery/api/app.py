@@ -49,6 +49,7 @@ from delivery.api.routes.admin import router as admin_router
 from delivery.api.routes.erasure import router as erasure_router
 from delivery.api.routes.ledger import router as ledger_router
 from delivery.api.routes.policies import router as policies_router
+from delivery.api.routes.policy_packs import router as policy_packs_router
 from delivery.api.routes.auth import router as auth_router
 from delivery.api.routes.consultation import router as consultation_router
 from delivery.api.routes.keys import router as keys_router
@@ -160,6 +161,7 @@ def create_app(
     app.include_router(inference_router)
     app.include_router(ledger_router)
     app.include_router(policies_router)
+    app.include_router(policy_packs_router)
     app.include_router(dashboard_router)
     app.include_router(entitlements_router)
     app.include_router(approvals_router)

@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import { Badge, Empty, ErrorBox, Loading, useApi } from "../components";
-import type { PolicyRegisterBody, PolicyResponse, SimulateResponse } from "../api/types";
+import type {
+  PolicyPack,
+  PolicyPackImportResult,
+  PolicyRegisterBody,
+  PolicyResponse,
+  SimulateResponse,
+} from "../api/types";
 
 const LIFECYCLES = ["", "DRAFT", "REVIEW", "ACTIVATED", "DEPRECATED"];
 const DECISIONS = ["allow", "deny", "require_approval"];
@@ -34,6 +40,7 @@ export default function Policies() {
       </div>
 
       {err && <ErrorBox message={err} />}
+      <PolicyPacks onImported={() => list.reload()} setErr={setErr} />
       <CreateForm onCreated={() => list.reload()} setErr={setErr} />
 
       {list.loading ? <Loading what="policies" /> : list.error ? <ErrorBox message={list.error} /> : (
@@ -164,6 +171,101 @@ function CreateForm({ onCreated, setErr }: { onCreated: () => void; setErr: (s: 
         <button className="primary" onClick={submit}>Register (DRAFT)</button>
         <button onClick={() => setOpen(false)}>Cancel</button>
       </div>
+    </div>
+  );
+}
+
+// Browse the shipped regulatory packs and import one as DRAFT policies (then backtest + activate
+// through the normal lifecycle). Collapsed by default so it doesn't crowd the authoring view.
+function PolicyPacks({ onImported, setErr }: { onImported: () => void; setErr: (s: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const packs = useApi(() => api.listPolicyPacks(), []);
+
+  if (!open) {
+    return <button className="primary mb" onClick={() => setOpen(true)}>▸ Start from a policy pack</button>;
+  }
+  return (
+    <div className="packs-section">
+      <div className="packs-head">
+        <span className="muted small">
+          Import a ready-made regulatory baseline as DRAFT policies, then backtest &amp; activate each.
+        </span>
+        <button className="linklike" onClick={() => setOpen(false)}>Hide</button>
+      </div>
+      {packs.loading ? <Loading what="packs" /> : packs.error ? <ErrorBox message={packs.error} /> : (
+        <div className="packs">
+          {packs.data!.packs.map((p) => (
+            <PackCard key={p.id} pack={p} onImported={onImported} setErr={setErr} />
+          ))}
+          {packs.data!.count === 0 && <Empty message="No packs available." />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PackCard({ pack, onImported, setErr }: {
+  pack: PolicyPack;
+  onImported: () => void;
+  setErr: (s: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<PolicyPackImportResult | null>(null);
+  const [showRules, setShowRules] = useState(false);
+
+  async function importPack() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api.importPolicyPack(pack.id);
+      setResult(r);
+      onImported();
+    } catch (e) {
+      setErr(e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="pack-card">
+      <div className="pack-title">{pack.name}</div>
+      <div className="pack-reg mono small">{pack.regulation}</div>
+      <p className="muted small">{pack.description}</p>
+      <div className="pack-meta mono small">
+        {pack.policy_count} policies · {pack.action_types.join(", ")}
+      </div>
+      <div className="pack-actions">
+        <button className="primary small" onClick={importPack} disabled={busy}>
+          {busy ? "Importing…" : "Import as DRAFTs"}
+        </button>
+        <button className="linklike" onClick={() => setShowRules((s) => !s)}>
+          {showRules ? "Hide rules" : "Preview rules"}
+        </button>
+      </div>
+      {result && (
+        <div className="pack-result small">
+          Imported <strong>{result.count}</strong> as DRAFT.
+          {result.skipped.length > 0 && (
+            <span className="muted"> {result.skipped.length} skipped ({result.skipped.map((s) => s.reason).join(", ")}).</span>
+          )}{" "}
+          See them below under <Badge value="DRAFT" />.
+        </div>
+      )}
+      {showRules && (
+        <table className="data pack-rules">
+          <thead><tr><th>Policy</th><th>Governs</th><th>Decision</th></tr></thead>
+          <tbody>
+            {pack.policies.map((pol) => (
+              <tr key={pol.id}>
+                <td><code>{pol.id}</code></td>
+                <td className="mono small">{pol.governs}</td>
+                <td><Badge value={pol.decision} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
