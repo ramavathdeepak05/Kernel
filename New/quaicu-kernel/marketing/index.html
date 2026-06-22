@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QUAICU — Governance kernel for AI. AI proposes, rules enforce, humans approve.</title>
+<meta name="description" content="QUAICU is the AI-native governance kernel for regulated institutions. Every AI or automated action is checked against your policy before it runs and sealed to a tamper-evident ledger." />
+<meta property="og:title" content="QUAICU — Governance kernel for AI" />
+<meta property="og:description" content="AI proposes. Rules enforce. Humans approve. Govern every model call against policy, with a tamper-evident audit trail." />
+<style>
+  :root{
+    --paper:#fafaf7;--paper-2:#f0eee8;--ink:#0a0a0a;--smoke:#525252;--mist:#737373;
+    --rule:#d4d4d4;--rule-soft:#e5e5e2;--ember:#008746;--ember-soft:#e3f0e7;--alert:#c43a1a;
+    --f-sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-sans);line-height:1.5}
+  a{color:var(--ember);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
+  code,.mono{font-family:var(--f-mono);font-size:.85em}
+  .btn{display:inline-block;border:1px solid var(--ink);padding:10px 20px;font-weight:600;font-size:14px}
+  .btn.primary{background:var(--ink);color:var(--paper)}
+  .btn.primary:hover{background:var(--ember);border-color:var(--ember);color:#fff;text-decoration:none}
+  .btn.ghost:hover{border-color:var(--ember);color:var(--ember);text-decoration:none}
+
+  header{border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--paper);z-index:10}
+  header .wrap{display:flex;align-items:center;justify-content:space-between;height:60px}
+  .brand{font-weight:700;letter-spacing:.04em}
+  .brand span{color:var(--smoke);font-weight:400}
+  nav.top a{color:var(--ink);font-size:13px;margin-left:22px}
+
+  .hero{padding:72px 0 56px;border-bottom:1px solid var(--rule)}
+  .kicker{font-family:var(--f-mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--smoke)}
+  h1{font-size:46px;line-height:1.08;margin:14px 0 18px;letter-spacing:-.02em;max-width:18ch}
+  .lede{font-size:19px;color:var(--smoke);max-width:60ch;margin:0 0 28px}
+  .cta-row .btn{margin-right:12px}
+  .tagline{margin-top:34px;font-family:var(--f-mono);font-size:13px;letter-spacing:.08em;color:var(--ink)}
+  .tagline b{color:var(--ember)}
+
+  section{padding:56px 0;border-bottom:1px solid var(--rule)}
+  h2{font-size:13px;font-family:var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--smoke);margin:0 0 28px}
+  .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule)}
+  .grid3 .cell{background:var(--paper);padding:22px}
+  .cell h3{margin:0 0 8px;font-size:17px}
+  .cell p{margin:0;color:var(--smoke);font-size:14px}
+  .num{font-family:var(--f-mono);color:var(--ember);font-size:13px}
+
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+  .step .n{display:inline-flex;width:26px;height:26px;align-items:center;justify-content:center;border:1px solid var(--ink);font-family:var(--f-mono);font-weight:600;font-size:13px}
+  .step h3{margin:10px 0 6px;font-size:16px}
+  .step p{margin:0;color:var(--smoke);font-size:14px}
+  pre{background:var(--paper-2);border:1px solid var(--rule);padding:14px 16px;overflow-x:auto;font-family:var(--f-mono);font-size:12.5px;margin:22px 0 0}
+
+  .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--rule)}
+  .tier{background:var(--paper);padding:24px;display:flex;flex-direction:column}
+  .tier.feat{border-top:3px solid var(--ember)}
+  .tier h3{margin:0 0 4px;font-size:18px}
+  .tier .price{font-family:var(--f-mono);font-size:22px;margin:6px 0 2px}
+  .tier .per{color:var(--smoke);font-size:12px}
+  .tier ul{list-style:none;padding:0;margin:16px 0 20px;font-size:14px;color:var(--smoke)}
+  .tier li{padding:5px 0;border-bottom:1px solid var(--rule-soft)}
+  .tier .btn{margin-top:auto;text-align:center}
+
+  footer{padding:40px 0;color:var(--smoke);font-size:13px}
+  footer .wrap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px}
+  footer a{color:var(--smoke);margin-left:18px}
+
+  @media(max-width:760px){
+    h1{font-size:34px}.grid3,.steps,.pricing{grid-template-columns:1fr}
+    nav.top a:not(.btn){display:none}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">QUAICU&nbsp;<span>Kernel</span></div>
+    <nav class="top">
+      <a href="#how">How it works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="https://kernel.quaicu.org">Sign in</a>
+      <a class="btn primary" href="https://kernel.quaicu.org">Get started</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero"><div class="wrap">
+  <div class="kicker">AI-native operating software for institutions</div>
+  <h1>The governance kernel for AI.</h1>
+  <p class="lede">QUAICU sits between your AI and the action it wants to take. Every model call or
+    automated decision is checked against your policy <em>before</em> it runs, escalated to a human
+    when it must be, and sealed into a tamper-evident ledger — so you can deploy AI in regulated
+    environments and prove exactly what happened.</p>
+  <div class="cta-row">
+    <a class="btn primary" href="https://kernel.quaicu.org">Start free try-it</a>
+    <a class="btn ghost" href="#how">See how it works</a>
+  </div>
+  <div class="tagline"><b>AI proposes.</b> &nbsp;Rules enforce. &nbsp;Humans approve.</div>
+</div></div>
+
+<section id="what"><div class="wrap">
+  <h2>What it does</h2>
+  <div class="grid3">
+    <div class="cell"><div class="num">K·01</div><h3>Policy enforcement</h3><p>Author rules in CEL or import a regulatory pack (EU AI Act, India DPDP). Every action is allowed, denied, or routed for approval — fail-closed.</p></div>
+    <div class="cell"><div class="num">K·02</div><h3>Tamper-evident ledger</h3><p>Each decision is sealed into an RFC-6962 Merkle ledger, signed by a managed KMS key. Prove what your AI did, and that the record wasn't altered.</p></div>
+    <div class="cell"><div class="num">K·05</div><h3>Governed AI gateway</h3><p>Point your OpenAI-compatible SDK at the gateway. Bring your own model key; every call is governed and logged, then forwarded to your provider.</p></div>
+  </div>
+</div></section>
+
+<section id="how"><div class="wrap">
+  <h2>How it works</h2>
+  <div class="steps">
+    <div class="step"><span class="n">1</span><h3>Connect</h3><p>Sign up, get an API key, and import a policy pack — or write your own CEL rule in minutes.</p></div>
+    <div class="step"><span class="n">2</span><h3>Govern</h3><p>Call <code>/v1/authorize</code> before you act, or route model calls through the gateway. QUAICU returns allow / deny / review.</p></div>
+    <div class="step"><span class="n">3</span><h3>Prove</h3><p>Every decision is sealed to your ledger. Export the audit trail; show regulators the rule that governed each action.</p></div>
+  </div>
+  <pre>curl -X POST https://kernel.quaicu.org/v1/authorize \
+  -H "Authorization: Bearer qk_your_key" -H "X-Tenant-Id: your-tenant" \
+  -d '{"type":"payments.wire","payload":{"amount":2500000}}'
+# -> {"decision":"require_approval", "sealed": true, "ledger_seq": 42}</pre>
+</div></section>
+
+<section id="pricing"><div class="wrap">
+  <h2>Pricing</h2>
+  <div class="pricing">
+    <div class="tier feat">
+      <h3>Starter</h3>
+      <div class="price">₹10,000</div><div class="per">per year · self-serve</div>
+      <ul><li>Real CEL governance + ledger</li><li>Governed AI gateway (BYO key)</li><li>Policy packs (DPDP, EU AI Act)</li><li>Up to 5 policies</li></ul>
+      <a class="btn primary" href="https://kernel.quaicu.org">Get started</a>
+    </div>
+    <div class="tier">
+      <h3>Business</h3>
+      <div class="price">from ₹20,00,000</div><div class="per">consultation-led</div>
+      <ul><li>Postgres + KMS-signed ledger</li><li>200 policies, higher quotas</li><li>Approvals / HITL workflows</li><li>Onboarding with our team</li></ul>
+      <a class="btn ghost" href="https://kernel.quaicu.org/plans">Talk to us</a>
+    </div>
+    <div class="tier">
+      <h3>Enterprise</h3>
+      <div class="price">Custom</div><div class="per">licensed · customer-hosted</div>
+      <ul><li>Deploy in your own cloud</li><li>Unlimited policies + tiers</li><li>External crypto-reviewed ledger</li><li>SLA &amp; dedicated support</li></ul>
+      <a class="btn ghost" href="https://kernel.quaicu.org/plans">Contact sales</a>
+    </div>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span>© <span id="y"></span> QUAICU Solutions Private Limited · Hyderabad, India</span>
+  <span>
+    <a href="https://kernel.quaicu.org/legal/terms">Terms</a>
+    <a href="https://kernel.quaicu.org/legal/privacy">Privacy</a>
+    <a href="https://kernel.quaicu.org/legal/refunds">Refunds</a>
+    <a href="mailto:support@quaicu.org">support@quaicu.org</a>
+  </span>
+</div></footer>
+<script>document.getElementById("y").textContent=new Date().getFullYear();</script>
+</body>
+</html>
