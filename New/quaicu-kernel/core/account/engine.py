@@ -25,6 +25,7 @@ from core.account.email_domains import assert_company_email
 from core.account.model import (
     Account,
     AccountStatus,
+    AIConnection,
     ApiKey,
     AuthenticatedPrincipal,
     SignupDetails,
@@ -415,6 +416,92 @@ class AccountEngine:
         if float(payload.get("exp", 0)) < datetime.now(timezone.utc).timestamp():
             raise SignupVerificationError("Verification code expired — request a new one.")
         return payload
+
+    def _encrypt_secret(self, plaintext: str) -> str:
+        """AES-GCM encrypt a secret (e.g. a BYO provider key) for at-rest storage. No expiry."""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        nonce = secrets.token_bytes(12)
+        ct = AESGCM(self._token_key()).encrypt(nonce, plaintext.encode("utf-8"), b"ai-connection")
+        return base64.urlsafe_b64encode(nonce + ct).rstrip(b"=").decode()
+
+    def _decrypt_secret(self, token: str) -> str:
+        """Inverse of ``_encrypt_secret``. Raises ValueError on any failure (tamper/wrong key)."""
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+        try:
+            blob = base64.urlsafe_b64decode((token or "") + "=" * (-len(token or "") % 4))
+            nonce, ct = blob[:12], blob[12:]
+            return AESGCM(self._token_key()).decrypt(nonce, ct, b"ai-connection").decode("utf-8")
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError("Stored AI provider key could not be decrypted.") from exc
+
+    # ── AI gateway: per-tenant BYO upstream connection (stored on the account profile) ──
+
+    def set_ai_connection(
+        self, tenant: TenantId, *, provider: str, base_url: str, api_key: str, default_model: str = ""
+    ) -> None:
+        """Save (or replace) the tenant's upstream LLM connection. The key is encrypted at rest."""
+        import dataclasses
+
+        account = self._accounts.get_account_by_tenant(tenant)
+        if account is None:
+            raise AccountExistsError(
+                f"No account for tenant {tenant!r}.", detail={"tenant": str(tenant)}
+            )
+        profile = dict(account.profile)
+        profile["ai_connection"] = {
+            "provider": provider,
+            "base_url": base_url.rstrip("/"),
+            "default_model": default_model,
+            "enc_key": self._encrypt_secret(api_key),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._accounts.add_account(dataclasses.replace(account, profile=profile))
+
+    def get_ai_connection(self, tenant: TenantId) -> AIConnection | None:
+        """Return the tenant's connection with the key decrypted (for the outbound call), or None."""
+        account = self._accounts.get_account_by_tenant(tenant)
+        if account is None:
+            return None
+        raw = account.profile.get("ai_connection")
+        if not isinstance(raw, Mapping):
+            return None
+        updated = raw.get("updated_at")
+        return AIConnection(
+            provider=str(raw.get("provider", "")),
+            base_url=str(raw.get("base_url", "")),
+            api_key=self._decrypt_secret(str(raw.get("enc_key", ""))),
+            default_model=str(raw.get("default_model", "")),
+            updated_at=datetime.fromisoformat(updated) if isinstance(updated, str) else None,
+        )
+
+    def ai_connection_status(self, tenant: TenantId) -> dict | None:
+        """Masked view of the connection for display (never returns the key). None if unset."""
+        conn = self.get_ai_connection(tenant)
+        if conn is None:
+            return None
+        tail = conn.api_key[-4:] if len(conn.api_key) >= 4 else "••••"
+        return {
+            "connected": True,
+            "provider": conn.provider,
+            "base_url": conn.base_url,
+            "default_model": conn.default_model,
+            "key_hint": f"••••{tail}",
+            "updated_at": conn.updated_at.isoformat() if conn.updated_at else None,
+        }
+
+    def clear_ai_connection(self, tenant: TenantId) -> bool:
+        """Remove the tenant's connection. Returns True if one was present."""
+        import dataclasses
+
+        account = self._accounts.get_account_by_tenant(tenant)
+        if account is None or "ai_connection" not in account.profile:
+            return False
+        profile = dict(account.profile)
+        profile.pop("ai_connection", None)
+        self._accounts.add_account(dataclasses.replace(account, profile=profile))
+        return True
 
     # ── API keys ─────────────────────────────────────────────────────────────────
 
