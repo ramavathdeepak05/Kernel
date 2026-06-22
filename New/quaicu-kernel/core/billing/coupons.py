@@ -31,16 +31,16 @@ class CouponError(QUAICUError):
 class Coupon:
     code: str
     kind: str  # "percent" | "flat"
-    value: int  # percent (0–100) when kind=percent, else paise off when kind=flat
+    value: float  # percent (0–100, fractional allowed) when kind=percent, else paise off when flat
     applies_to: str = "all"  # "starter" | "consultation" | "all"
     valid_until: date | None = None
     description: str = ""
 
     def discount_paise(self, base_paise: int) -> int:
         if self.kind == "percent":
-            pct = min(max(self.value, 0), 100)
-            return base_paise * pct // 100
-        return min(max(self.value, 0), base_paise)  # flat, never more than the base
+            pct = min(max(self.value, 0.0), 100.0)
+            return int(base_paise * pct / 100)  # floor — never over-discount
+        return min(int(max(self.value, 0)), base_paise)  # flat, never more than the base
 
 
 @dataclass(frozen=True)
@@ -101,7 +101,7 @@ class CouponBook:
                 Coupon(
                     code=code,
                     kind=str(it.get("kind", "percent")).lower(),
-                    value=int(it.get("value", 0)),
+                    value=float(it.get("value", 0)),
                     applies_to=str(it.get("applies_to", "all")).lower(),
                     valid_until=valid_until,
                     description=str(it.get("description", "")),

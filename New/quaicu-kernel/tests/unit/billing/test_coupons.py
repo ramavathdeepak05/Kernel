@@ -23,6 +23,12 @@ def test_percent_discount():
     assert applied.discount_paise == 500_000
 
 
+def test_fractional_percent():
+    # 99.5% off ₹10,000 → ₹50 charged (above the ₹1 floor).
+    book = CouponBook([Coupon(code="INT101", kind="percent", value=99.5, applies_to="starter")])
+    assert book.apply("INT101", _BASE, "starter").final_paise == 5_000
+
+
 def test_flat_discount_capped_at_base():
     book = CouponBook([Coupon(code="FLAT", kind="flat", value=2_000_000, applies_to="all")])
     applied = book.apply("FLAT", _BASE, "starter")
