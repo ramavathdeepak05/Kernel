@@ -55,6 +55,7 @@ export default function Signup() {
   // Step 3 — otp / payment
   const [token, setToken] = useState("");
   const [otp, setOtp] = useState("");
+  const [coupon, setCoupon] = useState("");
   const [paymentInfo, setPaymentInfo] = useState<SignupVerifyResponse | null>(null);
 
   const [busy, setBusy] = useState(false);
@@ -120,7 +121,10 @@ export default function Signup() {
     setBusy(true);
     setError(null);
     try {
-      const resp = await api.verifySignup({ verification_token: token, otp: otp.trim() });
+      const resp = await api.verifySignup({
+        verification_token: token, otp: otp.trim(),
+        coupon_code: coupon.trim() || undefined,
+      });
       if (resp.requires_payment) {
         setPaymentInfo(resp);     // show the "Pay ₹2" panel
         await openRazorpay(resp); // and open the widget right away
@@ -201,6 +205,10 @@ export default function Signup() {
             <p className="muted">
               A one-time <strong>{inr(paymentInfo.amount_paise)}</strong> registration fee (covers one
               year) activates your account.
+              {paymentInfo.coupon_code && (paymentInfo.discount_paise ?? 0) > 0 && (
+                <> Coupon <strong>{paymentInfo.coupon_code}</strong> applied — you save{" "}
+                <strong>{inr(paymentInfo.discount_paise ?? undefined)}</strong>.</>
+              )}
             </p>
             <div className="card signup-card">
               <div className="card-body">
@@ -225,6 +233,11 @@ export default function Signup() {
                     value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} placeholder="123456"
                     style={{ letterSpacing: "0.4em", fontSize: "1.25rem", textAlign: "center" }}
                   />
+                </label>
+                <label>
+                  Coupon code <span className="muted small">(optional)</span>
+                  <input value={coupon} onChange={(e) => setCoupon(e.target.value)}
+                    placeholder="e.g. LAUNCH50" autoCapitalize="characters" />
                 </label>
                 <button className="primary" type="submit" disabled={busy || otp.trim().length !== 6}>
                   {busy ? "Verifying…" : "Verify"}

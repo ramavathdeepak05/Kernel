@@ -43,6 +43,7 @@ export default function Plans() {
   const [email, setEmail] = useState("");
   const [company, setCompany] = useState("");
   const [phone, setPhone] = useState("");
+  const [coupon, setCoupon] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export default function Plans() {
       email: email.trim(),
       company_name: company.trim(),
       phone: phone.trim(),
+      coupon_code: coupon.trim() || undefined,
     };
     try {
       const order = await api.startConsultation(lead);
@@ -133,6 +135,7 @@ export default function Plans() {
             <label>Work email<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" /></label>
             <label>Company<input required value={company} onChange={(e) => setCompany(e.target.value)} placeholder="Acme Bank" /></label>
             <label>Phone<input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 …" /></label>
+            <label>Coupon code <span className="muted small">(optional)</span><input value={coupon} onChange={(e) => setCoupon(e.target.value)} placeholder="e.g. PARTNER25" /></label>
             <button className="primary" type="submit" disabled={busy || !valid}>
               {busy ? "Starting…" : "Pay ₹50,000 &amp; connect"}
             </button>

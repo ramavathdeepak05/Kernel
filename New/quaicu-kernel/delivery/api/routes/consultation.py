@@ -17,6 +17,7 @@ from dataclasses import replace
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from core.billing.coupons import CouponError
 from core.email import EmailMessage
 from core.errors import CheckoutError
 
@@ -31,6 +32,7 @@ class ConsultLead(BaseModel):
     email: str = Field(..., min_length=3)
     company_name: str = Field(..., min_length=1)
     phone: str = Field(..., min_length=1)
+    coupon_code: str | None = Field(None, description="Optional discount code applied to the deposit.")
 
 
 class ConsultStartResponse(BaseModel):
@@ -38,6 +40,8 @@ class ConsultStartResponse(BaseModel):
     razorpay_key_id: str
     amount_paise: int
     currency: str
+    coupon_code: str | None = None
+    discount_paise: int | None = None
 
 
 class ConsultCompleteRequest(ConsultLead):
@@ -70,12 +74,24 @@ async def consultation_start(body: ConsultLead, request: Request) -> ConsultStar
         raise HTTPException(status_code=422, detail={"error": "tier must be BUSINESS or ENTERPRISE", "code": "UNKNOWN_TIER"})
     gw = _gateway(request)
     amount = _amount(request)
+    coupon_code: str | None = None
+    discount_paise: int | None = None
+    book = getattr(request.app.state, "coupon_book", None)
+    if body.coupon_code and book is not None:
+        try:
+            applied = book.apply(body.coupon_code, amount, "consultation")
+        except CouponError as exc:
+            raise HTTPException(status_code=422, detail={"error": str(exc), "code": exc.code})
+        amount = applied.final_paise
+        coupon_code = applied.code
+        discount_paise = applied.discount_paise
     try:
         order_id = await gw.create_order(receipt=f"consult-{body.tier}-{body.email}", amount_paise=amount)
     except CheckoutError as exc:
         raise HTTPException(status_code=502, detail={"error": str(exc), "code": exc.code})
     return ConsultStartResponse(
-        order_id=order_id, razorpay_key_id=gw.key_id, amount_paise=amount, currency=gw.currency
+        order_id=order_id, razorpay_key_id=gw.key_id, amount_paise=amount, currency=gw.currency,
+        coupon_code=coupon_code, discount_paise=discount_paise,
     )
 
 

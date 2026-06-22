@@ -33,6 +33,17 @@ currency     = "INR"
 key_id       = "${RAZORPAY_KEY_ID}"
 key_secret   = "${RAZORPAY_KEY_SECRET}"
 
+# Discount coupons — applied to the signup fee / consultation deposit BEFORE the Razorpay order is
+# created (the kernel reduces the amount; Razorpay just charges it). A code that fully discounts is
+# floored at ₹1 (Razorpay's minimum). Add a block per code; uncomment to activate.
+# [[coupon]]
+# code        = "LAUNCH50"
+# kind        = "percent"        # "percent" (value = 0–100) | "flat" (value = paise off)
+# value       = 50
+# applies_to  = "starter"        # "starter" | "consultation" | "all"
+# valid_until = "2026-12-31"     # optional ISO date (inclusive)
+# description = "Launch offer — 50% off Starter"
+
 # Business / Enterprise are quote-based: a prospect pays this consultation deposit to connect with the
 # integrations team (the tier is NOT auto-changed). Reuses the Razorpay keys above. The lead + payment
 # ref are emailed to notify_email.
