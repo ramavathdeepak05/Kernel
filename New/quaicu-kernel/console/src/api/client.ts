@@ -17,6 +17,8 @@ import type {
   PolicyRegisterBody,
   PolicyResponse,
   ApiKeyList,
+  AuthorizeRequest,
+  AuthorizeResponse,
   ConsultCompleteBody,
   ConsultLeadBody,
   ConsultStartResponse,
@@ -108,6 +110,9 @@ export const api = {
   createKey: () => request<CreatedApiKey>("POST", "/v1/keys"),
   revokeKey: (keyId: string) =>
     request<{ key_id: string; revoked: boolean }>("POST", `/v1/keys/${encodeURIComponent(keyId)}/revoke`),
+
+  // ── Authorize (pure policy decision — powers the Get-started "try it" panel) ─
+  authorize: (b: AuthorizeRequest) => request<AuthorizeResponse>("POST", "/v1/authorize", b),
 
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),
