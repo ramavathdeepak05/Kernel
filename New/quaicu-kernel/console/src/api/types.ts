@@ -135,6 +135,28 @@ export interface CheckoutResponse {
   reference: string | null;
 }
 
+// ── Authorize (pure policy decision — the "try it" surface) ──────────────────
+// POST /v1/authorize evaluates policy/consent/identity for an action type and returns a verdict
+// WITHOUT executing anything. Always HTTP 200 — read `allowed`/`decision` from the body.
+export interface AuthorizeRequest {
+  type: string; // action type, e.g. "demo.payment"
+  payload?: Record<string, unknown>;
+  idempotency_key?: string | null;
+  record?: boolean | null; // override ledger sealing for this decision
+}
+
+export interface AuthorizeResponse {
+  decision: string; // "allow" | "deny" | "require_approval"
+  allowed: boolean;
+  actor_id: string;
+  reason?: string | null;
+  policy_versions: string[];
+  approvers: string[];
+  enforced_layers: string[];
+  sealed: boolean;
+  ledger_seq?: number | null;
+}
+
 // ── Self-serve verified signup (unauthenticated) ─────────────────────────────
 // Two steps: POST /v1/signup/start (collect details → email OTP) then
 // POST /v1/signup/verify (OTP → provisioned tenant + key).

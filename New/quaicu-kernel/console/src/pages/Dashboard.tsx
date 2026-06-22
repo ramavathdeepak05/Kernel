@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { Badge, Card, Empty, ErrorBox, Loading, Stat, useApi } from "../components";
 
@@ -7,9 +8,25 @@ export default function Dashboard() {
   const top = useApi(() => api.topActions(8), []);
   const queue = useApi(() => api.hitlQueue(), []);
 
+  // First-run nudge: a brand-new tenant has governed nothing yet — send them to the try-it page
+  // instead of staring at empty charts.
+  const noActivity = overview.data?.total_governed === 0;
+
   return (
     <div className="page">
       <h1>Governance dashboard</h1>
+
+      {noActivity && (
+        <div className="card getstarted-callout">
+          <div className="card-body">
+            <strong>No governed actions yet.</strong>{" "}
+            <span className="muted">
+              Run your first governed decision and see it sealed to the ledger.
+            </span>
+            <Link className="primary small callout-cta" to="/start">Get started →</Link>
+          </div>
+        </div>
+      )}
 
       <div className="grid-4">
         <Card title="Overview">

@@ -6,6 +6,7 @@ import { clearSession, getSession, isAuthenticated, setSession, subscribe } from
 import { EntitlementsProvider, useEntitlements, useFeature } from "./state/entitlements";
 import { beginLogin, oidcEnabled } from "./oidc/oidc";
 import Dashboard from "./pages/Dashboard";
+import GetStarted from "./pages/GetStarted";
 import Policies from "./pages/Policies";
 import Audit from "./pages/Audit";
 import Approvals from "./pages/Approvals";
@@ -124,6 +125,7 @@ function Nav() {
   const billing = (data?.billing_providers?.length ?? 0) > 0;
   return (
     <nav className="nav">
+      <NavLink to="/start">Get started</NavLink>
       <NavLink to="/" end>Dashboard</NavLink>
       {policies && <NavLink to="/policies">Policies</NavLink>}
       <NavLink to="/audit">Audit trail</NavLink>
@@ -252,6 +254,7 @@ export default function App() {
             {authed ? (
               <>
                 <Route path="/" element={<Dashboard />} />
+                <Route path="/start" element={<GetStarted />} />
                 <Route
                   path="/policies"
                   element={

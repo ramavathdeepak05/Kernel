@@ -6,8 +6,10 @@
 *-sa-key.json
 *.credentials.json
 
-# graphify output
+# graphify output + local corpus/index scratch
 graphify-out/
+.graphify_corpus/
+.graphify_python
 
 # Python
 __pycache__/
