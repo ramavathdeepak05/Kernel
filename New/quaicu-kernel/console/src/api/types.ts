@@ -160,6 +160,8 @@ export interface AuthorizeResponse {
 // ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────
 export interface PolicyPackPolicy {
   id: string;
+  title: string;
+  description: string;
   governs: string;
   condition: string;
   decision: string;
@@ -167,12 +169,22 @@ export interface PolicyPackPolicy {
   regulatory_refs: string[];
 }
 
+export interface PolicyPackActionType {
+  name: string;
+  use_case: string;
+  payload: string;
+  example: string;
+}
+
 export interface PolicyPack {
   id: string;
   name: string;
   regulation: string;
   description: string;
+  summary: string;
+  usage: string;
   action_types: string[];
+  action_specs: PolicyPackActionType[];
   policy_count: number;
   policies: PolicyPackPolicy[];
 }

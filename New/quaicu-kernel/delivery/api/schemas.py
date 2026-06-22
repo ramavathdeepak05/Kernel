@@ -363,11 +363,22 @@ class PolicyPackPolicyResponse(BaseModel):
     """One rule inside a starter pack (preview only — not yet registered)."""
 
     id: str
+    title: str
+    description: str
     governs: str
     condition: str
     decision: str
     approvers: list[str] = Field(default_factory=list)
     regulatory_refs: list[str] = Field(default_factory=list)
+
+
+class PolicyPackActionTypeResponse(BaseModel):
+    """How to invoke one of the pack's governed action types — the payload contract + an example."""
+
+    name: str
+    use_case: str
+    payload: str
+    example: str
 
 
 class PolicyPackResponse(BaseModel):
@@ -377,7 +388,10 @@ class PolicyPackResponse(BaseModel):
     name: str
     regulation: str
     description: str
+    summary: str = ""
+    usage: str = ""
     action_types: list[str]
+    action_specs: list[PolicyPackActionTypeResponse] = Field(default_factory=list)
     policy_count: int
     policies: list[PolicyPackPolicyResponse] = Field(default_factory=list)
 

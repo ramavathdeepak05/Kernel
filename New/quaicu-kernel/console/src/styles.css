@@ -264,3 +264,16 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .pack-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
 .pack-result { margin-top: 10px; border-top: 1px solid var(--rule-soft); padding-top: 8px; }
 .pack-rules { margin-top: 10px; }
+
+/* Policy-pack details panel (rich descriptions + usage contract). */
+.pack-details { margin-top: 12px; border-top: 1px solid var(--rule-soft); padding-top: 10px; }
+.pack-subhead { font-family: var(--f-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--smoke); margin: 12px 0 6px; }
+.action-spec { border-left: 2px solid var(--rule); padding-left: 10px; margin: 8px 0; }
+.action-spec .kv-label { min-width: 56px; display: inline-block; }
+.action-example { margin: 6px 0 0; padding: 8px 10px; background: var(--paper-2); border: 1px solid var(--rule);
+  font-family: var(--f-mono); font-size: 11px; overflow-x: auto; white-space: pre; }
+.policy-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.policy-item { border-left: 2px solid var(--rule); padding-left: 10px; }
+.policy-item-head { display: flex; align-items: center; gap: 8px; }
+.policy-item-meta { color: var(--smoke); margin-top: 3px; }

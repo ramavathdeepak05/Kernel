@@ -1,25 +1,27 @@
 """Starter policy packs — ready-made CEL rule sets shipped under ``docs/policy-packs/``.
 
 Each pack is a directory with a ``policies.toml`` of ``[[policy.seed]]`` entries (the same format
-the kernel seeds at boot). The console lets a tenant *import* a pack: every entry is registered as a
-DRAFT policy the tenant then backtests + activates through the normal lifecycle — so adopting a
+the kernel seeds at boot) plus optional ``[pack]`` / ``[[pack.action_type]]`` metadata that the
+console renders (the kernel seeder ignores those tables). The console lets a tenant *import* a pack:
+every entry is registered as a DRAFT policy the tenant then backtests + activates — so adopting a
 regulatory baseline is two clicks instead of hand-authoring CEL.
 
 The packs ship as repo files (the runtime image bundles the tree), so this module discovers them at
-the documented path. Display metadata (human name + regulation) lives in ``_META``; a pack directory
-without an entry still works, falling back to its directory name.
+the documented path. ``_META`` provides a name/regulation fallback for a pack whose TOML omits the
+``[pack]`` table.
 """
 
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # core/policy/packs.py → parents[2] is the package root (alongside docs/).
 PACKS_DIR = Path(__file__).resolve().parents[2] / "docs" / "policy-packs"
 
-# pack id (directory name) → (display name, regulation, one-line description)
+# pack id (directory name) → (display name, regulation, one-line description). Fallback only — a pack
+# that declares [pack] in its TOML overrides these.
 _META: dict[str, tuple[str, str, str]] = {
     "dpdp": (
         "India DPDP Act 2023",
@@ -37,6 +39,8 @@ _META: dict[str, tuple[str, str, str]] = {
 @dataclass(frozen=True)
 class PackPolicy:
     id: str
+    title: str
+    description: str
     governs: str
     condition: str
     decision: str
@@ -45,12 +49,25 @@ class PackPolicy:
 
 
 @dataclass(frozen=True)
+class PackActionType:
+    """How to actually invoke one of the governed action types — the payload contract + an example."""
+
+    name: str
+    use_case: str
+    payload: str
+    example: str
+
+
+@dataclass(frozen=True)
 class PolicyPack:
     id: str
     name: str
     regulation: str
     description: str
+    summary: str
+    usage: str
     policies: tuple[PackPolicy, ...]
+    action_specs: tuple[PackActionType, ...] = field(default_factory=tuple)
 
     @property
     def action_types(self) -> tuple[str, ...]:
@@ -67,10 +84,13 @@ def _load_dir(pack_id: str, path: Path) -> PolicyPack | None:
     if not toml_path.is_file():
         return None
     cfg = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+
     seeds = cfg.get("policy", {}).get("seed", [])
     policies = tuple(
         PackPolicy(
             id=str(s["id"]),
+            title=str(s.get("title", s["id"])),
+            description=str(s.get("description", "")),
             governs=str(s["governs"]),
             condition=str(s["condition"]),
             decision=str(s["decision"]),
@@ -82,9 +102,28 @@ def _load_dir(pack_id: str, path: Path) -> PolicyPack | None:
     )
     if not policies:
         return None
-    name, regulation, description = _META.get(pack_id, (pack_id, "", ""))
+
+    meta = cfg.get("pack", {})
+    fb_name, fb_reg, fb_desc = _META.get(pack_id, (pack_id, "", ""))
+    action_specs = tuple(
+        PackActionType(
+            name=str(a.get("name", "")),
+            use_case=str(a.get("use_case", "")),
+            payload=str(a.get("payload", "")),
+            example=str(a.get("example", "")),
+        )
+        for a in meta.get("action_type", [])
+        if a.get("name")
+    )
     return PolicyPack(
-        id=pack_id, name=name, regulation=regulation, description=description, policies=policies
+        id=pack_id,
+        name=str(meta.get("name", fb_name)),
+        regulation=str(meta.get("regulation", fb_reg)),
+        description=fb_desc,
+        summary=str(meta.get("summary", "")).strip(),
+        usage=str(meta.get("usage", "")).strip(),
+        policies=policies,
+        action_specs=action_specs,
     )
 
 
