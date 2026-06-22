@@ -252,3 +252,15 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .callout-cta { margin-left: auto; display: inline-block; text-decoration: none; background: var(--ink);
   border: 1px solid var(--ink); color: var(--paper); font-weight: 600; padding: 4px 12px; font-size: 12px; }
 .callout-cta:hover { background: var(--ember); border-color: var(--ember); color: #fff; }
+
+/* ── Policy packs (Policies page — "Start from a pack") ───────────────────── */
+.packs-section { border: 1px solid var(--rule); padding: 14px 16px; margin: 0 0 16px; }
+.packs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.packs { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.pack-card { border: 1px solid var(--rule); border-left-width: 3px; border-left-color: var(--ember); padding: 12px 14px; }
+.pack-title { font-weight: 600; font-size: 14px; }
+.pack-reg { color: var(--smoke); margin-top: 2px; }
+.pack-meta { color: var(--smoke); margin: 8px 0; }
+.pack-actions { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.pack-result { margin-top: 10px; border-top: 1px solid var(--rule-soft); padding-top: 8px; }
+.pack-rules { margin-top: 10px; }

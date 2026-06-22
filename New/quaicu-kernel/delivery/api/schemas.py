@@ -354,3 +354,43 @@ class EntitlementsResponse(BaseModel):
     #: Payment providers wired for self-serve checkout on this deployment (e.g. ["stripe"]). Empty
     #: when billing is not configured; the console shows the upgrade flow only when non-empty.
     billing_providers: list[str] = []
+
+
+# ── Starter policy packs (import a regulatory baseline as DRAFTs) ────────────────
+
+
+class PolicyPackPolicyResponse(BaseModel):
+    """One rule inside a starter pack (preview only — not yet registered)."""
+
+    id: str
+    governs: str
+    condition: str
+    decision: str
+    approvers: list[str] = Field(default_factory=list)
+    regulatory_refs: list[str] = Field(default_factory=list)
+
+
+class PolicyPackResponse(BaseModel):
+    """A starter policy pack the tenant can import into their own DRAFT policies."""
+
+    id: str
+    name: str
+    regulation: str
+    description: str
+    action_types: list[str]
+    policy_count: int
+    policies: list[PolicyPackPolicyResponse] = Field(default_factory=list)
+
+
+class PolicyPackListResponse(BaseModel):
+    packs: list[PolicyPackResponse]
+    count: int
+
+
+class PolicyPackImportResponse(BaseModel):
+    """Result of importing a pack: which policies were registered as DRAFTs, which were skipped."""
+
+    pack_id: str
+    imported: list[str]
+    skipped: list[dict[str, str]] = Field(default_factory=list)
+    count: int

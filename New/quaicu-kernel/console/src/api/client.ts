@@ -16,6 +16,8 @@ import type {
   PolicyListResponse,
   PolicyRegisterBody,
   PolicyResponse,
+  PolicyPackList,
+  PolicyPackImportResult,
   ApiKeyList,
   AuthorizeRequest,
   AuthorizeResponse,
@@ -129,6 +131,11 @@ export const api = {
   listVersions: (id: string) =>
     request<PolicyListResponse>("GET", `/v1/policies/${encodeURIComponent(id)}`),
   registerPolicy: (b: PolicyRegisterBody) => request<PolicyResponse>("POST", "/v1/policies", b),
+
+  // ── Starter policy packs (browse + import a regulatory baseline as DRAFTs) ───
+  listPolicyPacks: () => request<PolicyPackList>("GET", "/v1/policy-packs"),
+  importPolicyPack: (packId: string) =>
+    request<PolicyPackImportResult>("POST", `/v1/policy-packs/${encodeURIComponent(packId)}/import`),
   submitPolicy: (id: string, v: number) =>
     request<PolicyResponse>("POST", `/v1/policies/${encodeURIComponent(id)}/versions/${v}/submit`),
   uploadImpactReport: (id: string, v: number, b: ImpactReportBody) =>
