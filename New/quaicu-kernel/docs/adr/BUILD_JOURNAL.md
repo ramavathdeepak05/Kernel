@@ -183,6 +183,16 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · W6-2 govern the AI-gateway BYO passthrough · delivery/api + core/account + console · claude** —
+  The `/v1/ai/chat/completions` BYO passthrough was ungoverned (verbatim forward after only a policy
+  check). Added a **per-tenant PII-masking toggle** (`AIConnection.mask_pii`, opt-in on all tiers; masks
+  via `core/gateway/masking.py`, rehydrates the response), **token-budget enforcement** (`app.state.ai_budget`
+  `InMemoryBudgetTracker`, 429 on exhaustion, env default cap), and **streaming** (the prior hard 400 →
+  an SSE `StreamingResponse` proxy). Console AI-gateway page: masking toggle + status + a "more providers
+  — coming soon" panel (Azure/Anthropic pre-order). **Exposes:** governed BYO inference (PII never leaves
+  the kernel when masking is on; per-tenant spend cap; streaming works). Tests `test_ai_gateway.py`;
+  api+account 237 passed, ruff clean, console builds. **Follow-ups (deferred to next kernel version):** the
+  Azure + Anthropic translation shims.
 - **2026-06-23 · W6-1 SCIM provisioning + RBAC + team UI · core/account + delivery/api + console · claude** —
   Added multi-user support to a tenant (there was none — one Account + API keys). New: `Member` entity;
   `core/account/roles.py` (OWNER/ADMIN/COMPLIANCE/VIEWER → scopes, + `members:admin`/`scim:admin`);

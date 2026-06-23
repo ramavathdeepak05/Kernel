@@ -34,6 +34,7 @@ from core.errors import (
 )
 from core.account import AccountEngine
 from core.entitlements import EntitlementStore
+from core.gateway.budget import InMemoryBudgetTracker
 from delivery.api.auth import ApiKeyAuthMiddleware
 from delivery.api.middleware import GovernanceMiddleware
 from delivery.api.observability import RequestLoggingMiddleware
@@ -148,6 +149,9 @@ def create_app(
     # Readiness gate: false until lifespan startup hydration completes (see lifespan above). /readyz
     # reads this; /health (liveness) ignores it.
     app.state.ready = False
+    # Per-tenant token budget for the BYO AI-gateway passthrough (W6-2). Default unlimited; an optional
+    # default cap (QUAICU_AI_DEFAULT_MAX_TOKENS) is applied per-tenant lazily by the route.
+    app.state.ai_budget = InMemoryBudgetTracker()
     # Control-plane singletons (signup / admin / billing). Routes 503 when their dependency is absent.
     app.state.account_engine = account_engine
     app.state.entitlement_store = entitlement_store

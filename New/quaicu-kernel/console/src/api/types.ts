@@ -164,6 +164,7 @@ export interface AIConnectionStatus {
   base_url?: string;
   default_model?: string;
   key_hint?: string;
+  mask_pii?: boolean;
   updated_at?: string | null;
 }
 
@@ -172,6 +173,7 @@ export interface AIConnectionBody {
   base_url: string;
   api_key: string;
   default_model: string;
+  mask_pii?: boolean;
 }
 
 // ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────

@@ -442,7 +442,14 @@ class AccountEngine:
     # ── AI gateway: per-tenant BYO upstream connection (stored on the account profile) ──
 
     def set_ai_connection(
-        self, tenant: TenantId, *, provider: str, base_url: str, api_key: str, default_model: str = ""
+        self,
+        tenant: TenantId,
+        *,
+        provider: str,
+        base_url: str,
+        api_key: str,
+        default_model: str = "",
+        mask_pii: bool = False,
     ) -> None:
         """Save (or replace) the tenant's upstream LLM connection. The key is encrypted at rest."""
         import dataclasses
@@ -458,6 +465,7 @@ class AccountEngine:
             "base_url": base_url.rstrip("/"),
             "default_model": default_model,
             "enc_key": self._encrypt_secret(api_key),
+            "mask_pii": bool(mask_pii),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         self._accounts.add_account(dataclasses.replace(account, profile=profile))
@@ -477,6 +485,7 @@ class AccountEngine:
             api_key=self._decrypt_secret(str(raw.get("enc_key", ""))),
             default_model=str(raw.get("default_model", "")),
             updated_at=datetime.fromisoformat(updated) if isinstance(updated, str) else None,
+            mask_pii=bool(raw.get("mask_pii", False)),
         )
 
     def ai_connection_status(self, tenant: TenantId) -> dict | None:
@@ -491,6 +500,7 @@ class AccountEngine:
             "base_url": conn.base_url,
             "default_model": conn.default_model,
             "key_hint": f"••••{tail}",
+            "mask_pii": conn.mask_pii,
             "updated_at": conn.updated_at.isoformat() if conn.updated_at else None,
         }
 

@@ -284,3 +284,10 @@ button.small { padding: 4px 10px; font-size: 12px; }
 /* Team page — invite row (W6-1) */
 .invite-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .invite-row input { flex: 1 1 240px; min-width: 200px; }
+
+/* AI gateway — masking checkbox + coming-soon providers (W6-2) */
+.checkbox-row { display: flex; gap: 8px; align-items: flex-start; }
+.checkbox-row input[type="checkbox"] { width: auto; margin-top: 3px; }
+.coming-soon-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
+.provider-chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rule); padding: 6px 10px; }
+.provider-chip.disabled { color: var(--smoke); opacity: 0.75; }

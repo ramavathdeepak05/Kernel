@@ -60,6 +60,7 @@ class AIConnection:
     api_key: str           # the customer's provider key (plaintext in memory only)
     default_model: str = ""  # used when a request omits "model"
     updated_at: datetime | None = None
+    mask_pii: bool = False  # opt-in (all tiers): tokenize PII before forwarding to the provider (W6-2)
 
 
 @dataclass(frozen=True)
