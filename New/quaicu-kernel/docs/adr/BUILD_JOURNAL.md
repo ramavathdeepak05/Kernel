@@ -183,6 +183,16 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · W6-2 provider shim ② Anthropic · delivery/api + console · claude** —
+  Refactored the provider seam into a shim registry (`delivery/api/ai_providers.py`):
+  `build_request`/`translate_response`/`translate_stream` per provider. `OpenAICompatShim` (OpenAI-
+  compatible + Azure) is identity/passthrough (Azure unchanged); `AnthropicShim` translates OpenAI ⇄
+  Anthropic Messages both ways incl. the SSE event format. The gateway route resolves `get_shim(conn)`
+  and translates around the unchanged masking/budget/policy/rehydrate logic. Console adds an Anthropic
+  preset. **Exposes:** Anthropic as a selectable provider on the BYO gateway. Tests `test_ai_providers.py`
+  + e2e; api+account 244 passed, console builds. **Not validated against the live Anthropic API (no key).**
+  **Follow-ups:** ③ Vertex (SA JSON→OAuth→OpenAI-compat endpoint), ④ Bedrock (boto3+SigV4+Converse);
+  Anthropic tool-calls/vision deferred.
 - **2026-06-23 · W6-2 provider shim ① Azure OpenAI · delivery/api + core/account + console · claude** —
   First of four provider shims for the BYO gateway (unified gateway across OpenAI-compatible / Azure /
   Anthropic / Vertex / Bedrock, built one at a time). Added a `_provider_target(conn, model)` seam in

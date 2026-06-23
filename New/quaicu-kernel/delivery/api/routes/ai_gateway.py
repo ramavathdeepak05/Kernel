@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from core.errors import GatewayBudgetExceededError, QUAICUError
 from core.gateway.masking import MaskingConfig, MaskingContext, mask_text
 from core.types import Actor, ActorId, RequestContext
+from delivery.api.ai_providers import get_shim
 from delivery.api.auth import current_principal
 from delivery.api.deps import get_kernel
 from delivery.api.routes.actions import _bearer_token
@@ -33,31 +34,6 @@ from delivery.sdk.kernel import Kernel
 router = APIRouter(prefix="/v1/ai", tags=["ai-gateway"])
 
 _FORWARD_TIMEOUT = 120.0
-# Default Azure OpenAI api-version used when the connection doesn't pin one (GA as of 2024-10-21).
-_AZURE_DEFAULT_API_VERSION = "2024-10-21"
-
-
-def _provider_target(conn: Any, model: str) -> tuple[str, dict[str, str]]:
-    """Resolve the upstream (url, headers) for the tenant's provider.
-
-    The body/response stay OpenAI-shaped for every provider handled here, so the rest of the route
-    (masking, budget, streaming, rehydration) is provider-agnostic. This is the seam later providers
-    that need request/response translation (Anthropic/Vertex/Bedrock) will extend.
-    """
-    json_ct = {"Content-Type": "application/json"}
-    if str(getattr(conn, "provider", "")).lower() == "azure":
-        # Azure OpenAI: api-key header, deployment-style path, api-version query param. The OpenAI
-        # "model" maps to the Azure deployment name.
-        api_version = conn.api_version or _AZURE_DEFAULT_API_VERSION
-        url = (
-            f"{conn.base_url}/openai/deployments/{model}/chat/completions"
-            f"?api-version={api_version}"
-        )
-        return url, {"api-key": conn.api_key, **json_ct}
-    # Default: any OpenAI-compatible endpoint (OpenAI, Together, Groq, Mistral, OpenRouter, vLLM, …).
-    return f"{conn.base_url}/chat/completions", {"Authorization": f"Bearer {conn.api_key}", **json_ct}
-
-
 def _rehydrate_obj(obj: Any, ctx: MaskingContext) -> Any:
     """Recursively restore masked tokens to their original PII values in a provider response."""
     if isinstance(obj, str):
@@ -235,21 +211,22 @@ async def chat_completions(request: Request) -> Any:
                 m["content"] = mask_text(m["content"], cfg, ctx)
         body["messages"] = messages
 
-    url, headers = _provider_target(conn, model)
+    # Resolve the provider shim and translate the OpenAI request to the upstream's shape.
+    shim = get_shim(conn)
+    req = shim.build_request(conn, model, body)
 
-    # ── Streaming passthrough (SSE) ──────────────────────────────────────────────
+    # ── Streaming (SSE) — translate the upstream stream to OpenAI chunks ──────────
     if stream:
         async def _proxy():
             try:
                 async with httpx.AsyncClient(timeout=_FORWARD_TIMEOUT) as client:
-                    async with client.stream("POST", url, json=body, headers=headers) as upstream:
-                        async for chunk in upstream.aiter_bytes():
-                            if ctx is not None:
-                                # Best-effort per-chunk rehydration (a masked token rarely echoes back,
-                                # since PII was tokenized on the way out; tokens are ASCII + chunk-local).
-                                yield ctx.rehydrate(chunk.decode("utf-8", "ignore")).encode("utf-8")
-                            else:
-                                yield chunk
+                    async with client.stream(
+                        "POST", req.url, json=req.json_body, headers=req.headers
+                    ) as upstream:
+                        async for sse in shim.translate_stream(upstream.aiter_lines()):
+                            # Best-effort per-chunk rehydration (PII was masked on the way out; tokens
+                            # are ASCII + chunk-local, so a stray echo rehydrates cleanly).
+                            yield (ctx.rehydrate(sse) if ctx is not None else sse).encode("utf-8")
             except Exception as exc:  # noqa: BLE001 — surface as an SSE error event, don't 500 mid-stream
                 yield (
                     'data: {"error": {"message": "upstream stream failed: '
@@ -261,15 +238,15 @@ async def chat_completions(request: Request) -> Any:
     # ── Non-streaming forward ────────────────────────────────────────────────────
     try:
         async with httpx.AsyncClient(timeout=_FORWARD_TIMEOUT) as client:
-            upstream = await client.post(url, json=body, headers=headers)
+            upstream = await client.post(req.url, json=req.json_body, headers=req.headers)
     except httpx.TimeoutException:
         return _openai_error(504, "Upstream provider timed out.", "UPSTREAM_TIMEOUT")
     except Exception as exc:  # noqa: BLE001
         return _openai_error(502, f"Could not reach upstream provider: {exc}", "UPSTREAM_UNREACHABLE")
 
-    # Pass the provider's response (and status) back to the SDK, rehydrating masked PII first.
+    # Translate the provider response to OpenAI shape, rehydrating masked PII first.
     try:
-        data = upstream.json()
+        data = shim.translate_response(upstream.json())
         if ctx is not None:
             data = _rehydrate_obj(data, ctx)
         return JSONResponse(status_code=upstream.status_code, content=data)
