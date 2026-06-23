@@ -183,6 +183,37 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · W6-2 govern the AI-gateway BYO passthrough · delivery/api + core/account + console · claude** —
+  The `/v1/ai/chat/completions` BYO passthrough was ungoverned (verbatim forward after only a policy
+  check). Added a **per-tenant PII-masking toggle** (`AIConnection.mask_pii`, opt-in on all tiers; masks
+  via `core/gateway/masking.py`, rehydrates the response), **token-budget enforcement** (`app.state.ai_budget`
+  `InMemoryBudgetTracker`, 429 on exhaustion, env default cap), and **streaming** (the prior hard 400 →
+  an SSE `StreamingResponse` proxy). Console AI-gateway page: masking toggle + status + a "more providers
+  — coming soon" panel (Azure/Anthropic pre-order). **Exposes:** governed BYO inference (PII never leaves
+  the kernel when masking is on; per-tenant spend cap; streaming works). Tests `test_ai_gateway.py`;
+  api+account 237 passed, ruff clean, console builds. **Follow-ups (deferred to next kernel version):** the
+  Azure + Anthropic translation shims.
+- **2026-06-23 · W6-1 SCIM provisioning + RBAC + team UI · core/account + delivery/api + console · claude** —
+  Added multi-user support to a tenant (there was none — one Account + API keys). New: `Member` entity;
+  `core/account/roles.py` (OWNER/ADMIN/COMPLIANCE/VIEWER → scopes, + `members:admin`/`scim:admin`);
+  engine member lifecycle (deactivation revokes the member's keys via a new `ApiKey.member_id`);
+  migration `011_create_members` (+ `api_keys.member_id`); Postgres adapter + store + repository support;
+  a **SCIM 2.0** Users endpoint (`/scim/v2`, self-auth on a `scim:admin` bearer, tenant-isolated, Okta
+  `active=false` deprovision); a `/v1/members` console API + a console **Team** page. **Exposes:** enterprise
+  IdP provisioning/deprovisioning + role-based team management; deprovisioning revokes access.
+  Tests: `test_members.py`, `test_scim.py`; full unit suite 946 passed, ruff clean, console builds.
+  **Follow-ups:** SCIM Groups, IdP-specific certification, per-member console login (deferred).
+- **2026-06-23 · Wave 5 residency/sovereignty — Terraform the SaaS plane + region presets + zero-egress · deploy/terraform + docs · claude** —
+  Executed Wave 5 of `ACTION_TRACKER.md`. The SaaS plane had no IaC (hand-deployed). **Code:** new
+  `deploy/terraform/gcp-saas/` module codifies the shared-plane Cloud Run service + Cloud SQL + Secret
+  Manager, mirroring `gcp-enterprise/`; `var.region`-parameterized with `regions/{eu,india,gulf}.tfvars`
+  presets (W5-1/W5-2); opt-in `enable_private_egress` (VPC connector + private Cloud SQL), default off
+  (W5-3). **Docs:** `DATA_RESIDENCY.md` (per-region matrix + residency caveats, W5-4),
+  `ZERO_EGRESS_VALIDATION.md` (VPC-SC topology + evidence method, W5-3), `WAVE5_RESIDENCY.md` tracker;
+  cross-linked `DEPLOY_CLOUD_RUN.md`. **Exposes:** reproducible per-zone SaaS deploys + a path to a
+  proven no-egress posture. **Follow-ups (human/ops):** `terraform validate`/apply (TF not installed
+  here), import the live service, org-level VPC-SC perimeter, and run the zero-egress validation at
+  scale (the remaining honest gap).
 - **2026-06-23 · Wave 4 operational readiness — health/readiness probes + CI scanning + ops runbooks · delivery/api + cloudbuild + docs · claude** —
   Executed Wave 4 of `ACTION_TRACKER.md`. **Code (W4-1):** added `/readyz` (readiness, gated on a new
   `app.state.ready` flag flipped at the end of lifespan hydration) alongside the existing `/health`

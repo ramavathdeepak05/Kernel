@@ -164,6 +164,7 @@ export interface AIConnectionStatus {
   base_url?: string;
   default_model?: string;
   key_hint?: string;
+  mask_pii?: boolean;
   updated_at?: string | null;
 }
 
@@ -172,6 +173,7 @@ export interface AIConnectionBody {
   base_url: string;
   api_key: string;
   default_model: string;
+  mask_pii?: boolean;
 }
 
 // ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────
@@ -336,6 +338,26 @@ export interface CreatedApiKey {
   key_id: string;
   api_key: string; // plaintext — shown ONCE
   created_at: string;
+}
+
+// ── Team members (W6-1) ──────────────────────────────────────────────────────
+export interface MemberInfo {
+  member_id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  status: string; // "ACTIVE" | "DEACTIVATED"
+  external_id: string;
+  created_at: string;
+}
+export interface MemberList {
+  members: MemberInfo[];
+  roles: string[]; // assignable roles (OWNER/ADMIN/COMPLIANCE/VIEWER)
+}
+export interface InviteMemberBody {
+  email: string;
+  role: string;
+  display_name?: string;
 }
 
 // Request bodies

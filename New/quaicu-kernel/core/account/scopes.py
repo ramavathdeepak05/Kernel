@@ -28,6 +28,8 @@ POLICY_ADMIN = "policy:admin"          # author / activate / deprecate policies
 INFERENCE_WRITE = "inference:write"    # make a governed model call
 ERASURE_WRITE = "erasure:write"        # crypto-shred a data subject (GDPR/DPDP right to erasure)
 BILLING_WRITE = "billing:write"        # start a checkout / upgrade the tenant's own subscription
+MEMBERS_ADMIN = "members:admin"        # manage tenant members + roles (console Team page) — W6-1
+SCIM_ADMIN = "scim:admin"              # SCIM 2.0 provisioning bearer (enterprise IdP) — W6-1
 
 
 # Every scope the kernel currently understands. The bootstrap (signup) key gets all of them.
@@ -44,6 +46,8 @@ ALL_SCOPES: frozenset[str] = frozenset(
         INFERENCE_WRITE,
         ERASURE_WRITE,
         BILLING_WRITE,
+        MEMBERS_ADMIN,
+        SCIM_ADMIN,
     }
 )
 

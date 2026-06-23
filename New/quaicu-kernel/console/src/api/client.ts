@@ -19,6 +19,9 @@ import type {
   PolicyPackList,
   PolicyPackImportResult,
   ApiKeyList,
+  MemberList,
+  MemberInfo,
+  InviteMemberBody,
   AIConnectionStatus,
   AIConnectionBody,
   AuthorizeRequest,
@@ -114,6 +117,14 @@ export const api = {
   createKey: () => request<CreatedApiKey>("POST", "/v1/keys"),
   revokeKey: (keyId: string) =>
     request<{ key_id: string; revoked: boolean }>("POST", `/v1/keys/${encodeURIComponent(keyId)}/revoke`),
+
+  // ── Team members (W6-1) ──────────────────────────────────────────────────
+  listMembers: () => request<MemberList>("GET", "/v1/members"),
+  inviteMember: (b: InviteMemberBody) => request<MemberInfo>("POST", "/v1/members", b),
+  setMemberRole: (memberId: string, role: string) =>
+    request<MemberInfo>("PATCH", `/v1/members/${encodeURIComponent(memberId)}`, { role }),
+  deactivateMember: (memberId: string) =>
+    request<MemberInfo>("POST", `/v1/members/${encodeURIComponent(memberId)}/deactivate`),
 
   // ── Authorize (pure policy decision — powers the Get-started "try it" panel) ─
   authorize: (b: AuthorizeRequest) => request<AuthorizeResponse>("POST", "/v1/authorize", b),

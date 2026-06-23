@@ -28,9 +28,12 @@ from core.account.model import (
     AIConnection,
     ApiKey,
     AuthenticatedPrincipal,
+    Member,
+    MemberStatus,
     SignupDetails,
 )
 from core.account.passwords import hash_password, verify_password
+from core.account.roles import Role, parse_role
 from core.account.scopes import OWNER_SCOPES, normalize_scopes
 from core.account.store import AccountStore
 from core.entitlements import CustomerPlan, EntitlementStore, FeatureTier, PlanStatus
@@ -439,7 +442,14 @@ class AccountEngine:
     # ── AI gateway: per-tenant BYO upstream connection (stored on the account profile) ──
 
     def set_ai_connection(
-        self, tenant: TenantId, *, provider: str, base_url: str, api_key: str, default_model: str = ""
+        self,
+        tenant: TenantId,
+        *,
+        provider: str,
+        base_url: str,
+        api_key: str,
+        default_model: str = "",
+        mask_pii: bool = False,
     ) -> None:
         """Save (or replace) the tenant's upstream LLM connection. The key is encrypted at rest."""
         import dataclasses
@@ -455,6 +465,7 @@ class AccountEngine:
             "base_url": base_url.rstrip("/"),
             "default_model": default_model,
             "enc_key": self._encrypt_secret(api_key),
+            "mask_pii": bool(mask_pii),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         self._accounts.add_account(dataclasses.replace(account, profile=profile))
@@ -474,6 +485,7 @@ class AccountEngine:
             api_key=self._decrypt_secret(str(raw.get("enc_key", ""))),
             default_model=str(raw.get("default_model", "")),
             updated_at=datetime.fromisoformat(updated) if isinstance(updated, str) else None,
+            mask_pii=bool(raw.get("mask_pii", False)),
         )
 
     def ai_connection_status(self, tenant: TenantId) -> dict | None:
@@ -488,6 +500,7 @@ class AccountEngine:
             "base_url": conn.base_url,
             "default_model": conn.default_model,
             "key_hint": f"••••{tail}",
+            "mask_pii": conn.mask_pii,
             "updated_at": conn.updated_at.isoformat() if conn.updated_at else None,
         }
 
@@ -506,12 +519,13 @@ class AccountEngine:
     # ── API keys ─────────────────────────────────────────────────────────────────
 
     def issue_api_key(
-        self, tenant: TenantId, *, scopes: Iterable[str] | None = None
+        self, tenant: TenantId, *, scopes: Iterable[str] | None = None, member_id: str = ""
     ) -> tuple[ApiKey, str]:
         """Mint a new API key for ``tenant``. Returns (record, plaintext). Plaintext shown once.
 
         ``scopes`` restricts the key to a subset of `core/account/scopes.ALL_SCOPES` (fail-closed:
         unknown scopes raise). ``None`` grants the full owner scope set — used for the signup key.
+        ``member_id`` binds the key to a member (W6-1) so deactivating that member revokes it.
         """
         key_id = secrets.token_hex(8)
         secret = secrets.token_urlsafe(32)
@@ -521,9 +535,97 @@ class AccountEngine:
             hashed_secret=self._hash_secret(secret),
             created_at=datetime.now(timezone.utc),
             scopes=normalize_scopes(scopes),
+            member_id=member_id,
         )
         self._accounts.add_api_key(record)
         return record, f"qk_{key_id}_{secret}"
+
+    # ── Members + RBAC (W6-1) ──────────────────────────────────────────────────────
+
+    def _member_in_tenant(self, tenant: TenantId, member_id: str) -> Member:
+        """Resolve a member, asserting it belongs to ``tenant`` (no cross-tenant access / leak)."""
+        member = self._accounts.get_member(member_id)
+        if member is None or str(member.tenant_id) != str(tenant):
+            raise AccountNotFoundError(
+                f"No member {member_id!r} in this tenant.", detail={"member_id": member_id}
+            )
+        return member
+
+    def provision_member(
+        self,
+        tenant: TenantId,
+        *,
+        email: str,
+        role: str = Role.VIEWER.value,
+        display_name: str = "",
+        external_id: str = "",
+    ) -> Member:
+        """Create (or, by external_id/email, update) a member of ``tenant``. Idempotent for SCIM.
+
+        Role is validated fail-closed (`parse_role`). If a member with the same SCIM ``external_id`` or
+        the same email already exists in the tenant, it is updated (re-activated) rather than duplicated.
+        """
+        role_value = parse_role(role).value
+        existing = self._accounts.find_member_by_external_id(tenant, external_id) or (
+            self._accounts.find_member_by_email(tenant, email)
+        )
+        if existing is not None:
+            import dataclasses
+
+            updated = dataclasses.replace(
+                existing,
+                email=email or existing.email,
+                display_name=display_name or existing.display_name,
+                role=role_value,
+                status=MemberStatus.ACTIVE,
+                external_id=external_id or existing.external_id,
+            )
+            self._accounts.replace_member(updated)
+            return updated
+
+        member = Member(
+            member_id=f"mem_{secrets.token_hex(8)}",
+            tenant_id=tenant,
+            email=email,
+            display_name=display_name or email,
+            role=role_value,
+            status=MemberStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+            external_id=external_id,
+        )
+        return self._accounts.add_member(member)
+
+    def list_members(self, tenant: TenantId) -> list[Member]:
+        """All members of ``tenant`` (active + deactivated)."""
+        return self._accounts.list_members(tenant)
+
+    def get_member(self, tenant: TenantId, member_id: str) -> Member:
+        """Resolve a member of ``tenant`` (404 if absent / other tenant)."""
+        return self._member_in_tenant(tenant, member_id)
+
+    def set_member_role(self, tenant: TenantId, member_id: str, role: str) -> Member:
+        """Change a member's role (validated). Returns the updated member."""
+        import dataclasses
+
+        member = self._member_in_tenant(tenant, member_id)
+        updated = dataclasses.replace(member, role=parse_role(role).value)
+        self._accounts.replace_member(updated)
+        return updated
+
+    def deactivate_member(self, tenant: TenantId, member_id: str) -> Member:
+        """Deactivate a member and revoke their API keys (SCIM/console deprovisioning guarantee).
+
+        Idempotent — deactivating an already-deactivated member is a no-op that still returns it.
+        """
+        import dataclasses
+
+        member = self._member_in_tenant(tenant, member_id)
+        if member.status is not MemberStatus.DEACTIVATED:
+            member = dataclasses.replace(member, status=MemberStatus.DEACTIVATED)
+            self._accounts.replace_member(member)
+        revoked = self._accounts.revoke_member_keys(member_id)
+        log.info("member deactivated: id=%s tenant=%s keys_revoked=%d", member_id, tenant, revoked)
+        return member
 
     def list_api_keys(self, tenant: TenantId) -> list[ApiKey]:
         """All API-key records for ``tenant`` (metadata only — secrets are never stored)."""

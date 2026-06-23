@@ -36,6 +36,7 @@ export default function AIGateway() {
   const [baseUrl, setBaseUrl] = useState(PRESETS.OpenAI);
   const [apiKey, setApiKey] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [maskPii, setMaskPii] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +53,7 @@ export default function AIGateway() {
     setBusy(true);
     setError(null);
     try {
-      await api.setAIConnection({ provider, base_url: baseUrl.trim(), api_key: apiKey.trim(), default_model: defaultModel.trim() });
+      await api.setAIConnection({ provider, base_url: baseUrl.trim(), api_key: apiKey.trim(), default_model: defaultModel.trim(), mask_pii: maskPii });
       setApiKey("");
       conn.reload();
     } catch (err) {
@@ -110,6 +111,7 @@ print(resp.choices[0].message.content)
                 <div className="kv-row"><span className="kv-label">Base URL</span><code className="key-value">{conn.data.base_url}</code></div>
                 <div className="kv-row"><span className="kv-label">Key</span><span className="mono">{conn.data.key_hint}</span></div>
                 {conn.data.default_model && <div className="kv-row"><span className="kv-label">Model</span><span className="mono">{conn.data.default_model}</span></div>}
+                <div className="kv-row"><span className="kv-label">PII masking</span><span>{conn.data.mask_pii ? "On — PII tokenized before your provider sees it" : "Off"}</span></div>
                 <button className="secondary small" onClick={disconnect}>Disconnect</button>
               </div>
             </div>
@@ -132,6 +134,10 @@ print(resp.choices[0].message.content)
               <label>Default model <span className="muted small">(optional)</span>
                 <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder="gpt-4o-mini" />
               </label>
+              <label className="checkbox-row">
+                <input type="checkbox" checked={maskPii} onChange={(e) => setMaskPii(e.target.checked)} />
+                <span>Mask PII <span className="muted small">— tokenize emails, PAN, Aadhaar, cards, etc. before your provider sees them; rehydrated in the response. Available on all plans.</span></span>
+              </label>
               <button className="primary" type="submit" disabled={busy || !baseUrl.trim() || !apiKey.trim()}>
                 {busy ? "Saving…" : connected ? "Replace connection" : "Connect"}
               </button>
@@ -142,13 +148,28 @@ print(resp.choices[0].message.content)
             <div className="step-head"><span className="step-no">{connected ? "2" : "→"}</span><h2>Use it from your code</h2></div>
             <p className="muted small">
               One line changes — your existing OpenAI SDK, pointed at the gateway, authenticated with a{" "}
-              <strong>QUAICU API key</strong> (create one on the API keys page). Streaming isn't supported yet.
+              <strong>QUAICU API key</strong> (create one on the API keys page). Streaming (<code>stream=True</code>) is supported.
             </p>
             <div className="code-block">
               <div className="code-head"><span className="mono small">python</span><CopyButton text={snippet} /></div>
               <pre>{snippet}</pre>
             </div>
             <div className="kv-row"><span className="kv-label">Gateway URL</span><code className="key-value">{gatewayBase}</code><CopyButton text={gatewayBase} /></div>
+          </section>
+
+          <section className="step">
+            <div className="step-head"><span className="step-no">+</span><h2>More providers — coming soon</h2></div>
+            <p className="muted small">
+              Today the gateway speaks the OpenAI-compatible API (OpenAI, Together, Groq, Mistral,
+              OpenRouter, local vLLM, …). Native shims for these land in the next kernel release:
+            </p>
+            <div className="coming-soon-row">
+              <span className="provider-chip disabled">Azure OpenAI <Badge value="SOON" /></span>
+              <span className="provider-chip disabled">Anthropic <Badge value="SOON" /></span>
+            </div>
+            <p className="muted small">
+              Want early access? <a href="mailto:support@quaicu.org?subject=AI%20gateway%20provider%20pre-order">Pre-order / notify me →</a>
+            </p>
           </section>
         </>
       )}

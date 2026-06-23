@@ -1,5 +1,11 @@
 # Deploy the SaaS plane to Cloud Run
 
+> **Preferred path going forward: Terraform.** This `gcloud` walkthrough is the original manual deploy;
+> the same plane is now codified as IaC in [`deploy/terraform/gcp-saas`](../../deploy/terraform/gcp-saas/README.md)
+> (region-parameterized for EU/India/Gulf residency, opt-in zero-egress). Use the module to stand up a
+> new residency zone or to make this service reproducible; the steps below remain useful for
+> understanding the env/secret surface the module sets.
+
 Get the free (STARTER) + paid (BUSINESS) tiers live on Google Cloud Run. The image already honors
 Cloud Run's injected `$PORT` and selects its ASGI app via `KERNEL_APP`, so deploying is config + env.
 See also [HOSTING](../HOSTING.md), [GO_LIVE_SETUP](GO_LIVE_SETUP.md), and the customer-hosted

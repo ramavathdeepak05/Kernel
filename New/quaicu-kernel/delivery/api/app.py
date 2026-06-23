@@ -34,6 +34,7 @@ from core.errors import (
 )
 from core.account import AccountEngine
 from core.entitlements import EntitlementStore
+from core.gateway.budget import InMemoryBudgetTracker
 from delivery.api.auth import ApiKeyAuthMiddleware
 from delivery.api.middleware import GovernanceMiddleware
 from delivery.api.observability import RequestLoggingMiddleware
@@ -54,6 +55,8 @@ from delivery.api.routes.policy_packs import router as policy_packs_router
 from delivery.api.routes.auth import router as auth_router
 from delivery.api.routes.consultation import router as consultation_router
 from delivery.api.routes.keys import router as keys_router
+from delivery.api.routes.members import router as members_router
+from delivery.api.routes.scim import router as scim_router
 from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
 from delivery.sdk.provider import TieredKernelProvider
@@ -146,6 +149,9 @@ def create_app(
     # Readiness gate: false until lifespan startup hydration completes (see lifespan above). /readyz
     # reads this; /health (liveness) ignores it.
     app.state.ready = False
+    # Per-tenant token budget for the BYO AI-gateway passthrough (W6-2). Default unlimited; an optional
+    # default cap (QUAICU_AI_DEFAULT_MAX_TOKENS) is applied per-tenant lazily by the route.
+    app.state.ai_budget = InMemoryBudgetTracker()
     # Control-plane singletons (signup / admin / billing). Routes 503 when their dependency is absent.
     app.state.account_engine = account_engine
     app.state.entitlement_store = entitlement_store
@@ -180,6 +186,8 @@ def create_app(
     app.include_router(signup_router)
     app.include_router(auth_router)
     app.include_router(keys_router)
+    app.include_router(members_router)
+    app.include_router(scim_router)
     app.include_router(consultation_router)
     app.include_router(admin_router)
     app.include_router(billing_router)

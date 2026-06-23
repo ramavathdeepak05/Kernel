@@ -60,6 +60,7 @@ class AIConnection:
     api_key: str           # the customer's provider key (plaintext in memory only)
     default_model: str = ""  # used when a request omits "model"
     updated_at: datetime | None = None
+    mask_pii: bool = False  # opt-in (all tiers): tokenize PII before forwarding to the provider (W6-2)
 
 
 @dataclass(frozen=True)
@@ -98,6 +99,9 @@ class ApiKey:
     revoked: bool = False
     # RBAC scopes this key may exercise (see core/account/scopes.py). The signup key gets all.
     scopes: frozenset[str] = field(default_factory=lambda: OWNER_SCOPES)
+    # The member this key belongs to (W6-1), if any. Deactivating that member revokes the key.
+    # Empty for the legacy bootstrap/tenant key, which is unaffected by member lifecycle.
+    member_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -117,3 +121,25 @@ class AuthenticatedPrincipal:
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
+
+
+class MemberStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    DEACTIVATED = "DEACTIVATED"  # SCIM `active=false` / removed from the IdP → access revoked
+
+
+@dataclass(frozen=True)
+class Member:
+    """A user within a tenant (W6-1). Multiple members per tenant, each carrying a `role` (see
+    `core.account.roles`). Provisioned via the console Team page or an enterprise IdP over SCIM 2.0;
+    `external_id` is the IdP's stable user id (set by SCIM). Deactivating a member revokes their access.
+    """
+
+    member_id: str
+    tenant_id: TenantId
+    email: str
+    display_name: str
+    role: str  # a core.account.roles.Role wire value (e.g. "ADMIN"); validated at the engine boundary
+    status: MemberStatus
+    created_at: datetime
+    external_id: str = ""  # SCIM IdP user id (empty for console-invited members)
