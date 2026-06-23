@@ -16,6 +16,7 @@ import Callback from "./pages/Callback";
 import Signup from "./pages/Signup";
 import Plans from "./pages/Plans";
 import ApiKeys from "./pages/ApiKeys";
+import Team from "./pages/Team";
 import Legal from "./pages/Legal";
 import ResetPassword from "./pages/ResetPassword";
 
@@ -133,6 +134,7 @@ function Nav() {
       {approvals && <NavLink to="/approvals">Approvals</NavLink>}
       <NavLink to="/ai">AI gateway</NavLink>
       <NavLink to="/keys">API keys</NavLink>
+      <NavLink to="/team">Team</NavLink>
       {billing && <NavLink to="/billing">Billing</NavLink>}
     </nav>
   );
@@ -276,6 +278,7 @@ export default function App() {
                 />
                 <Route path="/ai" element={<AIGateway />} />
                 <Route path="/keys" element={<ApiKeys />} />
+                <Route path="/team" element={<Team />} />
                 <Route path="/billing" element={<Billing />} />
               </>
             ) : (

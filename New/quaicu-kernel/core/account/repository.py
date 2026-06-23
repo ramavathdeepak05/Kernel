@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from core.account.model import Account, ApiKey
+from core.account.model import Account, ApiKey, Member
 
 
 @runtime_checkable
@@ -23,6 +23,20 @@ class AccountRepository(Protocol):
 
     def load_all(self) -> tuple[list[Account], list[ApiKey]]:
         """Return (accounts, api_keys). Called once at startup to hydrate the cache."""
+        ...
+
+    def load_members(self) -> list[Member]:
+        """Return all members (W6-1). Called at startup to hydrate the member cache.
+
+        Optional for backends predating members: the store treats a missing method as 'no members'."""
+        ...
+
+    def save_member(self, member: Member) -> None:
+        """Upsert a member keyed by ``member_id`` (idempotent)."""
+        ...
+
+    def replace_member(self, member: Member) -> None:
+        """Persist a mutated member record (role change / deactivation)."""
         ...
 
     def get_account_by_email(self, email: str) -> Account | None:

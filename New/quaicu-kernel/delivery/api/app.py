@@ -54,6 +54,8 @@ from delivery.api.routes.policy_packs import router as policy_packs_router
 from delivery.api.routes.auth import router as auth_router
 from delivery.api.routes.consultation import router as consultation_router
 from delivery.api.routes.keys import router as keys_router
+from delivery.api.routes.members import router as members_router
+from delivery.api.routes.scim import router as scim_router
 from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
 from delivery.sdk.provider import TieredKernelProvider
@@ -180,6 +182,8 @@ def create_app(
     app.include_router(signup_router)
     app.include_router(auth_router)
     app.include_router(keys_router)
+    app.include_router(members_router)
+    app.include_router(scim_router)
     app.include_router(consultation_router)
     app.include_router(admin_router)
     app.include_router(billing_router)

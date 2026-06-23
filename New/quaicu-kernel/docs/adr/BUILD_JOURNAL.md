@@ -183,6 +183,16 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · W6-1 SCIM provisioning + RBAC + team UI · core/account + delivery/api + console · claude** —
+  Added multi-user support to a tenant (there was none — one Account + API keys). New: `Member` entity;
+  `core/account/roles.py` (OWNER/ADMIN/COMPLIANCE/VIEWER → scopes, + `members:admin`/`scim:admin`);
+  engine member lifecycle (deactivation revokes the member's keys via a new `ApiKey.member_id`);
+  migration `011_create_members` (+ `api_keys.member_id`); Postgres adapter + store + repository support;
+  a **SCIM 2.0** Users endpoint (`/scim/v2`, self-auth on a `scim:admin` bearer, tenant-isolated, Okta
+  `active=false` deprovision); a `/v1/members` console API + a console **Team** page. **Exposes:** enterprise
+  IdP provisioning/deprovisioning + role-based team management; deprovisioning revokes access.
+  Tests: `test_members.py`, `test_scim.py`; full unit suite 946 passed, ruff clean, console builds.
+  **Follow-ups:** SCIM Groups, IdP-specific certification, per-member console login (deferred).
 - **2026-06-23 · Wave 5 residency/sovereignty — Terraform the SaaS plane + region presets + zero-egress · deploy/terraform + docs · claude** —
   Executed Wave 5 of `ACTION_TRACKER.md`. The SaaS plane had no IaC (hand-deployed). **Code:** new
   `deploy/terraform/gcp-saas/` module codifies the shared-plane Cloud Run service + Cloud SQL + Secret

@@ -338,6 +338,26 @@ export interface CreatedApiKey {
   created_at: string;
 }
 
+// ── Team members (W6-1) ──────────────────────────────────────────────────────
+export interface MemberInfo {
+  member_id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  status: string; // "ACTIVE" | "DEACTIVATED"
+  external_id: string;
+  created_at: string;
+}
+export interface MemberList {
+  members: MemberInfo[];
+  roles: string[]; // assignable roles (OWNER/ADMIN/COMPLIANCE/VIEWER)
+}
+export interface InviteMemberBody {
+  email: string;
+  role: string;
+  display_name?: string;
+}
+
 // Request bodies
 export interface PolicyRegisterBody {
   id: string;

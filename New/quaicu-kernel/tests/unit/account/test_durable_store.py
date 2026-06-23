@@ -104,7 +104,8 @@ def test_load_all_maps_rows():
     b.account_rows = [
         ("acct_1", "acme", "a@b.io", "Acme", "ACTIVE", NOW, "Ada Lovelace", "CTO", "+1", "", {}, None)
     ]
-    b.key_rows = [("k1", "acme", "hash", NOW, False, ["read"])]
+    # 7 columns: key_id, tenant, hash, created_at, revoked, scopes, member_id (011).
+    b.key_rows = [("k1", "acme", "hash", NOW, False, ["read"], "")]
     accounts, keys = _repo(b).load_all()
     assert accounts[0].account_id == "acct_1" and accounts[0].status is AccountStatus.ACTIVE
     assert accounts[0].full_name == "Ada Lovelace" and accounts[0].job_title == "CTO"
