@@ -183,6 +183,17 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · Wave 5 residency/sovereignty — Terraform the SaaS plane + region presets + zero-egress · deploy/terraform + docs · claude** —
+  Executed Wave 5 of `ACTION_TRACKER.md`. The SaaS plane had no IaC (hand-deployed). **Code:** new
+  `deploy/terraform/gcp-saas/` module codifies the shared-plane Cloud Run service + Cloud SQL + Secret
+  Manager, mirroring `gcp-enterprise/`; `var.region`-parameterized with `regions/{eu,india,gulf}.tfvars`
+  presets (W5-1/W5-2); opt-in `enable_private_egress` (VPC connector + private Cloud SQL), default off
+  (W5-3). **Docs:** `DATA_RESIDENCY.md` (per-region matrix + residency caveats, W5-4),
+  `ZERO_EGRESS_VALIDATION.md` (VPC-SC topology + evidence method, W5-3), `WAVE5_RESIDENCY.md` tracker;
+  cross-linked `DEPLOY_CLOUD_RUN.md`. **Exposes:** reproducible per-zone SaaS deploys + a path to a
+  proven no-egress posture. **Follow-ups (human/ops):** `terraform validate`/apply (TF not installed
+  here), import the live service, org-level VPC-SC perimeter, and run the zero-egress validation at
+  scale (the remaining honest gap).
 - **2026-06-23 · Wave 4 operational readiness — health/readiness probes + CI scanning + ops runbooks · delivery/api + cloudbuild + docs · claude** —
   Executed Wave 4 of `ACTION_TRACKER.md`. **Code (W4-1):** added `/readyz` (readiness, gated on a new
   `app.state.ready` flag flipped at the end of lifespan hydration) alongside the existing `/health`
