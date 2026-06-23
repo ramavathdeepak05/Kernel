@@ -62,6 +62,8 @@ class AIConnection:
     updated_at: datetime | None = None
     mask_pii: bool = False  # opt-in (all tiers): tokenize PII before forwarding to the provider (W6-2)
     api_version: str = ""   # Azure OpenAI api-version query param; empty for non-Azure providers (W6-2)
+    project: str = ""       # GCP project id (Vertex); empty otherwise (W6-2)
+    location: str = ""      # GCP region, e.g. "us-central1" (Vertex); empty otherwise (W6-2)
 
 
 @dataclass(frozen=True)

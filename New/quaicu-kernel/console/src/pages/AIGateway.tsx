@@ -11,6 +11,7 @@ const PRESETS: Record<string, string> = {
   OpenAI: "https://api.openai.com/v1",
   "Azure OpenAI": "https://<resource>.openai.azure.com",
   Anthropic: "https://api.anthropic.com",
+  "Google Vertex": "",
   "Together AI": "https://api.together.xyz/v1",
   Groq: "https://api.groq.com/openai/v1",
   Mistral: "https://api.mistral.ai/v1",
@@ -21,7 +22,8 @@ const PRESETS: Record<string, string> = {
 function providerValue(label: string): string {
   if (label === "Azure OpenAI") return "azure";
   if (label === "Anthropic") return "anthropic";
-  return label; // display-only for OpenAI-compatible endpoints (backend keys only on azure/anthropic)
+  if (label === "Google Vertex") return "vertex";
+  return label; // display-only for OpenAI-compatible endpoints (backend keys only on azure/anthropic/vertex)
 }
 
 const AZURE_DEFAULT_API_VERSION = "2024-10-21";
@@ -49,10 +51,13 @@ export default function AIGateway() {
   const [defaultModel, setDefaultModel] = useState("");
   const [maskPii, setMaskPii] = useState(false);
   const [apiVersion, setApiVersion] = useState(AZURE_DEFAULT_API_VERSION);
+  const [project, setProject] = useState("");
+  const [location, setLocation] = useState("us-central1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isAzure = provider === "Azure OpenAI";
+  const isVertex = provider === "Google Vertex";
 
   const gatewayBase = `${apiOrigin()}/v1/ai`;
   const asErr = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
@@ -73,6 +78,8 @@ export default function AIGateway() {
         api_key: apiKey.trim(),
         default_model: defaultModel.trim(),
         mask_pii: maskPii,
+        project: isVertex ? project.trim() : "",
+        location: isVertex ? location.trim() : "",
         api_version: isAzure ? apiVersion.trim() : "",
       });
       setApiKey("");
@@ -129,8 +136,10 @@ print(resp.choices[0].message.content)
             <div className="card key-callout">
               <div className="card-body">
                 <div className="kv-row"><span className="kv-label">Provider</span><span>{conn.data.provider}</span></div>
-                <div className="kv-row"><span className="kv-label">Base URL</span><code className="key-value">{conn.data.base_url}</code></div>
-                <div className="kv-row"><span className="kv-label">Key</span><span className="mono">{conn.data.key_hint}</span></div>
+                {conn.data.base_url && <div className="kv-row"><span className="kv-label">Base URL</span><code className="key-value">{conn.data.base_url}</code></div>}
+                {conn.data.project && <div className="kv-row"><span className="kv-label">Project</span><span className="mono">{conn.data.project}</span></div>}
+                {conn.data.location && <div className="kv-row"><span className="kv-label">Location</span><span className="mono">{conn.data.location}</span></div>}
+                <div className="kv-row"><span className="kv-label">Credential</span><span className="mono">{conn.data.key_hint}</span></div>
                 {conn.data.default_model && <div className="kv-row"><span className="kv-label">Model</span><span className="mono">{conn.data.default_model}</span></div>}
                 {conn.data.api_version && <div className="kv-row"><span className="kv-label">API version</span><span className="mono">{conn.data.api_version}</span></div>}
                 <div className="kv-row"><span className="kv-label">PII masking</span><span>{conn.data.mask_pii ? "On — PII tokenized before your provider sees it" : "Off"}</span></div>
@@ -147,14 +156,30 @@ print(resp.choices[0].message.content)
                   {Object.keys(PRESETS).map((p) => <option key={p} value={p}>{p}</option>)}
                 </select>
               </label>
-              <label>Base URL
-                <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
-              </label>
-              <label>Provider API key
-                <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…  (stored encrypted, shown back only masked)" autoComplete="off" />
-              </label>
-              <label>Default model <span className="muted small">({isAzure ? "Azure deployment name" : "optional"})</span>
-                <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder={isAzure ? "my-gpt4o-deployment" : "gpt-4o-mini"} />
+              {isVertex ? (
+                <>
+                  <label>GCP project
+                    <input value={project} onChange={(e) => setProject(e.target.value)} placeholder="my-gcp-project" />
+                  </label>
+                  <label>Location
+                    <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="us-central1" />
+                  </label>
+                  <label>Service account JSON <span className="muted small">(stored encrypted, never shown back)</span>
+                    <textarea value={apiKey} onChange={(e) => setApiKey(e.target.value)} rows={5} placeholder='{ "type": "service_account", "project_id": "…", "private_key": "…", "client_email": "…" }' autoComplete="off" />
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label>Base URL
+                    <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
+                  </label>
+                  <label>Provider API key
+                    <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…  (stored encrypted, shown back only masked)" autoComplete="off" />
+                  </label>
+                </>
+              )}
+              <label>Default model <span className="muted small">({isAzure ? "Azure deployment name" : isVertex ? "e.g. google/gemini-2.0-flash-001" : "optional"})</span>
+                <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder={isAzure ? "my-gpt4o-deployment" : isVertex ? "google/gemini-2.0-flash-001" : "gpt-4o-mini"} />
               </label>
               {isAzure && (
                 <label>API version <span className="muted small">(Azure)</span>
@@ -165,7 +190,15 @@ print(resp.choices[0].message.content)
                 <input type="checkbox" checked={maskPii} onChange={(e) => setMaskPii(e.target.checked)} />
                 <span>Mask PII <span className="muted small">— tokenize emails, PAN, Aadhaar, cards, etc. before your provider sees them; rehydrated in the response. Available on all plans.</span></span>
               </label>
-              <button className="primary" type="submit" disabled={busy || !baseUrl.trim() || !apiKey.trim()}>
+              <button
+                className="primary"
+                type="submit"
+                disabled={
+                  busy ||
+                  !apiKey.trim() ||
+                  (isVertex ? !project.trim() || !location.trim() : !baseUrl.trim())
+                }
+              >
                 {busy ? "Saving…" : connected ? "Replace connection" : "Connect"}
               </button>
             </form>
@@ -188,11 +221,10 @@ print(resp.choices[0].message.content)
             <div className="step-head"><span className="step-no">+</span><h2>More providers — coming soon</h2></div>
             <p className="muted small">
               The gateway speaks the OpenAI-compatible API (OpenAI, Together, Groq, Mistral, OpenRouter,
-              local vLLM, …), <strong>Azure OpenAI</strong>, and <strong>Anthropic</strong> today. Native
-              shims for these land next:
+              local vLLM, …), <strong>Azure OpenAI</strong>, <strong>Anthropic</strong>, and
+              <strong> Google Vertex</strong> today. Coming next:
             </p>
             <div className="coming-soon-row">
-              <span className="provider-chip disabled">Google Vertex <Badge value="SOON" /></span>
               <span className="provider-chip disabled">AWS Bedrock <Badge value="SOON" /></span>
             </div>
             <p className="muted small">
