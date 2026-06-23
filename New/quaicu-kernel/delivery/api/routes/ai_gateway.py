@@ -211,9 +211,16 @@ async def chat_completions(request: Request) -> Any:
                 m["content"] = mask_text(m["content"], cfg, ctx)
         body["messages"] = messages
 
-    # Resolve the provider shim and translate the OpenAI request to the upstream's shape.
+    # Resolve the provider shim and translate the OpenAI request to the upstream's shape. For providers
+    # that mint credentials (e.g. Vertex OAuth from a service-account JSON), build_request can fail on a
+    # bad/missing credential — surface that as a clean provider-auth error.
     shim = get_shim(conn)
-    req = shim.build_request(conn, model, body)
+    try:
+        req = await shim.build_request(conn, model, body)
+    except ValueError as exc:
+        return _openai_error(400, str(exc), "PROVIDER_CONFIG_INVALID")
+    except Exception as exc:  # noqa: BLE001 — token mint / credential failure
+        return _openai_error(502, f"Provider authentication failed: {exc}", "PROVIDER_AUTH_FAILED")
 
     # ── Streaming (SSE) — translate the upstream stream to OpenAI chunks ──────────
     if stream:

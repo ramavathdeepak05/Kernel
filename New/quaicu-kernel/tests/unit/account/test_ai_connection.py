@@ -34,6 +34,22 @@ def test_status_is_masked_and_never_leaks_key():
     assert "sk-abcd1234" not in str(status)
 
 
+def test_vertex_roundtrips_project_location_and_masks_sa_json():
+    eng = _engine()
+    acct, _ = eng.signup(email="a@b.io", name="Acme")
+    sa = '{"client_email": "svc@proj.iam", "type": "service_account", "private_key": "SECRET"}'
+    eng.set_ai_connection(
+        acct.tenant_id, provider="vertex", base_url="", api_key=sa,
+        default_model="google/gemini-2.0-flash-001", project="proj", location="us-central1",
+    )
+    conn = eng.get_ai_connection(acct.tenant_id)
+    assert conn.provider == "vertex" and conn.project == "proj" and conn.location == "us-central1"
+    assert conn.api_key == sa  # SA JSON decrypts back for the outbound call
+    status = eng.ai_connection_status(acct.tenant_id)
+    assert status["project"] == "proj" and status["location"] == "us-central1"
+    assert "SECRET" not in str(status)  # the SA JSON (private key) never leaks in status
+
+
 def test_unset_connection_is_none():
     eng = _engine()
     acct, _ = eng.signup(email="a@b.io", name="Acme")

@@ -15,7 +15,9 @@ API both ways (incl. its SSE event format). Later providers (Vertex, Bedrock) ad
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 import time
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ from typing import Any
 _AZURE_DEFAULT_API_VERSION = "2024-10-21"
 _ANTHROPIC_VERSION = "2023-06-01"
 _ANTHROPIC_DEFAULT_MAX_TOKENS = 1024
+_GCP_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 
 
 @dataclass
@@ -39,7 +42,7 @@ class UpstreamRequest:
 class OpenAICompatShim:
     """OpenAI-compatible endpoints and Azure OpenAI (both OpenAI-shaped)."""
 
-    def build_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
+    async def build_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
         json_ct = {"Content-Type": "application/json"}
         if str(getattr(conn, "provider", "")).lower() == "azure":
             api_version = getattr(conn, "api_version", "") or _AZURE_DEFAULT_API_VERSION
@@ -75,7 +78,7 @@ _STOP_REASON = {
 class AnthropicShim:
     """Translate OpenAI chat-completions ⇄ Anthropic Messages API (text content)."""
 
-    def build_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
+    async def build_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
         system_parts: list[str] = []
         messages: list[dict[str, Any]] = []
         for m in body.get("messages", []) or []:
@@ -187,16 +190,90 @@ class AnthropicShim:
                 yield "data: [DONE]\n\n"
 
 
+# ── Google Vertex AI (OpenAI-compatible endpoint, OAuth from a service-account JSON) ─
+
+# Cache minted OAuth tokens per service account (keyed on client_email) to avoid a token-endpoint
+# round-trip on every request. Tokens live ~1h; we refresh within 60s of expiry.
+_vertex_token_cache: dict[str, tuple[str, float]] = {}
+_vertex_token_lock = threading.Lock()
+
+
+def _vertex_access_token(sa_info: dict[str, Any]) -> tuple[str, float]:
+    """Mint a GCP OAuth access token from a service-account dict. Returns (token, expiry_epoch).
+
+    Blocking (does a token-endpoint HTTP refresh) — callers run it off the event loop. Patched in
+    tests so no network/credentials are needed. google-auth is imported lazily.
+    """
+    from google.auth.transport.requests import Request  # lazy: only needed for Vertex
+    from google.oauth2 import service_account
+
+    creds = service_account.Credentials.from_service_account_info(sa_info, scopes=[_GCP_SCOPE])
+    creds.refresh(Request())
+    expiry = creds.expiry.timestamp() if creds.expiry else (time.time() + 3300)
+    return creds.token, expiry
+
+
+class VertexShim:
+    """Google Vertex AI via its OpenAI-compatible endpoint (auth = OAuth token from a SA JSON).
+
+    Body/response/stream are OpenAI-shaped (identity/passthrough); the work is per-tenant SA-JSON →
+    cached OAuth token + the project/location-scoped URL.
+    """
+
+    async def build_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
+        try:
+            sa_info = json.loads(conn.api_key)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Vertex connection's service-account JSON is not valid JSON.") from exc
+        project = (getattr(conn, "project", "") or "").strip()
+        location = (getattr(conn, "location", "") or "").strip()
+        if not project or not location:
+            raise ValueError("Vertex connection requires both 'project' and 'location'.")
+
+        token = await self._token(sa_info)
+        url = (
+            f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project}"
+            f"/locations/{location}/endpoints/openapi/chat/completions"
+        )
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        return UpstreamRequest(url, headers, body)
+
+    async def _token(self, sa_info: dict[str, Any]) -> str:
+        key = str(sa_info.get("client_email", "")) or json.dumps(sa_info, sort_keys=True)
+        now = time.time()
+        with _vertex_token_lock:
+            cached = _vertex_token_cache.get(key)
+            if cached and cached[1] - 60 > now:
+                return cached[0]
+        # Mint off the event loop (blocking refresh).
+        token, expiry = await asyncio.to_thread(_vertex_access_token, sa_info)
+        with _vertex_token_lock:
+            _vertex_token_cache[key] = (token, expiry)
+        return token
+
+    def translate_response(self, data: dict[str, Any]) -> dict[str, Any]:
+        return data  # OpenAI-shaped
+
+    async def translate_stream(self, lines: AsyncIterator[str]) -> AsyncIterator[str]:
+        async for line in lines:
+            if line:
+                yield line + "\n\n" if not line.endswith("\n") else line
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────────
 
 _OPENAI_COMPAT = OpenAICompatShim()
 _ANTHROPIC = AnthropicShim()
+_VERTEX = VertexShim()
 
 
 def get_shim(conn: Any) -> Any:
     """Resolve the shim for a connection's provider (default: OpenAI-compatible)."""
-    if str(getattr(conn, "provider", "")).lower() == "anthropic":
+    provider = str(getattr(conn, "provider", "")).lower()
+    if provider == "anthropic":
         return _ANTHROPIC
+    if provider == "vertex":
+        return _VERTEX
     return _OPENAI_COMPAT
 
 

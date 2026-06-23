@@ -5,7 +5,14 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from delivery.api.ai_providers import AnthropicShim, OpenAICompatShim, get_shim, iter_to_async
+import delivery.api.ai_providers as ap
+from delivery.api.ai_providers import (
+    AnthropicShim,
+    OpenAICompatShim,
+    VertexShim,
+    get_shim,
+    iter_to_async,
+)
 
 
 @dataclass
@@ -14,15 +21,18 @@ class _Conn:
     base_url: str
     api_key: str = "sk-x"
     api_version: str = ""
+    project: str = ""
+    location: str = ""
 
 
 def test_registry_routes_provider():
     assert isinstance(get_shim(_Conn("anthropic", "https://api.anthropic.com")), AnthropicShim)
     assert isinstance(get_shim(_Conn("openai", "https://api.openai.com/v1")), OpenAICompatShim)
     assert isinstance(get_shim(_Conn("azure", "https://x.openai.azure.com")), OpenAICompatShim)
+    assert isinstance(get_shim(_Conn("vertex", "")), VertexShim)
 
 
-def test_anthropic_build_request_hoists_system_and_defaults_max_tokens():
+async def test_anthropic_build_request_hoists_system_and_defaults_max_tokens():
     shim = AnthropicShim()
     body = {
         "messages": [
@@ -32,7 +42,7 @@ def test_anthropic_build_request_hoists_system_and_defaults_max_tokens():
         "temperature": 0.5,
         "stop": "END",
     }
-    req = shim.build_request(_Conn("anthropic", "https://api.anthropic.com", api_key="ak"), "claude-3-5", body)
+    req = await shim.build_request(_Conn("anthropic", "https://api.anthropic.com", api_key="ak"), "claude-3-5", body)
     assert req.url == "https://api.anthropic.com/v1/messages"
     assert req.headers["x-api-key"] == "ak" and req.headers["anthropic-version"] == "2023-06-01"
     assert "Authorization" not in req.headers
@@ -88,3 +98,57 @@ def test_openai_compat_translate_is_identity_passthrough():
     shim = OpenAICompatShim()
     data = {"choices": [{"message": {"content": "x"}}]}
     assert shim.translate_response(data) is data
+
+
+# ── Vertex (token minting patched — no GCP / network) ──────────────────────────────
+
+_SA_JSON = json.dumps({"client_email": "svc@proj.iam.gserviceaccount.com", "type": "service_account"})
+
+
+def _vertex_conn(**kw):
+    return _Conn("vertex", "", api_key=_SA_JSON, project="proj", location="us-central1", **kw)
+
+
+async def test_vertex_build_request_uses_project_location_url_and_bearer(monkeypatch):
+    calls = {"n": 0}
+
+    def _fake_token(sa_info):
+        calls["n"] += 1
+        return "ya29.fake", 9_999_999_999.0  # token, far-future expiry
+
+    monkeypatch.setattr(ap, "_vertex_access_token", _fake_token)
+    ap._vertex_token_cache.clear()
+    shim = VertexShim()
+    body = {"messages": [{"role": "user", "content": "hi"}]}
+    req = await shim.build_request(_vertex_conn(), "google/gemini-2.0-flash-001", body)
+    assert req.url == (
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/proj"
+        "/locations/us-central1/endpoints/openapi/chat/completions"
+    )
+    assert req.headers["Authorization"] == "Bearer ya29.fake"
+    assert req.json_body is body  # OpenAI-shaped passthrough
+    # Second call reuses the cached token (no second mint).
+    await shim.build_request(_vertex_conn(), "m", body)
+    assert calls["n"] == 1
+
+
+async def test_vertex_bad_sa_json_raises(monkeypatch):
+    monkeypatch.setattr(ap, "_vertex_access_token", lambda sa: ("t", 9e9))
+    shim = VertexShim()
+    conn = _Conn("vertex", "", api_key="not-json", project="p", location="us-central1")
+    try:
+        await shim.build_request(conn, "m", {"messages": []})
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+
+async def test_vertex_requires_project_and_location(monkeypatch):
+    monkeypatch.setattr(ap, "_vertex_access_token", lambda sa: ("t", 9e9))
+    shim = VertexShim()
+    conn = _Conn("vertex", "", api_key=_SA_JSON, project="", location="us-central1")
+    try:
+        await shim.build_request(conn, "m", {"messages": []})
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass

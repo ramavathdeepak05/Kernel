@@ -183,6 +183,16 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · W6-2 provider shim ③ Google Vertex · delivery/api + core/account + console · claude** —
+  First provider with cloud-IAM auth. `VertexShim`: per-tenant service-account JSON (encrypted) → cached,
+  off-event-loop OAuth token (google-auth, no new dep) → Vertex's OpenAI-compatible endpoint
+  (`/v1beta1/projects/{project}/locations/{location}/endpoints/openapi/chat/completions`); body/response/
+  stream stay OpenAI-shaped. `build_request` made async across shims; route maps credential failures to
+  PROVIDER_CONFIG_INVALID / PROVIDER_AUTH_FAILED. New `AIConnection.project`/`location`; console Vertex
+  form (project/location + SA-JSON textarea). **Exposes:** Vertex as a selectable BYO provider with the
+  SA JSON never leaking in status. Tests (token minter patched, no network) + e2e + account round-trip;
+  api+account 249 passed, console builds. **Not validated against live Vertex.** **Follow-ups:** ④ Bedrock
+  (boto3 + SigV4 + Converse; pairs with W6-7); Vertex tool-calls/vision deferred.
 - **2026-06-23 · W6-2 provider shim ② Anthropic · delivery/api + console · claude** —
   Refactored the provider seam into a shim registry (`delivery/api/ai_providers.py`):
   `build_request`/`translate_response`/`translate_stream` per provider. `OpenAICompatShim` (OpenAI-

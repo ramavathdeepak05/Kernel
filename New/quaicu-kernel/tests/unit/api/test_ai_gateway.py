@@ -226,6 +226,62 @@ async def test_anthropic_end_to_end_translates_request_and_response(monkeypatch)
     assert out["usage"]["total_tokens"] == 5
 
 
+async def test_vertex_end_to_end_oauth_and_url(monkeypatch):
+    import json as _json
+
+    import delivery.api.ai_providers as ap
+
+    monkeypatch.setattr(ap, "_vertex_access_token", lambda sa: ("ya29.fake", 9_999_999_999.0))
+    ap._vertex_token_cache.clear()
+    monkeypatch.setattr(gw.httpx, "AsyncClient", _FakeClient)
+
+    accounts = AccountStore()
+    accounts.add_account(
+        Account(
+            account_id="acct_acme",
+            tenant_id=TenantId(_TENANT),
+            email="acme@b.io",
+            name="acme",
+            status=AccountStatus.ACTIVE,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    eng = AccountEngine(accounts, EntitlementStore(), pepper="p", session_secret="s")
+    eng.set_ai_connection(
+        TenantId(_TENANT),
+        provider="vertex",
+        base_url="",
+        api_key=_json.dumps({"client_email": "svc@proj.iam", "type": "service_account"}),
+        default_model="google/gemini-2.0-flash-001",
+        project="proj",
+        location="us-central1",
+    )
+    kernel = Kernel.from_parts(
+        tenant=TenantId(_TENANT),
+        policy=FakePolicy(decision=Decision.ALLOW),
+        hitl=FakeHITL(),
+        ledger=FakeLedger(),
+        events=FakeEvents(),
+        identity=FakeIdentity(),
+    )
+    app = create_app(kernel, account_engine=eng, require_api_key=True, rate_limit=False)
+    _, key = eng.issue_api_key(TenantId(_TENANT))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/ai/chat/completions",
+            headers=_auth(key),
+            json={"messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert resp.status_code == 200
+    cap = _FakeClient.captured
+    assert cap["url"] == (
+        "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/proj"
+        "/locations/us-central1/endpoints/openapi/chat/completions"
+    )
+    assert cap["headers"]["Authorization"] == "Bearer ya29.fake"
+
+
 async def test_azure_shim_uses_deployment_url_and_api_key_header(monkeypatch):
     monkeypatch.setattr(gw.httpx, "AsyncClient", _FakeClient)
     app, _, key = _build(
