@@ -28,6 +28,7 @@ Config shape::
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -35,11 +36,28 @@ from adapters.billing import RazorpayBillingAdapter, StripeBillingAdapter
 from core.billing import BillingEngine
 from core.entitlements import EntitlementStore, FeatureTier
 
+# Matches a ``${VAR}`` token left behind by os.path.expandvars when VAR is unset in the environment.
+_UNRESOLVED_ENV = re.compile(r"\$\{([^}]+)\}")
+
 
 def _expand_env(node: Any) -> Any:
-    """Recursively resolve ``${ENV_VAR}`` references in string values (dicts/lists/strings)."""
+    """Recursively resolve ``${ENV_VAR}`` references in string values (dicts/lists/strings).
+
+    Fail-closed on an unset reference: ``os.path.expandvars`` leaves an unknown ``${VAR}`` token
+    in place verbatim, and that literal string is *truthy* — so it would sail past the ``_require``
+    check and hand an adapter a bogus secret (e.g. the literal ``"${RAZORPAY_WEBHOOK_SECRET}"`` as a
+    webhook-signing key, silently rejecting every real webhook with a 403). Detect the leftover token
+    and raise instead, so a misconfigured billing secret fails loudly at startup.
+    """
     if isinstance(node, str):
-        return os.path.expandvars(node)
+        expanded = os.path.expandvars(node)
+        leftover = _UNRESOLVED_ENV.search(expanded)
+        if leftover:
+            raise ValueError(
+                f"billing config references environment variable ${{{leftover.group(1)}}} which is "
+                "not set — refusing to build a billing adapter with an unresolved secret."
+            )
+        return expanded
     if isinstance(node, Mapping):
         return {k: _expand_env(v) for k, v in node.items()}
     if isinstance(node, list):

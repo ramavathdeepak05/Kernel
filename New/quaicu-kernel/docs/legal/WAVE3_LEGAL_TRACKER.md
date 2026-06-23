@@ -17,7 +17,7 @@ _Last updated: 2026-06-23 · Source of truth for status: update here as items mo
 | **Terms/Privacy/Refund sign-off** | W3-5 | wks | [counsel] | Inventory drafted — **banner stays** | Counsel works the checklist; only then remove the draft banner in a separate PR | `TERMS_SIGNOFF_INVENTORY.md` |
 | **Cyber-liability / E&O insurance** | W3-6 | wks | [business] | Not started | Get quotes; bind cover — **its limits feed the MSA liability cap (clause 12)** | — |
 | **Selling-entity / cross-border tax (VAT/GST)** | W3-7 | wks | [business+tax] | Not started | Decide selling entity + tax structure — **gates MSA governing-law/fees + Terms §9 + cross-border quoting** | — |
-| **Live Razorpay keys** | W3-8 | KYC-gated | [business] | Not started | Complete Razorpay KYC; swap to live keys. ⚠ Also provision the **absent `RAZORPAY_WEBHOOK_SECRET`** (flagged in W0-2 — webhook signature verification may be silently off) | — |
+| **Live Razorpay keys** | W3-8 | KYC-gated | [business] | Not started | Complete Razorpay KYC; swap to live keys. ℹ️ `RAZORPAY_WEBHOOK_SECRET` absence investigated — **not a live hole**: the webhook tier-flip engine is disabled (no `[billing.razorpay]` section); the live ₹ path verifies on `RAZORPAY_KEY_SECRET`. Provision the webhook secret only **when W6-8 auto-tier-flip webhooks ship**, before enabling `[billing.razorpay]`. (Footgun hardened: unresolved `${VAR}` now fails loudly at startup.) | — |
 
 ## Dependency order (what unblocks what)
 1. **W3-6 (insurance) + W3-7 (entity/tax)** are upstream blockers — the MSA can't finalize its

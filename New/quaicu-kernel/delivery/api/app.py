@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -118,9 +118,13 @@ def create_app(
         # survive a restart / scale-out. Sync (psycopg2) + off the hot path; no-op when in-memory.
         if account_engine is not None and hasattr(account_engine, "hydrate"):
             account_engine.hydrate()
+        # Startup hydration done → /readyz reports ready. Flipped back off during shutdown so a
+        # draining instance fails readiness while still answering liveness.
+        _app.state.ready = True
         try:
             yield
         finally:
+            _app.state.ready = False
             await target.shutdown()
 
     app = FastAPI(
@@ -139,6 +143,9 @@ def create_app(
     # routes resolve the serving kernel via delivery/api/deps.get_kernel.
     app.state.kernel = kernel
     app.state.provider = provider
+    # Readiness gate: false until lifespan startup hydration completes (see lifespan above). /readyz
+    # reads this; /health (liveness) ignores it.
+    app.state.ready = False
     # Control-plane singletons (signup / admin / billing). Routes 503 when their dependency is absent.
     app.state.account_engine = account_engine
     app.state.entitlement_store = entitlement_store
@@ -258,13 +265,25 @@ def create_app(
             content={"error": str(exc), "code": exc.code, "detail": exc.detail or {}},
         )
 
-    # ── Health endpoint ───────────────────────────────────────────────────────
+    # ── Health endpoints ──────────────────────────────────────────────────────
+    # /health = liveness (process up); /readyz = readiness (startup hydration done). Both are
+    # unauthenticated (outside /v1/*) and rate-limit exempt, for orchestrator probes + uptime
+    # monitors. The Helm chart's probes hit /health (delivery/docker/helm/values.yaml).
 
-    @app.get("/health", tags=["system"], summary="Health check")
+    @app.get("/health", tags=["system"], summary="Liveness / health check")
     async def health() -> dict:
         if provider is not None:
             return {"ok": True, "mode": "shared-plane",
                     "served_tiers": sorted(t.value for t in provider.served_tiers())}
         return {"ok": True, "mode": "single-kernel", "tenant": str(kernel.tenant)}
+
+    @app.get("/readyz", tags=["system"], summary="Readiness check")
+    async def readyz(response: Response) -> dict:
+        # 200 only once lifespan startup hydration completed (app.state.ready); 503 while booting or
+        # draining, so an orchestrator/load balancer routes traffic only to ready instances.
+        if getattr(app.state, "ready", False):
+            return {"ok": True, "status": "ready"}
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+        return {"ok": False, "status": "not-ready"}
 
     return app

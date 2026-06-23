@@ -183,6 +183,19 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · Wave 4 operational readiness — health/readiness probes + CI scanning + ops runbooks · delivery/api + cloudbuild + docs · claude** —
+  Executed Wave 4 of `ACTION_TRACKER.md`. **Code (W4-1):** added `/readyz` (readiness, gated on a new
+  `app.state.ready` flag flipped at the end of lifespan hydration) alongside the existing `/health`
+  (liveness) in `delivery/api/app.py`; Helm readiness probe → `/readyz`; `/readyz` added to the
+  rate-limit exempt set; `tests/unit/api/test_health.py`. **CI (W4-9):** `cloudbuild.yaml` now gates
+  on lint+unit-tests (blocking) then runs pip-audit + Trivy + a CycloneDX SBOM artifact in report
+  mode. **Docs:** new `SECURITY.md` (resolves the dangling refs from Waves 2–3), plus
+  `docs/operations/{DR_BCP_RUNBOOK,INCIDENT_RESPONSE,RETENTION_WORM_KEYROTATION,VULN_MANAGEMENT,OBSERVABILITY_ONCALL_STATUS,WAVE4_OPS_READINESS}.md`
+  and `docs/compliance/CAIQ_SIG_ANSWERS.md`; corrected an overstated CI claim in the DPA starter.
+  **Exposes:** liveness/readiness for orchestrators + uptime monitors; a supply-chain CI gate; a
+  ready-to-use ops/security doc set. **Follow-ups (human/ops):** run the DR restore test (the real gap
+  behind RTO/RPO), wire external monitoring/status-page/pager, stand up a retention-locked WORM bucket,
+  and graduate CI scans report→blocking.
 - **2026-06-23 · Wave 3 legal/commercial pack — counsel-briefing starter docs · legal docs · claude** —
   Executed Wave 3 of `ACTION_TRACKER.md` (legal/commercial, all counsel-gated). No code: produced
   five starter docs under `docs/legal/` to compress counsel drafting — `MSA_STARTER.md` (W3-1, 18-clause
