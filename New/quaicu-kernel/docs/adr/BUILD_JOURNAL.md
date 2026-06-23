@@ -183,6 +183,49 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · Wave 2 compliance — RBI/SEBI policy pack + commissioning docs · policy packs / compliance docs · claude** —
+  Executed Wave 2 of `ACTION_TRACKER.md` (long-lead compliance). **Code (W2-6):** new starter policy
+  pack `docs/policy-packs/rbi/{policies.toml,README.md}` — 12 CEL `[[policy.seed]]` rules across 4
+  governed action types (`data.store`, `data.transfer`, `outsourcing.engage`, `access.grant`) encoding
+  RBI payment-data localization (deny non-IN payment storage), encryption-at-rest, SEBI cloud
+  localization (review), RBI material-outsourcing governance (approval + audit-rights + exit-plan),
+  cross-border transfer review, and access-logging. Registered the `rbi` `_META` entry in
+  `core/policy/packs.py`; added `tests/unit/policy/test_rbi_pack.py`. Mirrors the existing DPDP pack;
+  the RBI regime was already modeled (`core/regmap/model.py` → `Regime.RBI_FREE_AI`). **What it
+  exposes:** a third importable regulatory pack — `get_pack("rbi")` / `list_packs()` now returns
+  `['dpdp','eu-ai-act','rbi']`; tenants can import it (DRAFT → backtest → ACTIVATE) for an RBI/SEBI
+  baseline. **Docs (commission the human clocks):** finalized the K·02 crypto-review RFQ with a
+  send-ready commissioning checklist + vendor shortlist (`docs/operations/CRYPTO_REVIEW_RFQ.md` §6,
+  W2-1); PCI SAQ-A scope memo (`docs/compliance/PCI_SAQ_A_SCOPE.md`, W2-7); pen-test SoW
+  (`docs/compliance/PENTEST_SOW.md`, W2-3); GDPR Art.28 DPA starter (`docs/legal/DPA_ART28_STARTER.md`,
+  W2-5, not-legal-advice); Wave-2 clock tracker (`docs/compliance/WAVE2_COMPLIANCE_CLOCKS.md`).
+  **Verification:** `test_rbi_pack.py` 14/14, `tests/unit/policy` 82 passed, ruff clean. **Follow-ups:**
+  RBI pack is a DRAFT baseline — adapt to licence category + backtest before activating in a real
+  tenant; W2-1/3/5/7 are drafted-and-pending the human send/book/counsel/QSA step; W2-2 (SOC 2) + W2-4
+  (ISO 27001) remain pure-human; W2-8 (HIPAA) deferred. (Also still open from prior session: W6-9
+  console fonts/headers need `wrangler deploy`; `RAZORPAY_WEBHOOK_SECRET` absent from the Cloud Run env.)
+
+- **2026-06-23 · Review triage — consolidated action tracker from two independent reviews · planning docs · claude** —
+  Merged two independent 2026-06-23 reviews — Gemini's code/runtime review (`review finding gemini.md`)
+  and the regulated-sale readiness review (`REVIEW_FINDING.md`) — into one trackable sheet
+  **`ACTION_TRACKER.md`** (repo root, `C:\alis-antigravity\Kernel\ACTION_TRACKER.md`). Organized into 9
+  act-on-order waves: **W0** live risk (rotate leaked Resend + Razorpay test secrets, confirm
+  `QUAICU_API_KEY_PEPPER`), **W1** the one all-sources-confirmed code fix (real-client-IP rate limiting
+  behind the Cloudflare Worker — key on `CF-Connecting-IP`, not raw `X-Forwarded-For`), **W2** long-lead
+  compliance clocks (K·02 crypto review, SOC2, pen-test, ISO 27001, GDPR/RBI/PCI), **W3** legal pack
+  (MSA/DPA/SLA + counsel sign-off + Razorpay KYC), **W4** ops readiness (observability, status page,
+  tested DR, IR runbook, trust center), **W5** residency/multi-region + zero-egress validation, **W6**
+  product gaps (SSO/SCIM, MaskingPort, `GcpKmsShredKeyring`, SIEM fan-out, AWS parity, auto-billing,
+  console hygiene), **W7** GTM (design partner / reference customer), **W8** deferred perf (Gemini's
+  sync-HTTP OpenBao signer + sync lifespan hydration + Go polyglot split). **What it exposes:** every row
+  carries an ID (W0-1…), a source tag (G/R/Both), a type (code vs human/process), a status field, and a
+  dated progress log — so work proceeds top-to-bottom with tracking. **Follow-ups (none actioned yet):**
+  highest-confidence item is **W1-1** (real-client-IP rate limiting — flagged independently by Gemini §1,
+  readiness §5, *and* the CLAUDE.md 2026-06-16 handoff). **W0-1** (rotate the leaked secrets) is the only
+  live-exposure item. Long-lead clocks (W2) should start **in parallel now** per the readiness review's
+  TOP-5 critical path — don't let finished code work crowd out the compliance clock. No code/test/config
+  touched.
+
 - **2026-06-17 · Launch hardening — RLS hydration sentinel + integration CI · adapters/ledger · migrations · .github · claude** —
   Final launch bucket (D). **(1)** Replaced the per-startup `ALTER TABLE … NO FORCE/FORCE` hydration
   hack (ACCESS EXCLUSIVE lock per boot, needs table ownership) with a **read-only RLS sentinel**

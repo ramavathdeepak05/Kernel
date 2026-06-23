@@ -10,6 +10,46 @@
 
 const KERNEL_ORIGIN = "https://quaicu-kernel-152046316624.us-central1.run.app";
 
+// Content-Security-Policy for the console document + assets. Baseline is self-only; the *only*
+// permitted third party is Razorpay Checkout (the hosted, PCI-compliant payment widget loaded lazily
+// by src/razorpay.ts — script + the api.razorpay.com iframe + *.razorpay.com telemetry/images).
+//   • 'unsafe-inline' on style-src: React `style={{…}}` attributes + the Razorpay widget inject inline
+//     styles. No inline *scripts* are allowed (script-src has no 'unsafe-inline').
+//   • No COOP/COEP: those would block Razorpay's cross-origin iframe postMessage and break checkout.
+//   • OIDC SSO (optional, per-deployment): if VITE_OIDC_ISSUER is set, add that issuer origin to
+//     connect-src — it's not enumerated here because the hosted console signs up via password+Razorpay.
+const CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self' https://checkout.razorpay.com",
+  "frame-src https://api.razorpay.com https://checkout.razorpay.com",
+  "connect-src 'self' https://*.razorpay.com",
+  "img-src 'self' data: https://*.razorpay.com",
+  "font-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+].join("; ");
+
+// Applied to every static-asset / SPA-document response. (frame-ancestors in the CSP is the modern
+// clickjacking control; X-Frame-Options is kept for older browsers.)
+const SECURITY_HEADERS = {
+  "Content-Security-Policy": CSP,
+  "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+};
+
+function withSecurityHeaders(response) {
+  // Reconstruct so the headers are mutable, then layer on the security set.
+  const resp = new Response(response.body, response);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) resp.headers.set(name, value);
+  return resp;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -37,7 +77,7 @@ export default {
       });
     }
 
-    // Not an API call → serve the static console (SPA).
-    return env.ASSETS.fetch(request);
+    // Not an API call → serve the static console (SPA), with security headers (CSP, HSTS, etc.).
+    return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 };
