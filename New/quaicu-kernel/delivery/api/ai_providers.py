@@ -260,11 +260,176 @@ class VertexShim:
                 yield line + "\n\n" if not line.endswith("\n") else line
 
 
+# ── AWS Bedrock (Converse API via boto3; self-dispatching — boto3 owns the SigV4 call) ─
+
+
+class ProviderDependencyError(RuntimeError):
+    """Raised when a provider's optional SDK isn't installed (e.g. boto3 for Bedrock)."""
+
+
+def openai_to_converse(body: dict[str, Any]) -> dict[str, Any]:
+    """OpenAI chat-completions → Bedrock Converse request fields (messages/system/inferenceConfig)."""
+    system: list[dict[str, str]] = []
+    messages: list[dict[str, Any]] = []
+    for m in body.get("messages", []) or []:
+        if not isinstance(m, dict):
+            continue
+        role, content = m.get("role"), m.get("content", "")
+        if role == "system":
+            if isinstance(content, str) and content:
+                system.append({"text": content})
+        elif role in ("user", "assistant") and isinstance(content, str):
+            messages.append({"role": role, "content": [{"text": content}]})
+
+    inference: dict[str, Any] = {}
+    if body.get("max_tokens") or body.get("max_completion_tokens"):
+        inference["maxTokens"] = int(body.get("max_tokens") or body.get("max_completion_tokens"))
+    if body.get("temperature") is not None:
+        inference["temperature"] = body["temperature"]
+    if body.get("top_p") is not None:
+        inference["topP"] = body["top_p"]
+    if body.get("stop") is not None:
+        stop = body["stop"]
+        inference["stopSequences"] = stop if isinstance(stop, list) else [stop]
+
+    out: dict[str, Any] = {"messages": messages}
+    if system:
+        out["system"] = system
+    if inference:
+        out["inferenceConfig"] = inference
+    return out
+
+
+def converse_to_openai(resp: dict[str, Any], model: str = "") -> dict[str, Any]:
+    """Bedrock Converse response → OpenAI chat.completion."""
+    blocks = (((resp.get("output") or {}).get("message") or {}).get("content")) or []
+    text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict))
+    usage = resp.get("usage") or {}
+    prompt = int(usage.get("inputTokens", 0) or 0)
+    completion = int(usage.get("outputTokens", 0) or 0)
+    return {
+        "id": "",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": _BEDROCK_STOP.get(str(resp.get("stopReason")), "stop"),
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": prompt + completion,
+        },
+    }
+
+
+_BEDROCK_STOP = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+    "content_filtered": "content_filter",
+}
+
+
+class BedrockShim:
+    """AWS Bedrock via the Converse API (boto3). Self-dispatching: boto3 makes the SigV4 call, so this
+    shim exposes ``complete``/``stream`` (not the httpx ``build_request`` path). ``client_factory`` is
+    injectable for tests so no boto3 / AWS creds are needed.
+    """
+
+    def __init__(self, client_factory: Any | None = None) -> None:
+        self._client_factory = client_factory
+
+    def _client(self, conn: Any) -> Any:
+        if self._client_factory is not None:
+            return self._client_factory(conn)
+        try:
+            import boto3  # lazy ([aws] extra)
+        except ImportError as exc:  # pragma: no cover - exercised via the route's error path
+            raise ProviderDependencyError(
+                "AWS Bedrock requires the 'aws' extra: pip install quaicu-kernel[aws]."
+            ) from exc
+        return boto3.client(
+            "bedrock-runtime",
+            region_name=conn.location or None,
+            aws_access_key_id=conn.aws_access_key_id or None,
+            aws_secret_access_key=conn.api_key or None,
+        )
+
+    async def complete(self, conn: Any, model: str, body: dict[str, Any]) -> dict[str, Any]:
+        client = self._client(conn)
+        req = openai_to_converse(body)
+        resp = await asyncio.to_thread(client.converse, modelId=model, **req)
+        return converse_to_openai(resp, model)
+
+    async def stream(self, conn: Any, model: str, body: dict[str, Any]) -> AsyncIterator[str]:
+        client = self._client(conn)
+        req = openai_to_converse(body)
+        created = int(time.time())
+
+        def _chunk(delta: dict[str, Any], finish: Any) -> str:
+            payload = {
+                "id": "",
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+            }
+            return f"data: {json.dumps(payload)}\n\n"
+
+        # boto3's converse_stream EventStream is blocking — drain it in a worker thread onto a queue.
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _drain() -> None:
+            try:
+                resp = client.converse_stream(modelId=model, **req)
+                for event in resp.get("stream", []):
+                    loop.call_soon_threadsafe(queue.put_nowait, ("event", event))
+            except Exception as exc:  # noqa: BLE001
+                loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+        worker = asyncio.create_task(asyncio.to_thread(_drain))
+        finish = "stop"
+        try:
+            while True:
+                kind, payload = await queue.get()
+                if kind == "done":
+                    break
+                if kind == "error":
+                    yield (
+                        'data: {"error": {"message": "bedrock stream failed: '
+                        + str(payload).replace('"', "'") + '", "type": "upstream_error"}}\n\n'
+                    )
+                    break
+                ev = payload
+                if "messageStart" in ev:
+                    yield _chunk({"role": "assistant", "content": ""}, None)
+                elif "contentBlockDelta" in ev:
+                    txt = ((ev["contentBlockDelta"].get("delta") or {}).get("text"))
+                    if txt:
+                        yield _chunk({"content": txt}, None)
+                elif "messageStop" in ev:
+                    finish = _BEDROCK_STOP.get(str(ev["messageStop"].get("stopReason")), "stop")
+            yield _chunk({}, finish)
+            yield "data: [DONE]\n\n"
+        finally:
+            await worker
+
+
 # ── Registry ──────────────────────────────────────────────────────────────────────
 
 _OPENAI_COMPAT = OpenAICompatShim()
 _ANTHROPIC = AnthropicShim()
 _VERTEX = VertexShim()
+_BEDROCK = BedrockShim()
 
 
 def get_shim(conn: Any) -> Any:
@@ -274,6 +439,8 @@ def get_shim(conn: Any) -> Any:
         return _ANTHROPIC
     if provider == "vertex":
         return _VERTEX
+    if provider == "bedrock":
+        return _BEDROCK
     return _OPENAI_COMPAT
 
 

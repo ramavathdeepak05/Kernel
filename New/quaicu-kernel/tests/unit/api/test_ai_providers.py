@@ -8,10 +8,14 @@ from dataclasses import dataclass
 import delivery.api.ai_providers as ap
 from delivery.api.ai_providers import (
     AnthropicShim,
+    BedrockShim,
     OpenAICompatShim,
+    ProviderDependencyError,
     VertexShim,
+    converse_to_openai,
     get_shim,
     iter_to_async,
+    openai_to_converse,
 )
 
 
@@ -151,4 +155,83 @@ async def test_vertex_requires_project_and_location(monkeypatch):
         await shim.build_request(conn, "m", {"messages": []})
         raise AssertionError("expected ValueError")
     except ValueError:
+        pass
+
+
+# ── Bedrock (Converse translation + boto3 client injected) ─────────────────────────
+
+
+def test_openai_to_converse_hoists_system_and_inference():
+    out = openai_to_converse({
+        "messages": [
+            {"role": "system", "content": "be terse"},
+            {"role": "user", "content": "hi"},
+        ],
+        "max_tokens": 256,
+        "temperature": 0.3,
+        "stop": "END",
+    })
+    assert out["system"] == [{"text": "be terse"}]
+    assert out["messages"] == [{"role": "user", "content": [{"text": "hi"}]}]
+    assert out["inferenceConfig"] == {"maxTokens": 256, "temperature": 0.3, "stopSequences": ["END"]}
+
+
+def test_converse_to_openai_maps_content_and_usage():
+    resp = {
+        "output": {"message": {"content": [{"text": "hello "}, {"text": "world"}]}},
+        "stopReason": "max_tokens",
+        "usage": {"inputTokens": 7, "outputTokens": 3},
+    }
+    out = converse_to_openai(resp, model="anthropic.claude")
+    assert out["choices"][0]["message"]["content"] == "hello world"
+    assert out["choices"][0]["finish_reason"] == "length"
+    assert out["usage"] == {"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10}
+
+
+class _FakeBedrockClient:
+    def converse(self, modelId, **kw):
+        _FakeBedrockClient.last = {"modelId": modelId, **kw}
+        return {
+            "output": {"message": {"content": [{"text": "hi there"}]}},
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 3, "outputTokens": 2},
+        }
+
+    def converse_stream(self, modelId, **kw):
+        return {"stream": [
+            {"messageStart": {"role": "assistant"}},
+            {"contentBlockDelta": {"delta": {"text": "Hel"}}},
+            {"contentBlockDelta": {"delta": {"text": "lo"}}},
+            {"messageStop": {"stopReason": "end_turn"}},
+        ]}
+
+
+async def test_bedrock_complete_translates_via_injected_client():
+    shim = BedrockShim(client_factory=lambda conn: _FakeBedrockClient())
+    out = await shim.complete(_Conn("bedrock", ""), "anthropic.claude", {"messages": [{"role": "user", "content": "hi"}]})
+    assert out["object"] == "chat.completion"
+    assert out["choices"][0]["message"]["content"] == "hi there"
+    assert out["usage"]["total_tokens"] == 5
+
+
+async def test_bedrock_stream_yields_openai_chunks_then_done():
+    shim = BedrockShim(client_factory=lambda conn: _FakeBedrockClient())
+    chunks = [c async for c in shim.stream(_Conn("bedrock", ""), "m", {"messages": [{"role": "user", "content": "hi"}]})]
+    blob = "".join(chunks)
+    contents = []
+    for line in blob.splitlines():
+        line = line.strip()
+        if line.startswith("data:") and "[DONE]" not in line:
+            contents.append(json.loads(line[len("data:"):].strip())["choices"][0]["delta"].get("content", ""))
+    assert "".join(contents) == "Hello"
+    assert blob.rstrip().endswith("[DONE]")
+
+
+async def test_bedrock_missing_boto3_raises_dependency_error():
+    # No client_factory → lazy `import boto3`, which isn't installed in this env.
+    shim = BedrockShim()
+    try:
+        await shim.complete(_Conn("bedrock", "", location="us-east-1"), "m", {"messages": []})
+        raise AssertionError("expected ProviderDependencyError")
+    except ProviderDependencyError:
         pass

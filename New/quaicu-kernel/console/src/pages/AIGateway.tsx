@@ -12,6 +12,7 @@ const PRESETS: Record<string, string> = {
   "Azure OpenAI": "https://<resource>.openai.azure.com",
   Anthropic: "https://api.anthropic.com",
   "Google Vertex": "",
+  "AWS Bedrock": "",
   "Together AI": "https://api.together.xyz/v1",
   Groq: "https://api.groq.com/openai/v1",
   Mistral: "https://api.mistral.ai/v1",
@@ -23,7 +24,8 @@ function providerValue(label: string): string {
   if (label === "Azure OpenAI") return "azure";
   if (label === "Anthropic") return "anthropic";
   if (label === "Google Vertex") return "vertex";
-  return label; // display-only for OpenAI-compatible endpoints (backend keys only on azure/anthropic/vertex)
+  if (label === "AWS Bedrock") return "bedrock";
+  return label; // display-only for OpenAI-compatible endpoints (backend keys only on the named providers)
 }
 
 const AZURE_DEFAULT_API_VERSION = "2024-10-21";
@@ -53,11 +55,13 @@ export default function AIGateway() {
   const [apiVersion, setApiVersion] = useState(AZURE_DEFAULT_API_VERSION);
   const [project, setProject] = useState("");
   const [location, setLocation] = useState("us-central1");
+  const [awsAccessKeyId, setAwsAccessKeyId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isAzure = provider === "Azure OpenAI";
   const isVertex = provider === "Google Vertex";
+  const isBedrock = provider === "AWS Bedrock";
 
   const gatewayBase = `${apiOrigin()}/v1/ai`;
   const asErr = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
@@ -79,7 +83,8 @@ export default function AIGateway() {
         default_model: defaultModel.trim(),
         mask_pii: maskPii,
         project: isVertex ? project.trim() : "",
-        location: isVertex ? location.trim() : "",
+        location: isVertex || isBedrock ? location.trim() : "",
+        aws_access_key_id: isBedrock ? awsAccessKeyId.trim() : "",
         api_version: isAzure ? apiVersion.trim() : "",
       });
       setApiKey("");
@@ -138,7 +143,8 @@ print(resp.choices[0].message.content)
                 <div className="kv-row"><span className="kv-label">Provider</span><span>{conn.data.provider}</span></div>
                 {conn.data.base_url && <div className="kv-row"><span className="kv-label">Base URL</span><code className="key-value">{conn.data.base_url}</code></div>}
                 {conn.data.project && <div className="kv-row"><span className="kv-label">Project</span><span className="mono">{conn.data.project}</span></div>}
-                {conn.data.location && <div className="kv-row"><span className="kv-label">Location</span><span className="mono">{conn.data.location}</span></div>}
+                {conn.data.aws_access_key_id && <div className="kv-row"><span className="kv-label">Access key ID</span><span className="mono">{conn.data.aws_access_key_id}</span></div>}
+                {conn.data.location && <div className="kv-row"><span className="kv-label">{conn.data.aws_access_key_id ? "Region" : "Location"}</span><span className="mono">{conn.data.location}</span></div>}
                 <div className="kv-row"><span className="kv-label">Credential</span><span className="mono">{conn.data.key_hint}</span></div>
                 {conn.data.default_model && <div className="kv-row"><span className="kv-label">Model</span><span className="mono">{conn.data.default_model}</span></div>}
                 {conn.data.api_version && <div className="kv-row"><span className="kv-label">API version</span><span className="mono">{conn.data.api_version}</span></div>}
@@ -168,6 +174,18 @@ print(resp.choices[0].message.content)
                     <textarea value={apiKey} onChange={(e) => setApiKey(e.target.value)} rows={5} placeholder='{ "type": "service_account", "project_id": "…", "private_key": "…", "client_email": "…" }' autoComplete="off" />
                   </label>
                 </>
+              ) : isBedrock ? (
+                <>
+                  <label>AWS access key ID
+                    <input value={awsAccessKeyId} onChange={(e) => setAwsAccessKeyId(e.target.value)} placeholder="AKIA…" autoComplete="off" />
+                  </label>
+                  <label>AWS secret access key <span className="muted small">(stored encrypted, never shown back)</span>
+                    <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="••••••••" autoComplete="off" />
+                  </label>
+                  <label>Region
+                    <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="us-east-1" />
+                  </label>
+                </>
               ) : (
                 <>
                   <label>Base URL
@@ -178,8 +196,8 @@ print(resp.choices[0].message.content)
                   </label>
                 </>
               )}
-              <label>Default model <span className="muted small">({isAzure ? "Azure deployment name" : isVertex ? "e.g. google/gemini-2.0-flash-001" : "optional"})</span>
-                <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder={isAzure ? "my-gpt4o-deployment" : isVertex ? "google/gemini-2.0-flash-001" : "gpt-4o-mini"} />
+              <label>Default model <span className="muted small">({isAzure ? "Azure deployment name" : isVertex ? "e.g. google/gemini-2.0-flash-001" : isBedrock ? "Bedrock model id" : "optional"})</span>
+                <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder={isAzure ? "my-gpt4o-deployment" : isVertex ? "google/gemini-2.0-flash-001" : isBedrock ? "anthropic.claude-3-5-sonnet-20241022-v2:0" : "gpt-4o-mini"} />
               </label>
               {isAzure && (
                 <label>API version <span className="muted small">(Azure)</span>
@@ -196,7 +214,11 @@ print(resp.choices[0].message.content)
                 disabled={
                   busy ||
                   !apiKey.trim() ||
-                  (isVertex ? !project.trim() || !location.trim() : !baseUrl.trim())
+                  (isVertex
+                    ? !project.trim() || !location.trim()
+                    : isBedrock
+                    ? !awsAccessKeyId.trim() || !location.trim() || !defaultModel.trim()
+                    : !baseUrl.trim())
                 }
               >
                 {busy ? "Saving…" : connected ? "Replace connection" : "Connect"}
@@ -218,17 +240,12 @@ print(resp.choices[0].message.content)
           </section>
 
           <section className="step">
-            <div className="step-head"><span className="step-no">+</span><h2>More providers — coming soon</h2></div>
+            <div className="step-head"><span className="step-no">+</span><h2>Supported providers</h2></div>
             <p className="muted small">
-              The gateway speaks the OpenAI-compatible API (OpenAI, Together, Groq, Mistral, OpenRouter,
-              local vLLM, …), <strong>Azure OpenAI</strong>, <strong>Anthropic</strong>, and
-              <strong> Google Vertex</strong> today. Coming next:
-            </p>
-            <div className="coming-soon-row">
-              <span className="provider-chip disabled">AWS Bedrock <Badge value="SOON" /></span>
-            </div>
-            <p className="muted small">
-              Want early access? <a href="mailto:support@quaicu.org?subject=AI%20gateway%20provider%20pre-order">Pre-order / notify me →</a>
+              The gateway governs every major provider: any <strong>OpenAI-compatible</strong> endpoint
+              (OpenAI, Together, Groq, Mistral, OpenRouter, local vLLM, …), <strong>Azure OpenAI</strong>,
+              <strong> Anthropic</strong>, <strong>Google Vertex</strong>, and <strong>AWS Bedrock</strong>
+              — one governed endpoint, your keys, your spend.
             </p>
           </section>
         </>

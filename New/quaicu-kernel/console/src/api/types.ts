@@ -168,6 +168,7 @@ export interface AIConnectionStatus {
   api_version?: string;
   project?: string;
   location?: string;
+  aws_access_key_id?: string;
   updated_at?: string | null;
 }
 
@@ -180,6 +181,7 @@ export interface AIConnectionBody {
   api_version?: string;
   project?: string;
   location?: string;
+  aws_access_key_id?: string;
 }
 
 // ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────

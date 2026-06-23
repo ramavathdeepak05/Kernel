@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from core.errors import GatewayBudgetExceededError, QUAICUError
 from core.gateway.masking import MaskingConfig, MaskingContext, mask_text
 from core.types import Actor, ActorId, RequestContext
-from delivery.api.ai_providers import get_shim
+from delivery.api.ai_providers import ProviderDependencyError, get_shim
 from delivery.api.auth import current_principal
 from delivery.api.deps import get_kernel
 from delivery.api.routes.actions import _bearer_token
@@ -211,10 +211,34 @@ async def chat_completions(request: Request) -> Any:
                 m["content"] = mask_text(m["content"], cfg, ctx)
         body["messages"] = messages
 
-    # Resolve the provider shim and translate the OpenAI request to the upstream's shape. For providers
+    shim = get_shim(conn)
+
+    # ── Self-dispatching providers (e.g. Bedrock via boto3 — the SDK owns the SigV4 call) ──
+    if hasattr(shim, "complete"):
+        try:
+            if stream:
+                async def _self_stream():
+                    try:
+                        async for sse in shim.stream(conn, model, body):
+                            yield (ctx.rehydrate(sse) if ctx is not None else sse).encode("utf-8")
+                    except Exception as exc:  # noqa: BLE001 — surface as an SSE error event
+                        yield (
+                            'data: {"error": {"message": "provider stream failed: '
+                            + str(exc).replace('"', "'") + '", "type": "upstream_error"}}\n\n'
+                        ).encode("utf-8")
+                return StreamingResponse(_self_stream(), media_type="text/event-stream")
+            data = await shim.complete(conn, model, body)
+            if ctx is not None:
+                data = _rehydrate_obj(data, ctx)
+            return JSONResponse(status_code=200, content=data)
+        except ProviderDependencyError as exc:
+            return _openai_error(501, str(exc), "PROVIDER_DEPENDENCY_MISSING")
+        except Exception as exc:  # noqa: BLE001 — credential / API failure
+            return _openai_error(502, f"Provider call failed: {exc}", "PROVIDER_AUTH_FAILED")
+
+    # Translate the OpenAI request to the upstream's shape (httpx-forwarded providers). For providers
     # that mint credentials (e.g. Vertex OAuth from a service-account JSON), build_request can fail on a
     # bad/missing credential — surface that as a clean provider-auth error.
-    shim = get_shim(conn)
     try:
         req = await shim.build_request(conn, model, body)
     except ValueError as exc:
