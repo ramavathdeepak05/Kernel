@@ -61,6 +61,7 @@ class AIConnection:
     default_model: str = ""  # used when a request omits "model"
     updated_at: datetime | None = None
     mask_pii: bool = False  # opt-in (all tiers): tokenize PII before forwarding to the provider (W6-2)
+    api_version: str = ""   # Azure OpenAI api-version query param; empty for non-Azure providers (W6-2)
 
 
 @dataclass(frozen=True)
