@@ -10,11 +10,19 @@ import { getSession } from "../state/auth";
 const PRESETS: Record<string, string> = {
   OpenAI: "https://api.openai.com/v1",
   "Azure OpenAI": "https://<resource>.openai.azure.com",
+  Anthropic: "https://api.anthropic.com",
   "Together AI": "https://api.together.xyz/v1",
   Groq: "https://api.groq.com/openai/v1",
   Mistral: "https://api.mistral.ai/v1",
   Custom: "",
 };
+
+// Map a preset label to the backend provider discriminator (default: the lowercased label).
+function providerValue(label: string): string {
+  if (label === "Azure OpenAI") return "azure";
+  if (label === "Anthropic") return "anthropic";
+  return label; // display-only for OpenAI-compatible endpoints (backend keys only on azure/anthropic)
+}
 
 const AZURE_DEFAULT_API_VERSION = "2024-10-21";
 
@@ -60,7 +68,7 @@ export default function AIGateway() {
     setError(null);
     try {
       await api.setAIConnection({
-        provider: isAzure ? "azure" : provider,
+        provider: providerValue(provider),
         base_url: baseUrl.trim(),
         api_key: apiKey.trim(),
         default_model: defaultModel.trim(),
@@ -180,10 +188,10 @@ print(resp.choices[0].message.content)
             <div className="step-head"><span className="step-no">+</span><h2>More providers — coming soon</h2></div>
             <p className="muted small">
               The gateway speaks the OpenAI-compatible API (OpenAI, Together, Groq, Mistral, OpenRouter,
-              local vLLM, …) and <strong>Azure OpenAI</strong> today. Native shims for these land next:
+              local vLLM, …), <strong>Azure OpenAI</strong>, and <strong>Anthropic</strong> today. Native
+              shims for these land next:
             </p>
             <div className="coming-soon-row">
-              <span className="provider-chip disabled">Anthropic <Badge value="SOON" /></span>
               <span className="provider-chip disabled">Google Vertex <Badge value="SOON" /></span>
               <span className="provider-chip disabled">AWS Bedrock <Badge value="SOON" /></span>
             </div>

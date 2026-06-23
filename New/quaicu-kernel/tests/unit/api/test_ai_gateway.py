@@ -20,8 +20,8 @@ _PII = "reach me at alice@acme.io"
 
 
 class _FakeStream:
-    def __init__(self, chunks: list[bytes]):
-        self._chunks = chunks
+    def __init__(self, lines: list[str]):
+        self._lines = lines
 
     async def __aenter__(self):
         return self
@@ -29,15 +29,20 @@ class _FakeStream:
     async def __aexit__(self, *a):
         return False
 
-    async def aiter_bytes(self):
-        for c in self._chunks:
-            yield c
+    async def aiter_lines(self):
+        for ln in self._lines:
+            yield ln
 
 
 class _FakeClient:
-    """Captures the forwarded body and echoes the first user message back as the assistant content."""
+    """Captures the forwarded body and echoes the first user message back as the assistant content.
+
+    ``stream_lines`` (class attr) configures the SSE lines the streaming path yields, so a test can feed
+    OpenAI-shaped or Anthropic-shaped events.
+    """
 
     captured: dict = {}
+    stream_lines: list[str] = ['data: {"choices":[{"delta":{"content":"hi"}}]}', "data: [DONE]"]
 
     def __init__(self, *a, **k):
         pass
@@ -64,7 +69,7 @@ class _FakeClient:
 
     def stream(self, method, url, json=None, headers=None):
         _FakeClient.captured = {"url": url, "body": json, "headers": headers}
-        return _FakeStream([b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', b"data: [DONE]\n\n"])
+        return _FakeStream(list(_FakeClient.stream_lines))
 
 
 def _build(mask_pii: bool, *, provider="openai", base_url="https://api.openai.com/v1", api_version=""):
@@ -168,6 +173,57 @@ async def test_connection_status_exposes_mask_pii():
     _, eng, _ = _build(mask_pii=True)
     status = eng.ai_connection_status(TenantId(_TENANT))
     assert status["mask_pii"] is True
+
+
+class _AnthropicFakeClient(_FakeClient):
+    """Returns an Anthropic-shaped non-stream response so the route's translate_response runs."""
+
+    async def post(self, url, json=None, headers=None):
+        _FakeClient.captured = {"url": url, "body": json, "headers": headers}
+
+        class _Resp:
+            status_code = 200
+
+            def json(self_inner):
+                return {
+                    "id": "msg_1",
+                    "model": "claude-3-5",
+                    "content": [{"type": "text", "text": "hi there"}],
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 3, "output_tokens": 2},
+                }
+
+            text = ""
+
+        return _Resp()
+
+
+async def test_anthropic_end_to_end_translates_request_and_response(monkeypatch):
+    monkeypatch.setattr(gw.httpx, "AsyncClient", _AnthropicFakeClient)
+    app, _, key = _build(mask_pii=False, provider="anthropic", base_url="https://api.anthropic.com")
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/ai/chat/completions",
+            headers=_auth(key),
+            json={
+                "model": "claude-3-5",
+                "messages": [
+                    {"role": "system", "content": "be terse"},
+                    {"role": "user", "content": "hi"},
+                ],
+            },
+        )
+    assert resp.status_code == 200
+    cap = _FakeClient.captured
+    # Request was translated to the Anthropic Messages shape.
+    assert cap["url"] == "https://api.anthropic.com/v1/messages"
+    assert cap["headers"]["x-api-key"] == "sk-tenant" and "Authorization" not in cap["headers"]
+    assert cap["body"]["system"] == "be terse" and cap["body"]["max_tokens"] == 1024
+    # Response was translated back to OpenAI shape for the client.
+    out = resp.json()
+    assert out["object"] == "chat.completion"
+    assert out["choices"][0]["message"]["content"] == "hi there"
+    assert out["usage"]["total_tokens"] == 5
 
 
 async def test_azure_shim_uses_deployment_url_and_api_key_header(monkeypatch):
