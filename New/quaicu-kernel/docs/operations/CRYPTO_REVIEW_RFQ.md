@@ -40,3 +40,33 @@ Specifically assess:
 ## 5. Out of scope (this engagement)
 The broader application (API auth, billing, console), and non-K·02 governance layers — unless a
 finding crosses into them.
+
+## 6. Commissioning checklist (W2-1 — send-ready once the brackets are filled)
+
+This RFQ gates the regulated-enterprise launch and has the longest lead time in Wave 2 (~6–8 wk), so
+commission it **first**. To turn this draft into an outbound RFQ:
+
+**Fill these before sending:**
+- [ ] `[TAG]` (§2) — pin to a specific release commit/tag so the firm reviews a frozen tree.
+- [ ] `[N]` weeks (§4) — proposed report timeline (typical 3–4 wk) and remediation re-review window.
+- [ ] Budget band (§4) — set an internal ceiling; a focused K·02 review is usually a few-week fixed-fee engagement.
+- [ ] NDA — attach your mutual NDA; most firms will counter-sign or supply their own.
+- [ ] Contacts (§4) — name the engineering point-of-contact for the walkthrough call and Qs.
+
+**Vendor shortlist** (request a quote from 2–3 in parallel; all have public Merkle/transparency-log or
+applied-crypto track records):
+| Firm | Why | How to approach |
+|---|---|---|
+| **Trail of Bits** | Deep applied-crypto + protocol review; published on transparency logs | Contact via their website engagement form; reference "K·02 RFC 6962 Merkle ledger + Ed25519/ECDSA-P256 STH signing" |
+| **NCC Group** | Large crypto practice; familiar to enterprise/bank procurement | Standard RFP intake; the bank-facing brand helps the attestation land |
+| **Kudelski Security** | Strong applied-crypto / HSM & key-management focus | Good fit given the OpenBao/Cloud-KMS signer split |
+| **Cure53** | Sharp, fast, focused crypto/appsec reviews | Best for a tight, time-boxed scope |
+
+**What to require in the deliverable** (so it's usable in sales): findings-by-severity report **with
+reproductions**, a **remediation re-review** of our fixes, and a **letter of attestation** suitable to
+share with regulated customers and marketplace reviewers (this letter is the asset the whole credibility
+story hangs on — make it an explicit contract deliverable, not a maybe).
+
+**After it lands:** record the report date + attestation in the trust center (W4-6) and the Wave-2 clock
+tracker (`docs/compliance/WAVE2_COMPLIANCE_CLOCKS.md`); feed any findings back through the normal fix
+flow and request the re-review letter.

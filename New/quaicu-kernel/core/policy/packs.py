@@ -33,6 +33,11 @@ _META: dict[str, tuple[str, str, str]] = {
         "Regulation (EU) 2024/1689",
         "Prohibited-practice, high-risk human-oversight, and AI transparency/disclosure controls.",
     ),
+    "rbi": (
+        "India RBI/SEBI Cloud & Outsourcing",
+        "RBI Outsourcing of IT Services (2023) + SEBI Cloud Framework (2023)",
+        "Data-localization, encryption, outsourcing-governance, and access-logging controls for RBI/SEBI regulated entities.",
+    ),
 }
 
 
