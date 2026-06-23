@@ -1,18 +1,75 @@
-# Cloud Build: build the SaaS-plane kernel image and push it to Artifact Registry.
+# Cloud Build: gate (lint+tests) → build → push → scan (W4-9).
 # Uses delivery/docker/Dockerfile (the shared-plane image with KERNEL_APP selection + baked
 # /etc/quaicu configs) — NOT the root single-kernel Dockerfile.
 #
 #   gcloud builds submit --config cloudbuild.yaml .
+#
+# Scan steps (pip-audit, Trivy, SBOM) run in REPORT mode — they log findings but do NOT fail the
+# build yet. The graduation plan (report → blocking, by severity + patch SLA) lives in
+# docs/operations/VULN_MANAGEMENT.md. The lint+test gate IS blocking: a broken build never ships.
+substitutions:
+  _IMAGE: us-central1-docker.pkg.dev/ordinal-quarter-499114-s2/quaicu/kernel:v1
 steps:
-  - name: gcr.io/cloud-builders/docker
+  # ── Gate: lint + unit tests (blocking) ──────────────────────────────────────
+  - id: lint-and-test
+    name: python:3.12-slim
+    entrypoint: bash
     args:
-      - build
-      - -f
-      - delivery/docker/Dockerfile
-      - -t
-      - us-central1-docker.pkg.dev/ordinal-quarter-499114-s2/quaicu/kernel:v1
-      - .
+      - -c
+      - |
+        set -euo pipefail
+        pip install --no-cache-dir -e '.[test,dev]'
+        ruff check .
+        pytest tests/unit -q
+
+  # ── Build the image ─────────────────────────────────────────────────────────
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["lint-and-test"]
+    args: ["build", "-f", "delivery/docker/Dockerfile", "-t", "${_IMAGE}", "."]
+
+  # ── Push so the scan + deploy resolve the same digest ─────────────────────────
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["build"]
+    args: ["push", "${_IMAGE}"]
+
+  # ── Dependency vulnerability scan (report-only) ───────────────────────────────
+  - id: pip-audit
+    name: python:3.12-slim
+    waitFor: ["lint-and-test"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        pip install --no-cache-dir pip-audit
+        # Report mode: never fail the build (W4-9 graduation tracked in VULN_MANAGEMENT.md).
+        pip-audit -r requirements.lock || true
+
+  # ── Image vulnerability scan (report-only) ────────────────────────────────────
+  - id: trivy-scan
+    name: aquasec/trivy
+    waitFor: ["push"]
+    entrypoint: sh
+    args:
+      - -c
+      - "trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 --no-progress ${_IMAGE} || true"
+
+  # ── SBOM (CycloneDX) as a build artifact ──────────────────────────────────────
+  - id: sbom
+    name: aquasec/trivy
+    waitFor: ["push"]
+    entrypoint: sh
+    args:
+      - -c
+      - "trivy image --format cyclonedx --output /workspace/sbom.cyclonedx.json ${_IMAGE} || true"
+
+artifacts:
+  objects:
+    location: gs://${PROJECT_ID}_cloudbuild/sbom/$BUILD_ID
+    paths: ["/workspace/sbom.cyclonedx.json"]
+
 images:
-  - us-central1-docker.pkg.dev/ordinal-quarter-499114-s2/quaicu/kernel:v1
+  - ${_IMAGE}
 options:
   logging: CLOUD_LOGGING_ONLY
