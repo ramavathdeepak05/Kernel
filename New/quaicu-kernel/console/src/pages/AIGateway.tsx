@@ -9,11 +9,14 @@ import { getSession } from "../state/auth";
 
 const PRESETS: Record<string, string> = {
   OpenAI: "https://api.openai.com/v1",
+  "Azure OpenAI": "https://<resource>.openai.azure.com",
   "Together AI": "https://api.together.xyz/v1",
   Groq: "https://api.groq.com/openai/v1",
   Mistral: "https://api.mistral.ai/v1",
   Custom: "",
 };
+
+const AZURE_DEFAULT_API_VERSION = "2024-10-21";
 
 function apiOrigin(): string {
   const { apiBase } = getSession();
@@ -37,8 +40,11 @@ export default function AIGateway() {
   const [apiKey, setApiKey] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [maskPii, setMaskPii] = useState(false);
+  const [apiVersion, setApiVersion] = useState(AZURE_DEFAULT_API_VERSION);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isAzure = provider === "Azure OpenAI";
 
   const gatewayBase = `${apiOrigin()}/v1/ai`;
   const asErr = (e: unknown) => (e instanceof ApiError ? `${e.code}: ${e.message}` : String(e));
@@ -53,7 +59,14 @@ export default function AIGateway() {
     setBusy(true);
     setError(null);
     try {
-      await api.setAIConnection({ provider, base_url: baseUrl.trim(), api_key: apiKey.trim(), default_model: defaultModel.trim(), mask_pii: maskPii });
+      await api.setAIConnection({
+        provider: isAzure ? "azure" : provider,
+        base_url: baseUrl.trim(),
+        api_key: apiKey.trim(),
+        default_model: defaultModel.trim(),
+        mask_pii: maskPii,
+        api_version: isAzure ? apiVersion.trim() : "",
+      });
       setApiKey("");
       conn.reload();
     } catch (err) {
@@ -111,6 +124,7 @@ print(resp.choices[0].message.content)
                 <div className="kv-row"><span className="kv-label">Base URL</span><code className="key-value">{conn.data.base_url}</code></div>
                 <div className="kv-row"><span className="kv-label">Key</span><span className="mono">{conn.data.key_hint}</span></div>
                 {conn.data.default_model && <div className="kv-row"><span className="kv-label">Model</span><span className="mono">{conn.data.default_model}</span></div>}
+                {conn.data.api_version && <div className="kv-row"><span className="kv-label">API version</span><span className="mono">{conn.data.api_version}</span></div>}
                 <div className="kv-row"><span className="kv-label">PII masking</span><span>{conn.data.mask_pii ? "On — PII tokenized before your provider sees it" : "Off"}</span></div>
                 <button className="secondary small" onClick={disconnect}>Disconnect</button>
               </div>
@@ -131,9 +145,14 @@ print(resp.choices[0].message.content)
               <label>Provider API key
                 <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…  (stored encrypted, shown back only masked)" autoComplete="off" />
               </label>
-              <label>Default model <span className="muted small">(optional)</span>
-                <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder="gpt-4o-mini" />
+              <label>Default model <span className="muted small">({isAzure ? "Azure deployment name" : "optional"})</span>
+                <input value={defaultModel} onChange={(e) => setDefaultModel(e.target.value)} placeholder={isAzure ? "my-gpt4o-deployment" : "gpt-4o-mini"} />
               </label>
+              {isAzure && (
+                <label>API version <span className="muted small">(Azure)</span>
+                  <input value={apiVersion} onChange={(e) => setApiVersion(e.target.value)} placeholder={AZURE_DEFAULT_API_VERSION} />
+                </label>
+              )}
               <label className="checkbox-row">
                 <input type="checkbox" checked={maskPii} onChange={(e) => setMaskPii(e.target.checked)} />
                 <span>Mask PII <span className="muted small">— tokenize emails, PAN, Aadhaar, cards, etc. before your provider sees them; rehydrated in the response. Available on all plans.</span></span>
@@ -160,12 +179,13 @@ print(resp.choices[0].message.content)
           <section className="step">
             <div className="step-head"><span className="step-no">+</span><h2>More providers — coming soon</h2></div>
             <p className="muted small">
-              Today the gateway speaks the OpenAI-compatible API (OpenAI, Together, Groq, Mistral,
-              OpenRouter, local vLLM, …). Native shims for these land in the next kernel release:
+              The gateway speaks the OpenAI-compatible API (OpenAI, Together, Groq, Mistral, OpenRouter,
+              local vLLM, …) and <strong>Azure OpenAI</strong> today. Native shims for these land next:
             </p>
             <div className="coming-soon-row">
-              <span className="provider-chip disabled">Azure OpenAI <Badge value="SOON" /></span>
               <span className="provider-chip disabled">Anthropic <Badge value="SOON" /></span>
+              <span className="provider-chip disabled">Google Vertex <Badge value="SOON" /></span>
+              <span className="provider-chip disabled">AWS Bedrock <Badge value="SOON" /></span>
             </div>
             <p className="muted small">
               Want early access? <a href="mailto:support@quaicu.org?subject=AI%20gateway%20provider%20pre-order">Pre-order / notify me →</a>

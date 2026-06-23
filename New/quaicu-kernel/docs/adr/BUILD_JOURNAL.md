@@ -183,6 +183,15 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · W6-2 provider shim ① Azure OpenAI · delivery/api + core/account + console · claude** —
+  First of four provider shims for the BYO gateway (unified gateway across OpenAI-compatible / Azure /
+  Anthropic / Vertex / Bedrock, built one at a time). Added a `_provider_target(conn, model)` seam in
+  `ai_gateway.py`: Azure → `api-key` header + `/openai/deployments/{model}/chat/completions?api-version=…`;
+  default → OpenAI-compatible Bearer. Azure stays OpenAI-shaped, so masking/budget/streaming are
+  unchanged. New `AIConnection.api_version`; console Azure preset + api-version field. **Exposes:** Azure
+  OpenAI as a selectable provider. Test green; api+account 238 passed, console builds. **Follow-ups
+  (one at a time):** ② Anthropic (translation), ③ Vertex (SA JSON → OAuth → OpenAI-compat endpoint),
+  ④ Bedrock (boto3 + SigV4 + Converse; pairs with W6-7).
 - **2026-06-23 · W6-2 govern the AI-gateway BYO passthrough · delivery/api + core/account + console · claude** —
   The `/v1/ai/chat/completions` BYO passthrough was ungoverned (verbatim forward after only a policy
   check). Added a **per-tenant PII-masking toggle** (`AIConnection.mask_pii`, opt-in on all tiers; masks

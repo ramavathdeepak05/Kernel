@@ -33,6 +33,29 @@ from delivery.sdk.kernel import Kernel
 router = APIRouter(prefix="/v1/ai", tags=["ai-gateway"])
 
 _FORWARD_TIMEOUT = 120.0
+# Default Azure OpenAI api-version used when the connection doesn't pin one (GA as of 2024-10-21).
+_AZURE_DEFAULT_API_VERSION = "2024-10-21"
+
+
+def _provider_target(conn: Any, model: str) -> tuple[str, dict[str, str]]:
+    """Resolve the upstream (url, headers) for the tenant's provider.
+
+    The body/response stay OpenAI-shaped for every provider handled here, so the rest of the route
+    (masking, budget, streaming, rehydration) is provider-agnostic. This is the seam later providers
+    that need request/response translation (Anthropic/Vertex/Bedrock) will extend.
+    """
+    json_ct = {"Content-Type": "application/json"}
+    if str(getattr(conn, "provider", "")).lower() == "azure":
+        # Azure OpenAI: api-key header, deployment-style path, api-version query param. The OpenAI
+        # "model" maps to the Azure deployment name.
+        api_version = conn.api_version or _AZURE_DEFAULT_API_VERSION
+        url = (
+            f"{conn.base_url}/openai/deployments/{model}/chat/completions"
+            f"?api-version={api_version}"
+        )
+        return url, {"api-key": conn.api_key, **json_ct}
+    # Default: any OpenAI-compatible endpoint (OpenAI, Together, Groq, Mistral, OpenRouter, vLLM, …).
+    return f"{conn.base_url}/chat/completions", {"Authorization": f"Bearer {conn.api_key}", **json_ct}
 
 
 def _rehydrate_obj(obj: Any, ctx: MaskingContext) -> Any:
@@ -212,8 +235,7 @@ async def chat_completions(request: Request) -> Any:
                 m["content"] = mask_text(m["content"], cfg, ctx)
         body["messages"] = messages
 
-    url = f"{conn.base_url}/chat/completions"
-    headers = {"Authorization": f"Bearer {conn.api_key}", "Content-Type": "application/json"}
+    url, headers = _provider_target(conn, model)
 
     # ── Streaming passthrough (SSE) ──────────────────────────────────────────────
     if stream:

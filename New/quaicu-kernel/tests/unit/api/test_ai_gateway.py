@@ -67,7 +67,7 @@ class _FakeClient:
         return _FakeStream([b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', b"data: [DONE]\n\n"])
 
 
-def _build(mask_pii: bool):
+def _build(mask_pii: bool, *, provider="openai", base_url="https://api.openai.com/v1", api_version=""):
     accounts = AccountStore()
     accounts.add_account(
         Account(
@@ -82,11 +82,12 @@ def _build(mask_pii: bool):
     eng = AccountEngine(accounts, EntitlementStore(), pepper="p", session_secret="s")
     eng.set_ai_connection(
         TenantId(_TENANT),
-        provider="openai",
-        base_url="https://api.openai.com/v1",
+        provider=provider,
+        base_url=base_url,
         api_key="sk-tenant",
         default_model="gpt-4o-mini",
         mask_pii=mask_pii,
+        api_version=api_version,
     )
     kernel = Kernel.from_parts(
         tenant=TenantId(_TENANT),
@@ -167,3 +168,28 @@ async def test_connection_status_exposes_mask_pii():
     _, eng, _ = _build(mask_pii=True)
     status = eng.ai_connection_status(TenantId(_TENANT))
     assert status["mask_pii"] is True
+
+
+async def test_azure_shim_uses_deployment_url_and_api_key_header(monkeypatch):
+    monkeypatch.setattr(gw.httpx, "AsyncClient", _FakeClient)
+    app, _, key = _build(
+        mask_pii=False,
+        provider="azure",
+        base_url="https://my-res.openai.azure.com",
+        api_version="2024-10-21",
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/ai/chat/completions",
+            headers=_auth(key),
+            json={"model": "gpt-4o-dep", "messages": [{"role": "user", "content": "hi"}]},
+        )
+    assert resp.status_code == 200
+    cap = _FakeClient.captured
+    assert cap["url"] == (
+        "https://my-res.openai.azure.com/openai/deployments/gpt-4o-dep/chat/completions"
+        "?api-version=2024-10-21"
+    )
+    # Azure auth = api-key header, NOT Authorization: Bearer.
+    assert cap["headers"].get("api-key") == "sk-tenant"
+    assert "Authorization" not in cap["headers"]
