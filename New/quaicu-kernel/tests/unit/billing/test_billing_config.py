@@ -121,3 +121,19 @@ def test_webhook_only_adapter_is_not_checkout_capable():
     config = {"billing": {"stripe": {"webhook_secret": "a", "price_to_tier": {"price_business": "BUSINESS"}}}}
     adapters, _ = build_billing(config, _store())
     assert adapters["stripe"]._api_key is None
+
+
+def test_unresolved_env_ref_raises(monkeypatch):
+    # An unset ${VAR} must fail loudly, not pass the literal token through as a (truthy) secret —
+    # otherwise the adapter would build with a bogus key and silently 403 every real webhook.
+    monkeypatch.delenv("RAZORPAY_WEBHOOK_SECRET", raising=False)
+    config = {
+        "billing": {
+            "razorpay": {
+                "webhook_secret": "${RAZORPAY_WEBHOOK_SECRET}",
+                "plan_to_tier": {"plan_business": "BUSINESS"},
+            }
+        }
+    }
+    with pytest.raises(ValueError, match="RAZORPAY_WEBHOOK_SECRET"):
+        build_billing(config, _store())
