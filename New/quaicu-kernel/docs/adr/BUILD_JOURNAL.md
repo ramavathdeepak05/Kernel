@@ -183,6 +183,20 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-23 · Wave 3 legal/commercial pack — counsel-briefing starter docs · legal docs · claude** —
+  Executed Wave 3 of `ACTION_TRACKER.md` (legal/commercial, all counsel-gated). No code: produced
+  five starter docs under `docs/legal/` to compress counsel drafting — `MSA_STARTER.md` (W3-1, 18-clause
+  MSA skeleton + 4 exhibits; the load-bearing clause is the *governance-is-tooling-not-a-compliance-
+  guarantee* disclaimer), `SLA_STARTER.md` (W3-3, uptime tiers + service-credit schedule, numbers left
+  as `[N]%` placeholders gated on W4-1/2/3 observability+tested-DR), `ORDER_FORM_AND_PRICING.md` (W3-4,
+  order-form + support tiers + pricing mirroring live ₹10k/₹50k Razorpay), `TERMS_SIGNOFF_INVENTORY.md`
+  (W3-5, counsel review checklist for `console/src/legal/content.ts`), `WAVE3_LEGAL_TRACKER.md` (the
+  human-item tracker). W3-2 (DPA) is satisfied-by the existing `DPA_ART28_STARTER.md`. **Exposes:** a
+  ready-to-hand-to-counsel pack; the binding contracts are still counsel-originated. **Guardrail:** did
+  NOT remove the live "draft" banner in `content.ts:1-2` — that is a separate post-sign-off PR.
+  **Follow-ups (pure human):** W3-6 insurance (limits feed the MSA liability cap), W3-7 entity/tax
+  (gates governing-law + cross-border quoting), W3-8 live Razorpay KYC (+ provision the absent
+  `RAZORPAY_WEBHOOK_SECRET`).
 - **2026-06-23 · Wave 2 compliance — RBI/SEBI policy pack + commissioning docs · policy packs / compliance docs · claude** —
   Executed Wave 2 of `ACTION_TRACKER.md` (long-lead compliance). **Code (W2-6):** new starter policy
   pack `docs/policy-packs/rbi/{policies.toml,README.md}` — 12 CEL `[[policy.seed]]` rules across 4
