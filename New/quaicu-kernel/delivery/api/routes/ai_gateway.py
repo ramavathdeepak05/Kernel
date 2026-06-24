@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.errors import GatewayBudgetExceededError, QUAICUError
-from core.gateway.masking import MaskingConfig, MaskingContext, mask_text
+from core.gateway.masking import DEFAULT_MASKING, MaskingConfig, MaskingContext
 from core.types import Actor, ActorId, RequestContext
 from delivery.api.ai_providers import ProviderDependencyError, get_shim
 from delivery.api.auth import current_principal
@@ -204,11 +204,14 @@ async def chat_completions(request: Request) -> Any:
     # ── PII masking (opt-in per connection, all tiers): tokenize before forwarding ──────
     ctx: MaskingContext | None = None
     if conn.mask_pii:
+        # The masking engine is pluggable (W6-3): in-process regex by default, or managed Cloud DLP when
+        # the deployment opts in. Resolved on app.state; defaults to regex.
+        port = getattr(request.app.state, "masking_port", None) or DEFAULT_MASKING
         ctx = MaskingContext()
         cfg = MaskingConfig()
         for m in messages:
             if isinstance(m, dict) and isinstance(m.get("content"), str):
-                m["content"] = mask_text(m["content"], cfg, ctx)
+                m["content"] = await port.mask(m["content"], config=cfg, ctx=ctx)
         body["messages"] = messages
 
     shim = get_shim(conn)

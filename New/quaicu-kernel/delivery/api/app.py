@@ -19,6 +19,8 @@ retrieve it via ``request.app.state.kernel`` without global state.
 
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response, status
@@ -35,6 +37,7 @@ from core.errors import (
 from core.account import AccountEngine
 from core.entitlements import EntitlementStore
 from core.gateway.budget import InMemoryBudgetTracker
+from core.gateway.masking import DEFAULT_MASKING
 from delivery.api.auth import ApiKeyAuthMiddleware
 from delivery.api.middleware import GovernanceMiddleware
 from delivery.api.observability import RequestLoggingMiddleware
@@ -60,6 +63,29 @@ from delivery.api.routes.scim import router as scim_router
 from delivery.api.routes.signup import router as signup_router
 from delivery.sdk.kernel import Kernel
 from delivery.sdk.provider import TieredKernelProvider
+
+_log = logging.getLogger("quaicu.api.app")
+
+
+def _build_masking_port():
+    """Resolve the gateway's PII-masking engine from env (W6-3). Default: in-process regex.
+
+    ``QUAICU_MASKING_PROVIDER=dlp`` + ``QUAICU_DLP_PROJECT`` opts into managed Cloud DLP. Any misconfig
+    (missing project, SDK not installed) logs a warning and falls back to regex — masking must never
+    break the gateway because the chosen detector is unavailable.
+    """
+    if os.getenv("QUAICU_MASKING_PROVIDER", "").lower() != "dlp":
+        return DEFAULT_MASKING
+    project = os.getenv("QUAICU_DLP_PROJECT", "")
+    try:
+        from adapters.masking import CloudDLPMaskingAdapter
+
+        port = CloudDLPMaskingAdapter(project, location=os.getenv("QUAICU_DLP_LOCATION", "global"))
+        _log.info("gateway PII masking: Cloud DLP (project=%s)", project)
+        return port
+    except Exception as exc:  # noqa: BLE001 — never let masking config break startup
+        _log.warning("Cloud DLP masking unavailable (%s) — falling back to regex.", exc)
+        return DEFAULT_MASKING
 
 
 def create_app(
@@ -152,6 +178,9 @@ def create_app(
     # Per-tenant token budget for the BYO AI-gateway passthrough (W6-2). Default unlimited; an optional
     # default cap (QUAICU_AI_DEFAULT_MAX_TOKENS) is applied per-tenant lazily by the route.
     app.state.ai_budget = InMemoryBudgetTracker()
+    # PII-masking engine for the gateway (W6-3). Default: in-process regex. Opt into managed Cloud DLP
+    # with QUAICU_MASKING_PROVIDER=dlp + QUAICU_DLP_PROJECT (falls back to regex on misconfig).
+    app.state.masking_port = _build_masking_port()
     # Control-plane singletons (signup / admin / billing). Routes 503 when their dependency is absent.
     app.state.account_engine = account_engine
     app.state.entitlement_store = entitlement_store

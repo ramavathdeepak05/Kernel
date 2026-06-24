@@ -183,6 +183,17 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-24 · W6-3 PII masking beyond regex — MaskingPort + Cloud DLP · core/ports + core/gateway + adapters + delivery · claude** —
+  Made the gateway's PII-detection engine swappable. New `MaskingPort` protocol (`core/ports/masking.py`,
+  async `mask`); default `RegexMaskingAdapter` (wraps the existing regex `mask_text`, exported as
+  `DEFAULT_MASKING`); managed `CloudDLPMaskingAdapter` (`adapters/masking/gcp_dlp.py`) — lazy
+  `google-cloud-dlp` ([gcp] extra, injectable client), `inspect_content` findings tokenized into the same
+  `MaskingContext` (rehydration unchanged), off the event loop. Wired on `app.state.masking_port` (regex
+  default; opt into DLP via `QUAICU_MASKING_PROVIDER=dlp` + `QUAICU_DLP_PROJECT`, fail-safe fallback); the
+  BYO gateway route now `await port.mask(...)`. **Exposes:** managed PII detection (names/addresses regex
+  misses) as a drop-in, opt-in engine. Tests (regex + DLP via fake client + missing-SDK + route-uses-port)
+  284 passed. **Follow-ups:** AWS Comprehend adapter; adopt the port in K·05 `AIGateway.generate`; DLP
+  batching. Not validated against live DLP.
 - **2026-06-24 · W6-2 provider shim ④ AWS Bedrock → W6-2 complete · delivery/api + core/account + console · claude** —
   Final BYO-gateway shim. `BedrockShim` is self-dispatching (own `complete`/`stream`, not the httpx
   path) because boto3 owns the SigV4 Converse call. Lazy `import boto3` ([aws] extra) + injectable client
