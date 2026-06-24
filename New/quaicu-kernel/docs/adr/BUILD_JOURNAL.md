@@ -183,6 +183,61 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · W7-2 sales-engineering collateral + runnable underwriting demo · examples + docs · claude** —
+  Shipped the four W7-2 deliverables; the demo is the code centerpiece. **(1) Runnable demo env**
+  `examples/underwriting-demo/`: `demo.py` runs use-case-1 (credit-underwriting, HITL-gated) end-to-end
+  with **zero external services** — verified green: low-risk→ALLOW→seal · high-risk→`require_approval`→
+  in-process HITL→`role:risk_head` approves→seal (approver sealed; self-approval blocked) · over-limit→
+  fail-closed DENY · export K·02 bundle → **`verify_ledger_proof_bundle()` ✅ offline**. Pure assembly of
+  built surfaces (K·01 CEL, K·03 HITL, K·02 TrustLedger, WS-F export) + a `poll_wait` approve-callback
+  (the engine exposes `max_poll_attempts`/`poll_wait`; `poll()` is non-blocking, so the callback clears
+  the queue deterministically between attempts). Plus `kernel.demo.toml` (single-source for both paths),
+  `seed.py` (stdlib HTTP console populator), README (script verified / console documented). **Two small
+  reusable non-core wirings** made the config path verifiable: `adapters/ledger/memory_signed.py`
+  `MemorySignedLedgerAdapter` (RFC-6962 TrustLedger + ephemeral software `InMemoryEd25519Signer` + in-mem
+  repo → signed STH with embedded pubkey, so exports verify offline with no OpenBao/KMS) registered as
+  `memory_signed_ledger`, and an `in_process` → `core.hitl.engine.InProcessHITLPort` registry entry — both
+  in `delivery/sdk/kernel.py`. Test `tests/unit/adapters/test_memory_signed_ledger.py` (seal→export→
+  verify via `Kernel.from_config` on the demo toml); adapters/hitl/approvals suites 164 passed, ruff clean.
+  **(2)** `docs/compliance/COMPLIANCE_MATRIX.md` (regime→layer→feature→evidence for RBI/DPDP/EU-AI-Act,
+  grounded in the pack READMEs, + "what QUAICU does NOT do"). **(3)** `docs/compliance/SECURITY_WHITEPAPER.md`
+  (CISO-facing: threat model, fail-closed invariants, crypto/isolation/data-handling/key-mgmt, honest
+  assurance roadmap). **(4)** `docs/ARCHITECTURE_ONEPAGER.md` (condensed) + committed/corrected the root
+  `ARCHITECTURE.md` (stale "K·09–K·14 in active development" → all 14 built/green). **Follow-ups:** a stable
+  *hosted* demo env; Slack/Teams fast-approve + verify-by-upload UI; W7-3/4 gated on a design partner.
+- **2026-06-25 · W7-1 design-partner kit (3-use-case pilot mix) · docs/gtm · claude** —
+  Built the agent-side of W7-1 (landing a partner is human; the value is the kit that lets the team land
+  one). Per the user, anchored on a **curated mix of 3 pilot use-cases** rather than a single-vertical bet,
+  each mapped to **already-built** kernel surfaces. New `docs/gtm/`: **`PILOT_USE_CASES.md`** (centerpiece —
+  ① credit-underwriting assist HITL-gated: `require_approval` → `/v1/approvals` → K·02 seal →
+  `/v1/ledger/{tenant}/export`; ② KYC/AML onboarding: K·04 consent + `MaskingPort` + crypto-shred erasure
+  (W6-4) + DPDP pack; ③ govern an existing GenAI app via the gateway: `POST /v1/ai/chat/completions`
+  masking+budget+seal across OpenAI/Azure/Anthropic/Vertex/Bedrock — one base-URL change; persona/flow/
+  metrics/reg-hook/demo/scope each + a summary table), **`DESIGN_PARTNER_PROGRAM.md`** (fee-waived/credited
+  pilot vs the ₹50k consultation deposit; success = an *inspected* reference), **`DESIGN_PARTNER_LOI.md`**
+  (NOT-LEGAL-ADVICE starter → MSA/DPA conversion), **`TARGET_LIST_AND_OUTREACH.md`** (ICP firmographics —
+  *segments not companies* — qualifying Qs, proof+enforcement pitch, warm/cold-exec/SI-co-sell templates).
+  Grounded in `docs/strategy/MARKET_2026_2027.md`, the `[consultation]` motion, `DPA_ART28_STARTER`, and the
+  RBI/DPDP packs; honest "validated against fake clients not live cloud" caveats kept. **Docs only — no
+  code/tests/deploys.** Tracker: W7-1 → ◐. **Follow-up (human):** source + sign + inspect a partner;
+  W7-2 (security whitepaper / architecture one-pager / compliance matrix / demo env) is separate.
+- **2026-06-25 · W6-9 console WCAG-AA contrast + responsive (Wave 6 complete; W6-8 deferred) · console · claude** —
+  Finished W6-9: darkened the text-only `--mist` token (#a3a3a3→#6f6f6f light, #525252→#8f8f8f dark) to
+  clear WCAG-AA 4.5:1 (it was ~2.4–2.7:1); brand ember/warn accents (borderline-passing) left intact;
+  added a `@media (max-width:640px)` block (nav + page-head wrap; wide `table.data` scrolls — no
+  breakpoints existed before). `npm run build` clean. W6-8 (auto-subscription billing) **deferred** as
+  not relevant to the consultancy-led strategy (the BillingEngine already auto-flips on a subscription
+  webhook if wired). **Wave 6 fully resolved.** **Follow-up:** `wrangler deploy` to ship the console;
+  next = execute the approved 2026-2027 strategy memo.
+- **2026-06-25 · W6-7 Step Functions WorkflowPort adapter → AWS parity complete · adapters/workflow + delivery/sdk · claude** —
+  Full ASL-translation adapter. `governed_def_to_asl` translates a `GovernedProcessDef` to Amazon States
+  Language (steps→Task, transitions→Choice, HITL gate→long-timeout Activity Task + States.Timeout catch,
+  TERMINAL_*→Succeed/Fail). `StepFunctionsWorkflowAdapter` implements `WorkflowPort` (create+start_execution
+  / send_task_success-failure via the HITL activity token / describe_execution→ProcessState), lazy boto3 +
+  injectable client, fail-closed. Registered `aws_sfn`. **Exposes:** run the governed lifecycle natively on
+  AWS Step Functions — completes AWS parity (Bedrock + EventBridge + KMS signer + Cognito + SFN). Tests
+  (ASL structure + start/state/signal via fake client + missing-boto3) 168 passed. **Follow-ups:** HITL
+  task-token needs an activity worker in-deploy; not validated against live AWS.
 - **2026-06-24 · W6-7 AWS KMS ledger signer + Cognito-via-OIDC · adapters/ledger + delivery/sdk · claude** —
   The FIPS-HSM signing root on AWS. `adapters/ledger/aws_kms.py` mirrors `gcp_kms.py`: `AwsKmsTreeSigner`
   (ECDSA-P256 via `kms.sign` over a SHA-256 digest → DER signature; local verify against the KMS public

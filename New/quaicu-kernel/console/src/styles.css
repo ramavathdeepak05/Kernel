@@ -4,7 +4,7 @@
 :root {
   /* Neutrals — light mode default */
   --paper: #fafaf7; --paper-2: #f0eee8;
-  --ink: #0a0a0a; --graphite: #1c1c1c; --smoke: #525252; --mist: #a3a3a3;
+  --ink: #0a0a0a; --graphite: #1c1c1c; --smoke: #525252; --mist: #6f6f6f;  /* mist darkened for WCAG AA (text) */
   --rule: #d4d4d4; --rule-soft: #e5e5e2;
   /* Accents (status only) */
   --ember: #008746; --ember-soft: #e3f0e7; --alert: #c43a1a; --alert-soft: #f7e6e1; --warn: #946800;
@@ -28,7 +28,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #0a0a0a; --paper-2: #141413;
-    --ink: #fafaf7; --graphite: #e5e5e2; --smoke: #a3a3a3; --mist: #525252;
+    --ink: #fafaf7; --graphite: #e5e5e2; --smoke: #a3a3a3; --mist: #8f8f8f;  /* mist lightened for WCAG AA on dark */
     --rule: #2a2a28; --rule-soft: #1c1c1c;
     --ember: #00a855; --ember-soft: #0d2519; --alert: #e0573a; --alert-soft: #2a120b; --warn: #c79a3a;
     color-scheme: dark;
@@ -294,3 +294,11 @@ button.small { padding: 4px 10px; font-size: 12px; }
 .coming-soon-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; }
 .provider-chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--rule); padding: 6px 10px; }
 .provider-chip.disabled { color: var(--smoke); opacity: 0.75; }
+
+/* Responsive pass (W6-9) — narrow viewports (phones/tablets). */
+@media (max-width: 640px) {
+  .nav { flex-wrap: wrap; }                         /* nav links wrap instead of overflowing */
+  .page-head { flex-wrap: wrap; gap: 10px; }        /* title + action buttons stack/wrap */
+  /* Wide data tables scroll horizontally rather than overflowing the page. */
+  table.data { display: block; overflow-x: auto; white-space: nowrap; }
+}
