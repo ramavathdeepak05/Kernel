@@ -183,6 +183,13 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-24 · W6-6 console ledger-export UI · console · claude** —
+  Frontend-only; the export API + offline verifier already existed. Audit page gains Download CSV
+  (client-side, RFC-4180, from the loaded trail) and Download proof bundle (JSON) (fetches
+  `/v1/ledger/{tenant}/export` → the self-verifying RFC-6962 bundle), with busy/error states. New
+  `api.exportLedger()` + `LedgerProofBundle` type. **Exposes:** regulators/analysts can download the
+  audit trail + a self-verifying proof bundle from the console. `npm run build` clean. **Follow-ups:**
+  verify-by-upload UI; window/regulation export filters.
 - **2026-06-24 · W6-5 SIEM fan-out — EventBridge + webhook event sinks · adapters/events + delivery/sdk · claude** —
   Pub/Sub + Logging sinks already existed; added the AWS + provider-agnostic paths. `EventBridgeEventSink`
   (boto3 `put_events`, lazy [aws], injectable client) and `WebhookEventSink` (POST the governed-action
