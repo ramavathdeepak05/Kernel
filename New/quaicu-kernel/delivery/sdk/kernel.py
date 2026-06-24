@@ -100,6 +100,7 @@ class _InMemoryActionRepository:
 _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     # WorkflowPort
     "memory":                  ("adapters.workflow.memory",          "InMemoryWorkflowAdapter"),
+    "aws_sfn":                 ("adapters.workflow.aws_sfn",         "StepFunctionsWorkflowAdapter"),
     # InferencePort
     "openai_compat":           ("adapters.inference.openai_compat",  "OpenAICompatInferenceAdapter"),
     "vertex_inference":        ("adapters.inference.vertex",         "VertexInferenceAdapter"),

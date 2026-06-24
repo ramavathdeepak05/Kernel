@@ -183,6 +183,15 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · W6-7 Step Functions WorkflowPort adapter → AWS parity complete · adapters/workflow + delivery/sdk · claude** —
+  Full ASL-translation adapter. `governed_def_to_asl` translates a `GovernedProcessDef` to Amazon States
+  Language (steps→Task, transitions→Choice, HITL gate→long-timeout Activity Task + States.Timeout catch,
+  TERMINAL_*→Succeed/Fail). `StepFunctionsWorkflowAdapter` implements `WorkflowPort` (create+start_execution
+  / send_task_success-failure via the HITL activity token / describe_execution→ProcessState), lazy boto3 +
+  injectable client, fail-closed. Registered `aws_sfn`. **Exposes:** run the governed lifecycle natively on
+  AWS Step Functions — completes AWS parity (Bedrock + EventBridge + KMS signer + Cognito + SFN). Tests
+  (ASL structure + start/state/signal via fake client + missing-boto3) 168 passed. **Follow-ups:** HITL
+  task-token needs an activity worker in-deploy; not validated against live AWS.
 - **2026-06-24 · W6-7 AWS KMS ledger signer + Cognito-via-OIDC · adapters/ledger + delivery/sdk · claude** —
   The FIPS-HSM signing root on AWS. `adapters/ledger/aws_kms.py` mirrors `gcp_kms.py`: `AwsKmsTreeSigner`
   (ECDSA-P256 via `kms.sign` over a SHA-256 digest → DER signature; local verify against the KMS public
