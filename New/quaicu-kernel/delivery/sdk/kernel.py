@@ -566,6 +566,28 @@ class Kernel:
             from adapters.events.sinks import PubSubEventSink
 
             events.subscribe(PubSubEventSink(str(topic)))
+        bus = ev.get("eventbridge_bus")
+        if bus:
+            from adapters.events.sinks import EventBridgeEventSink
+
+            events.subscribe(
+                EventBridgeEventSink(
+                    str(bus),
+                    source=str(ev.get("eventbridge_source", "quaicu.governance")),
+                    detail_type=str(ev.get("eventbridge_detail_type", "GovernedAction")),
+                )
+            )
+        webhook = ev.get("webhook_url")
+        if webhook:
+            import os
+
+            from adapters.events.sinks import WebhookEventSink
+
+            headers = {
+                str(k): os.path.expandvars(str(v))
+                for k, v in (ev.get("webhook_headers", {}) or {}).items()
+            }
+            events.subscribe(WebhookEventSink(os.path.expandvars(str(webhook)), headers=headers))
 
     @staticmethod
     def _build_policy(

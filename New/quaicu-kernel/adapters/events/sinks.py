@@ -20,6 +20,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import urllib.request
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from core.types import Action, Decision, LedgerEntry
@@ -80,3 +83,84 @@ class PubSubEventSink:
             self._publisher.publish(self._topic, data)  # fire-and-forget; returns a future
         except Exception as exc:  # noqa: BLE001 — emit must never fail on a best-effort sink
             log.warning("PubSubEventSink publish failed (topic=%s): %s", self._topic, exc)
+
+
+class EventBridgeEventSink:
+    """Publish each sealed governed action to an AWS EventBridge bus via ``put_events`` (best-effort).
+
+    boto3 is lazily imported (``[aws]`` extra) and the client is injectable for tests. Routes/rules on
+    the bus fan the events out to a SIEM / Kinesis / Lambda / CloudWatch downstream.
+    """
+
+    def __init__(
+        self,
+        event_bus: str,
+        *,
+        source: str = "quaicu.governance",
+        detail_type: str = "GovernedAction",
+        client: Any | None = None,
+    ) -> None:
+        self._bus = event_bus
+        self._source = source
+        self._detail_type = detail_type
+        if client is None:
+            import boto3  # lazy ([aws] extra)
+
+            client = boto3.client("events")
+        self._client = client
+
+    def __call__(self, action: Action, entry: LedgerEntry) -> None:
+        detail = json.dumps(_entry_record(entry))
+        try:
+            self._client.put_events(
+                Entries=[
+                    {
+                        "Source": self._source,
+                        "DetailType": self._detail_type,
+                        "Detail": detail,
+                        "EventBusName": self._bus,
+                    }
+                ]
+            )
+        except Exception as exc:  # noqa: BLE001 — emit must never fail on a best-effort sink
+            log.warning("EventBridgeEventSink put_events failed (bus=%s): %s", self._bus, exc)
+
+
+# Sync HTTP POST signature for the webhook sink (so tests inject a recording stub).
+WebhookPost = Callable[[str, bytes, Mapping[str, str]], Any]
+
+
+def _threaded_urllib_post(url: str, body: bytes, headers: Mapping[str, str]) -> None:
+    """Fire-and-forget POST on a daemon thread so a slow SIEM never blocks the seal path."""
+
+    def _send() -> None:
+        try:
+            req = urllib.request.Request(url, data=body, headers=dict(headers), method="POST")
+            urllib.request.urlopen(req, timeout=5)  # noqa: S310 — operator-configured SIEM URL
+        except Exception as exc:  # noqa: BLE001 — best-effort
+            log.warning("WebhookEventSink POST failed (url=%s): %s", url, exc)
+
+    threading.Thread(target=_send, daemon=True).start()
+
+
+class WebhookEventSink:
+    """POST each sealed governed action (as JSON) to any SIEM HTTP endpoint (Splunk HEC, Datadog,
+    Sumo, a generic collector). ``post`` is injectable; the default is a fire-and-forget urllib POST."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        post: WebhookPost | None = None,
+    ) -> None:
+        self._url = url
+        self._headers = {"Content-Type": "application/json", **dict(headers or {})}
+        self._post = post or _threaded_urllib_post
+
+    def __call__(self, action: Action, entry: LedgerEntry) -> None:
+        body = json.dumps(_entry_record(entry)).encode("utf-8")
+        try:
+            self._post(self._url, body, self._headers)
+        except Exception as exc:  # noqa: BLE001 — emit must never fail on a best-effort sink
+            log.warning("WebhookEventSink dispatch failed (url=%s): %s", self._url, exc)
