@@ -183,6 +183,14 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · W6-9 console WCAG-AA contrast + responsive (Wave 6 complete; W6-8 deferred) · console · claude** —
+  Finished W6-9: darkened the text-only `--mist` token (#a3a3a3→#6f6f6f light, #525252→#8f8f8f dark) to
+  clear WCAG-AA 4.5:1 (it was ~2.4–2.7:1); brand ember/warn accents (borderline-passing) left intact;
+  added a `@media (max-width:640px)` block (nav + page-head wrap; wide `table.data` scrolls — no
+  breakpoints existed before). `npm run build` clean. W6-8 (auto-subscription billing) **deferred** as
+  not relevant to the consultancy-led strategy (the BillingEngine already auto-flips on a subscription
+  webhook if wired). **Wave 6 fully resolved.** **Follow-up:** `wrangler deploy` to ship the console;
+  next = execute the approved 2026-2027 strategy memo.
 - **2026-06-25 · W6-7 Step Functions WorkflowPort adapter → AWS parity complete · adapters/workflow + delivery/sdk · claude** —
   Full ASL-translation adapter. `governed_def_to_asl` translates a `GovernedProcessDef` to Amazon States
   Language (steps→Task, transitions→Choice, HITL gate→long-timeout Activity Task + States.Timeout catch,
