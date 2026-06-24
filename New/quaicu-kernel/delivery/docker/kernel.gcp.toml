@@ -61,3 +61,7 @@ mask_patterns    = true
 issuer   = "${OIDC_ISSUER}"      # e.g. GCP Identity Platform / customer IdP discovery URL
 audience = "${OIDC_AUDIENCE}"
 jwks_uri = "${OIDC_JWKS_URI}"    # optional — discovered from the issuer when omitted
+# AWS Cognito federates through this same OIDC adapter (no separate adapter needed): set
+#   identity = "oidc"
+#   issuer   = "https://cognito-idp.<region>.amazonaws.com/<userPoolId>"
+#   audience = "<app-client-id>"   # jwks_uri is discovered from the issuer's well-known document
