@@ -12,6 +12,7 @@ import type {
   Entitlements,
   HitlQueue,
   ImpactReportBody,
+  LedgerProofBundle,
   LedgerTrail,
   PolicyListResponse,
   PolicyRegisterBody,
@@ -179,6 +180,7 @@ export const api = {
 
   // ── Audit trail ───────────────────────────────────────────────────────────
   ledgerTrail: () => request<LedgerTrail>("GET", `/v1/ledger/${tenant()}/trail`),
+  exportLedger: () => request<LedgerProofBundle>("GET", `/v1/ledger/${tenant()}/export`),
 
   // ── Approvals ─────────────────────────────────────────────────────────────
   listApprovals: () => request<ApprovalList>("GET", "/v1/approvals"),

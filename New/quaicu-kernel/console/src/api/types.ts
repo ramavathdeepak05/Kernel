@@ -92,6 +92,10 @@ export interface LedgerTrail {
   count: number;
 }
 
+// Self-verifying regulator export (RFC-6962 proof bundle). Self-describing — the console just
+// serializes + downloads it; the offline verifier reads its internal shape.
+export type LedgerProofBundle = Record<string, unknown>;
+
 export interface ApprovalRecord {
   handle_id: string;
   action_id: string;
