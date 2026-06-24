@@ -50,6 +50,23 @@ def test_vertex_roundtrips_project_location_and_masks_sa_json():
     assert "SECRET" not in str(status)  # the SA JSON (private key) never leaks in status
 
 
+def test_bedrock_roundtrips_aws_fields_and_masks_secret():
+    eng = _engine()
+    acct, _ = eng.signup(email="a@b.io", name="Acme")
+    eng.set_ai_connection(
+        acct.tenant_id, provider="bedrock", base_url="", api_key="aws-secret-xyz",
+        default_model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        location="us-east-1", aws_access_key_id="AKIAEXAMPLE",
+    )
+    conn = eng.get_ai_connection(acct.tenant_id)
+    assert conn.provider == "bedrock" and conn.location == "us-east-1"
+    assert conn.aws_access_key_id == "AKIAEXAMPLE"
+    assert conn.api_key == "aws-secret-xyz"  # secret decrypts for the call
+    status = eng.ai_connection_status(acct.tenant_id)
+    assert status["aws_access_key_id"] == "AKIAEXAMPLE" and status["location"] == "us-east-1"
+    assert "aws-secret-xyz" not in str(status)  # the secret access key never leaks
+
+
 def test_unset_connection_is_none():
     eng = _engine()
     acct, _ = eng.signup(email="a@b.io", name="Acme")

@@ -282,6 +282,56 @@ async def test_vertex_end_to_end_oauth_and_url(monkeypatch):
     assert cap["headers"]["Authorization"] == "Bearer ya29.fake"
 
 
+async def test_bedrock_end_to_end_via_injected_client(monkeypatch):
+    import delivery.api.ai_providers as ap
+
+    class _FakeBedrock:
+        def converse(self, modelId, **kw):
+            _FakeBedrock.last = {"modelId": modelId, **kw}
+            return {
+                "output": {"message": {"content": [{"text": "hi from bedrock"}]}},
+                "stopReason": "end_turn",
+                "usage": {"inputTokens": 4, "outputTokens": 3},
+            }
+
+    # Swap the registry singleton for one with an injected (no-boto3) client.
+    monkeypatch.setattr(ap, "_BEDROCK", ap.BedrockShim(client_factory=lambda conn: _FakeBedrock()))
+
+    accounts = AccountStore()
+    accounts.add_account(
+        Account(
+            account_id="acct_acme", tenant_id=TenantId(_TENANT), email="acme@b.io", name="acme",
+            status=AccountStatus.ACTIVE, created_at=datetime.now(timezone.utc),
+        )
+    )
+    eng = AccountEngine(accounts, EntitlementStore(), pepper="p", session_secret="s")
+    eng.set_ai_connection(
+        TenantId(_TENANT), provider="bedrock", base_url="", api_key="aws-secret",
+        default_model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        location="us-east-1", aws_access_key_id="AKIA_TEST",
+    )
+    kernel = Kernel.from_parts(
+        tenant=TenantId(_TENANT), policy=FakePolicy(decision=Decision.ALLOW), hitl=FakeHITL(),
+        ledger=FakeLedger(), events=FakeEvents(), identity=FakeIdentity(),
+    )
+    app = create_app(kernel, account_engine=eng, require_api_key=True, rate_limit=False)
+    _, key = eng.issue_api_key(TenantId(_TENANT))
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/ai/chat/completions",
+            headers=_auth(key),
+            json={"messages": [{"role": "system", "content": "be nice"}, {"role": "user", "content": "hi"}]},
+        )
+    assert resp.status_code == 200
+    out = resp.json()
+    assert out["object"] == "chat.completion"
+    assert out["choices"][0]["message"]["content"] == "hi from bedrock"
+    # Request was translated to Converse (system hoisted, content blocks).
+    assert _FakeBedrock.last["system"] == [{"text": "be nice"}]
+    assert _FakeBedrock.last["modelId"] == "anthropic.claude-3-5-sonnet-20241022-v2:0"
+
+
 async def test_azure_shim_uses_deployment_url_and_api_key_header(monkeypatch):
     monkeypatch.setattr(gw.httpx, "AsyncClient", _FakeClient)
     app, _, key = _build(

@@ -183,6 +183,18 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-24 · W6-2 provider shim ④ AWS Bedrock → W6-2 complete · delivery/api + core/account + console · claude** —
+  Final BYO-gateway shim. `BedrockShim` is self-dispatching (own `complete`/`stream`, not the httpx
+  path) because boto3 owns the SigV4 Converse call. Lazy `import boto3` ([aws] extra) + injectable client
+  (per `marketplace.py`); pure `openai_to_converse`/`converse_to_openai` translators; `complete` via
+  `asyncio.to_thread(client.converse)`; `stream` bridges boto3's blocking `converse_stream` EventStream
+  onto an asyncio.Queue → OpenAI chunks + [DONE]. Route branches on `hasattr(shim,"complete")` →
+  PROVIDER_DEPENDENCY_MISSING (501) / PROVIDER_AUTH_FAILED (502). New `AIConnection.aws_access_key_id`;
+  console Bedrock form; coming-soon panel → "supported providers". **Exposes:** the gateway now governs
+  OpenAI-compatible + Azure + Anthropic + Vertex + Bedrock — one governed endpoint across every major
+  provider. Tests (translators + complete/stream with a fake client + missing-boto3 + e2e + account)
+  256 passed, console builds. **Caveats:** Bedrock in prod needs the [aws] extra; not validated against
+  live AWS. **Follow-ups:** Bedrock tool-calls/vision; install [aws] in the SaaS image to enable it.
 - **2026-06-23 · W6-2 provider shim ③ Google Vertex · delivery/api + core/account + console · claude** —
   First provider with cloud-IAM auth. `VertexShim`: per-tenant service-account JSON (encrypted) → cached,
   off-event-loop OAuth token (google-auth, no new dep) → Vertex's OpenAI-compatible endpoint
