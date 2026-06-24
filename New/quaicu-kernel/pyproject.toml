@@ -45,6 +45,7 @@ dev = [
 gcp = [
     "google-cloud-kms>=3",       # adapters/ledger/gcp_kms — ECDSA-P256 STH signing (FIPS 140-2 L3 HSM)
     "google-genai>=1",           # adapters/inference/vertex — Vertex AI (Gemini) inference
+    "google-cloud-dlp>=3",       # adapters/masking/gcp_dlp — managed PII detection (W6-3)
 ]
 aws = [
     # AWS-parity adapters (docs/strategy/ENTERPRISE_CLOUD_STRATEGY.md): KMS Ed25519 signer, Bedrock

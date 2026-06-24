@@ -93,3 +93,18 @@ def mask_payload(payload: dict, config: MaskingConfig, ctx: MaskingContext) -> d
         else:
             masked[k] = v
     return masked
+
+
+# ── MaskingPort: default (regex) adapter ─────────────────────────────────────────
+
+
+class RegexMaskingAdapter:
+    """The default `MaskingPort` (core/ports/masking) — the in-process regex masker. No network, no
+    dependency; this is what runs unless a managed detector (e.g. Cloud DLP) is configured."""
+
+    async def mask(self, text: str, *, config: MaskingConfig, ctx: MaskingContext) -> str:
+        return mask_text(text, config, ctx)
+
+
+# Module singleton — the gateway's default masking engine.
+DEFAULT_MASKING = RegexMaskingAdapter()

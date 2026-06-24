@@ -175,6 +175,32 @@ async def test_connection_status_exposes_mask_pii():
     assert status["mask_pii"] is True
 
 
+async def test_route_uses_pluggable_masking_port(monkeypatch):
+    # W6-3: when mask_pii is on, the route delegates to app.state.masking_port (regex by default;
+    # swappable to Cloud DLP). Inject a fake port and assert it's invoked.
+    monkeypatch.setattr(gw.httpx, "AsyncClient", _FakeClient)
+    app, _, key = _build(mask_pii=True)
+
+    class _FakePort:
+        calls = 0
+
+        async def mask(self, text, *, config, ctx):
+            _FakePort.calls += 1
+            return "REDACTED"
+
+    app.state.masking_port = _FakePort()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/ai/chat/completions",
+            headers=_auth(key),
+            json={"messages": [{"role": "user", "content": _PII}]},
+        )
+    assert resp.status_code == 200 and _FakePort.calls == 1
+    # The forwarded body carried what the port returned (not the raw PII).
+    forwarded = json.dumps(_FakeClient.captured["body"])
+    assert "REDACTED" in forwarded and "alice@acme.io" not in forwarded
+
+
 class _AnthropicFakeClient(_FakeClient):
     """Returns an Anthropic-shaped non-stream response so the route's translate_response runs."""
 
