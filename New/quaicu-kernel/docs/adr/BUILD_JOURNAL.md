@@ -183,6 +183,22 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · W7-1 design-partner kit (3-use-case pilot mix) · docs/gtm · claude** —
+  Built the agent-side of W7-1 (landing a partner is human; the value is the kit that lets the team land
+  one). Per the user, anchored on a **curated mix of 3 pilot use-cases** rather than a single-vertical bet,
+  each mapped to **already-built** kernel surfaces. New `docs/gtm/`: **`PILOT_USE_CASES.md`** (centerpiece —
+  ① credit-underwriting assist HITL-gated: `require_approval` → `/v1/approvals` → K·02 seal →
+  `/v1/ledger/{tenant}/export`; ② KYC/AML onboarding: K·04 consent + `MaskingPort` + crypto-shred erasure
+  (W6-4) + DPDP pack; ③ govern an existing GenAI app via the gateway: `POST /v1/ai/chat/completions`
+  masking+budget+seal across OpenAI/Azure/Anthropic/Vertex/Bedrock — one base-URL change; persona/flow/
+  metrics/reg-hook/demo/scope each + a summary table), **`DESIGN_PARTNER_PROGRAM.md`** (fee-waived/credited
+  pilot vs the ₹50k consultation deposit; success = an *inspected* reference), **`DESIGN_PARTNER_LOI.md`**
+  (NOT-LEGAL-ADVICE starter → MSA/DPA conversion), **`TARGET_LIST_AND_OUTREACH.md`** (ICP firmographics —
+  *segments not companies* — qualifying Qs, proof+enforcement pitch, warm/cold-exec/SI-co-sell templates).
+  Grounded in `docs/strategy/MARKET_2026_2027.md`, the `[consultation]` motion, `DPA_ART28_STARTER`, and the
+  RBI/DPDP packs; honest "validated against fake clients not live cloud" caveats kept. **Docs only — no
+  code/tests/deploys.** Tracker: W7-1 → ◐. **Follow-up (human):** source + sign + inspect a partner;
+  W7-2 (security whitepaper / architecture one-pager / compliance matrix / demo env) is separate.
 - **2026-06-25 · W6-9 console WCAG-AA contrast + responsive (Wave 6 complete; W6-8 deferred) · console · claude** —
   Finished W6-9: darkened the text-only `--mist` token (#a3a3a3→#6f6f6f light, #525252→#8f8f8f dark) to
   clear WCAG-AA 4.5:1 (it was ~2.4–2.7:1); brand ember/warn accents (borderline-passing) left intact;
