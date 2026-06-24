@@ -37,9 +37,16 @@ decision  = "deny"
 # The STARTER ledger is in-memory (ephemeral). Record every sealed governed action to the
 # `quaicu.audit` logger so the platform's log capture (e.g. Cloud Logging) is the durable audit
 # stream — visibility into what each tenant's product is doing without a database. Add
-# `pubsub_topic = "projects/<p>/topics/<t>"` to also fan out to Pub/Sub.
+# `pubsub_topic = "projects/<p>/topics/<t>"` to also fan out to Pub/Sub. For AWS, set
+# `eventbridge_bus = "<bus-name>"` (needs the [aws] extra + AWS creds). For any HTTP SIEM (Splunk HEC,
+# Datadog, …) set `webhook_url = "https://…"` and optionally `[events.webhook_headers]` (e.g. an auth
+# token; values may be `${ENV}`). All sinks are best-effort — a sink failure never breaks the seal path.
 [events]
 log_sink = true
+# eventbridge_bus = "quaicu-governance"
+# webhook_url     = "https://http-intake.logs.datadoghq.com/api/v2/logs"
+# [events.webhook_headers]
+# DD-API-KEY = "${DATADOG_API_KEY}"
 
 [hitl]
 dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"

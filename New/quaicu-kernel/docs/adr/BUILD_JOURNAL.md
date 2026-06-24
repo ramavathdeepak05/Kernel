@@ -183,6 +183,15 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-24 · W6-5 SIEM fan-out — EventBridge + webhook event sinks · adapters/events + delivery/sdk · claude** —
+  Pub/Sub + Logging sinks already existed; added the AWS + provider-agnostic paths. `EventBridgeEventSink`
+  (boto3 `put_events`, lazy [aws], injectable client) and `WebhookEventSink` (POST the governed-action
+  JSON to any SIEM HTTP collector; injectable poster, default fire-and-forget daemon-thread urllib so a
+  slow SIEM never blocks the seal path). Both best-effort. Wired in `Kernel._wire_event_sinks` via
+  `[events].eventbridge_bus` and `[events].webhook_url` (+ `${ENV}`-resolved headers); documented in
+  kernel.starter.toml. **Exposes:** the governed-action stream now fans out to GCP Pub/Sub, AWS
+  EventBridge, or any HTTP SIEM. Tests (fake events client + injected poster + wiring) 214 passed.
+  **Follow-up:** queued/at-least-once delivery; not validated against live EventBridge.
 - **2026-06-24 · W6-4 provable erasure — HSM GcpKmsShredKeyring + durable store + wiring · adapters/erasure + delivery/sdk + migration · claude** —
   Erasure DEKs lived in memory and erasure wasn't wired on the SaaS plane (build_saas_app omitted
   erasure_engine → 503). New `GcpKmsShredKeyring` (envelope: per-subject DEK wrapped by a Cloud KMS

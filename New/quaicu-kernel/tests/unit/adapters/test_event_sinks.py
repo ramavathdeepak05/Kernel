@@ -7,7 +7,12 @@ import logging
 from datetime import datetime, timezone
 
 from adapters.events.memory import InMemoryEventBusAdapter
-from adapters.events.sinks import LoggingEventSink, PubSubEventSink
+from adapters.events.sinks import (
+    EventBridgeEventSink,
+    LoggingEventSink,
+    PubSubEventSink,
+    WebhookEventSink,
+)
 from core.types import (
     Action,
     ActionId,
@@ -92,6 +97,91 @@ def test_pubsub_sink_is_best_effort_on_failure():
     pub = _FakePublisher(fail=True)
     # Must not raise — emit is best-effort.
     PubSubEventSink("t", publisher=pub)(_action(), _entry())
+
+
+# ── EventBridge (AWS) — injected fake client, no boto3 ─────────────────────────────
+
+
+class _FakeEventsClient:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls: list[dict] = []
+
+    def put_events(self, **kw):
+        if self.fail:
+            raise RuntimeError("eventbridge unavailable")
+        self.calls.append(kw)
+        return {"FailedEntryCount": 0}
+
+
+def test_eventbridge_sink_puts_entry():
+    client = _FakeEventsClient()
+    EventBridgeEventSink("quaicu-bus", client=client)(_action(), _entry())
+    assert len(client.calls) == 1
+    entry = client.calls[0]["Entries"][0]
+    assert entry["EventBusName"] == "quaicu-bus"
+    assert entry["Source"] == "quaicu.governance" and entry["DetailType"] == "GovernedAction"
+    detail = json.loads(entry["Detail"])
+    assert detail["tenant"] == "acme" and detail["ledger_seq"] == 7 and detail["decision"] == "allow"
+
+
+def test_eventbridge_sink_is_best_effort_on_failure():
+    EventBridgeEventSink("b", client=_FakeEventsClient(fail=True))(_action(), _entry())  # no raise
+
+
+# ── Generic SIEM webhook — injected recording poster ───────────────────────────────
+
+
+def test_webhook_sink_posts_json_with_headers():
+    sent: list[tuple] = []
+
+    def _post(url, body, headers):
+        sent.append((url, body, dict(headers)))
+
+    WebhookEventSink("https://siem.example/collect", headers={"X-Token": "secret"}, post=_post)(
+        _action(), _entry()
+    )
+    assert len(sent) == 1
+    url, body, headers = sent[0]
+    assert url == "https://siem.example/collect"
+    assert headers["X-Token"] == "secret" and headers["Content-Type"] == "application/json"
+    payload = json.loads(body)
+    assert payload["tenant"] == "acme" and payload["ledger_seq"] == 7
+
+
+def test_webhook_sink_is_best_effort_on_failure():
+    def _boom(url, body, headers):
+        raise RuntimeError("siem down")
+
+    WebhookEventSink("https://x", post=_boom)(_action(), _entry())  # must not raise
+
+
+async def test_wired_eventbridge_and_webhook_sinks(monkeypatch):
+    # _wire_event_sinks does `from adapters.events.sinks import EventBridge/WebhookEventSink` at call
+    # time, so patching the module attrs lets us avoid the real (boto3/urllib) constructors.
+    import adapters.events.sinks as sinks
+
+    eb_calls: list[tuple] = []
+    wh_calls: list[tuple] = []
+
+    def _fake_eb(bus, **kw):
+        return lambda action, entry: eb_calls.append((bus, entry.ledger_seq))
+
+    def _fake_wh(url, **kw):
+        return lambda action, entry: wh_calls.append((url, kw.get("headers"), entry.ledger_seq))
+
+    monkeypatch.setattr(sinks, "EventBridgeEventSink", _fake_eb)
+    monkeypatch.setattr(sinks, "WebhookEventSink", _fake_wh)
+    bus = InMemoryEventBusAdapter()
+    Kernel._wire_event_sinks(
+        bus,
+        {"events": {"eventbridge_bus": "quaicu-bus",
+                    "webhook_url": "https://siem/collect",
+                    "webhook_headers": {"X-Token": "t"}}},
+    )
+    await bus.emit(action=_action(), entry=_entry())
+    assert eb_calls == [("quaicu-bus", 7)]
+    assert wh_calls == [("https://siem/collect", {"X-Token": "t"}, 7)]
 
 
 async def test_wired_log_sink_records_on_emit(caplog):
