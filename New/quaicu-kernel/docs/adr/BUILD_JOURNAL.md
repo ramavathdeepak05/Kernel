@@ -183,6 +183,17 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-24 · W6-4 provable erasure — HSM GcpKmsShredKeyring + durable store + wiring · adapters/erasure + delivery/sdk + migration · claude** —
+  Erasure DEKs lived in memory and erasure wasn't wired on the SaaS plane (build_saas_app omitted
+  erasure_engine → 503). New `GcpKmsShredKeyring` (envelope: per-subject DEK wrapped by a Cloud KMS
+  symmetric KEK; only the wrapped blob persists; destroy deletes it + tombstones → unrecoverable),
+  injectable `WrappedDekStore` with `InMemoryWrappedDekStore` + durable `PostgresWrappedDekStore` on
+  migration 012 (`quaicu_shred_keys`). `delivery/sdk/erasure_config.build_erasure` reads `[erasure]`
+  (keyring=memory|gcp_kms, kek, dsn) with fail-safe fallbacks; `build_saas_app` now wires it. Lazy
+  google-cloud-kms, injectable client. **Exposes:** HSM-rooted provable crypto-shred + a working erasure
+  endpoint when enabled. Tests (full cycle via ErasureEngine w/ fake KMS; DEK-wrapped-at-rest;
+  no-resurrection; Postgres fake-cursor; config) 164 passed. **Caveats/follow-ups:** prod needs [gcp] +
+  a KEK + migration 012 + DSN; not validated against live KMS; AWS KMS keyring later.
 - **2026-06-24 · W6-3 PII masking beyond regex — MaskingPort + Cloud DLP · core/ports + core/gateway + adapters + delivery · claude** —
   Made the gateway's PII-detection engine swappable. New `MaskingPort` protocol (`core/ports/masking.py`,
   async `mask`); default `RegexMaskingAdapter` (wraps the existing regex `mask_text`, exported as
