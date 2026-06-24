@@ -120,6 +120,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "memory_ledger":           ("adapters.ledger.memory",            "InMemoryLedgerAdapter"),
     "openbao_ledger":          ("adapters.ledger.openbao",           "OpenBaoLedgerAdapter"),
     "gcp_kms_ledger":          ("adapters.ledger.gcp_kms",           "GcpKmsLedgerAdapter"),
+    "aws_kms_ledger":          ("adapters.ledger.aws_kms",           "AwsKmsLedgerAdapter"),
     # LedgerRepository (durable ledger backends; the TrustLedger writes through to these)
     "memory_ledger_repo":      ("adapters.ledger.memory_repo",       "InMemoryLedgerRepository"),
     "postgres_ledger":         ("adapters.ledger.postgres",          "PostgresLedgerRepository"),
@@ -501,7 +502,7 @@ class Kernel:
         ``kernel.startup()``.
         """
         # TrustLedger-based signing adapters that accept a durable LedgerRepository kwarg.
-        _DURABLE_LEDGERS = {"openbao_ledger", "gcp_kms_ledger"}
+        _DURABLE_LEDGERS = {"openbao_ledger", "gcp_kms_ledger", "aws_kms_ledger"}
         name = adapter_cfg["ledger"]
         ledger_kwargs = cfg.get("ledger", {})
         repository: LedgerRepository | None = None

@@ -183,6 +183,16 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-24 · W6-7 AWS KMS ledger signer + Cognito-via-OIDC · adapters/ledger + delivery/sdk · claude** —
+  The FIPS-HSM signing root on AWS. `adapters/ledger/aws_kms.py` mirrors `gcp_kms.py`: `AwsKmsTreeSigner`
+  (ECDSA-P256 via `kms.sign` over a SHA-256 digest → DER signature; local verify against the KMS public
+  key) + `AwsKmsLedgerAdapter` (TrustLedger wrapper). Same DER-ECDSA-P256 wire format as the GCP signer,
+  so AWS-signed STHs verify with the existing offline regulator code. Registered `aws_kms_ledger` +
+  `_DURABLE_LEDGERS`. Cognito needs no code (federates via the existing `OIDCIdentityAdapter`) —
+  documented in kernel.gcp.toml. boto3 lazy ([aws]); test uses a real-EC-P256-backed fake KMS client
+  (roundtrip + tamper + ledger seal→STH verify), 44 passed. **Exposes:** run the K·02 ledger signing
+  root on AWS KMS (+ Cognito SSO) with the same regulator-verifiable proofs. **Follow-ups:** Step
+  Functions WorkflowPort adapter (last W6-7 piece); not validated against live AWS KMS.
 - **2026-06-24 · W6-6 console ledger-export UI · console · claude** —
   Frontend-only; the export API + offline verifier already existed. Audit page gains Download CSV
   (client-side, RFC-4180, from the loaded trail) and Download proof bundle (JSON) (fetches
