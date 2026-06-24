@@ -183,6 +183,28 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · W7-2 sales-engineering collateral + runnable underwriting demo · examples + docs · claude** —
+  Shipped the four W7-2 deliverables; the demo is the code centerpiece. **(1) Runnable demo env**
+  `examples/underwriting-demo/`: `demo.py` runs use-case-1 (credit-underwriting, HITL-gated) end-to-end
+  with **zero external services** — verified green: low-risk→ALLOW→seal · high-risk→`require_approval`→
+  in-process HITL→`role:risk_head` approves→seal (approver sealed; self-approval blocked) · over-limit→
+  fail-closed DENY · export K·02 bundle → **`verify_ledger_proof_bundle()` ✅ offline**. Pure assembly of
+  built surfaces (K·01 CEL, K·03 HITL, K·02 TrustLedger, WS-F export) + a `poll_wait` approve-callback
+  (the engine exposes `max_poll_attempts`/`poll_wait`; `poll()` is non-blocking, so the callback clears
+  the queue deterministically between attempts). Plus `kernel.demo.toml` (single-source for both paths),
+  `seed.py` (stdlib HTTP console populator), README (script verified / console documented). **Two small
+  reusable non-core wirings** made the config path verifiable: `adapters/ledger/memory_signed.py`
+  `MemorySignedLedgerAdapter` (RFC-6962 TrustLedger + ephemeral software `InMemoryEd25519Signer` + in-mem
+  repo → signed STH with embedded pubkey, so exports verify offline with no OpenBao/KMS) registered as
+  `memory_signed_ledger`, and an `in_process` → `core.hitl.engine.InProcessHITLPort` registry entry — both
+  in `delivery/sdk/kernel.py`. Test `tests/unit/adapters/test_memory_signed_ledger.py` (seal→export→
+  verify via `Kernel.from_config` on the demo toml); adapters/hitl/approvals suites 164 passed, ruff clean.
+  **(2)** `docs/compliance/COMPLIANCE_MATRIX.md` (regime→layer→feature→evidence for RBI/DPDP/EU-AI-Act,
+  grounded in the pack READMEs, + "what QUAICU does NOT do"). **(3)** `docs/compliance/SECURITY_WHITEPAPER.md`
+  (CISO-facing: threat model, fail-closed invariants, crypto/isolation/data-handling/key-mgmt, honest
+  assurance roadmap). **(4)** `docs/ARCHITECTURE_ONEPAGER.md` (condensed) + committed/corrected the root
+  `ARCHITECTURE.md` (stale "K·09–K·14 in active development" → all 14 built/green). **Follow-ups:** a stable
+  *hosted* demo env; Slack/Teams fast-approve + verify-by-upload UI; W7-3/4 gated on a design partner.
 - **2026-06-25 · W7-1 design-partner kit (3-use-case pilot mix) · docs/gtm · claude** —
   Built the agent-side of W7-1 (landing a partner is human; the value is the kit that lets the team land
   one). Per the user, anchored on a **curated mix of 3 pilot use-cases** rather than a single-vertical bet,

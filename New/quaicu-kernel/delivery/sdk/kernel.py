@@ -106,6 +106,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "vertex_inference":        ("adapters.inference.vertex",         "VertexInferenceAdapter"),
     # HITLPort
     "webhook":                 ("adapters.hitl.webhook",             "WebhookHITLAdapter"),
+    "in_process":              ("core.hitl.engine",                  "InProcessHITLPort"),
     # IdentityPort
     "jwt":                     ("adapters.identity.jwt_adapter",     "JWTIdentityAdapter"),
     "oidc":                    ("adapters.identity.oidc",            "OIDCIdentityAdapter"),
@@ -119,6 +120,7 @@ _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
     "postgres_policy":         ("adapters.policy.postgres",          "PostgresPolicyRepository"),
     # Ledger
     "memory_ledger":           ("adapters.ledger.memory",            "InMemoryLedgerAdapter"),
+    "memory_signed_ledger":    ("adapters.ledger.memory_signed",     "MemorySignedLedgerAdapter"),
     "openbao_ledger":          ("adapters.ledger.openbao",           "OpenBaoLedgerAdapter"),
     "gcp_kms_ledger":          ("adapters.ledger.gcp_kms",           "GcpKmsLedgerAdapter"),
     "aws_kms_ledger":          ("adapters.ledger.aws_kms",           "AwsKmsLedgerAdapter"),
