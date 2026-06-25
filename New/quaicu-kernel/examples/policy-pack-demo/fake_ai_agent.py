@@ -130,14 +130,20 @@ def _run_once(base: str, api_key: str, applicants: int, dry_run: bool) -> int:
             print(f"  [{agent:<8}] {action_type:<22} {label}")
             continue
         status, body = _propose(base, api_key, action_type, payload, ikey)
-        if isinstance(body, dict):
-            outcome = body.get("state") or body.get("decision") or status
+        # These status codes are GOVERNANCE OUTCOMES, not transport failures:
+        #   200/202 → executed + sealed · 403 → policy DENY · 422 → HALT (e.g. approval gate could
+        #   not be satisfied on this tier). Only other codes are real errors.
+        if 200 <= status < 300:
+            state = body.get("state", "COMPLETED") if isinstance(body, dict) else "COMPLETED"
+            marker, outcome = "✓", f"{state} (sealed)"
+        elif status == 403:
+            marker, outcome = "⛔", "DENIED by policy"
+        elif status == 422:
+            marker, outcome = "⏸", "HALTED (approval gate — see note)"
         else:
-            outcome = body
-        marker = "✓" if 200 <= status < 300 else "✗"
-        if not (200 <= status < 300):
+            marker, outcome = "✗", f"[{status}] {body}"
             failures += 1
-        print(f"  {marker} [{agent:<8}] {action_type:<22} {label[:46]:<46} → {outcome}")
+        print(f"  {marker} [{agent:<8}] {action_type:<22} {label[:44]:<44} → {outcome}")
     return failures
 
 
@@ -169,8 +175,11 @@ def main() -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped.")
-    print("\nOpen the console → Audit (sealed actions + Download proof bundle) and Approvals "
-          "(cross-border AML + no-oversight credit decisions awaiting a human).")
+    print("\n✓ = executed + sealed (see console → Audit + Download proof bundle).")
+    print("⛔ = denied by an active policy (fail-closed).")
+    print("⏸ = require-approval action HALTED: this tier's HITL is webhook-based with no receiver, so")
+    print("     it can't queue approvals. The approve→execute→seal flow is shown by the local demos")
+    print("     (demo.py / ../underwriting-demo/demo.py with an in-process HITL). See LIVE_DEMO_RUNBOOK.md.")
     return 0
 
 
