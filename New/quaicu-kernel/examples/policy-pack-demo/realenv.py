@@ -52,6 +52,8 @@ def _call(method: str, url: str, api_key: str, body: dict | None = None) -> tupl
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("Authorization", f"Bearer {api_key}")
+    # A CDN/WAF in front of the kernel (e.g. Cloudflare) may block the default urllib agent (HTTP 1010).
+    req.add_header("User-Agent", "quaicu-demo-agent/1.0")
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
