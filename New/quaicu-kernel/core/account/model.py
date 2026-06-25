@@ -110,18 +110,21 @@ class ApiKey:
 
 @dataclass(frozen=True)
 class AuthenticatedPrincipal:
-    """The resolved caller behind a verified API key — what the auth layer hands to routes.
+    """The resolved caller behind a verified credential — what the auth layer hands to routes.
 
-    Carries only what authorization needs: the tenant the key belongs to, its owning account, the
-    key id (for audit/revocation), and the scopes the key may exercise. Identity for *governance*
-    (the actor whose roles drive policy) is still resolved separately from the request's IdP token;
-    this principal authorizes access to the management surface itself.
+    Carries what authorization needs: the tenant the credential belongs to, its owning account, the
+    key id (for audit/revocation), the scopes it may exercise, and the governance ``roles`` of the
+    underlying account/member. The credential (API key or session JWT) is verified by the account
+    engine, so a governed-action route may use this principal as the **host-provided governance
+    actor** (its `account_id` is the actor id; `roles` drive policy) without re-resolving an IdP
+    token — see `delivery/api/deps.resolve_governed_actor`.
     """
 
     tenant_id: TenantId
     account_id: str
     key_id: str
     scopes: frozenset[str]
+    roles: tuple[str, ...] = ()
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes

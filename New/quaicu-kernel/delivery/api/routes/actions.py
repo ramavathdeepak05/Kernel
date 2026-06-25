@@ -30,7 +30,7 @@ from core.types import (
 )
 from core.account.scopes import ACTIONS_READ, ACTIONS_WRITE
 from delivery.api.auth import enforce_scope
-from delivery.api.deps import get_kernel, get_request_tenant
+from delivery.api.deps import get_kernel, get_request_tenant, resolve_governed_actor
 from delivery.api.schemas import ActionResponse, ProposeRequest
 from delivery.sdk.kernel import Kernel
 
@@ -83,29 +83,36 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
     # from the request body.
     token = _bearer_token(request)
     enforce_scope(request, ACTIONS_WRITE)
-    if not kernel.has_identity:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "API requires an identity adapter to authenticate callers",
-                "code": "IDENTITY_NOT_CONFIGURED",
-            },
+
+    # API-key path: the verified principal IS the host identity (a qk_ key is not a JWT the IdentityPort
+    # can read), so use it as the actor and skip IdP re-resolution. Otherwise the engine resolves the
+    # actor from the bearer via the IdentityPort (JWT/IdP path — unchanged), which the API requires.
+    bridged = resolve_governed_actor(request, tenant)
+    if bridged is not None:
+        actor, ctx = bridged, None
+    else:
+        if not kernel.has_identity:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "API requires an identity adapter to authenticate callers",
+                    "code": "IDENTITY_NOT_CONFIGURED",
+                },
+            )
+        # Placeholder actor — the engine replaces it with the token-resolved identity during _propose.
+        actor = Actor(id=ActorId("unresolved"), tenant=tenant)
+        ctx = RequestContext(
+            headers=dict(request.headers),
+            source_ip=request.client.host if request.client else None,
+            raw_token=token,
+            tenant_hint=tenant,
         )
 
-    ctx = RequestContext(
-        headers=dict(request.headers),
-        source_ip=request.client.host if request.client else None,
-        raw_token=token,
-        tenant_hint=tenant,
-    )
-
-    # Placeholder actor — the engine replaces it with the token-resolved identity during _propose.
-    placeholder_actor = Actor(id=ActorId("unresolved"), tenant=tenant)
     action = Action(
         id=ActionId(str(uuid.uuid4())),
         type=body.type,
         payload=body.payload,
-        actor=placeholder_actor,
+        actor=actor,
         tenant=tenant,
         idempotency_key=IdempotencyKey(body.idempotency_key),
         proposed_at=datetime.now(tz=timezone.utc),

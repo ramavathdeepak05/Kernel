@@ -20,7 +20,7 @@ import os
 
 from fastapi import Request
 
-from core.types import TenantId
+from core.types import Actor, ActorId, TenantId
 from delivery.sdk.kernel import Kernel
 
 # Shared secret proving a request arrived via our Cloudflare Worker edge. When set, the edge-forwarded
@@ -90,6 +90,32 @@ def get_kernel(request: Request) -> Kernel:
             detail={"error": "Cannot determine tenant for routing", "code": "TENANT_UNRESOLVED"},
         )
     return provider.kernel_for(tenant)
+
+
+def resolve_governed_actor(request: Request, tenant: TenantId) -> Actor | None:
+    """A host-provided governance actor derived from a verified **API-key** principal, or ``None``.
+
+    On the SaaS plane the auth middleware verifies the bearer and stashes an ``AuthenticatedPrincipal``
+    on ``request.state.principal``. A ``qk_`` API key is not a JWT, so the kernel's (JWT) IdentityPort
+    can't resolve a governance actor from it — yet the principal *is* cryptographically verified
+    (HMAC key lookup), so it is a trusted host identity, not a spoofable caller claim. For a ``qk_``
+    bearer we therefore build the actor directly from the principal (account id + governance roles).
+
+    Returns ``None`` for any other bearer (a session JWT / IdP token), so that path is **unchanged** —
+    the kernel's IdentityPort still verifies the token and resolves the actor. Routes never accept a
+    caller-supplied actor, so this never widens trust.
+    """
+    token = _bearer_token_or_none(request)
+    if token is None or not token.startswith("qk_"):
+        return None
+    principal = getattr(request.state, "principal", None)
+    if principal is None:
+        return None
+    return Actor(
+        id=ActorId(str(principal.account_id)),
+        tenant=tenant,
+        roles=tuple(getattr(principal, "roles", ()) or ()),
+    )
 
 
 def get_request_tenant(request: Request) -> TenantId:

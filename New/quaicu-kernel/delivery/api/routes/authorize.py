@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from core.errors import QUAICUError
 from core.types import Actor, ActorId, RequestContext
-from delivery.api.deps import get_kernel, get_request_tenant
+from delivery.api.deps import get_kernel, get_request_tenant, resolve_governed_actor
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import AuthorizeRequest, AuthorizeResponse
 from delivery.sdk.kernel import Kernel
@@ -40,24 +40,30 @@ async def authorize(body: AuthorizeRequest, request: Request) -> AuthorizeRespon
     tenant = get_request_tenant(request)
 
     token = _bearer_token(request)
-    if not kernel.has_identity:
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "API requires an identity adapter", "code": "IDENTITY_NOT_CONFIGURED"},
-        )
 
-    ctx = RequestContext(
-        headers=dict(request.headers),
-        source_ip=request.client.host if request.client else None,
-        raw_token=token,
-        tenant_hint=tenant,
-    )
-    placeholder_actor = Actor(id=ActorId("unresolved"), tenant=tenant)
+    # API-key path: derive the governance actor from the verified principal and skip IdP resolution
+    # (a qk_ key is not a JWT). Otherwise resolve via the IdentityPort from the bearer (JWT/IdP path).
+    bridged = resolve_governed_actor(request, tenant)
+    if bridged is not None:
+        actor, ctx = bridged, None
+    else:
+        if not kernel.has_identity:
+            raise HTTPException(
+                status_code=503,
+                detail={"error": "API requires an identity adapter", "code": "IDENTITY_NOT_CONFIGURED"},
+            )
+        actor = Actor(id=ActorId("unresolved"), tenant=tenant)
+        ctx = RequestContext(
+            headers=dict(request.headers),
+            source_ip=request.client.host if request.client else None,
+            raw_token=token,
+            tenant_hint=tenant,
+        )
 
     try:
         result = await kernel.check(
             action_type=body.type,
-            actor=placeholder_actor,
+            actor=actor,
             payload=body.payload,
             idempotency_key=body.idempotency_key,
             context=ctx,

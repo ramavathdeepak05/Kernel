@@ -73,3 +73,19 @@ def parse_role(value: object) -> Role:
 def role_scopes(role: object) -> frozenset[str]:
     """The effective scope set for a role."""
     return _ROLE_SCOPES[parse_role(role)]
+
+
+# Governance actor roles per account/member role — the tuple that lands in `Actor.roles` and drives
+# CEL policy evaluation. Mirrors the console session JWT's `roles` claim (e.g. an owner logs in with
+# ["owner", "policy_admin"]) so an API-key-authenticated owner resolves the same governance identity.
+_ACTOR_ROLES: dict[Role, tuple[str, ...]] = {
+    Role.OWNER: ("owner", "policy_admin"),
+    Role.ADMIN: ("admin", "policy_admin"),
+    Role.COMPLIANCE: ("compliance",),
+    Role.VIEWER: ("viewer",),
+}
+
+
+def actor_roles_for(role: object) -> tuple[str, ...]:
+    """The governance `Actor.roles` for an account/member role (fail-closed via `parse_role`)."""
+    return _ACTOR_ROLES[parse_role(role)]
