@@ -90,6 +90,16 @@ class _InMemoryActionRepository:
     ) -> Action | None:
         return self._store.get((str(tenant), str(key)))
 
+    async def get_by_id(self, tenant: TenantId, action_id: ActionId) -> Action | None:
+        return next(
+            (
+                a
+                for a in self._store.values()
+                if str(a.id) == str(action_id) and str(a.tenant) == str(tenant)
+            ),
+            None,
+        )
+
     @property
     def by_key(self) -> dict[tuple[str, str], Action]:
         return self._store
@@ -238,13 +248,78 @@ class Kernel:
             await hitl.approve(
                 handle_id, approver_actor_id=actor.id, approver_roles=tuple(actor.roles)
             )
+            # Resume the gated action (execute → seal → emit) now that it's approved. Best-effort:
+            # a deferred (PENDING_APPROVAL) action completes here; a synchronous one is already
+            # resolved and resume is a no-op. Never raises out — the approval is already recorded.
+            await self.resume_approved(handle_id, approver=actor)
         elif decision == "rejected":
             await hitl.reject(
                 handle_id, approver_actor_id=actor.id, approver_roles=tuple(actor.roles)
             )
+            # A deferred (PENDING_APPROVAL) action must reach a terminal state on rejection — fail-closed
+            # DENY (mirrors the synchronous gate). No-op if there's no such pending action.
+            await self._deny_rejected(handle_id)
         else:
             raise ValueError(f"decision must be 'approved' or 'rejected', got {decision!r}")
         return hitl.get_record(handle_id)
+
+    async def resume_approved(self, handle_id: str, *, approver: Actor) -> Any:
+        """Resume a PENDING_APPROVAL action after its approval — execute → seal → emit.
+
+        Returns the final ``Action`` (COMPLETED on success), or ``None`` if there is nothing to resume
+        (no in-process HITL, the record isn't APPROVED, the action is absent, or it's already resolved —
+        the resume is idempotent). Best-effort: a load/resume failure is logged and swallowed, leaving
+        the approval recorded + the action PENDING for a reconcile (never raises out of the approve path).
+        Scoped to declarative ``propose`` actions, whose execute step is recording the proposed payload.
+        """
+        from core.types import ApprovalDecision, ApproverRef
+
+        hitl = self._in_process_hitl()
+        if hitl is None:
+            return None
+        record = hitl.get_record(handle_id)
+        if record is None or record.decision is not ApprovalDecision.APPROVED:
+            return None
+        try:
+            action = await self.engine._repo.get_by_id(record.tenant, record.action_id)  # type: ignore[attr-defined]
+        except Exception:  # noqa: BLE001 — load failure: leave PENDING for reconcile
+            log.exception("resume: could not load action %s", record.action_id)
+            return None
+        if action is None or action.state is not ActionState.PENDING_APPROVAL:
+            return None  # nothing to resume / already resolved (idempotent)
+
+        payload = dict(action.payload)
+
+        async def _execute_fn() -> dict[str, Any]:
+            return {"payload": payload}
+
+        approver_ref = ApproverRef(f"user:{record.decided_by}") if record.decided_by else None
+        resolved = self.resolve_profile(action.type)
+        try:
+            return await self.engine.resume_after_approval(
+                action, approver=approver_ref, execute_fn=_execute_fn, profile=resolved
+            )
+        except Exception:  # noqa: BLE001 — seal/execute failure already HALTs in-engine; never raise out
+            log.exception("resume_after_approval failed for action %s", action.id)
+            return None
+
+    async def _deny_rejected(self, handle_id: str) -> Any:
+        """Terminal-deny a PENDING_APPROVAL action whose approval was just rejected. Best-effort no-op
+        if there's no in-process HITL / record / pending action (idempotent)."""
+        hitl = self._in_process_hitl()
+        if hitl is None:
+            return None
+        record = hitl.get_record(handle_id)
+        if record is None:
+            return None
+        try:
+            action = await self.engine._repo.get_by_id(record.tenant, record.action_id)  # type: ignore[attr-defined]
+            if action is None:
+                return None
+            return await self.engine.deny_pending(action, "approval rejected")
+        except Exception:  # noqa: BLE001 — leave PENDING for reconcile rather than raise out
+            log.exception("deny-on-reject failed for action %s", record.action_id)
+            return None
 
     # ── Lifecycle hooks (startup / shutdown) ─────────────────────────────────────
 

@@ -115,6 +115,14 @@ FROM   quaicu_actions
 WHERE  tenant_id = $1 AND idempotency_key = $2
 """
 
+_SELECT_BY_ID_SQL = """
+SELECT id, tenant_id, idempotency_key, type, state,
+       actor_id, actor_tenant, actor_roles, actor_attributes,
+       payload, proposed_at
+FROM   quaicu_actions
+WHERE  tenant_id = $1 AND id = $2
+"""
+
 _UPDATE_STATE_SQL = """
 UPDATE quaicu_actions
 SET    state = $1, updated_at = now()
@@ -265,6 +273,20 @@ class PostgresStorageAdapter:
                     row = await conn.fetchrow(
                         _SELECT_BY_IDEMPOTENCY_SQL, str(tenant), str(key)
                     )
+            return _row_to_action(row) if row is not None else None
+        except StoragePortError:
+            raise
+        except Exception as exc:
+            raise StoragePortError(str(exc)) from exc
+
+    async def get_by_id(self, tenant: TenantId, action_id: ActionId) -> Action | None:
+        """Return the (tenant, action_id) action or None. RLS-scoped via app.current_tenant."""
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SELECT set_config('app.current_tenant', $1, true)", str(tenant))
+                    row = await conn.fetchrow(_SELECT_BY_ID_SQL, str(tenant), str(action_id))
             return _row_to_action(row) if row is not None else None
         except StoragePortError:
             raise

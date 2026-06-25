@@ -13,6 +13,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from core.types import (
     Action,
+    ActionId,
     ApproverRef,
     EvaluationResult,
     IdempotencyKey,
@@ -79,4 +80,10 @@ class ActionRepository(Protocol):
         self, tenant: TenantId, key: IdempotencyKey
     ) -> Action | None:
         """Return the action for `(tenant, key)` if present, else None."""
+        ...
+
+    async def get_by_id(self, tenant: TenantId, action_id: ActionId) -> Action | None:
+        """Return the `(tenant, action_id)` action if present, else None. Used to resume a
+        PENDING_APPROVAL action on approval (the approval record carries the tenant + action id, not the
+        idempotency key). `tenant` scopes the read under RLS."""
         ...
