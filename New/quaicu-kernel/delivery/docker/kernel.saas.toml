@@ -11,6 +11,11 @@
 starter  = "/etc/quaicu/kernel.starter.toml"    # in-memory tier
 business = "/etc/quaicu/kernel.business.toml"    # durable Postgres + CEL tier
 
+# Control-plane admin guard (ADR-0010). Set the env var QUAICU_ADMIN_TOKEN (Secret Manager) to enable
+# the /v1/admin/* routes — list tenants, change a tenant's tier (manual upgrade), read usage. Unset →
+# the routes return 503 (closed by default). Present the token as `Authorization: Bearer <token>` or
+# `X-Admin-Token`. This is an operator/control-plane credential — never a tenant API key.
+
 # Durable shared plan store so billing-driven tier flips survive a restart (run migration 005 first).
 # Omit `dsn` to inherit the per-tier [storage] DSN. Use ${ENV_VAR} to keep credentials out of the file.
 [entitlements]

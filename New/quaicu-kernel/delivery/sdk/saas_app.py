@@ -100,6 +100,10 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
         coupon_book=build_coupon_book(config),  # discount codes for the fee / consultation
         erasure_engine=build_erasure(config),  # crypto-shred erasure when [erasure].enabled (W6-4)
         cors_origins=_cors_origins(config),
+        # Control-plane admin guard (ADR-0010): enables /v1/admin/* (e.g. manual tier changes) when a
+        # token is provisioned. Read from the environment so the secret stays out of the config file;
+        # unset → the admin routes stay closed (503), the safe default.
+        admin_token=os.getenv("QUAICU_ADMIN_TOKEN") or None,
     )
 
 

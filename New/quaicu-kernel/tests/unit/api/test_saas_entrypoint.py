@@ -56,6 +56,20 @@ def test_build_saas_app_single_tier(tmp_path) -> None:
     assert [t.value for t in app.state.provider.served_tiers()] == ["STARTER"]
 
 
+def test_admin_token_closed_by_default(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("QUAICU_ADMIN_TOKEN", raising=False)
+    config = {"plane": {"starter": _write_tier(tmp_path, "starter", "saas-starter")}}
+    app = build_saas_app(config)
+    assert app.state.admin_token is None  # /v1/admin/* stays closed (503) — safe default
+
+
+def test_admin_token_wired_from_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("QUAICU_ADMIN_TOKEN", "s3cret-admin")
+    config = {"plane": {"starter": _write_tier(tmp_path, "starter", "saas-starter")}}
+    app = build_saas_app(config)
+    assert app.state.admin_token == "s3cret-admin"  # enables manual tier changes via /v1/admin/*
+
+
 # ── tier_config_paths validation (fail-closed) ────────────────────────────────
 
 
