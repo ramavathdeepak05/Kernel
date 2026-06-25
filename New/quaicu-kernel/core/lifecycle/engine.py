@@ -98,6 +98,7 @@ class LifecycleEngine:
         *,
         context: RequestContext | None = None,
         profile: GovernanceProfile | None = None,
+        defer_gate: bool = False,
     ) -> Action:
         """Drive `action` through the lifecycle, enforcing the layers the `profile` declares.
 
@@ -105,6 +106,12 @@ class LifecycleEngine:
         state (COMPLETED on success; DENIED/HALTED otherwise, or the pre-existing action on an
         idempotency hit). Never raises for an expected governance/infra outcome — the terminal state
         carries it. Each enabled layer remains fail-closed; a disabled layer is skipped by config.
+
+        `defer_gate=True` (declarative `propose` path only): on `REQUIRE_APPROVAL`, create the approval
+        request and **return the PENDING_APPROVAL action without polling/executing** — the action
+        resumes (execute → seal → emit) via `resume_after_approval` when an authorized approver decides.
+        The default `False` keeps the synchronous behavior (poll → fail-closed on timeout) for every
+        existing caller (`guard`/`generate`/`check`).
         """
         prof = profile or self._default_profile
 
@@ -136,6 +143,11 @@ class LifecycleEngine:
                 return await self._deny(
                     action, "approval required but HITL gate disabled by profile"
                 )
+            if defer_gate:
+                # Pause durably: register the approval request + return PENDING_APPROVAL. No poll,
+                # no execute, no seal, no timeout→deny. The action resumes via resume_after_approval
+                # once an approver decides (the durable HITL store survives across instances/restarts).
+                return await self._request_pending(action, evaluation)
             action, approver = await self._gate(action, evaluation)
             if action.state is not ActionState.PENDING_APPROVAL and action.state in (
                 ActionState.DENIED,
@@ -439,6 +451,75 @@ class LifecycleEngine:
             if self._poll_wait is not None:
                 await self._poll_wait()
         return ApprovalOutcome(ApprovalDecision.TIMED_OUT)  # exhausted attempts → fail-closed
+
+    # ── Deferred gate + resume (async approval) ──────────────────────────────────
+
+    async def _request_pending(
+        self, action: Action, evaluation: EvaluationResult
+    ) -> Action:
+        """Deferred gate: transition to PENDING_APPROVAL + register the approval request, then return
+        without polling. Mirrors the first half of `_gate`; the action awaits `resume_after_approval`."""
+        action, ok = await self._transition(action, ActionState.PENDING_APPROVAL)
+        if not ok:
+            return action  # storage failure → HALTED (caller returns it)
+        try:
+            await self._hitl.request_approval(
+                action=action, approvers=list(evaluation.approvers), tenant=action.tenant
+            )
+        except Exception as exc:  # noqa: BLE001 — HITL infra failure → HALT (fail-closed)
+            return await self._halt(action, "HITL request failed — fail-closed halt", exc)
+        return action
+
+    async def resume_after_approval(
+        self,
+        action: Action,
+        *,
+        approver: ApproverRef | None,
+        execute_fn: ExecuteFn,
+        profile: GovernanceProfile | None = None,
+    ) -> Action:
+        """Resume a PENDING_APPROVAL action after an authorized approval: re-evaluate → execute → seal
+        → emit. **Idempotent** — a no-op unless the action is still PENDING_APPROVAL, so a repeated
+        approval can never double-execute or double-seal. **Fail-closed** — a re-evaluation DENY denies
+        the action; a seal failure HALTs it (the existing `_execute`/`_seal` semantics)."""
+        prof = profile or self._default_profile
+        if action.state is not ActionState.PENDING_APPROVAL:
+            return action  # already resolved (idempotency / double-approve guard)
+
+        # Re-evaluate to obtain the evaluation to seal (the seal records policy as of completion). Use
+        # the policy directly — `_evaluate` transitions to EVALUATING, which is illegal from
+        # PENDING_APPROVAL. The APPROVED HITL record (not this evaluation) authorizes passing the gate.
+        if prof.enforce_policy:
+            try:
+                evaluation = await self._policy.evaluate(action)
+            except Exception as exc:  # noqa: BLE001 — any policy failure → DENY (fail-closed)
+                return await self._deny(action, "policy re-evaluation failed — fail-closed", exc)
+            if evaluation is None:
+                return await self._deny(action, "policy returned None — fail-closed")
+            if evaluation.decision is Decision.DENY:
+                return await self._deny(action, evaluation.reason or "policy denied on resume")
+        else:
+            evaluation = EvaluationResult(
+                decision=Decision.ALLOW, policy_versions=("<policy-unenforced>",)
+            )
+        evaluation = self._annotate(evaluation, {}, prof)
+
+        action, result = await self._execute(action, execute_fn)
+        if action.state is ActionState.HALTED:
+            return action
+        action, entry = await self._seal(action, evaluation, result, approver, prof)
+        if action.state is ActionState.HALTED:
+            return action
+        if prof.emit_events:
+            await self._emit(action, entry)
+        return action
+
+    async def deny_pending(self, action: Action, reason: str) -> Action:
+        """Fail-closed terminal for a rejected/expired deferred gate: PENDING_APPROVAL → DENIED.
+        Idempotent — a no-op unless the action is still PENDING_APPROVAL."""
+        if action.state is not ActionState.PENDING_APPROVAL:
+            return action
+        return await self._deny(action, reason)
 
     async def _execute(self, action: Action, execute_fn: ExecuteFn) -> tuple[Action, Any]:
         action, ok = await self._transition(action, ActionState.EXECUTING)

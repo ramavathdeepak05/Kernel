@@ -131,15 +131,18 @@ def _run_once(base: str, api_key: str, applicants: int, dry_run: bool) -> int:
             continue
         status, body = _propose(base, api_key, action_type, payload, ikey)
         # These status codes are GOVERNANCE OUTCOMES, not transport failures:
-        #   200/202 → executed + sealed · 403 → policy DENY · 422 → HALT (e.g. approval gate could
-        #   not be satisfied on this tier). Only other codes are real errors.
+        #   202 COMPLETED → executed + sealed · 202 PENDING_APPROVAL → gated, awaiting an approver
+        #   (queued to /v1/approvals; seals when approved) · 403 → policy DENY · 422 → HALT.
         if 200 <= status < 300:
             state = body.get("state", "COMPLETED") if isinstance(body, dict) else "COMPLETED"
-            marker, outcome = "✓", f"{state} (sealed)"
+            if state == "PENDING_APPROVAL":
+                marker, outcome = "⏸", "PENDING_APPROVAL (queued; seals on approve)"
+            else:
+                marker, outcome = "✓", f"{state} (sealed)"
         elif status == 403:
             marker, outcome = "⛔", "DENIED by policy"
         elif status == 422:
-            marker, outcome = "⏸", "HALTED (approval gate — see note)"
+            marker, outcome = "⏸", "HALTED (approval gate)"
         else:
             marker, outcome = "✗", f"[{status}] {body}"
             failures += 1
@@ -175,12 +178,11 @@ def main() -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\nstopped.")
-    print("\n✓ = executed + sealed (see console → Audit + Download proof bundle).")
-    print("⛔ = denied by an active policy, OR a require-approval action that timed out the synchronous")
-    print("     gate → fail-closed DENY. On in-process-HITL tiers the approval record is still QUEUED")
-    print("     (console → Approvals); on a webhook tier with no receiver it HALTs (⏸) instead.")
-    print("⏸ = require-approval HALTED (no HITL receiver). The full approve→execute→seal flow is shown")
-    print("     by the local demos (demo.py / ../underwriting-demo/demo.py). See LIVE_DEMO_RUNBOOK.md.")
+    print("\n✓ = executed + sealed (console → Audit + Download proof bundle).")
+    print("⛔ = denied by an active policy (fail-closed).")
+    print("⏸ = require-approval: durably queued (console → Approvals). Approving it executes + seals")
+    print("     the action (kernel.resume_approved) — note an approver must differ from the proposer")
+    print("     (separation of duties). See LIVE_DEMO_RUNBOOK.md.")
     return 0
 
 

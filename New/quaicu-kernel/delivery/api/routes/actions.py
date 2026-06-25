@@ -122,7 +122,10 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
         return {"payload": dict(action.payload)}
 
     try:
-        final = await kernel.engine.run(action, execute_fn, context=ctx)
+        # defer_gate: a require_approval action pauses at PENDING_APPROVAL (durably queued to HITL)
+        # and is completed later via the approvals API (kernel.resume_approved) — it does NOT block
+        # the request or fail-closed-deny on a synchronous timeout.
+        final = await kernel.engine.run(action, execute_fn, context=ctx, defer_gate=True)
     except QUAICUError as exc:
         raise HTTPException(status_code=503, detail={"error": str(exc), "code": exc.code})
 
@@ -137,6 +140,7 @@ async def propose_action(body: ProposeRequest, request: Request) -> ActionRespon
             detail={"error": "Action halted by governance", "action_id": str(final.id)},
         )
 
+    # 202 ActionResponse — COMPLETED (allowed) or PENDING_APPROVAL (gated; awaiting an approver).
     return _action_response(final)
 
 
