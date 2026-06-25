@@ -7,7 +7,7 @@ id = "saas-starter"
 
 [adapters]
 policy   = "cel_policy"     # real K·01 CEL enforcement (in-memory store, seeded below)
-hitl     = "webhook"
+hitl     = "in_process"     # built-in approvals queue: require_approval actions land in /v1/approvals
 ledger   = "memory_ledger"
 events   = "memory_events"
 identity = "jwt"
@@ -48,10 +48,12 @@ log_sink = true
 # [events.webhook_headers]
 # DD-API-KEY = "${DATADOG_API_KEY}"
 
+# In-process HITL queue (see [adapters].hitl). require_approval actions are held here and surfaced on
+# /v1/approvals (the console Approvals page); the list/decide surface is tenant-scoped. timeout_seconds
+# bounds how long a request waits for a decision. (To route approvals to an external system instead,
+# set hitl = "webhook" and provide dispatch_url/poll_url.)
 [hitl]
-dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"
-poll_url     = "http://host.docker.internal:9000/hitl/status"
-timeout      = 10
+timeout_seconds = 86400
 
 [identity]
 secret_or_key = "${KERNEL_JWT_SECRET}"

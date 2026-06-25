@@ -24,7 +24,7 @@ from core.errors import HITLPortError, IdentityPortError
 from core.hitl.model import ApprovalRecord
 from core.types import Actor, RequestContext, TenantId
 from delivery.api.auth import enforce_scope
-from delivery.api.deps import get_kernel, get_request_tenant
+from delivery.api.deps import get_kernel, get_request_tenant, resolve_governed_actor
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import ApprovalListResponse, ApprovalRecordResponse
 from delivery.sdk.kernel import Kernel
@@ -51,6 +51,11 @@ async def _authenticate(request: Request, *, scope: str) -> tuple[Kernel, Actor,
                 "code": "HITL_QUEUE_UNAVAILABLE",
             },
         )
+    # API-key path: the verified principal is the host identity (a qk_ key is not a JWT). Otherwise
+    # resolve via the IdentityPort from the bearer (JWT/IdP path — unchanged).
+    bridged = resolve_governed_actor(request, tenant)
+    if bridged is not None:
+        return kernel, bridged, tenant
     token = _bearer_token(request)
     if not kernel.has_identity:
         raise HTTPException(

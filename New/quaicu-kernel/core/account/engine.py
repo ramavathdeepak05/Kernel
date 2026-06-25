@@ -33,7 +33,7 @@ from core.account.model import (
     SignupDetails,
 )
 from core.account.passwords import hash_password, verify_password
-from core.account.roles import Role, parse_role
+from core.account.roles import Role, actor_roles_for, parse_role
 from core.account.scopes import OWNER_SCOPES, normalize_scopes
 from core.account.store import AccountStore
 from core.entitlements import CustomerPlan, EntitlementStore, FeatureTier, PlanStatus
@@ -383,11 +383,13 @@ class AccountEngine:
         if not tenant or not account_id:
             raise ApiKeyInvalidError("Session token missing tenant/subject.")
         scopes = payload.get("scopes") or sorted(OWNER_SCOPES)
+        roles = tuple(str(r) for r in payload.get("roles", [])) or actor_roles_for(Role.OWNER)
         return AuthenticatedPrincipal(
             tenant_id=TenantId(str(tenant)),
             account_id=str(account_id),
             key_id="session",
             scopes=frozenset(str(s) for s in scopes),
+            roles=roles,
         )
 
     # ── Encrypted, self-contained verification token (AES-256-GCM over the pepper) ──
@@ -698,14 +700,23 @@ class AccountEngine:
 
         This is what the API auth layer uses. A ``qk_…`` bearer is an API key (programmatic access); any
         other bearer is treated as a console session JWT (email+password login). Both yield a principal
-        with tenant + scopes. Fail-closed (raises `ApiKeyInvalidError`).
+        with tenant + scopes + governance roles. Fail-closed (raises `ApiKeyInvalidError`).
         """
         if (presented or "").startswith("qk_"):
             account, record = self._verify(presented)
+            # Governance roles for the key: the bound member's role (W6-1), else OWNER for the
+            # account/bootstrap key (the tenant root). These become the actor's roles when the key
+            # authenticates a governed action (see delivery/api/deps.resolve_governed_actor).
+            role = Role.OWNER
+            if record.member_id:
+                member = self._accounts.get_member(record.member_id)
+                if member is not None and str(member.tenant_id) == str(record.tenant_id):
+                    role = parse_role(member.role)
             return AuthenticatedPrincipal(
                 tenant_id=record.tenant_id,
                 account_id=account.account_id,
                 key_id=record.key_id,
                 scopes=record.scopes,
+                roles=actor_roles_for(role),
             )
         return self._resolve_session(presented or "")

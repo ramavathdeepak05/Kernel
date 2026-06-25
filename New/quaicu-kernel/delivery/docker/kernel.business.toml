@@ -9,7 +9,7 @@ id = "saas-business"
 [adapters]
 policy       = "cel_policy"        # real K·01 CEL evaluator
 policy_store = "postgres_policy"   # durable policy persistence
-hitl         = "webhook"
+hitl         = "in_process"        # built-in approvals queue (/v1/approvals); tenant-scoped list/decide
 ledger       = "gcp_kms_ledger"    # RFC 6962 transparency log, Cloud KMS-signed STHs (FIPS 140-2)
 ledger_store = "postgres_ledger"   # durable Merkle backend (the signer above persists through it)
 storage      = "postgres_storage"  # durable action persistence
@@ -35,10 +35,10 @@ key      = "sth-signer"
 [ledger_store]
 dsn = "${KERNEL_DSN}"
 
+# In-process HITL queue (see [adapters].hitl). require_approval actions surface on /v1/approvals
+# (tenant-scoped). For an external approval system instead, set hitl = "webhook" + dispatch_url/poll_url.
 [hitl]
-dispatch_url = "http://host.docker.internal:9000/hitl/dispatch"
-poll_url     = "http://host.docker.internal:9000/hitl/status"
-timeout      = 30
+timeout_seconds = 86400
 
 [identity]
 secret_or_key = "${KERNEL_JWT_SECRET}"
