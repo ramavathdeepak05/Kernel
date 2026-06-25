@@ -183,6 +183,26 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · Regulated-FS demo — shipped RBI/DPDP/EU-AI-Act packs governing a demo tenant · examples · claude** —
+  Follow-on to the underwriting demo, per the user: a demo account using the **existing** policy packs +
+  a real-environment walkthrough. `examples/policy-pack-demo/`: **`demo.py`** (verified, exit 0) loads
+  the in-the-box `docs/policy-packs/{rbi,dpdp,eu-ai-act}/` content via `core.policy.packs.get_pack` (the
+  same loader behind the live `/v1/policy-packs` import) — **25 policies** — into tenant `demo-nbfc`,
+  then governs ~12 realistic actions across all three regimes (RBI data.store/transfer/outsourcing/
+  access · DPDP personal_data.process/transfer · EU ai_system.invoke) → allow / deny / require_approval
+  →approve, all hitting the **actual pack CEL** (payloads honor each pack's documented contract; the
+  shared approver carries compliance/cro/dpo/compliance_officer roles), then exports the K·02 bundle and
+  **verifies offline** (7 sealed, 5 denied-not-sealed). **`realenv.py`** drives the packs against a LIVE
+  kernel (default `https://kernel.quaicu.org`) with the user's `qk_` API key — `/v1/me/entitlements`
+  auth check, optional `/v1/policy-packs/{id}/import`, and `/v1/authorize` per-regime actions (each
+  sealed); stdlib-only. **`README.md`** gives the local runbook (verified) + the prod walkthrough
+  (browser signup→OTP→₹2 test fee→login→create key→console "Start from a policy pack" import+activate→
+  `realenv.py`→Audit/Download proof bundle). **Prod safety:** I did **not** create accounts or mutate
+  `kernel.quaicu.org` — those steps are the user's (signup needs OTP+payment; pack import needs a
+  policy-admin key; enforcement needs activation) and are documented honestly, incl. the synchronous-
+  approval caveat. ruff clean. No core changes (reuses the W7-2 `memory_signed_ledger` + `in_process`
+  wirings). **Follow-ups:** a policy-admin-scoped demo key so `realenv.py --import-packs` works headless;
+  cleaning up any demo tenants created on prod.
 - **2026-06-25 · W7-2 sales-engineering collateral + runnable underwriting demo · examples + docs · claude** —
   Shipped the four W7-2 deliverables; the demo is the code centerpiece. **(1) Runnable demo env**
   `examples/underwriting-demo/`: `demo.py` runs use-case-1 (credit-underwriting, HITL-gated) end-to-end
