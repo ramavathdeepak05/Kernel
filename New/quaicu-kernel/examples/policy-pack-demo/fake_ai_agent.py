@@ -99,6 +99,9 @@ def _propose(base: str, api_key: str, action_type: str, payload: dict, ikey: str
     req = urllib.request.Request(f"{base}/v1/actions/propose", data=body, method="POST")
     req.add_header("Authorization", f"Bearer {api_key}")
     req.add_header("Content-Type", "application/json")
+    # A normal UA — a CDN/WAF (e.g. Cloudflare) in front of the kernel may block the default
+    # "Python-urllib/x" agent (HTTP 1010). Identify as a generic client.
+    req.add_header("User-Agent", "quaicu-demo-agent/1.0")
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             raw = resp.read().decode()
