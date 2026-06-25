@@ -10,11 +10,13 @@ scopes every operation to the caller's tenant — a tenant can only see/mint/rev
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Body, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from core.errors import ApiKeyInvalidError
-from delivery.api.auth import current_principal
+from core.account.roles import role_scopes
+from core.account.scopes import MEMBERS_ADMIN
+from core.errors import ApiKeyInvalidError, QUAICUError
+from delivery.api.auth import current_principal, enforce_scope
 
 router = APIRouter(prefix="/v1", tags=["keys"])
 
@@ -34,6 +36,15 @@ class CreatedApiKey(BaseModel):
     key_id: str
     api_key: str = Field(..., description="Plaintext key — shown ONCE; store it securely.")
     created_at: str
+
+
+class CreateKeyRequest(BaseModel):
+    member_id: str | None = Field(
+        None,
+        description="Bind the key to this member (W6-1): the key acts AS that member — a distinct "
+        "governance actor with the member's role + scopes (so a member can approve an action the "
+        "owner proposed). Requires the members:admin scope. Omit for an account-level (owner) key.",
+    )
 
 
 def _principal(request: Request):
@@ -76,10 +87,24 @@ async def list_keys(request: Request) -> ApiKeyList:
 @router.post(
     "/keys", response_model=CreatedApiKey, status_code=status.HTTP_201_CREATED, summary="Mint an API key"
 )
-async def create_key(request: Request) -> CreatedApiKey:
+async def create_key(
+    request: Request, body: CreateKeyRequest | None = Body(default=None)
+) -> CreatedApiKey:
     principal = _principal(request)
     engine = _engine(request)
-    record, plaintext = engine.issue_api_key(principal.tenant_id)
+    member_id = body.member_id if body else None
+    if member_id:
+        # Binding a key to a member mints a credential that acts as that member — gate on members:admin.
+        enforce_scope(request, MEMBERS_ADMIN)
+        try:
+            member = engine.get_member(principal.tenant_id, member_id)
+        except QUAICUError as exc:
+            raise HTTPException(status_code=404, detail={"error": str(exc), "code": exc.code})
+        record, plaintext = engine.issue_api_key(
+            principal.tenant_id, scopes=role_scopes(member.role), member_id=member_id
+        )
+    else:
+        record, plaintext = engine.issue_api_key(principal.tenant_id)
     return CreatedApiKey(
         key_id=record.key_id, api_key=plaintext, created_at=record.created_at.isoformat()
     )

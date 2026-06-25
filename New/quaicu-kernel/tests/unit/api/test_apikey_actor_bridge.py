@@ -77,3 +77,33 @@ def test_member_bound_key_resolves_member_roles() -> None:
     _record, presented = eng.issue_api_key(account.tenant_id, member_id=member.member_id)
     principal = eng.resolve_principal(presented)
     assert principal.roles == actor_roles_for(Role.COMPLIANCE)
+
+
+# ── member-bound key → a distinct governance actor (separation of duties) ─────
+
+def test_member_bound_key_subject_is_distinct_from_owner() -> None:
+    eng = AccountEngine(AccountStore(), EntitlementStore(), pepper="p", session_secret="s")
+    account, _ = eng.signup(email="a@b.io", name="Acme")
+    member = eng.provision_member(
+        account.tenant_id, email="c@x.io", display_name="C", role=Role.COMPLIANCE.value
+    )
+    _record, presented = eng.issue_api_key(account.tenant_id, member_id=member.member_id)
+    principal = eng.resolve_principal(presented)
+    assert principal.subject == f"member:{member.member_id}"
+    assert principal.actor_id == f"member:{member.member_id}"
+    assert principal.actor_id != account.account_id  # distinct from the proposer → SoD can be satisfied
+
+
+def test_owner_key_subject_is_the_account() -> None:
+    eng = AccountEngine(AccountStore(), EntitlementStore(), pepper="p", session_secret="s")
+    account, presented = eng.signup(email="a@b.io", name="Acme")
+    assert eng.resolve_principal(presented).actor_id == account.account_id
+
+
+def test_bridge_actor_id_uses_subject() -> None:
+    principal = AuthenticatedPrincipal(
+        tenant_id=_T, account_id="acct_owner", key_id="k", scopes=frozenset(),
+        roles=("compliance",), subject="member:mem_1",
+    )
+    actor = resolve_governed_actor(_request("Bearer qk_a_b", principal), _T)
+    assert actor is not None and str(actor.id) == "member:mem_1"
