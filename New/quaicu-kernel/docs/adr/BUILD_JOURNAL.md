@@ -183,6 +183,21 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-25 · Fake credit + KYC/AML AI → living console demo on kernel.quaicu.org · examples · claude** —
+  Per the user: a demo that populates the **live console** with a fake AI running credit-underwriting +
+  KYC/AML, all packs loaded. Added `examples/policy-pack-demo/fake_ai_agent.py` — two simulated agents
+  (KYC/AML onboarding + credit underwriting) that fire a believable stream of governed
+  `POST /v1/actions/propose` calls mapped onto the shipped packs (personal_data.process→DPDP,
+  data.store/data.transfer/access.grant→RBI, ai_system.invoke[credit_scoring,high]→EU), with archetype
+  variety so **Audit** fills with sealed actions and **Approvals** fills with cross-border AML + no-
+  oversight credit reviews. `--dry-run` (verified — prints the plan), `--loop`/`--interval` (keep the
+  console alive), `--applicants N`; stdlib-only; reports 403/scope + not-activated hints. Per-action
+  outcomes are the ones `demo.py` already verifies against the real packs. README reworked to a living-
+  console runbook (browser signup→OTP→₹2→key→console pack import+**activate**→run agent→Audit/Approvals).
+  **Prod boundary unchanged:** account creation / key minting / pack activation are the user's console
+  steps (OTP+payment+policy-admin); I build the traffic generator, not the prod account. **Follow-ups:**
+  a policy-admin demo key for headless import; the synchronous-approval semantic (approve doesn't
+  re-execute) is a known edge; tenant cleanup on prod.
 - **2026-06-25 · Regulated-FS demo — shipped RBI/DPDP/EU-AI-Act packs governing a demo tenant · examples · claude** —
   Follow-on to the underwriting demo, per the user: a demo account using the **existing** policy packs +
   a real-environment walkthrough. `examples/policy-pack-demo/`: **`demo.py`** (verified, exit 0) loads

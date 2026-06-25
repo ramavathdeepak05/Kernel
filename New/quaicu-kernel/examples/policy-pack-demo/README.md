@@ -37,52 +37,67 @@ a call or record it.
 
 ---
 
-## B. Real environment — `kernel.quaicu.org` (you drive it)
+## B. Living console demo — `kernel.quaicu.org` with a fake credit + KYC/AML AI
 
-This touches a **production** system, so the account/key steps are yours to do in the browser; the
-scripted part runs with your key. (Today `kernel.quaicu.org` serves the console SPA and proxies
-`/v1/*` to the kernel.)
+The goal: a **demo account on the live console** with **all packs loaded** and a **fake AI system**
+firing credit-underwriting + KYC/AML calls, so the **Audit** and **Approvals** pages fill with realistic
+governed traffic. This touches a **production** system, so the account/key/pack steps are yours to do in
+the browser (an agent can't do OTP + payment + console clicks for you); the **fake AI traffic** is a
+script you run with your key.
 
-### B1. Create a demo account (browser, one-time)
-1. Go to **`https://kernel.quaicu.org`** → **Plans** → pick **Starter** (self-serve).
+### B1. Create the demo account (browser, one-time ~5 min)
+1. **`https://kernel.quaicu.org`** → **Plans** → **Starter** (self-serve).
 2. Sign up: email **OTP** → onboarding survey → password → the one-time **₹2 signup fee** via Razorpay
-   (currently **test** keys). You're auto-logged-in. *(Signup creates a durable account/tenant — use a
-   throwaway you don't mind keeping or asking ops to clean up.)*
-3. Console → **API Keys** → **Create** → copy the `qk_…` key.
+   (currently **test** keys, so effectively free). You're auto-logged-in. *(This creates a durable
+   account/tenant — use a throwaway and have ops clean it up after.)*
+3. Console → **API Keys** → **Create** → copy the `qk_…` key. (Ensure it has action-write scope.)
 
-### B2. Load the regulatory packs (console — has policy-admin)
-- Console → **Policies → "Start from a policy pack"** → import **RBI**, **DPDP**, **EU AI Act**. They
-  land as **DRAFTs** (never silently enforced).
-- For each policy you want enforced: open it → backtest → **activate** (the F-10 gate). Activate a few
-  to make the next step show real enforcement.
+### B2. Load + activate all the packs (console — it has policy-admin)
+- Console → **Policies → "Start from a policy pack"** → import **RBI**, **DPDP**, **EU AI Act** (they
+  land as **DRAFTs** — never silently enforced).
+- **Activate** the policies you want enforced (open → backtest → activate, the F-10 gate). Activate the
+  data.store / data.transfer / personal_data.process / ai_system.invoke / access.grant rules so the fake
+  AI's calls are actually governed. *(Optional: `realenv.py --import-packs` imports via API if your key
+  has policy-admin — but activation is still a console step.)*
 
-### B3. Govern actions over HTTPS with your key
+### B3. Run the fake AI system (the living traffic)
 ```bash
 # PowerShell:
 $env:QUAICU_API_KEY = "qk_xxx"
-python examples/policy-pack-demo/realenv.py --base https://kernel.quaicu.org --import-packs
+python examples/policy-pack-demo/fake_ai_agent.py --base https://kernel.quaicu.org --applicants 8
+# keep the console alive during a call:
+python examples/policy-pack-demo/fake_ai_agent.py --loop --interval 20
+# preview the call plan without sending:
+python examples/policy-pack-demo/fake_ai_agent.py --dry-run
 ```
-The helper: confirms the key (`/v1/me/entitlements`), optionally imports the packs
-(`/v1/policy-packs/{id}/import` — needs a policy-admin key; otherwise do it in the console per B2), and
-sends a representative governed action per pack to `/v1/authorize`. Each decision is **sealed** to your
-tenant's audit trail.
+Two simulated agents (KYC/AML onboarding + credit underwriting) fire a believable stream of governed
+`POST /v1/actions/propose` calls mapped onto the shipped packs:
 
-> Outcomes reflect the policies **active** in your tenant. Until you activate pack policies (B2), actions
-> fall through to the deployment's fail-closed default — that's expected.
+| Fake-AI step | Action type | Pack | Typical outcome |
+|---|---|---|---|
+| KYC identity screen | `personal_data.process` | DPDP | allow (or **deny** if no consent) |
+| store KYC docs | `data.store` | RBI | allow (India + encrypted) |
+| AML sanctions screening | `data.transfer` | RBI | **review** if cross-border |
+| credit-bureau pull | `personal_data.process` | DPDP | allow |
+| store financials | `data.store` | RBI | **deny** if payment data offshore |
+| AI credit decision | `ai_system.invoke` | EU AI Act | **review** if high-risk + no human oversight |
+| analyst case access | `access.grant` | RBI | allow (logged) |
 
-### B4. See the proof
-- Console → **Audit** → the sealed decisions from B3 → **Download proof bundle (JSON)** — independently
-  verifiable offline (the same `verify_ledger_proof_bundle` the local script runs).
-- Console → **Get started / `/start`** also has a live try-it against a seeded policy + copy-paste
-  curl/Python.
+So **Audit** fills with sealed actions and **Approvals** fills with cross-border AML reviews + no-oversight
+credit decisions awaiting a human. (The exact action→outcome mapping is verified locally by `demo.py`.)
+
+### B4. Show it in the console
+- **Audit** → the sealed governed actions → **Download proof bundle (JSON)** (offline-verifiable).
+- **Approvals** → the pending high-risk credit + cross-border AML reviews.
+- **Policies** → the three imported packs governing it all.
 
 ### Honest notes
-- **The local script (A) is the verified source of truth.** The live walkthrough has rough edges
-  (signup is a browser flow; pack import needs a policy-admin key; enforcement needs activation; the
-  synchronous-propose approval semantics differ from the script). Use A to *prove it works*, B to show
-  *real integration*.
-- `realenv.py` **writes to your tenant** (DRAFT policies + sealed authorize records). Run it on a demo
-  tenant you own.
+- **The local script (A) is the verified source of truth.** The live demo has real edges: signup is a
+  browser flow; pack import needs a policy-admin key (do it in the console); **enforcement needs
+  activation** (until then, actions fall through to the fail-closed default — that's expected); and the
+  synchronous-propose approval path means a high-risk action is recorded for approval but won't
+  re-execute on approve (that full semantic is what the local scripts show cleanly).
+- `fake_ai_agent.py` / `realenv.py` **write to your tenant**. Run them on a demo tenant you own.
 
 ---
 
@@ -90,7 +105,8 @@ tenant's audit trail.
 | File | Purpose |
 |------|---------|
 | `demo.py` | Local, verified — shipped packs govern a tenant end-to-end + offline verify. |
-| `realenv.py` | HTTP helper to drive the packs against a live kernel with your API key. |
+| `fake_ai_agent.py` | The fake credit + KYC/AML AI → a stream of governed calls to a live console (`--dry-run`/`--loop`). |
+| `realenv.py` | Setup helper — API-key auth check + optional pack import + a few sample `/v1/authorize` calls. |
 | `README.md` | This file. |
 
 ## See also
