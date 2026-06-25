@@ -38,7 +38,7 @@ from core.sandbox.engine import run_counterfactual_backtest
 from core.account.scopes import POLICY_ADMIN
 from core.types import ApproverRef, Actor, Decision, RequestContext
 from delivery.api.auth import enforce_scope
-from delivery.api.deps import get_kernel, get_request_tenant
+from delivery.api.deps import get_kernel, get_request_tenant, resolve_governed_actor
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import (
     ActivateRequest,
@@ -79,27 +79,31 @@ async def _require_policy_admin(request: Request) -> tuple[Kernel, Actor]:
         )
     token = _bearer_token(request)
     enforce_scope(request, POLICY_ADMIN)
-    if not kernel.has_identity:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error": "API requires an identity adapter to authenticate callers",
-                "code": "IDENTITY_NOT_CONFIGURED",
-            },
-        )
 
-    ctx = RequestContext(
-        headers=dict(request.headers),
-        source_ip=request.client.host if request.client else None,
-        raw_token=token,
-        tenant_hint=tenant,
-    )
-    try:
-        actor = await kernel.resolve_actor(ctx, tenant=tenant)
-    except IdentityPortError as exc:
-        # Without this catch the global QUAICUError handler would wrongly map an auth failure to 503.
-        raise HTTPException(status_code=401, detail={"error": str(exc), "code": exc.code})
-    # TenantIsolationError propagates → global handler maps it to 403.
+    # API-key path: the verified principal is the host actor (carries the account/member roles); a qk_
+    # key is not a JWT the IdentityPort can read. Otherwise resolve via the IdentityPort (JWT/IdP path).
+    actor = resolve_governed_actor(request, tenant)
+    if actor is None:
+        if not kernel.has_identity:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "API requires an identity adapter to authenticate callers",
+                    "code": "IDENTITY_NOT_CONFIGURED",
+                },
+            )
+        ctx = RequestContext(
+            headers=dict(request.headers),
+            source_ip=request.client.host if request.client else None,
+            raw_token=token,
+            tenant_hint=tenant,
+        )
+        try:
+            actor = await kernel.resolve_actor(ctx, tenant=tenant)
+        except IdentityPortError as exc:
+            # Without this catch the global QUAICUError handler would wrongly map auth failure to 503.
+            raise HTTPException(status_code=401, detail={"error": str(exc), "code": exc.code})
+        # TenantIsolationError propagates → global handler maps it to 403.
 
     actor_roles = {r if r.startswith("role:") else f"role:{r}" for r in actor.roles}
     if not actor_roles & set(kernel.policy_admin_roles):

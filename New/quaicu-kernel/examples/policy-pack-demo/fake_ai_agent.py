@@ -176,10 +176,11 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nstopped.")
     print("\n✓ = executed + sealed (see console → Audit + Download proof bundle).")
-    print("⛔ = denied by an active policy (fail-closed).")
-    print("⏸ = require-approval action HALTED: this tier's HITL is webhook-based with no receiver, so")
-    print("     it can't queue approvals. The approve→execute→seal flow is shown by the local demos")
-    print("     (demo.py / ../underwriting-demo/demo.py with an in-process HITL). See LIVE_DEMO_RUNBOOK.md.")
+    print("⛔ = denied by an active policy, OR a require-approval action that timed out the synchronous")
+    print("     gate → fail-closed DENY. On in-process-HITL tiers the approval record is still QUEUED")
+    print("     (console → Approvals); on a webhook tier with no receiver it HALTs (⏸) instead.")
+    print("⏸ = require-approval HALTED (no HITL receiver). The full approve→execute→seal flow is shown")
+    print("     by the local demos (demo.py / ../underwriting-demo/demo.py). See LIVE_DEMO_RUNBOOK.md.")
     return 0
 
 
