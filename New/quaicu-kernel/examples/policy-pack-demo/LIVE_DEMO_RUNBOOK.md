@@ -52,7 +52,21 @@ this repo's scripts already send a normal `User-Agent`; make sure you're on the 
 
 ---
 
-## 3. Load + activate the packs (console — it has policy-admin)
+## 3. Install the demo policy set
+
+**Fastest (scripted):** with your session JWT exported, run the installer — it authors + activates a
+cap-sized set (one catch-all `allow` + four guardrails) in one shot:
+```bash
+python examples/policy-pack-demo/activate_demo_policies.py --base https://kernel.quaicu.org
+```
+This reproduces the verified setup on `quaicu-222af5` (5/5 active). Then skip to step 4.
+
+> ⚠️ If you've deprecated `starter-allow-baseline`, you **need** a catch-all `allow` again — otherwise any
+> action type with no matching active policy **fail-closes to DENY** (empty policy set). The installer's
+> `demo-allow-baseline` restores it; the four guardrails carve out the deny/review exceptions
+> (deny-overrides).
+
+**Or, manually (console — has policy-admin):**
 
 The fake AI's calls map onto the shipped packs. Until rules are **active**, everything matches only the
 default `starter-allow-baseline` (`allow *`) and seals as `COMPLETED` — good for populating Audit, but no
@@ -112,9 +126,15 @@ Keep passes under the rate limit (`rate_limit_per_min: 60`).
 - **API-key gap:** the `qk_` key can't drive governed actions on the SaaS plane (needs a session JWT).
   The durable fix — bridging the API-key principal → lifecycle actor so the documented integration
   credential works — is a small kernel change + a prod redeploy.
-- **Approval semantics:** on the synchronous propose path, a high-risk action is recorded for approval
-  but approving it in the UI doesn't re-execute it. The clean approve→execute→seal flow is shown by the
-  local scripts (`demo.py`, `../underwriting-demo/demo.py`).
+- **Approvals queue can't populate on STARTER:** the live tier's HITL adapter is **webhook-based with no
+  receiver configured**, so a `require_approval` action fail-closes to **HALT** (the agent shows `⏸`,
+  the propose API returns 422) instead of landing in the **Approvals** queue. So the live console demo
+  shows **allow (sealed) + deny** cleanly, but **not** a populated Approvals page. The full
+  route-to-a-human → approve → execute → seal flow is shown by the local scripts (`demo.py`,
+  `../underwriting-demo/demo.py`, which wire an in-process HITL). Live in-console approvals would need an
+  in-process HITL adapter on the tier kernel (a config change + redeploy).
+- **Verified live (2026-06-25):** 78 governed actions sealed to `quaicu-222af5`; 5 policies active;
+  payment-offshore + no-consent actions correctly DENIED; require_approval actions HALTED per the above.
 
 ## See also
 - Local, no-server version (all 3 packs, offline-verified): [`demo.py`](demo.py) / [`README.md`](README.md)
