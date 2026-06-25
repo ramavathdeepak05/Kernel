@@ -19,6 +19,7 @@ import dataclasses
 import functools
 import importlib
 import inspect
+import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -95,6 +96,9 @@ class _InMemoryActionRepository:
 
 
 # ── Adapter registry (F-11 config over code) ───────────────────────────────────
+
+log = logging.getLogger(__name__)
+
 
 # Maps config key → (module_path, class_name). Extended by plugins via register_adapter().
 _ADAPTER_REGISTRY: dict[str, tuple[str, str]] = {
@@ -442,7 +446,7 @@ class Kernel:
             else:
                 policy = _load_adapter(adapter_cfg["policy"])
         if "hitl" in adapter_cfg:
-            hitl = _load_adapter(adapter_cfg["hitl"], **cfg.get("hitl", {}))
+            hitl = cls._build_hitl(adapter_cfg, cfg)
         if "ledger" in adapter_cfg:
             ledger, ledger_repository = cls._build_ledger(adapter_cfg, cfg)
         if "events" in adapter_cfg:
@@ -491,6 +495,36 @@ class Kernel:
             ledger_repository=ledger_repository,
             policy_admin_roles=policy_admin_roles,
         )
+
+    @staticmethod
+    def _build_hitl(adapter_cfg: dict[str, Any], cfg: dict[str, Any]) -> HITLPort:
+        """Assemble the HITL port.
+
+        For ``hitl = "in_process"`` an optional ``[hitl].store = "postgres"`` (+ a ``dsn``) backs the
+        approvals queue with a durable, cross-instance ``PostgresApprovalStore`` instead of per-process
+        memory — so ``/v1/approvals`` is consistent on a horizontally-scaled plane. Omit ``store`` for
+        the in-memory default. Any other adapter (e.g. ``webhook``) is built from the flat registry.
+        """
+        name = adapter_cfg["hitl"]
+        hitl_cfg = dict(cfg.get("hitl", {}))
+        if name != "in_process":
+            return _load_adapter(name, **hitl_cfg)
+
+        from core.hitl.engine import InProcessHITLPort
+
+        store_kind = hitl_cfg.pop("store", None)
+        dsn = hitl_cfg.pop("dsn", None)
+        kwargs: dict[str, Any] = {}
+        if "timeout_seconds" in hitl_cfg:
+            kwargs["timeout_seconds"] = int(hitl_cfg["timeout_seconds"])
+        if store_kind == "postgres":
+            if not dsn:
+                log.warning("hitl.store=postgres but no [hitl].dsn — falling back to in-memory queue")
+            else:
+                from adapters.hitl.postgres_store import PostgresApprovalStore
+
+                kwargs["store"] = PostgresApprovalStore(str(dsn))
+        return InProcessHITLPort(**kwargs)
 
     @staticmethod
     def _build_ledger(

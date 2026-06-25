@@ -36,9 +36,13 @@ key      = "sth-signer"
 dsn = "${KERNEL_DSN}"
 
 # In-process HITL queue (see [adapters].hitl). require_approval actions surface on /v1/approvals
-# (tenant-scoped). For an external approval system instead, set hitl = "webhook" + dispatch_url/poll_url.
+# (tenant-scoped). `store = "postgres"` persists the queue to quaicu_approvals (migration 013) so it's
+# consistent across Cloud Run instances (the in-memory default is per-process). Reuses the kernel DB.
+# For an external approval system instead, set hitl = "webhook" + dispatch_url/poll_url.
 [hitl]
 timeout_seconds = 86400
+store = "postgres"
+dsn   = "${KERNEL_DSN}"
 
 [identity]
 secret_or_key = "${KERNEL_JWT_SECRET}"
