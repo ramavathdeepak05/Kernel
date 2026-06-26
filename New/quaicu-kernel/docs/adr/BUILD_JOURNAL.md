@@ -183,6 +183,20 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-26 · W7-5 SI/partner-channel kit · docs/gtm · claude** —
+  Strategy critical-path ③ (after W7-1/W7-2; W7-3/W7-4 deferred). A kit (human signs the SI), not new
+  breadth. New `docs/gtm/`: **`SI_CHANNEL_PROGRAM.md`** (wedge = free **Auditor View** → SIs/auditors
+  verify a client's AI-governance evidence offline → recommend/mandate QUAICU → compliance infrastructure;
+  Big-4/regional-SI/RegTech partner types; what SIs get / we ask; referral→co-sell→managed tiers; relation
+  to the consultation/MSA motion; success = SI-sourced pilot or SI mandating the proof format),
+  **`AUDITOR_VIEW.md`** (auditor surface grounded in **built** features — `/v1/ledger/{tenant}/export` →
+  `core.regmap.export.verify_ledger_proof_bundle` offline + K·14 evidence pack + the W7-2 compliance
+  matrix; verify-offline flow; the underwriting/policy-pack demos as "see it"; honest scope — a dedicated
+  read-only auditor console role is a follow-up if an SI pulls it), **`SI_TARGET_AND_OUTREACH.md`** (SI
+  firmographics — segments not firms — qualifying Qs, compliance-infrastructure co-sell pitch, outreach
+  templates). Reuses the W7-1 kit (expands its §4c SI co-sell stub) + W7-2 collateral; claims only built
+  surfaces; all cross-links verified. Docs only. Tracker: W7-5 → ◐. **Follow-up (human):** source + sign
+  an SI; optional read-only auditor console role if pulled.
 - **2026-06-25 · Fake credit + KYC/AML AI → living console demo on kernel.quaicu.org · examples · claude** —
   Per the user: a demo that populates the **live console** with a fake AI running credit-underwriting +
   KYC/AML, all packs loaded. Added `examples/policy-pack-demo/fake_ai_agent.py` — two simulated agents
