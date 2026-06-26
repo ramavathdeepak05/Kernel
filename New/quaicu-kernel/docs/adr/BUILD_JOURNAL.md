@@ -183,6 +183,19 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-26 · W8-1/W8-2 non-blocking hot path · core/ledger + delivery/api · claude** —
+  Fixed two event-loop-blocking issues; **W8-1 was live on prod**. `TrustLedger.seal` called the signer's
+  sync `sign()` inside the async `seal` (under a global lock), and the BUSINESS-tier `gcp_kms` signer's
+  `sign()` is a blocking `asymmetric_sign` Cloud-KMS call → **every seal froze the event loop**. Wrapped
+  both signer call sites (`seal` + `hydrate`) in `await asyncio.to_thread(self._signer.sign, …)`
+  (`core/ledger/engine.py`) — fixes all durable signers (gcp_kms/aws_kms/openbao) at once; in-memory
+  signer unaffected; no `TreeSigner` interface change; safe because the global `_lock` serializes signs.
+  W8-2: `await asyncio.to_thread(account_engine.hydrate)` in the app lifespan (`delivery/api/app.py`) so
+  the sync psycopg2 account-load runs off-loop at boot (still completes before `ready`). Test
+  `tests/unit/ledger/test_nonblocking_seal.py` (blocking fake signer + concurrent ticker → loop stays
+  free; STH still verifies). Full unit suite 1036 passed; ruff clean. Tracker: W8-1/W8-2 → done.
+  **Follow-ups:** per-tenant seal locks (concurrent cross-tenant seals — next W8 step) + bounded/lazy
+  hydration; W8-3 (Go polyglot) stays deferred. Pending build + deploy (image-only, no migration).
 - **2026-06-26 · W7-5 SI/partner-channel kit · docs/gtm · claude** —
   Strategy critical-path ③ (after W7-1/W7-2; W7-3/W7-4 deferred). A kit (human signs the SI), not new
   breadth. New `docs/gtm/`: **`SI_CHANNEL_PROGRAM.md`** (wedge = free **Auditor View** → SIs/auditors
