@@ -112,7 +112,9 @@ def resolve_governed_actor(request: Request, tenant: TenantId) -> Actor | None:
     if principal is None:
         return None
     return Actor(
-        id=ActorId(str(principal.account_id)),
+        # The actor identity is the principal's subject — a member-bound key carries the member id
+        # (distinct actor → SoD holds), the account/bootstrap key + session use the account id.
+        id=ActorId(str(getattr(principal, "actor_id", None) or principal.account_id)),
         tenant=tenant,
         roles=tuple(getattr(principal, "roles", ()) or ()),
     )

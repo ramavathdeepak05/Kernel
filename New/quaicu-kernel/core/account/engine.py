@@ -390,6 +390,7 @@ class AccountEngine:
             key_id="session",
             scopes=frozenset(str(s) for s in scopes),
             roles=roles,
+            subject=str(account_id),  # the console session acts as the account (owner)
         )
 
     # ── Encrypted, self-contained verification token (AES-256-GCM over the pepper) ──
@@ -708,15 +709,20 @@ class AccountEngine:
             # account/bootstrap key (the tenant root). These become the actor's roles when the key
             # authenticates a governed action (see delivery/api/deps.resolve_governed_actor).
             role = Role.OWNER
+            subject = account.account_id  # account/bootstrap key → the account is the actor
             if record.member_id:
                 member = self._accounts.get_member(record.member_id)
                 if member is not None and str(member.tenant_id) == str(record.tenant_id):
                     role = parse_role(member.role)
+                    # A member-bound key is a DISTINCT governance actor (its member id), so a member
+                    # can approve an action the owner proposed — separation of duties holds (W6-1).
+                    subject = f"member:{member.member_id}"
             return AuthenticatedPrincipal(
                 tenant_id=record.tenant_id,
                 account_id=account.account_id,
                 key_id=record.key_id,
                 scopes=record.scopes,
                 roles=actor_roles_for(role),
+                subject=subject,
             )
         return self._resolve_session(presented or "")

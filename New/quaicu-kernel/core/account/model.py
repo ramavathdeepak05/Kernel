@@ -116,8 +116,13 @@ class AuthenticatedPrincipal:
     key id (for audit/revocation), the scopes it may exercise, and the governance ``roles`` of the
     underlying account/member. The credential (API key or session JWT) is verified by the account
     engine, so a governed-action route may use this principal as the **host-provided governance
-    actor** (its `account_id` is the actor id; `roles` drive policy) without re-resolving an IdP
-    token — see `delivery/api/deps.resolve_governed_actor`.
+    actor** (its `subject` is the actor id; `roles` drive policy) without re-resolving an IdP token —
+    see `delivery/api/deps.resolve_governed_actor`.
+
+    ``subject`` is the **governance actor identity**: a member-bound key (W6-1) carries the member id,
+    so distinct members are distinct actors (a member can approve an action the owner proposed —
+    separation of duties holds). The account/bootstrap key + session use the account id. Defaults to
+    the account id when unset.
     """
 
     tenant_id: TenantId
@@ -125,9 +130,15 @@ class AuthenticatedPrincipal:
     key_id: str
     scopes: frozenset[str]
     roles: tuple[str, ...] = ()
+    subject: str = ""
 
     def has_scope(self, scope: str) -> bool:
         return scope in self.scopes
+
+    @property
+    def actor_id(self) -> str:
+        """The governance actor identity — `subject` if set (member-bound), else the account id."""
+        return self.subject or self.account_id
 
 
 class MemberStatus(str, Enum):
