@@ -166,7 +166,12 @@ class TrustLedger:
                         actor_roles=tuple(action.actor.roles),
                     )
                     root = self._trees[tenant].root()
-                    sth = self._signer.sign(self._trees[tenant].size, root, now)
+                    # Sign off the event loop: a durable signer (Cloud KMS / OpenBao) makes a blocking
+                    # network call, and seal runs in the request path. The global lock above already
+                    # serializes signs, so the (non-thread-safe) signer client is never used concurrently.
+                    sth = await asyncio.to_thread(
+                        self._signer.sign, self._trees[tenant].size, root, now
+                    )
                     if self._repository is not None:
                         await self._repository.append_entry(entry)
                         await self._repository.save_sth(tenant, sth)
@@ -232,9 +237,10 @@ class TrustLedger:
 
                 sth = sths.get(str(tenant))
                 if sth is None:
-                    # Entries exist but no stored head — recompute the root and re-sign.
-                    sth = self._signer.sign(
-                        tree.size, tree.root(), datetime.now(tz=timezone.utc)
+                    # Entries exist but no stored head — recompute the root and re-sign (off-loop:
+                    # hydrate runs in the startup path and a durable signer makes a blocking call).
+                    sth = await asyncio.to_thread(
+                        self._signer.sign, tree.size, tree.root(), datetime.now(tz=timezone.utc)
                     )
                 self._sths[tenant] = sth
 

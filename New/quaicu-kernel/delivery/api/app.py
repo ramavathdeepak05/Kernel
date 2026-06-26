@@ -19,6 +19,7 @@ retrieve it via ``request.app.state.kernel`` without global state.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -144,9 +145,10 @@ def create_app(
         if entitlement_store is not None:
             await entitlement_store.hydrate()
         # Repopulate the account/API-key cache from its durable store (if wired) so self-serve signups
-        # survive a restart / scale-out. Sync (psycopg2) + off the hot path; no-op when in-memory.
+        # survive a restart / scale-out. The hydrate is sync (psycopg2) and can load every account, so
+        # run it off the event loop — it still completes before `ready` is flipped (auth needs the cache).
         if account_engine is not None and hasattr(account_engine, "hydrate"):
-            account_engine.hydrate()
+            await asyncio.to_thread(account_engine.hydrate)
         # Startup hydration done → /readyz reports ready. Flipped back off during shutdown so a
         # draining instance fails readiness while still answering liveness.
         _app.state.ready = True
