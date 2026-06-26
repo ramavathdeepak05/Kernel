@@ -12,6 +12,78 @@ next cold agent doesn't know it happened.
 
 ---
 
+## Outstanding & deferred work (as of 2026-06-26 — single source of truth; supersedes ACTION_TRACKER)
+
+> The root `ACTION_TRACKER.md` is **deprecated/frozen** (kept for history); everything still open lives
+> here. The product/engineering waves are essentially worked down — what remains is mostly **human/
+> process** + a known set of **deferred** and **code-follow-up** items. Live deployment: revision
+> **`quaicu-kernel-00034-8sx`** (see the `kernel-deployment` memory for prod-state detail). IDs reference
+> the old tracker rows.
+
+**A. Human / process — the deal-blocking critical path (mostly drafted; needs sending/booking/counsel):**
+- **W2-1** K·02 ledger crypto review — RFQ send-ready (`docs/operations/CRYPTO_REVIEW_RFQ.md`); **send it**
+  (longest pole; gates bank deployment).
+- **W2-2** SOC 2 (Type I→II) — **start the clock** (not started). **W2-3** independent pen-test — SoW
+  drafted (`docs/compliance/PENTEST_SOW.md`); **book a firm**. **W2-4** ISO 27001 (+27701) — not started.
+- **W2-5 / W3-2** GDPR Art.28 DPA + SCCs — starter (`docs/legal/DPA_ART28_STARTER.md`); **counsel** finalizes.
+  **W3-1** enterprise MSA — starter (`docs/legal/MSA_STARTER.md`); **counsel**. **W3-3** SLA — starter
+  (numbers pending W4 targets) + counsel. **W3-4** order-form/pricing — starter; business sets list pricing.
+  **W3-5** Terms/Privacy/Refunds counsel sign-off — inventory drafted; ⛔ the **draft banner in
+  `console/src/legal/content.ts` stays until counsel clears it** (separate PR).
+- **W3-6** cyber/E&O insurance · **W3-7** selling-entity + cross-border tax (VAT/GST) · **W3-8** live
+  Razorpay keys (KYC) — **also provision the absent `RAZORPAY_WEBHOOK_SECRET`** before enabling
+  `[billing.razorpay]`. **W2-7** PCI SAQ-A — confirm w/ acquirer + QSA. **W2-6** RBI pack — adapt to the
+  licence category + backtest before activating in a real tenant.
+- **W7-1** land an inspected design partner · **W7-5** sign an SI / audit-firm partner. (Both kits built;
+  signing is human.)
+
+**B. Operational / deploy-pending (code or runbook done — ops to execute):**
+- **W4-1** wire log-based metrics + alerts + uptime check · **W4-2** stand up `status.quaicu.org` ·
+  **W4-3** *run the DR restore test* (the real gap behind any RTO/RPO) · **W4-4** staff the on-call
+  rotation · **W4-5** stand up the retention-locked WORM bucket · **W4-6** publish a trust-center page ·
+  **W4-8** IR tabletop + fill `[contacts]` · **W4-9** graduate CI scans report→blocking once the backlog
+  clears.
+- **W5-1** `terraform validate` + import/apply the SaaS-plane IaC (`deploy/terraform/gcp-saas/`) · **W5-2**
+  apply a non-US region (eu/india/gulf presets exist) · **W5-3** stand up the org VPC-SC perimeter + run
+  the zero-egress validation at scale · **W5-4** fill per-zone residency guarantees.
+- **W6-9** `wrangler deploy` from `console/` to ship the self-hosted fonts + CSP/security headers + WCAG-AA
+  contrast + responsive pass (code done; not yet shipped).
+
+**C. Deferred until a design partner pulls it (per the 2026–2027 strategy — do NOT build ahead):**
+- **W7-3** marketplace listings (GCP/AWS/Azure) · **W7-4** console localization for non-English regulators
+  · **W8-3** polyglot Go split (Merkle/CEL) · **W6-8** auto-subscription billing (PLG-only; the
+  consultancy-led ICP doesn't need it).
+
+**D. Code follow-ups (this session's SaaS arc + earlier wave notes):**
+- **Member console login** — a `COMPLIANCE` member can approve only via their **API key** today; the
+  console only logs in as the owner, so in-browser maker/checker approval needs member auth (password/IdP).
+  (The maker/checker flow itself works end-to-end via the member key — verified live.)
+- **Point-in-time evaluation persistence** on resume (today `resume_after_approval` re-evaluates) ·
+  `@kernel.guard` **closure** async-resume (stays synchronous — closures aren't persistable).
+- **Per-tenant seal locks** + **bounded/lazy account hydration** (next W8 steps after W8-1/W8-2) ·
+  **at-least-once** durable HITL delivery.
+- **Read-only auditor console role** (the W7-5 "Auditor View" as a scoped UI role; today it's the
+  export + offline verifier) · **K·06 process-engine** wiring on the SaaS plane.
+- W6 notes: SCIM **Groups** + IdP-specific certification (W6-1) · **AWS Comprehend** masking adapter +
+  adopt `MaskingPort` in the K·05 `generate` path + DLP batching (W6-3) · verify-by-upload UI + export
+  time-window/regulation filters (W6-6).
+- Strategy-named buildable lever (not yet started): the **MCP governance server** (frictionless
+  integration; "MCP = the AI security issue of 2026").
+
+**E. Honest caveats — not validated against live cloud (fake-client tests only):** the gateway shims
+(Anthropic / Vertex / Bedrock), Cloud DLP masking, the GCP/AWS KMS shred keyrings, AWS Step Functions, and
+the EventBridge sink. A design-partner pilot is where these first run against a real environment. The K·02
+**crypto review (W2-1) gates bank deployment**.
+
+**F. Operational cleanup (this session, on prod — do soon):**
+- **Rotate the chat-exposed credentials**: API keys `qk_7beab…` (old owner), `qk_25f9…` (accidental no-op
+  owner key), `qk_30fa…` (the member key) + the old console session JWT — console → API Keys → revoke.
+- Clean up demo artifacts on tenant `quaicu-222af5`: the `COMPLIANCE` member `mem_a9abfff3cf1103a4` +
+  leftover PENDING approvals; and the old smoke-test tenant `quaicu-smoke-test-b821a0` /
+  account `acct_04edc16666652d41`.
+
+---
+
 ## Current status (2026-06-15)
 
 **All 14 governance layers + the delivery phase are built and green, an operator console ships
