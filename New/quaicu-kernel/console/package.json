@@ -6,7 +6,7 @@
   "description": "QUAICU kernel operator console — policy management, governance dashboard, audit trail, HITL approvals.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && npm run build:docs",
+    "build": "npm run build:docs && tsc -b && vite build",
     "build:docs": "cd .. && pip install -r requirements-docs.txt -q && mkdocs build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
