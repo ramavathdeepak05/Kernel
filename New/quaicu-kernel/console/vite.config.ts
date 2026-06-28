@@ -7,6 +7,10 @@ const KERNEL_API = process.env.KERNEL_API_URL ?? "http://localhost:8000";
 
 export default defineConfig({
   plugins: [react()],
+  base: '/app/',
+  build: {
+    outDir: 'dist/app',
+  },
   server: {
     port: 5173,
     proxy: {

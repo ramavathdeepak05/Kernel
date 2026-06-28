@@ -98,12 +98,19 @@ export default {
       });
     }
 
-    // Docs → serve MkDocs static files with docs-specific CSP (allows Google Fonts + MkDocs CDN).
-    if (url.pathname === "/docs" || url.pathname.startsWith("/docs/")) {
-      return withDocsHeaders(await env.ASSETS.fetch(request));
+    // Console SPA — lives at /app/ (BrowserRouter basename="/app").
+    // Fallback any unmatched /app/* route to /app/index.html so React Router handles it client-side.
+    if (url.pathname === "/app" || url.pathname.startsWith("/app/")) {
+      const response = await env.ASSETS.fetch(request);
+      if (response.status === 404) {
+        const fallback = new Request(new URL("/app/index.html", request.url).toString(), request);
+        return withSecurityHeaders(await env.ASSETS.fetch(fallback));
+      }
+      return withSecurityHeaders(response);
     }
 
-    // Not an API call → serve the static console (SPA), with security headers (CSP, HSTS, etc.).
-    return withSecurityHeaders(await env.ASSETS.fetch(request));
+    // Everything else → MkDocs docs (served at root, not /docs/).
+    // DOCS_CSP allows Google Fonts + jsdelivr.net (Mermaid diagrams).
+    return withDocsHeaders(await env.ASSETS.fetch(request));
   },
 };

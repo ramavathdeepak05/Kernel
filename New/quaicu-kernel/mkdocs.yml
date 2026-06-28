@@ -1,17 +1,17 @@
 site_name: QUAICU Kernel
-site_url: https://kernel.quaicu.org/docs/
+site_url: https://kernel.quaicu.org/
 site_description: >-
   Technical documentation for the QUAICU AI Governance Kernel.
   14 governance layers. Fail-closed. RFC-6962 sealed.
 site_author: QUAICU Solutions Private Limited
 
 docs_dir: docs-src
-site_dir: console/dist/docs
+site_dir: console/dist
 
 theme:
   name: material
   custom_dir: docs-overrides
-  logo: assets/quaicu-mark.svg
+  logo: assets/favicon.ico
   favicon: assets/favicon.ico
   font:
     text: Inter
