@@ -32,6 +32,19 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
 ].join("; ");
 
+// Docs CSP: wider than the console — allows Google Fonts (MkDocs Material) and CDN scripts (Mermaid).
+const DOCS_CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+  "connect-src 'self'",
+  "img-src 'self' data:",
+  "font-src 'self' https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+].join("; ");
+
 // Applied to every static-asset / SPA-document response. (frame-ancestors in the CSP is the modern
 // clickjacking control; X-Frame-Options is kept for older browsers.)
 const SECURITY_HEADERS = {
@@ -44,9 +57,17 @@ const SECURITY_HEADERS = {
 };
 
 function withSecurityHeaders(response) {
-  // Reconstruct so the headers are mutable, then layer on the security set.
   const resp = new Response(response.body, response);
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) resp.headers.set(name, value);
+  return resp;
+}
+
+function withDocsHeaders(response) {
+  const resp = new Response(response.body, response);
+  resp.headers.set("Content-Security-Policy", DOCS_CSP);
+  resp.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  resp.headers.set("X-Content-Type-Options", "nosniff");
+  resp.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   return resp;
 }
 
@@ -75,6 +96,11 @@ export default {
         body: hasBody ? await request.arrayBuffer() : undefined,
         redirect: "manual",
       });
+    }
+
+    // Docs → serve MkDocs static files with docs-specific CSP (allows Google Fonts + MkDocs CDN).
+    if (url.pathname === "/docs" || url.pathname.startsWith("/docs/")) {
+      return withDocsHeaders(await env.ASSETS.fetch(request));
     }
 
     // Not an API call → serve the static console (SPA), with security headers (CSP, HSTS, etc.).
