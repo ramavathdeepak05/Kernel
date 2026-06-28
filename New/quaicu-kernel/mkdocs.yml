@@ -1,0 +1,118 @@
+site_name: QUAICU Kernel
+site_url: https://kernel.quaicu.org/docs/
+site_description: >-
+  Technical documentation for the QUAICU AI Governance Kernel.
+  14 governance layers. Fail-closed. RFC-6962 sealed.
+site_author: QUAICU Solutions Private Limited
+
+docs_dir: docs-src
+site_dir: console/dist/docs
+
+theme:
+  name: material
+  custom_dir: docs-overrides
+  logo: assets/quaicu-mark.svg
+  favicon: assets/favicon.ico
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - search.suggest
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - toc.follow
+
+extra_css:
+  - assets/quaicu.css
+
+extra:
+  homepage: https://quaicu.org
+  generator: false
+  social:
+    - icon: fontawesome/solid/globe
+      link: https://quaicu.org
+      name: quaicu.org
+    - icon: fontawesome/solid/envelope
+      link: mailto:hello@quaicu.org
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Tutorials:
+    - Overview: tutorials/index.md
+    - Your First Governed Action: tutorials/first-governed-action.md
+    - Python SDK End-to-End: tutorials/python-sdk-end-to-end.md
+    - REST API Integration: tutorials/rest-api-integration.md
+  - How-To Guides:
+    - Overview: how-to/index.md
+    - Write a Policy: how-to/write-a-policy.md
+    - Configure HITL: how-to/configure-hitl.md
+    - Set Up Observability: how-to/setup-observability.md
+    - Deploy Sovereign: how-to/deploy-sovereign.md
+    - Deploy Dedicated (VPC): how-to/deploy-dedicated.md
+    - Build an Adapter: how-to/build-an-adapter.md
+    - Verify a Ledger Proof: how-to/verify-ledger-proof.md
+  - Reference:
+    - Overview: reference/index.md
+    - REST API: reference/api/rest.md
+    - Python SDK: reference/sdk/kernel-class.md
+    - CEL Policy Language: reference/policy/cel-language.md
+    - Policy Lifecycle: reference/policy/lifecycle.md
+    - Configuration: reference/configuration.md
+  - Concepts:
+    - Overview: concepts/index.md
+    - Architecture: concepts/architecture.md
+    - Governance Layers: concepts/governance-layers.md
+    - Action Lifecycle: concepts/lifecycle.md
+    - Deployment Tiers: concepts/deployment-tiers.md
+    - Security Model: concepts/security.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+      title: On this page
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - minify:
+      minify_html: true
