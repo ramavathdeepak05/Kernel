@@ -3,10 +3,38 @@
 {% block fonts %}
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 {% endblock %}
 
 {% block extrahead %}
-<meta name="og:site_name" content="QUAICU Kernel Docs" />
-<link rel="icon" href="https://quaicu.org/favicon.ico" />
+<meta property="og:site_name" content="QUAICU Kernel" />
+<meta name="theme-color" content="#fafaf7" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)" />
+<link rel="icon" href="/favicon.ico" />
+<!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-NDQ7KG3W');</script>
+<!-- End Google Tag Manager -->
+{% endblock %}
+
+{% block announce %}
+<div class="md-announce__inner">
+  <a href="https://quaicu.org" rel="noopener">&#8592; quaicu.org</a>
+  <span>&middot;</span>
+  <span>AI Governance Kernel &amp; Policy Packs</span>
+  <span style="margin-left: auto;">
+    <a href="/app/" style="color: #2bb673; border-color: #2bb673;">Sign In &#8594;</a>
+  </span>
+</div>
+{% endblock %}
+
+{% block site_body %}
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NDQ7KG3W"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+{{ super() }}
 {% endblock %}

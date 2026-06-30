@@ -1,0 +1,162 @@
+{% extends "main.html" %}
+
+{% block content %}
+<style>
+/* Home page hero — quaicu.org brutalist style */
+.qk-hero {
+  border-bottom: 1px solid #d4d4d4;
+  padding: clamp(56px, 8vw, 112px) clamp(20px, 4vw, 72px) clamp(48px, 6vw, 80px);
+  background: var(--md-default-bg-color);
+  max-width: 1680px;
+  margin: 0 auto;
+}
+[data-md-color-scheme="slate"] .qk-hero { border-color: #2a2a28; }
+
+.qk-hero__kicker {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #008746;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.qk-hero__kicker::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #008746;
+  border-radius: 50% !important;
+  animation: qk-pulse 2s ease-in-out infinite;
+}
+@keyframes qk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+.qk-hero__h1 {
+  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
+  font-size: clamp(36px, 6vw, 80px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--md-default-fg-color);
+  max-width: 16ch;
+  margin: 0 0 24px;
+}
+
+.qk-hero__lead {
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: clamp(15px, 1.6vw, 19px);
+  line-height: 1.65;
+  color: #525252;
+  max-width: 54ch;
+  margin: 0 0 36px;
+}
+[data-md-color-scheme="slate"] .qk-hero__lead { color: #a3a3a3; }
+
+.qk-hero__btns {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Button styles inline (before extra_css loads) */
+.qk-btn {
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  height: 40px;
+  padding: 0 18px;
+  border: 1px solid var(--md-default-fg-color);
+  background: transparent;
+  color: var(--md-default-fg-color);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  transition: border-color 120ms, color 120ms, background 120ms;
+  cursor: pointer;
+}
+.qk-btn:hover { border-color: #008746; color: #008746; text-decoration: none; }
+.qk-btn--primary { background: var(--md-default-fg-color); color: var(--md-default-bg-color); }
+.qk-btn--primary:hover { background: #008746; border-color: #008746; color: #fafaf7; }
+
+/* Status strip */
+.qk-status {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 56px;
+  padding-top: 24px;
+  border-top: 1px solid #d4d4d4;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #525252;
+  align-items: center;
+}
+[data-md-color-scheme="slate"] .qk-status { border-color: #2a2a28; color: #a3a3a3; }
+
+.qk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #d4d4d4;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+[data-md-color-scheme="slate"] .qk-pill { border-color: #2a2a28; }
+
+.qk-pill--live {
+  border-color: #008746;
+  color: #008746;
+  background: #e3f0e7;
+}
+[data-md-color-scheme="slate"] .qk-pill--live { background: rgba(0,135,70,.12); }
+.qk-pill--live::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  background: #008746;
+  border-radius: 50% !important;
+  animation: qk-pulse 2s ease-in-out infinite;
+}
+
+/* Content section below hero */
+.qk-content {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 clamp(20px, 4vw, 72px);
+}
+</style>
+
+<!-- Hero -->
+<div class="qk-hero">
+  <div class="qk-hero__kicker">K&middot;01&ndash;K&middot;08 in production &middot; Woxsen University</div>
+  <h1 class="qk-hero__h1">AI governance kernel and policy packs for regulated enterprises.</h1>
+  <p class="qk-hero__lead">For CTOs who need to ship governed AI, compliance officers who need to prove it, and founders who can't afford to build the governance layer from scratch.</p>
+  <div class="qk-hero__btns">
+    <a href="/app/" class="qk-btn qk-btn--primary">Sign In &#8594;</a>
+    <a href="/app/signup" class="qk-btn">Sign Up</a>
+    <a href="/quickstart/" class="qk-btn">Quickstart &mdash; 60 seconds</a>
+  </div>
+  <div class="qk-status">
+    <span class="qk-pill qk-pill--live">K&middot;01&ndash;K&middot;08 &middot; Prod</span>
+    <span class="qk-pill">K&middot;09&ndash;K&middot;14 &middot; Pilot</span>
+    <span style="margin-left: auto;">Python SDK &middot; REST API &middot; Docker</span>
+  </div>
+</div>
+
+<!-- Docs content (Where to start, guarantees, etc.) -->
+<div class="qk-content">
+  <article class="md-content__inner md-typeset">
+    {{ page.content }}
+  </article>
+</div>
+{% endblock %}
