@@ -181,9 +181,9 @@
   letter-spacing: 0.01em;
 }
 .qk-hbtn:hover {
-  background: var(--md-default-fg-color);
-  color: var(--md-default-bg-color);
-  border-color: var(--md-default-fg-color);
+  border-color: #008746;
+  color: #008746 !important;
+  background: transparent;
   text-decoration: none;
 }
 .qk-hbtn--primary {
@@ -192,9 +192,9 @@
   color: var(--md-default-bg-color);
 }
 .qk-hbtn--primary:hover {
-  background: #008746;
-  border-color: #008746;
-  color: #fafaf7;
+  background: #008746 !important;
+  border-color: #008746 !important;
+  color: #fafaf7 !important;
 }
 [data-md-color-scheme="slate"] .qk-hbtn { border-color: #2a2a28; color: #a3a3a3; }
 @media (max-width: 960px) { .qk-header-ctas { display: none; } }
@@ -279,9 +279,9 @@
 
 /* ── Buttons ─────────────────────────────────────────────────── */
 .md-typeset .md-button { font-family: "Inter", system-ui, sans-serif; font-size: 13px; font-weight: 600; height: 40px; line-height: 38px; padding: 0 18px; border: 1px solid var(--md-default-fg-color); background: transparent; color: var(--md-default-fg-color); letter-spacing: 0; text-decoration: none; display: inline-flex; align-items: center; transition: border-color 120ms, color 120ms, background 120ms; }
-.md-typeset .md-button:hover { background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); text-decoration: none; }
+.md-typeset .md-button:hover { border-color: #008746; color: #008746 !important; background: transparent; text-decoration: none; }
 .md-typeset .md-button--primary { background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); }
-.md-typeset .md-button--primary:hover { background: #008746; border-color: #008746; color: #fafaf7; }
+.md-typeset .md-button--primary:hover { background: #008746 !important; border-color: #008746 !important; color: #fafaf7 !important; }
 
 /* ── Content tabs ────────────────────────────────────────────── */
 .md-typeset .tabbed-set { border: 1px solid #d4d4d4; margin: 1.2em 0; }
