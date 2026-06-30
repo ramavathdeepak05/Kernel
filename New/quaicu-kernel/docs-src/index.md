@@ -40,7 +40,7 @@ Choose the path that matches your role:
 ## Production status
 
 !!! success "K·01–K·08 · Production-Ready"
-    The core governance layers (Policy Engine, TrustLedger, HITL Gate, DPDP Consent, AI Gateway, Process Engine, Event Bus, Model Registry) are live in production at Woxsen University under the ALIS deployment.
+    The core governance layers (Policy Engine, TrustLedger, HITL Gate, DPDP Consent, AI Gateway, Process Engine, Event Bus, Model Registry) are live in production.
 
 !!! info "K·09–K·14 · Built and Green"
     The extended assurance layers (Fairness, Drift, Explainability, Incident/Rollback, Sandbox, Regulatory Mapping) are built and passing their test suites. First live deployment via design-partner pilot.

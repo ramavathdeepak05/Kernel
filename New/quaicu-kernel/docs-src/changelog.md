@@ -16,7 +16,7 @@ The kernel was built in six waves:
 
 ## Production deployment
 
-**2026** — ALIS deployed at Woxsen University. K·01–K·08 live in production.
+**2026** — ALIS deployed. K·01–K·08 live in production.
 
 ## Upcoming
 
