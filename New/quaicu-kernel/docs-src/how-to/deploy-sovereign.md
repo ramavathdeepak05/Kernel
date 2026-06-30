@@ -1,6 +1,6 @@
 # Deploy Sovereign (On-Premise / Air-Gapped)
 
-The Sovereign tier runs entirely on customer hardware with no egress. The kernel image is the same as every other tier — deployment mode is set by `kernel.toml`.
+The Sovereign tier runs entirely on customer hardware with no egress. The kernel image is the same as every other tier, deployment mode is set by `kernel.toml`.
 
 ## Prerequisites
 
@@ -9,7 +9,7 @@ The Sovereign tier runs entirely on customer hardware with no egress. The kernel
 - OpenBao instance for Ed25519 signing (or bring your own HSM)
 - TLS at the load balancer
 
-## Step 1 — Pull the image
+## Step 1: Pull the image
 
 ```bash
 docker pull ghcr.io/ramavathdeepak05/kernel:latest
@@ -21,7 +21,7 @@ Images are cosign-signed. Verify before deploying:
 cosign verify ghcr.io/ramavathdeepak05/kernel:latest
 ```
 
-## Step 2 — Configure `kernel.toml`
+## Step 2: Configure `kernel.toml`
 
 ```toml
 [kernel]
@@ -46,7 +46,7 @@ smtp_host = "smtp.internal"
 smtp_from = "kernel@your-org.com"
 ```
 
-## Step 3 — Run migrations
+## Step 3: Run migrations
 
 ```bash
 docker run --rm \
@@ -56,7 +56,7 @@ docker run --rm \
   python -m alembic upgrade head
 ```
 
-## Step 4 — Start the kernel
+## Step 4: Start the kernel
 
 ```bash
 docker compose -f delivery/docker/docker-compose.prod.yml up -d
@@ -71,7 +71,7 @@ curl https://kernel.your-org.com/health
 ## Production checklist
 
 - [ ] `QUAICU_API_KEY_PEPPER` set (random 32-byte hex, not guessable)
-- [ ] TLS at the load balancer — kernel never terminates TLS itself
+- [ ] TLS at the load balancer, kernel never terminates TLS itself
 - [ ] `X-Real-Client-IP` / `X-Edge-Auth` configured for the rate limiter (see CLAUDE.md open thread)
 - [ ] PostgreSQL with connection pooling (PgBouncer recommended at scale)
 - [ ] OpenBao unsealed and `transit/kernel/sign` key created

@@ -20,7 +20,7 @@ dsn = "postgresql://kernel:password@localhost:5432/quaicu"
 default_decision = "deny"
 
 [hitl]
-adapter = "memory"       # dev only — use "email" or "slack" in production
+adapter = "memory"       # dev only - use "email" or "slack" in production
 
 [ledger]
 signing_adapter = "openbao"

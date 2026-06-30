@@ -11,12 +11,12 @@ from delivery.sdk import Kernel, GovernanceProfile
 # Initialize from config file
 kernel = Kernel.from_config("kernel.toml")
 
-# Decorate any async function — signature unchanged
+# Decorate any async function - signature unchanged
 @kernel.governed(policy="credit.approve")
 async def approve_credit(loan_id: str, amount: float) -> dict:
     return {"status": "approved", "loan_id": loan_id, "amount": amount}
 
-# Use it normally — governance is transparent
+# Use it normally - governance is transparent
 result = await approve_credit("L-9821", 75000.0)
 
 # Or use a GovernanceProfile preset

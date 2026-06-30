@@ -1,6 +1,6 @@
 # How-To Guides
 
-Task-oriented guides for specific operations. These assume you have the kernel running — see the [Quickstart →](../quickstart.md) if you haven't yet.
+Task-oriented guides for specific operations. These assume you have the kernel running, see the [Quickstart →](../quickstart.md) if you haven't yet.
 
 | Guide | Use when |
 |-------|----------|

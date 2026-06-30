@@ -1,6 +1,6 @@
 # Write a Policy
 
-This guide walks through creating a new governance policy — from writing the CEL condition to activating it in production.
+This guide walks through creating a new governance policy, from writing the CEL condition to activating it in production.
 
 ## Policy lifecycle
 
@@ -12,7 +12,7 @@ A policy must pass through every stage before it can block real actions. This pr
 
 ---
 
-## Step 1 — Write the condition
+## Step 1: Write the condition
 
 Policies use CEL (Common Expression Language). See the full [CEL Reference →](../reference/policy/cel-language.md).
 
@@ -27,13 +27,13 @@ Policies use CEL (Common Expression Language). See the full [CEL Reference →](
 ```
 
 **Rules:**
-- Use only the [allowed variables](../reference/policy/cel-language.md#cel-variables) — `action_type`, `actor_roles`, `payload_<field>`, etc.
-- One boolean expression per condition — no multi-statement code
+- Use only the [allowed variables](../reference/policy/cel-language.md#cel-variables): `action_type`, `actor_roles`, `payload_<field>`, etc.
+- One boolean expression per condition, no multi-statement code
 - Type-correct: integer payload → `payload_amount > 5000000` (not `> "5000000"`)
 
 ---
 
-## Step 2 — Create the policy (DRAFT)
+## Step 2: Create the policy (DRAFT)
 
 ```bash
 curl -X POST http://localhost:7000/v1/policies \
@@ -48,11 +48,11 @@ curl -X POST http://localhost:7000/v1/policies \
   }'
 ```
 
-The policy is created in **DRAFT** state — it has no effect on live traffic.
+The policy is created in **DRAFT** state, it has no effect on live traffic.
 
 ---
 
-## Step 3 — Run a backtest
+## Step 3: Run a backtest
 
 ```bash
 curl -X POST http://localhost:7000/v1/policies/loan.high_value_approval/backtest \
@@ -68,7 +68,7 @@ Fix any errors before proceeding.
 
 ---
 
-## Step 4 — Shadow mode
+## Step 4: Shadow mode
 
 ```bash
 curl -X PATCH http://localhost:7000/v1/policies/loan.high_value_approval \
@@ -76,11 +76,11 @@ curl -X PATCH http://localhost:7000/v1/policies/loan.high_value_approval \
   -d '{"lifecycle": "SHADOW_MODE"}'
 ```
 
-In shadow mode, the policy evaluates against live traffic and logs what it *would* do — without actually blocking or routing to approvers. Monitor for unexpected denials.
+In shadow mode, the policy evaluates against live traffic and logs what it *would* do, without actually blocking or routing to approvers. Monitor for unexpected denials.
 
 ---
 
-## Step 5 — Activate
+## Step 5: Activate
 
 Once you're satisfied:
 
