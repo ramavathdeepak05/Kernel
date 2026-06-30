@@ -1,6 +1,6 @@
 # CEL Policy Language Reference
 
-QUAICU policies are evaluated using **CEL (Common Expression Language)** — a deterministic, non-Turing-complete, sandboxed expression language. CEL is guaranteed to terminate and cannot produce side effects.
+QUAICU policies are evaluated using **CEL (Common Expression Language)**: a deterministic, non-Turing-complete, sandboxed expression language. CEL is guaranteed to terminate and cannot produce side effects.
 
 ---
 
@@ -8,8 +8,8 @@ QUAICU policies are evaluated using **CEL (Common Expression Language)** — a d
 
 QUAICU governs **actions** (e.g. `loan.approve`, `email.send`, `record.delete`). A policy has two parts:
 
-1. A **condition** — a CEL boolean expression describing which actions the policy applies to
-2. A **decision** — what to do when the condition is true: `allow`, `deny`, or `require_approval`
+1. A **condition**: a CEL boolean expression describing which actions the policy applies to
+2. A **decision**: what to do when the condition is true: `allow`, `deny`, or `require_approval`
 
 Read it as: **"IF `<condition>` THEN `<decision>`."**
 
@@ -17,7 +17,7 @@ Read it as: **"IF `<condition>` THEN `<decision>`."**
 
 ## CEL variables
 
-The kernel flattens each action into a fixed set of CEL variables. **Use these exact names — no others exist.**
+The kernel flattens each action into a fixed set of CEL variables. **Use these exact names, no others exist.**
 
 | Variable | Type | Example |
 |----------|------|---------|
@@ -28,7 +28,7 @@ The kernel flattens each action into a fixed set of CEL variables. **Use these e
 | `payload_<field>` | `string \| int \| double \| bool` | `payload_amount > 1000000` |
 
 !!! note "Payload variables"
-    Only top-level scalar payload fields are typed. `payload.amount` is **wrong** — use `payload_amount`. Nested objects arrive as their string form.
+    Only top-level scalar payload fields are typed. `payload.amount` is **wrong**: use `payload_amount`. Nested objects arrive as their string form.
 
 There are no time, date, request, or environment variables. If a value isn't in the action payload, it isn't available in CEL.
 
@@ -91,8 +91,8 @@ size("hello") == 5
 !!! warning "Do not"
     - Invent functions not listed here
     - Reference variables not listed in the variables table
-    - Use dotted payload names (`payload.amount` is wrong — use `payload_amount`)
-    - Write multi-statement code — a condition is one boolean expression
+    - Use dotted payload names (`payload.amount` is wrong, use `payload_amount`)
+    - Write multi-statement code, a condition is one boolean expression
 
 ---
 

@@ -1,6 +1,6 @@
 # Policy Lifecycle
 
-Every policy in the QUAICU Kernel follows a mandatory lifecycle. You cannot skip stages — each transition requires explicit action.
+Every policy in the QUAICU Kernel follows a mandatory lifecycle. You cannot skip stages, each transition requires explicit action.
 
 ```
 DRAFT → REVIEW → BACKTEST → SHADOW_MODE → ACTIVATED → DEPRECATED

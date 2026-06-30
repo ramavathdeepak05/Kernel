@@ -1,6 +1,6 @@
-# Quickstart — Docker in 60 Seconds
+# Quickstart: Docker in 60 Seconds
 
-Get the QUAICU Governance Kernel running locally, make your first governed call, and see a sealed ledger entry — all in under 60 seconds.
+Get the QUAICU Governance Kernel running locally, make your first governed call, and see a sealed ledger entry, all in under 60 seconds.
 
 ## Prerequisites
 
@@ -82,7 +82,7 @@ curl http://localhost:7000/v1/ledger/trail \
   -H "X-API-Key: dev-key-starter"
 ```
 
-You'll see the append-only log of every governed action — each with its hash, actor, decision, and timestamp.
+You'll see the append-only log of every governed action, each with its hash, actor, decision, and timestamp.
 
 ---
 
@@ -99,7 +99,7 @@ curl -X POST http://localhost:7000/v1/actions/propose \
   }'
 ```
 
-If a high-value policy is active, this returns `"decision": "DENY"` — the action was blocked before execution. Nothing was written to the ledger.
+If a high-value policy is active, this returns `"decision": "DENY"`: the action was blocked before execution. Nothing was written to the ledger.
 
 ---
 
@@ -111,12 +111,12 @@ Every call went through the full governance lifecycle:
 PROPOSE → EVALUATE → GATE → EXECUTE → SEAL → EMIT
 ```
 
-1. **PROPOSE** — action received with an idempotency key
-2. **EVALUATE** — policies checked (CEL expressions), consent verified, model registry consulted
-3. **GATE** — human approval routed if policy required it
-4. **EXECUTE** — state change executed via durable workflow
-5. **SEAL** — result written to the RFC-6962 Merkle tree and HSM-signed
-6. **EMIT** — structured event published after seal
+1. **PROPOSE**: action received with an idempotency key
+2. **EVALUATE**: policies checked (CEL expressions), consent verified, model registry consulted
+3. **GATE**: human approval routed if policy required it
+4. **EXECUTE**: state change executed via durable workflow
+5. **SEAL**: result written to the RFC-6962 Merkle tree and HSM-signed
+6. **EMIT**: structured event published after seal
 
 Any failure at any step → **DENY** or **HALT**. No silent passthrough.
 

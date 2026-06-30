@@ -1,6 +1,6 @@
 # Build an Adapter
 
-The kernel uses hexagonal architecture — every external dependency is accessed through a Port interface. Adding a new model provider, storage backend, or signing service means writing one adapter file. Zero core changes.
+The kernel uses hexagonal architecture, every external dependency is accessed through a Port interface. Adding a new model provider, storage backend, or signing service means writing one adapter file. Zero core changes.
 
 ## The hexagonal rule
 

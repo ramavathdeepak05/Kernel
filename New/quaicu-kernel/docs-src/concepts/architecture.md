@@ -2,13 +2,13 @@
 
 The QUAICU Governance Kernel is a fail-closed, model/cloud-neutral **AI Action Governance** control plane. It enforces policy on every AI action and seals each one to an offline-verifiable RFC-6962 ledger.
 
-> *"Don't just observe your AI. Govern it — and prove it."*
+> *"Don't just observe your AI. Govern it, and prove it."*
 
 ---
 
 ## The problem
 
-AI is moving from advisory chatbots to **read-write agents** — the risk flips from hallucination to **unauthorized execution**. GRC tools document models but are blind at runtime. Observability watches but doesn't gate. Prompt firewalls secure the prompt, not the action. Hyperscaler guardrails lock you in.
+AI is moving from advisory chatbots to **read-write agents**: the risk flips from hallucination to **unauthorized execution**. GRC tools document models but are blind at runtime. Observability watches but doesn't gate. Prompt firewalls secure the prompt, not the action. Hyperscaler guardrails lock you in.
 
 Nobody owns *"mathematical proof of what the AI did, under which policy, approved by whom."* The kernel does.
 
@@ -77,7 +77,7 @@ Onboarding a customer = pick a deployment mode + set adapters in config + load p
 
 ## The 14 governance layers
 
-**Core (K·01–K·08) — production-ready:**
+**Core (K·01–K·08): production-ready:**
 
 | Layer | Name | Purpose |
 |-------|------|---------|
@@ -90,7 +90,7 @@ Onboarding a customer = pick a deployment mode + set adapters in config + load p
 | K·07 | Event Bus | Structured events emitted only after seal |
 | K·08 | Model Registry | Per-tenant model allowlists |
 
-**Extended (K·09–K·14) — built, awaiting pilot:**
+**Extended (K·09–K·14): built, awaiting pilot:**
 
 | Layer | Name | Purpose |
 |-------|------|---------|
@@ -98,7 +98,7 @@ Onboarding a customer = pick a deployment mode + set adapters in config + load p
 | K·10 | Drift Monitor | Detects model behavior semantic drift |
 | K·11 | Explainability | Reconstructs why any past decision was made |
 | K·12 | Incident Engine | Post-breach rollbacks as governed actions |
-| K·13 | Sandbox | "What if" replay — test policies before live |
+| K·13 | Sandbox | "What if" replay, test policies before live |
 | K·14 | Regulatory Mapping | Maps policies to regulations (RBI, GDPR, EU AI Act, DPDP) |
 
 ---
@@ -117,10 +117,10 @@ Onboarding a customer = pick a deployment mode + set adapters in config + load p
 
 ## Why it wins
 
-- **Offline-verifiable proof** — a regulator verifies the bundle without trusting QUAICU
-- **Model-neutral** — OpenAI / Anthropic / Vertex / Bedrock / Ollama, all governed identically
-- **Sovereign** — customer-hosted, customer-held KMS; fits RBI/DPDP localization requirements
-- **Turnkey regimes** — RBI FREE-AI, DPDP, EU AI Act policy packs ship in the box
+- **Offline-verifiable proof**: a regulator verifies the bundle without trusting QUAICU
+- **Model-neutral**: OpenAI / Anthropic / Vertex / Bedrock / Ollama, all governed identically
+- **Sovereign**: customer-hosted, customer-held KMS; fits RBI/DPDP localization requirements
+- **Turnkey regimes**: RBI FREE-AI, DPDP, EU AI Act policy packs ship in the box
 
 ---
 
@@ -133,4 +133,4 @@ Onboarding a customer = pick a deployment mode + set adapters in config + load p
     K·09–K·14 are built and passing their test suites. First live deployment via design-partner pilot.
 
 !!! warning "In progress"
-    SOC 2, pen-test, K·02 crypto third-party review, and counsel-signed DPA/MSA are in progress. Some managed cloud adapters are validated against fake clients — the pilot is where they first run for real.
+    SOC 2, pen-test, K·02 crypto third-party review, and counsel-signed DPA/MSA are in progress. Some managed cloud adapters are validated against fake clients, the pilot is where they first run for real.

@@ -1,5 +1,5 @@
 /* ============================================================
-   QUAICU Kernel Docs — Design System
+   QUAICU Kernel Docs - Design System
    Overrides MkDocs Material to match quaicu.org exactly.
    Palette: #fafaf7 paper · #0a0a0a ink · #008746 ember
    Fonts: Space Grotesk (headings) · Inter (body) · JetBrains Mono (code/meta)
@@ -115,7 +115,7 @@
 /* ── Global resets ───────────────────────────────────────────── */
 *, *::before, *::after { border-radius: 0 !important; }
 
-/* ── Text selection — match quaicu.org (white on ember) ──────── */
+/* ── Text selection - match quaicu.org (white on ember) ──────── */
 ::selection { background: #008746; color: #fff; }
 ::-moz-selection { background: #008746; color: #fff; }
 
@@ -126,7 +126,7 @@
 }
 
 /* ============================================================
-   Top nav — the SAME element as quaicu.org's .nav (header.html
+   Top nav - the SAME element as quaicu.org's .nav (header.html
    renders quaicu.org's exact markup; Material's .md-header and
    .md-tabs are replaced, not restyled).
    ============================================================ */
@@ -187,7 +187,7 @@
 
 .nav-cta { display: flex; gap: 10px; align-items: center; }
 
-/* nav buttons — quaicu.org .btn / .btn--ghost / .btn--primary */
+/* nav buttons - quaicu.org .btn / .btn--ghost / .btn--primary */
 .nav .btn, .nav-mobile .btn {
   display: inline-flex;
   align-items: center;
@@ -325,14 +325,14 @@
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) td { border-color: #2a2a28; }
 .md-typeset table:not([class]) tr:hover { background: var(--md-default-bg-color--light); }
 
-/* ── Buttons — match quaicu.org .btn/.btn--primary ──────────── */
+/* ── Buttons - match quaicu.org .btn/.btn--primary ──────────── */
 .md-typeset .md-button { font-family: "Inter", system-ui, sans-serif; font-size: 13px; font-weight: 600; height: 40px; line-height: 38px; padding: 0 18px; border: 1px solid var(--md-default-fg-color); background: transparent; color: var(--md-default-fg-color); letter-spacing: 0; text-decoration: none; display: inline-flex; align-items: center; transition: border-color 120ms, color 120ms, background 120ms; }
 .md-typeset .md-button:hover { background: var(--md-default-fg-color) !important; color: var(--md-default-bg-color) !important; border-color: var(--md-default-fg-color); text-decoration: none; }
 .md-typeset .md-button--primary { background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); }
 .md-typeset .md-button--primary:hover { background: #008746 !important; border-color: #008746 !important; color: #fafaf7 !important; }
 
 /* ============================================================
-   Landing-page sections — ports quaicu.org's structural DNA:
+   Landing-page sections - ports quaicu.org's structural DNA:
    1680px shell · numbered section-head (200px│1fr) · hairline
    rules · bordered card grids · brutal comparison tables.
    ============================================================ */
@@ -344,7 +344,7 @@
 }
 [data-md-color-scheme="slate"] .qk-sec { border-color: #2a2a28; }
 
-/* section header — mono kicker rail + title/lead, quaicu.org .section-head */
+/* section header - mono kicker rail + title/lead, quaicu.org .section-head */
 .qk-sec-head {
   display: grid;
   grid-template-columns: 200px 1fr;
@@ -434,7 +434,7 @@
 }
 .qk-card-links a:hover { color: #008746; text-decoration: none; }
 
-/* brutal comparison table — quaicu.org table.brutal */
+/* brutal comparison table - quaicu.org table.brutal */
 .qk-table { width: 100%; border-collapse: collapse; font-family: "Inter", system-ui, sans-serif; font-size: 15px; }
 .qk-table th, .qk-table td { text-align: left; padding: 16px 20px; vertical-align: top; border-bottom: 1px solid #d4d4d4; }
 [data-md-color-scheme="slate"] .qk-table th, [data-md-color-scheme="slate"] .qk-table td { border-color: #2a2a28; }
@@ -475,7 +475,7 @@
 .qk-stat-body { font-size: 14px; line-height: 1.6; color: #525252; margin: 0; }
 [data-md-color-scheme="slate"] .qk-stat-body { color: #a3a3a3; }
 
-/* code cards — labelled mono snippets */
+/* code cards - labelled mono snippets */
 .qk-code-card { background: var(--md-code-bg-color); border: 1px solid #d4d4d4; display: flex; flex-direction: column; }
 [data-md-color-scheme="slate"] .qk-code-card { border-color: #2a2a28; }
 .qk-code-label {
@@ -520,7 +520,7 @@
 .qk-cta-meta { font-family: "JetBrains Mono", monospace; font-size: 11px; letter-spacing: 0.04em; color: #525252; margin-top: 8px; }
 [data-md-color-scheme="slate"] .qk-cta-meta { color: #a3a3a3; }
 
-/* ── Inner doc pages — page-hero rhythm to match quaicu.org ──── */
+/* ── Inner doc pages - page-hero rhythm to match quaicu.org ──── */
 .md-content__inner { padding-top: 1.2rem; }
 .md-content__inner > .md-typeset > h1 {
   border-bottom: 1px solid #d4d4d4;
