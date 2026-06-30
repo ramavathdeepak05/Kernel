@@ -127,7 +127,7 @@ Onboarding a customer = pick a deployment mode + set adapters in config + load p
 ## Honest status
 
 !!! success "Production"
-    K·01–K·08 are live in production at Woxsen University under the ALIS deployment.
+    K·01–K·08 are live in production.
 
 !!! info "Built, awaiting pilot"
     K·09–K·14 are built and passing their test suites. First live deployment via design-partner pilot.

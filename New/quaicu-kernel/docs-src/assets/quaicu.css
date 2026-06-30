@@ -275,7 +275,7 @@
 
 .md-nav__link {
   font-family: "Inter", system-ui, sans-serif;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--md-default-fg-color--light);
   transition: color 100ms;
@@ -300,7 +300,7 @@
 }
 
 .md-nav--secondary .md-nav__link {
-  font-size: 12px;
+  font-size: 13px;
   padding: 2px 12px;
 }
 
@@ -311,14 +311,14 @@
 
 .md-typeset {
   font-family: "Inter", system-ui, sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.75;
   color: var(--md-typeset-color);
 }
 
 .md-typeset h1 {
   font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: clamp(26px, 4vw, 44px);
+  font-size: clamp(28px, 4.5vw, 52px);
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.1;
@@ -328,7 +328,7 @@
 
 .md-typeset h2 {
   font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: clamp(18px, 2.4vw, 28px);
+  font-size: clamp(20px, 2.8vw, 34px);
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--md-default-fg-color);
@@ -343,7 +343,7 @@
 
 .md-typeset h3 {
   font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: clamp(15px, 1.8vw, 20px);
+  font-size: clamp(16px, 2vw, 24px);
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--md-default-fg-color);
@@ -384,7 +384,7 @@
 /* ── Inline code ─────────────────────────────────────────────── */
 .md-typeset code {
   font-family: "JetBrains Mono", monospace;
-  font-size: 12.5px;
+  font-size: 13.5px;
   background: var(--md-code-bg-color);
   border: 1px solid #d4d4d4;
   padding: 1px 5px;
@@ -411,7 +411,7 @@
   border: none;
   padding: 16px 20px;
   background: transparent;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   display: block;
 }
@@ -504,7 +504,7 @@
 /* ── Tables — mono headers ───────────────────────────────────── */
 .md-typeset table:not([class]) {
   border: 1px solid #d4d4d4;
-  font-size: 14px;
+  font-size: 15px;
   width: 100%;
 }
 
@@ -562,9 +562,9 @@
 
 .md-typeset .md-button:hover {
   border-color: #008746;
-  color: #008746;
   background: transparent;
   text-decoration: none;
+  /* text stays ink — only border turns ember, matching quaicu.org .btn:hover */
 }
 
 .md-typeset .md-button--primary {
