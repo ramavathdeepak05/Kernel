@@ -113,690 +113,294 @@
 }
 
 /* ── Global resets ───────────────────────────────────────────── */
-*, *::before, *::after {
-  border-radius: 0 !important;
-}
+*, *::before, *::after { border-radius: 0 !important; }
 
-.md-header,
-.md-sidebar,
-.md-search__form,
-.md-search__output,
-.md-typeset .highlight,
-.md-typeset pre,
-.md-typeset .admonition,
-.md-typeset details,
-.md-nav__link,
-.md-tooltip,
-.md-dialog {
+.md-header, .md-sidebar, .md-search__form, .md-search__output,
+.md-typeset .highlight, .md-typeset pre, .md-typeset .admonition,
+.md-typeset details, .md-nav__link, .md-tooltip, .md-dialog {
   box-shadow: none !important;
 }
 
-/* ── Announce bar — dark mono banner ─────────────────────────── */
-.md-announce {
-  background: #0a0a0a;
-  padding: 6px 0;
-  min-height: unset;
-}
+/* ── Header — matches quaicu.org .nav exactly ────────────────── */
+.md-header { background: var(--md-default-bg-color); border-bottom: none; box-shadow: none; color: var(--md-default-fg-color); height: 56px; }
+.md-header__inner { padding: 0 clamp(16px, 3vw, 48px); height: 56px; gap: 16px; }
+.md-header__button.md-logo img, .md-header__button.md-logo svg { width: 22px; height: 22px; }
+.md-header__title { font-family: "Space Grotesk", "Inter", system-ui, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--md-default-fg-color); }
+.md-header__title .md-header__topic:first-child { font-family: "Space Grotesk", "Inter", system-ui, sans-serif; font-weight: 700; }
+.md-header__button { color: var(--md-default-fg-color--light); }
+.md-header__button:hover { color: var(--md-default-fg-color); }
 
-[data-md-color-scheme="slate"] .md-announce {
-  background: #0d0d0c;
-  border-bottom: 1px solid #2a2a28;
-}
-
-.md-announce__inner {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: #a3a3a3;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  max-width: 1680px;
-  margin: 0 auto;
-  padding: 0 clamp(16px, 3vw, 48px);
-}
-
-.md-announce__inner a {
-  color: #fafaf7;
-  text-decoration: none;
-  border-bottom: 1px solid #525252;
-  padding-bottom: 1px;
-  transition: border-color 120ms, color 120ms;
-}
-
-.md-announce__inner a:hover {
-  border-color: #008746;
-  color: #2bb673;
-}
-
-/* ── Header — matches quaicu.org nav ─────────────────────────── */
-.md-header {
-  background: var(--md-default-bg-color);
-  border-bottom: 1px solid #d4d4d4;
-  box-shadow: none;
-  color: var(--md-default-fg-color);
-}
-
-[data-md-color-scheme="slate"] .md-header {
-  border-color: #2a2a28;
-}
-
-.md-header__inner {
-  padding: 0 clamp(16px, 3vw, 48px);
-}
-
-.md-header__button.md-logo img,
-.md-header__button.md-logo svg {
-  width: 22px;
-  height: 22px;
-}
-
-.md-header__title {
-  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--md-default-fg-color);
-}
-
-.md-header__title .md-header__topic:first-child {
-  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-weight: 700;
-}
-
-.md-header__button {
-  color: var(--md-default-fg-color--light);
-}
-
-.md-header__button:hover {
-  color: #008746;
-}
-
-/* ── Nav tabs — mono uppercase ───────────────────────────────── */
-.md-tabs {
-  background: var(--md-default-bg-color);
-  border-bottom: 1px solid #d4d4d4;
-  box-shadow: none;
-}
-
-[data-md-color-scheme="slate"] .md-tabs {
-  border-color: #2a2a28;
-}
-
-.md-tabs__inner {
-  padding: 0 clamp(16px, 3vw, 48px);
-}
-
+/* ── Nav tabs → match quaicu.org .nav-links exactly ─────────── */
+.md-tabs { background: var(--md-default-bg-color); border-bottom: 1px solid #d4d4d4; box-shadow: none; }
+[data-md-color-scheme="slate"] .md-tabs { border-color: #2a2a28; }
+.md-tabs__inner { padding: 0 clamp(16px, 3vw, 48px); }
 .md-tabs__link {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--md-default-fg-color--light);
+  letter-spacing: 0;
+  text-transform: none;
+  color: #525252;
   opacity: 1;
   margin-top: 0;
   transition: color 120ms;
+  padding: 0 4px;
 }
-
-.md-tabs__link:hover,
+.md-tabs__link:hover { color: #0a0a0a; }
+[data-md-color-scheme="slate"] .md-tabs__link { color: #a3a3a3; }
+[data-md-color-scheme="slate"] .md-tabs__link:hover { color: #fafaf7; }
 .md-tabs__link--active {
-  color: #008746;
+  color: #fff !important;
+  background: #008746;
+  padding: 4px 10px;
+  margin: 0 -6px;
 }
 
-/* ── Sidebar ─────────────────────────────────────────────────── */
-.md-sidebar {
-  border-right: 1px solid #d4d4d4;
+/* ── Header CTA buttons (injected via JS) ────────────────────── */
+.qk-header-ctas {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-shrink: 0;
 }
-
-[data-md-color-scheme="slate"] .md-sidebar {
-  border-color: #2a2a28;
-}
-
-.md-sidebar--secondary {
-  border-right: none;
-  border-left: 1px solid #d4d4d4;
-}
-
-[data-md-color-scheme="slate"] .md-sidebar--secondary {
-  border-color: #2a2a28;
-}
-
-.md-nav__title {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--md-default-fg-color--light);
-  padding: 8px 12px 4px;
-}
-
-.md-nav__link {
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--md-default-fg-color--light);
-  transition: color 100ms;
-  padding: 4px 12px;
-}
-
-.md-nav__link:hover,
-.md-nav__link:focus {
-  color: #008746;
-  background: transparent;
-}
-
-.md-nav__link--active,
-.md-nav__link--active:hover {
-  color: #008746;
-  font-weight: 600;
-}
-
-.md-nav__item--active > .md-nav__link {
-  color: #008746;
-  font-weight: 600;
-}
-
-.md-nav--secondary .md-nav__link {
-  font-size: 13px;
-  padding: 2px 12px;
-}
-
-/* ── Content typography ──────────────────────────────────────── */
-.md-content {
-  background: var(--md-default-bg-color);
-}
-
-.md-typeset {
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 16px;
-  line-height: 1.75;
-  color: var(--md-typeset-color);
-}
-
-.md-typeset h1 {
-  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: clamp(28px, 4.5vw, 52px);
-  font-weight: 700;
-  letter-spacing: -0.03em;
-  line-height: 1.1;
-  color: var(--md-default-fg-color);
-  margin-bottom: 0.4em;
-}
-
-.md-typeset h2 {
-  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: clamp(20px, 2.8vw, 34px);
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--md-default-fg-color);
-  border-bottom: 1px solid #d4d4d4;
-  padding-bottom: 8px;
-  margin-top: 2em;
-}
-
-[data-md-color-scheme="slate"] .md-typeset h2 {
-  border-color: #2a2a28;
-}
-
-.md-typeset h3 {
-  font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: clamp(16px, 2vw, 24px);
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--md-default-fg-color);
-}
-
-.md-typeset h4,
-.md-typeset h5,
-.md-typeset h6 {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--md-default-fg-color--light);
-}
-
-.md-typeset p {
-  color: var(--md-typeset-color);
-  line-height: 1.75;
-}
-
-.md-typeset a {
-  color: var(--md-typeset-a-color);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  text-decoration-thickness: 1px;
-}
-
-.md-typeset a:hover {
-  text-decoration-thickness: 2px;
-}
-
-.md-typeset strong {
-  font-weight: 700;
-  color: var(--md-default-fg-color);
-}
-
-/* ── Inline code ─────────────────────────────────────────────── */
-.md-typeset code {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 13.5px;
-  background: var(--md-code-bg-color);
-  border: 1px solid #d4d4d4;
-  padding: 1px 5px;
-  color: var(--md-code-fg-color);
-}
-
-[data-md-color-scheme="slate"] .md-typeset code {
-  border-color: #2a2a28;
-}
-
-/* ── Code blocks ─────────────────────────────────────────────── */
-.md-typeset pre {
-  background: var(--md-code-bg-color);
-  border: 1px solid #d4d4d4;
-  padding: 0;
-  margin: 1.2em 0;
-}
-
-[data-md-color-scheme="slate"] .md-typeset pre {
-  border-color: #2a2a28;
-}
-
-.md-typeset pre > code {
-  border: none;
-  padding: 16px 20px;
-  background: transparent;
-  font-size: 14px;
-  line-height: 1.6;
-  display: block;
-}
-
-.md-typeset .highlight {
-  border: 1px solid #d4d4d4;
-  margin: 1.2em 0;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .highlight {
-  border-color: #2a2a28;
-}
-
-.md-typeset .highlight .filename {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  background: var(--md-default-bg-color--light);
-  border-bottom: 1px solid #d4d4d4;
-  padding: 6px 16px;
-  color: var(--md-default-fg-color--light);
-}
-
-[data-md-color-scheme="slate"] .md-typeset .highlight .filename {
-  border-color: #2a2a28;
-}
-
-.md-clipboard {
-  color: #a3a3a3;
-  transition: color 120ms;
-}
-
-.md-clipboard:hover {
-  color: #008746;
-}
-
-/* ── Admonitions — quaicu.org card style ────────────────────── */
-.md-typeset .admonition,
-.md-typeset details {
-  border: 1px solid #d4d4d4;
-  border-left: 3px solid #008746;
-  background: var(--md-default-bg-color--light);
-  padding: 0;
-  margin: 1.2em 0;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .admonition,
-[data-md-color-scheme="slate"] .md-typeset details {
-  border-color: #2a2a28;
-  border-left-color: #2bb673;
-}
-
-.md-typeset .admonition-title,
-.md-typeset summary {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  background: transparent;
-  border-bottom: 1px solid #d4d4d4;
-  padding: 10px 16px;
-  color: #008746;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .admonition-title,
-[data-md-color-scheme="slate"] .md-typeset summary {
-  border-color: #2a2a28;
-  color: #2bb673;
-}
-
-.md-typeset .admonition p,
-.md-typeset details p {
-  padding: 0 16px;
-  font-size: 14px;
-}
-
-.md-typeset .admonition.warning  { border-left-color: #c43a1a; }
-.md-typeset .admonition.danger   { border-left-color: #c43a1a; }
-.md-typeset .admonition.info     { border-left-color: #a3a3a3; }
-.md-typeset .admonition.note     { border-left-color: #525252; }
-
-.md-typeset .admonition.warning .admonition-title { color: #c43a1a; }
-.md-typeset .admonition.danger .admonition-title  { color: #c43a1a; }
-.md-typeset .admonition.info .admonition-title    { color: #525252; }
-.md-typeset .admonition.note .admonition-title    { color: #525252; }
-
-/* ── Tables — mono headers ───────────────────────────────────── */
-.md-typeset table:not([class]) {
-  border: 1px solid #d4d4d4;
-  font-size: 15px;
-  width: 100%;
-}
-
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) {
-  border-color: #2a2a28;
-}
-
-.md-typeset table:not([class]) th {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  background: var(--md-default-bg-color--light);
-  border-bottom: 2px solid #d4d4d4;
-  padding: 10px 16px;
-  color: var(--md-default-fg-color--light);
-}
-
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
-  border-color: #2a2a28;
-}
-
-.md-typeset table:not([class]) td {
-  border-color: #d4d4d4;
-  padding: 8px 16px;
-  vertical-align: top;
-}
-
-[data-md-color-scheme="slate"] .md-typeset table:not([class]) td {
-  border-color: #2a2a28;
-}
-
-.md-typeset table:not([class]) tr:hover {
-  background: var(--md-default-bg-color--light);
-}
-
-/* ── Buttons — .btn / .btn--primary match ───────────────────── */
-.md-typeset .md-button {
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  height: 40px;
-  line-height: 38px;
-  padding: 0 18px;
-  border: 1px solid var(--md-default-fg-color);
-  background: transparent;
-  color: var(--md-default-fg-color);
-  letter-spacing: 0;
-  text-decoration: none;
+.qk-hbtn {
   display: inline-flex;
   align-items: center;
-  transition: border-color 120ms, color 120ms, background 120ms;
-}
-
-.md-typeset .md-button:hover {
-  border-color: #008746;
+  height: 36px;
+  padding: 0 14px;
+  font-family: "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid #d4d4d4;
   background: transparent;
+  color: #525252;
+  cursor: pointer;
+  transition: all 120ms;
   text-decoration: none;
-  /* text stays ink — only border turns ember, matching quaicu.org .btn:hover */
+  white-space: nowrap;
+  letter-spacing: 0.01em;
 }
-
-.md-typeset .md-button--primary {
+.qk-hbtn:hover {
   background: var(--md-default-fg-color);
   color: var(--md-default-bg-color);
   border-color: var(--md-default-fg-color);
+  text-decoration: none;
 }
-
-.md-typeset .md-button--primary:hover {
+.qk-hbtn--primary {
+  background: var(--md-default-fg-color);
+  border-color: var(--md-default-fg-color);
+  color: var(--md-default-bg-color);
+}
+.qk-hbtn--primary:hover {
   background: #008746;
   border-color: #008746;
   color: #fafaf7;
 }
+[data-md-color-scheme="slate"] .qk-hbtn { border-color: #2a2a28; color: #a3a3a3; }
+@media (max-width: 960px) { .qk-header-ctas { display: none; } }
+
+/* ── Scroll progress bar ─────────────────────────────────────── */
+.qk-nav-progress {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: transparent;
+  pointer-events: none;
+  z-index: 10;
+}
+.qk-nav-progress-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #008746;
+  will-change: width;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+.md-sidebar { border-right: 1px solid #d4d4d4; }
+[data-md-color-scheme="slate"] .md-sidebar { border-color: #2a2a28; }
+.md-sidebar--secondary { border-right: none; border-left: 1px solid #d4d4d4; }
+[data-md-color-scheme="slate"] .md-sidebar--secondary { border-color: #2a2a28; }
+.md-nav__title { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--md-default-fg-color--light); padding: 8px 12px 4px; }
+.md-nav__link { font-family: "Inter", system-ui, sans-serif; font-size: 14px; font-weight: 500; color: var(--md-default-fg-color--light); transition: color 100ms; padding: 4px 12px; }
+.md-nav__link:hover, .md-nav__link:focus { color: #008746; background: transparent; }
+.md-nav__link--active, .md-nav__link--active:hover { color: #008746; font-weight: 600; }
+.md-nav__item--active > .md-nav__link { color: #008746; font-weight: 600; }
+.md-nav--secondary .md-nav__link { font-size: 13px; padding: 2px 12px; }
+
+/* ── Content typography ──────────────────────────────────────── */
+.md-content { background: var(--md-default-bg-color); }
+.md-typeset { font-family: "Inter", system-ui, sans-serif; font-size: 16px; line-height: 1.75; color: var(--md-typeset-color); }
+.md-typeset h1 { font-family: "Space Grotesk", "Inter", system-ui, sans-serif; font-size: clamp(28px, 4.5vw, 52px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.1; color: var(--md-default-fg-color); margin-bottom: 0.4em; }
+.md-typeset h2 { font-family: "Space Grotesk", "Inter", system-ui, sans-serif; font-size: clamp(20px, 2.8vw, 34px); font-weight: 700; letter-spacing: -0.02em; color: var(--md-default-fg-color); border-bottom: 1px solid #d4d4d4; padding-bottom: 8px; margin-top: 2em; }
+[data-md-color-scheme="slate"] .md-typeset h2 { border-color: #2a2a28; }
+.md-typeset h3 { font-family: "Space Grotesk", "Inter", system-ui, sans-serif; font-size: clamp(16px, 2vw, 24px); font-weight: 700; letter-spacing: -0.01em; color: var(--md-default-fg-color); }
+.md-typeset h4, .md-typeset h5, .md-typeset h6 { font-family: "JetBrains Mono", monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: var(--md-default-fg-color--light); }
+.md-typeset a { color: var(--md-typeset-a-color); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.md-typeset a:hover { text-decoration-thickness: 2px; }
+.md-typeset strong { font-weight: 700; color: var(--md-default-fg-color); }
+
+/* ── Code ────────────────────────────────────────────────────── */
+.md-typeset code { font-family: "JetBrains Mono", monospace; font-size: 13.5px; background: var(--md-code-bg-color); border: 1px solid #d4d4d4; padding: 1px 5px; color: var(--md-code-fg-color); }
+[data-md-color-scheme="slate"] .md-typeset code { border-color: #2a2a28; }
+.md-typeset pre { background: var(--md-code-bg-color); border: 1px solid #d4d4d4; padding: 0; margin: 1.2em 0; }
+[data-md-color-scheme="slate"] .md-typeset pre { border-color: #2a2a28; }
+.md-typeset pre > code { border: none; padding: 16px 20px; background: transparent; font-size: 14px; line-height: 1.6; display: block; }
+.md-typeset .highlight { border: 1px solid #d4d4d4; margin: 1.2em 0; }
+[data-md-color-scheme="slate"] .md-typeset .highlight { border-color: #2a2a28; }
+.md-typeset .highlight .filename { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; background: var(--md-default-bg-color--light); border-bottom: 1px solid #d4d4d4; padding: 6px 16px; color: var(--md-default-fg-color--light); }
+[data-md-color-scheme="slate"] .md-typeset .highlight .filename { border-color: #2a2a28; }
+.md-clipboard { color: #a3a3a3; transition: color 120ms; }
+.md-clipboard:hover { color: #008746; }
+
+/* ── Admonitions ─────────────────────────────────────────────── */
+.md-typeset .admonition, .md-typeset details { border: 1px solid #d4d4d4; border-left: 3px solid #008746; background: var(--md-default-bg-color--light); padding: 0; margin: 1.2em 0; }
+[data-md-color-scheme="slate"] .md-typeset .admonition, [data-md-color-scheme="slate"] .md-typeset details { border-color: #2a2a28; border-left-color: #2bb673; }
+.md-typeset .admonition-title, .md-typeset summary { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; background: transparent; border-bottom: 1px solid #d4d4d4; padding: 10px 16px; color: #008746; }
+[data-md-color-scheme="slate"] .md-typeset .admonition-title, [data-md-color-scheme="slate"] .md-typeset summary { border-color: #2a2a28; color: #2bb673; }
+.md-typeset .admonition p, .md-typeset details p { padding: 0 16px; font-size: 14px; }
+.md-typeset .admonition.warning, .md-typeset .admonition.danger { border-left-color: #c43a1a; }
+.md-typeset .admonition.info { border-left-color: #a3a3a3; }
+.md-typeset .admonition.note { border-left-color: #525252; }
+.md-typeset .admonition.warning .admonition-title, .md-typeset .admonition.danger .admonition-title { color: #c43a1a; }
+.md-typeset .admonition.info .admonition-title { color: #525252; }
+.md-typeset .admonition.note .admonition-title { color: #525252; }
+
+/* ── Tables ──────────────────────────────────────────────────── */
+.md-typeset table:not([class]) { border: 1px solid #d4d4d4; font-size: 15px; width: 100%; }
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) { border-color: #2a2a28; }
+.md-typeset table:not([class]) th { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; background: var(--md-default-bg-color--light); border-bottom: 2px solid #d4d4d4; padding: 10px 16px; color: var(--md-default-fg-color--light); }
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th { border-color: #2a2a28; }
+.md-typeset table:not([class]) td { border-color: #d4d4d4; padding: 8px 16px; vertical-align: top; }
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) td { border-color: #2a2a28; }
+.md-typeset table:not([class]) tr:hover { background: var(--md-default-bg-color--light); }
+
+/* ── Buttons — match quaicu.org .btn/.btn--primary ──────────── */
+.md-typeset .md-button { font-family: "Inter", system-ui, sans-serif; font-size: 13px; font-weight: 600; height: 40px; line-height: 38px; padding: 0 18px; border: 1px solid var(--md-default-fg-color); background: transparent; color: var(--md-default-fg-color); letter-spacing: 0; text-decoration: none; display: inline-flex; align-items: center; transition: border-color 120ms, color 120ms, background 120ms; }
+.md-typeset .md-button:hover { background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); text-decoration: none; }
+.md-typeset .md-button--primary { background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); }
+.md-typeset .md-button--primary:hover { background: #008746; border-color: #008746; color: #fafaf7; }
 
 /* ── Content tabs ────────────────────────────────────────────── */
-.md-typeset .tabbed-set {
-  border: 1px solid #d4d4d4;
-  margin: 1.2em 0;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .tabbed-set {
-  border-color: #2a2a28;
-}
-
-.md-typeset .tabbed-labels {
-  background: var(--md-default-bg-color--light);
-  border-bottom: 1px solid #d4d4d4;
-  gap: 0;
-  overflow-x: auto;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .tabbed-labels {
-  border-color: #2a2a28;
-}
-
-.md-typeset .tabbed-labels > label {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--md-default-fg-color--light);
-  padding: 8px 16px;
-  border-right: 1px solid #d4d4d4;
-  margin: 0;
-  transition: color 120ms, background 120ms;
-  white-space: nowrap;
-}
-
-[data-md-color-scheme="slate"] .md-typeset .tabbed-labels > label {
-  border-color: #2a2a28;
-}
-
-.md-typeset .tabbed-labels > label:hover {
-  color: #008746;
-  background: var(--md-default-bg-color);
-}
-
-.md-typeset .tabbed-set > input:checked + label {
-  color: #008746;
-  background: var(--md-default-bg-color);
-  border-bottom: 2px solid #008746;
-}
-
-.md-typeset .tabbed-content {
-  padding: 16px 20px;
-}
+.md-typeset .tabbed-set { border: 1px solid #d4d4d4; margin: 1.2em 0; }
+[data-md-color-scheme="slate"] .md-typeset .tabbed-set { border-color: #2a2a28; }
+.md-typeset .tabbed-labels { background: var(--md-default-bg-color--light); border-bottom: 1px solid #d4d4d4; gap: 0; overflow-x: auto; }
+[data-md-color-scheme="slate"] .md-typeset .tabbed-labels { border-color: #2a2a28; }
+.md-typeset .tabbed-labels > label { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--md-default-fg-color--light); padding: 8px 16px; border-right: 1px solid #d4d4d4; margin: 0; transition: color 120ms, background 120ms; white-space: nowrap; }
+[data-md-color-scheme="slate"] .md-typeset .tabbed-labels > label { border-color: #2a2a28; }
+.md-typeset .tabbed-labels > label:hover { color: #008746; background: var(--md-default-bg-color); }
+.md-typeset .tabbed-set > input:checked + label { color: #008746; background: var(--md-default-bg-color); border-bottom: 2px solid #008746; }
+.md-typeset .tabbed-content { padding: 16px 20px; }
 
 /* ── Search ──────────────────────────────────────────────────── */
-.md-search__form {
-  background: var(--md-default-bg-color--light);
-  border: 1px solid #d4d4d4;
-  height: 36px;
-  transition: border-color 120ms;
-}
+.md-search__form { background: var(--md-default-bg-color--light); border: 1px solid #d4d4d4; height: 36px; transition: border-color 120ms; }
+[data-md-color-scheme="slate"] .md-search__form { border-color: #2a2a28; }
+.md-search__form:focus-within { border-color: #008746; }
+.md-search__input { font-family: "Inter", system-ui, sans-serif; font-size: 13px; color: var(--md-default-fg-color); background: transparent; }
+.md-search__input::placeholder { color: var(--md-default-fg-color--lighter); }
+.md-search__output { border: 1px solid #d4d4d4; border-top: none; background: var(--md-default-bg-color); }
+[data-md-color-scheme="slate"] .md-search__output { border-color: #2a2a28; }
+.md-search-result__meta { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; background: var(--md-default-bg-color--light); border-bottom: 1px solid #d4d4d4; }
+[data-md-color-scheme="slate"] .md-search-result__meta { border-color: #2a2a28; }
+.md-search-result__link { border-bottom: 1px solid #d4d4d4; }
+[data-md-color-scheme="slate"] .md-search-result__link { border-color: #2a2a28; }
+.md-search-result__link:hover { background: var(--md-default-bg-color--light); }
 
-[data-md-color-scheme="slate"] .md-search__form {
-  border-color: #2a2a28;
-}
+/* ── Material footer → hidden (replaced by qk-foot) ─────────── */
+.md-footer { display: none; }
 
-.md-search__form:focus-within {
-  border-color: #008746;
-}
-
-.md-search__input {
-  font-family: "Inter", system-ui, sans-serif;
-  font-size: 13px;
-  color: var(--md-default-fg-color);
-  background: transparent;
-}
-
-.md-search__input::placeholder {
-  color: var(--md-default-fg-color--lighter);
-}
-
-.md-search__output {
-  border: 1px solid #d4d4d4;
-  border-top: none;
+/* ── Custom footer (matches quaicu.org exactly) ──────────────── */
+.qk-foot {
+  border-top: 2px solid var(--md-default-fg-color);
+  padding: 64px 0 32px;
   background: var(--md-default-bg-color);
 }
-
-[data-md-color-scheme="slate"] .md-search__output {
-  border-color: #2a2a28;
+.qk-foot-inner {
+  max-width: 1680px;
+  margin: 0 auto;
+  padding: 0 clamp(20px, 4vw, 72px);
 }
-
-.md-search-result__meta {
+.qk-foot-grid {
+  display: grid;
+  grid-template-columns: 2fr repeat(3, 1fr);
+  gap: 48px;
+  margin-bottom: 64px;
+}
+@media (max-width: 900px) { .qk-foot-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 600px) { .qk-foot-grid { grid-template-columns: 1fr; } }
+.qk-foot-col h4 {
   font-family: "JetBrains Mono", monospace;
   font-size: 10px;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  background: var(--md-default-bg-color--light);
-  border-bottom: 1px solid #d4d4d4;
+  color: #525252;
+  margin: 0 0 20px 0;
 }
-
-[data-md-color-scheme="slate"] .md-search-result__meta {
-  border-color: #2a2a28;
-}
-
-.md-search-result__link {
-  border-bottom: 1px solid #d4d4d4;
-}
-
-[data-md-color-scheme="slate"] .md-search-result__link {
-  border-color: #2a2a28;
-}
-
-.md-search-result__link:hover {
-  background: var(--md-default-bg-color--light);
-}
-
-/* ── Footer ──────────────────────────────────────────────────── */
-.md-footer {
-  border-top: 1px solid #d4d4d4;
-  background: var(--md-footer-bg-color);
-}
-
-[data-md-color-scheme="slate"] .md-footer {
-  border-color: #2a2a28;
-}
-
-.md-footer-meta {
-  background: var(--md-footer-bg-color--dark);
-  border-top: 1px solid #d4d4d4;
-}
-
-[data-md-color-scheme="slate"] .md-footer-meta {
-  border-color: #2a2a28;
-}
-
-.md-footer-meta__inner {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--md-footer-fg-color--lighter);
-}
-
-.md-footer-copyright {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-}
-
-/* ── Pagination ──────────────────────────────────────────────── */
-.md-footer__link {
-  background: transparent;
-  border-top: 1px solid #d4d4d4;
-  transition: background 120ms;
-}
-
-[data-md-color-scheme="slate"] .md-footer__link {
-  border-color: #2a2a28;
-}
-
-.md-footer__link:hover {
-  background: var(--md-default-bg-color--light);
-}
-
-.md-footer__title {
+[data-md-color-scheme="slate"] .qk-foot-col h4 { color: #a3a3a3; }
+.qk-foot-col ul { list-style: none; display: grid; gap: 8px; padding: 0; margin: 0; }
+.qk-foot-col a { font-size: 14px; color: #1c1c1c; text-decoration: none; transition: color 120ms; }
+[data-md-color-scheme="slate"] .qk-foot-col a { color: #e5e5e2; }
+.qk-foot-col a:hover { color: var(--md-default-fg-color); text-decoration: none; }
+.qk-foot-brandname {
   font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-  font-size: 15px;
+  font-size: 28px;
   font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--md-default-fg-color);
+  margin: 0 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
-
-.md-footer__direction {
+.qk-foot-brandname::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  background: #008746;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.qk-foot-desc {
+  max-width: 32ch;
+  font-size: 14px;
+  color: #525252;
+  margin: 0 0 24px 0;
+  line-height: 1.55;
+}
+[data-md-color-scheme="slate"] .qk-foot-desc { color: #a3a3a3; }
+.qk-foot-meta {
   font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--md-default-fg-color--light);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #525252;
+  line-height: 1.7;
 }
+[data-md-color-scheme="slate"] .qk-foot-meta { color: #a3a3a3; }
+.qk-foot-coda {
+  padding-top: 24px;
+  border-top: 1px solid #d4d4d4;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: #525252;
+  text-transform: uppercase;
+}
+[data-md-color-scheme="slate"] .qk-foot-coda { border-color: #2a2a28; color: #a3a3a3; }
 
 /* ── Back to top ─────────────────────────────────────────────── */
-.md-top {
-  background: var(--md-default-bg-color);
-  border: 1px solid #d4d4d4;
-  color: var(--md-default-fg-color--light);
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.md-top:hover {
-  background: var(--md-default-bg-color--light);
-  color: #008746;
-  border-color: #008746;
-}
+.md-top { background: var(--md-default-bg-color); border: 1px solid #d4d4d4; color: var(--md-default-fg-color--light); font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.md-top:hover { background: var(--md-default-bg-color--light); color: #008746; border-color: #008746; }
 
 /* ── Scrollbar ───────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d4d4d4; }
 ::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
-
 [data-md-color-scheme="slate"] ::-webkit-scrollbar-thumb { background: #2a2a28; }
 
-/* ── Utility — quaicu.org back link ─────────────────────────── */
-.quaicu-back {
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--md-default-fg-color--light);
-  text-decoration: none;
-  border-bottom: 1px solid #d4d4d4;
-  padding-bottom: 1px;
-  transition: color 120ms, border-color 120ms;
-}
-
-.quaicu-back:hover {
-  color: #008746;
-  border-color: #008746;
-}
+/* ── Utility ─────────────────────────────────────────────────── */
+.quaicu-back { font-family: "JetBrains Mono", monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: var(--md-default-fg-color--light); text-decoration: none; border-bottom: 1px solid #d4d4d4; padding-bottom: 1px; transition: color 120ms, border-color 120ms; }
+.quaicu-back:hover { color: #008746; border-color: #008746; }
