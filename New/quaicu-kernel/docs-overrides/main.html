@@ -22,6 +22,51 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
 
 {% block announce %}{% endblock %}
 
+{# Replace Material's two-row header (.md-header + .md-tabs) with quaicu.org's
+   single .nav element — identical markup to quaicu.org/assets/nav.js #}
+{% block header %}
+<header class="nav" data-md-component="header">
+  <div class="nav-inner">
+    <a href="/" class="nav-brand" aria-label="QUAICU Kernel home">
+      <img src="/assets/quaicu-mark.svg" alt="" width="22" height="22" class="nav-brand-mark" />QUAICU<span class="nav-brand-mono">Kernel</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="/quickstart/" data-page="quickstart">Quickstart</a>
+      <a href="/tutorials/" data-page="tutorials">Tutorials</a>
+      <a href="/how-to/" data-page="how-to">How-To</a>
+      <a href="/reference/" data-page="reference">Reference</a>
+      <a href="/concepts/" data-page="concepts">Concepts</a>
+      <a href="/changelog/" data-page="changelog">Changelog</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="btn btn--ghost" href="https://quaicu.org" target="_blank" rel="noopener">quaicu.org &#8599;</a>
+      <a class="btn btn--primary" href="/app/">Sign In</a>
+    </div>
+    <button class="nav-toggle" aria-label="Open menu" aria-expanded="false" aria-controls="nav-mobile" type="button">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="nav-progress" aria-hidden="true"><span class="nav-progress-fill"></span></div>
+</header>
+<div class="nav-mobile" id="nav-mobile" data-open="false" aria-hidden="true">
+  <nav aria-label="Primary mobile">
+    <a href="/quickstart/" data-page="quickstart">Quickstart</a>
+    <a href="/tutorials/" data-page="tutorials">Tutorials</a>
+    <a href="/how-to/" data-page="how-to">How-To</a>
+    <a href="/reference/" data-page="reference">Reference</a>
+    <a href="/concepts/" data-page="concepts">Concepts</a>
+    <a href="/changelog/" data-page="changelog">Changelog</a>
+  </nav>
+  <div class="nav-mobile-cta">
+    <a class="btn btn--ghost btn--lg" href="https://quaicu.org" target="_blank" rel="noopener">quaicu.org &#8599;</a>
+    <a class="btn btn--primary btn--lg" href="/app/">Sign In</a>
+  </div>
+</div>
+{% endblock %}
+
+{# Tabs row folded into the single nav above #}
+{% block tabs %}{% endblock %}
+
 {% block site_body %}
 <!-- Google Tag Manager (noscript) -->
 <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-NDQ7KG3W"
@@ -79,35 +124,47 @@ height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
 {% block scripts %}
 {{ super() }}
 <script>
-/* Inject header CTAs (← quaicu.org + Sign In) */
+/* Wire the quaicu.org-style nav: mobile sheet, scroll progress, active link */
 (function () {
-  var inner = document.querySelector('.md-header__inner');
-  if (!inner) return;
-  var ctas = document.createElement('div');
-  ctas.className = 'qk-header-ctas';
-  ctas.innerHTML =
-    '<a class="qk-hbtn" href="https://quaicu.org" target="_blank" rel="noopener">← quaicu.org</a>' +
-    '<a class="qk-hbtn qk-hbtn--primary" href="/app/">Sign In →</a>';
-  var firstNonLogo = inner.querySelector('.md-header__button:not(.md-logo)');
-  if (firstNonLogo) inner.insertBefore(ctas, firstNonLogo);
-  else inner.appendChild(ctas);
+  /* Mobile menu toggle */
+  var toggle = document.querySelector('.nav-toggle');
+  var sheet = document.querySelector('.nav-mobile');
+  if (toggle && sheet) {
+    var setOpen = function (open) {
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+      sheet.setAttribute('data-open', String(open));
+      sheet.setAttribute('aria-hidden', String(!open));
+      document.body.style.overflow = open ? 'hidden' : '';
+    };
+    toggle.addEventListener('click', function () {
+      setOpen(toggle.getAttribute('aria-expanded') !== 'true');
+    });
+    sheet.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', function () { setOpen(false); });
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') setOpen(false);
+    });
+  }
 
-  /* Scroll progress bar */
-  var header = document.querySelector('.md-header');
-  if (header) {
-    var prog = document.createElement('div');
-    prog.className = 'qk-nav-progress';
-    prog.innerHTML = '<span class="qk-nav-progress-fill"></span>';
-    header.appendChild(prog);
-    var fill = prog.querySelector('.qk-nav-progress-fill');
-    function upd() {
+  /* Scroll progress fill */
+  var fill = document.querySelector('.nav-progress-fill');
+  if (fill) {
+    var upd = function () {
       var max = document.documentElement.scrollHeight - window.innerHeight;
       fill.style.width = (max > 0 ? Math.min(window.scrollY / max, 1) * 100 : 0) + '%';
-    }
+    };
     window.addEventListener('scroll', upd, { passive: true });
     window.addEventListener('resize', upd, { passive: true });
     upd();
   }
+
+  /* Active link by first path segment (quaicu.org markActiveLink pattern) */
+  var seg = (location.pathname.split('/').filter(Boolean)[0] || 'home');
+  document.querySelectorAll('.nav-links a[data-page], .nav-mobile a[data-page]').forEach(function (a) {
+    if (a.dataset.page === seg) a.classList.add('is-active');
+  });
 
   /* Footer year */
   document.querySelectorAll('.qk-year').forEach(function (el) {
