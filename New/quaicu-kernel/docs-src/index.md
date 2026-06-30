@@ -1,13 +1,9 @@
-# QUAICU Governance Kernel
-
-**AI governance kernel and policy packs for regulated enterprises.**
-
-The QUAICU Governance Kernel is a standalone, fail-closed AI governance engine that makes every AI decision policy-compliant, auditable, and cryptographically provable before execution. Available as Python SDK, REST API, or Docker.
-
-<div style="display:flex;gap:12px;margin:24px 0 32px;">
-  <a href="/app/" class="md-button md-button--primary">Sign In →</a>
-  <a href="/app/signup" class="md-button">Sign Up</a>
-</div>
+---
+template: home.html
+hide:
+  - navigation
+  - toc
+---
 
 ---
 

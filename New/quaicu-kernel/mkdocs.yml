@@ -13,9 +13,7 @@ theme:
   custom_dir: docs-overrides
   logo: assets/favicon.ico
   favicon: assets/favicon.ico
-  font:
-    text: Inter
-    code: JetBrains Mono
+  font: false
   palette:
     - scheme: default
       primary: custom
