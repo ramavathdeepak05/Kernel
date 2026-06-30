@@ -161,7 +161,7 @@
   text-decoration: none;
 }
 .nav-brand:hover { text-decoration: none; color: var(--md-default-fg-color); }
-.nav-brand-mark { width: 22px; height: 22px; display: inline-block; align-self: center; color: #008746; image-rendering: -webkit-optimize-contrast; }
+.nav-brand-mark { width: 22px; height: 22px; display: inline-block; align-self: center; image-rendering: -webkit-optimize-contrast; }
 .nav-brand-mono {
   font-family: "JetBrains Mono", monospace;
   font-size: 10px;
