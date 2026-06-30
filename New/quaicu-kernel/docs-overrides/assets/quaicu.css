@@ -115,6 +115,10 @@
 /* ── Global resets ───────────────────────────────────────────── */
 *, *::before, *::after { border-radius: 0 !important; }
 
+/* ── Text selection — match quaicu.org (white on ember) ──────── */
+::selection { background: #008746; color: #fff; }
+::-moz-selection { background: #008746; color: #fff; }
+
 .md-header, .md-sidebar, .md-search__form, .md-search__output,
 .md-typeset .highlight, .md-typeset pre, .md-typeset .admonition,
 .md-typeset details, .md-nav__link, .md-tooltip, .md-dialog {
@@ -279,7 +283,7 @@
 
 /* ── Buttons ─────────────────────────────────────────────────── */
 .md-typeset .md-button { font-family: "Inter", system-ui, sans-serif; font-size: 13px; font-weight: 600; height: 40px; line-height: 38px; padding: 0 18px; border: 1px solid var(--md-default-fg-color); background: transparent; color: var(--md-default-fg-color); letter-spacing: 0; text-decoration: none; display: inline-flex; align-items: center; transition: border-color 120ms, color 120ms, background 120ms; }
-.md-typeset .md-button:hover { border-color: #008746; color: #008746 !important; background: transparent; text-decoration: none; }
+.md-typeset .md-button:hover { background: var(--md-default-fg-color) !important; color: var(--md-default-bg-color) !important; border-color: var(--md-default-fg-color); text-decoration: none; }
 .md-typeset .md-button--primary { background: var(--md-default-fg-color); color: var(--md-default-bg-color); border-color: var(--md-default-fg-color); }
 .md-typeset .md-button--primary:hover { background: #008746 !important; border-color: #008746 !important; color: #fafaf7 !important; }
 
