@@ -153,10 +153,158 @@
   </div>
 </div>
 
-<!-- Docs content (Where to start, guarantees, etc.) -->
-<div class="qk-content">
-  <article class="md-content__inner md-typeset">
-    {{ page.content }}
-  </article>
-</div>
+<!-- 01 · Where to start -->
+<section class="qk-sec">
+  <div class="qk-sec-head">
+    <div class="qk-kicker"><span class="qk-knum">01</span>Where to start</div>
+    <div>
+      <h2 class="qk-sec-title">Three doors. Pick the one that fits your role.</h2>
+      <p class="qk-sec-lead">Every path is a guided sequence &mdash; from a 60-second Docker run to offline-verifiable ledger proofs. Start where you are.</p>
+    </div>
+  </div>
+  <div class="qk-grid qk-grid-3">
+    <div class="qk-card">
+      <div class="qk-card-eyebrow">Builder / Integrator</div>
+      <div class="qk-card-title">Embed governance and ship it</div>
+      <p class="qk-card-desc">Wrap a function, call the API, or run the container &mdash; governance without rebuilding the layer yourself.</p>
+      <ul class="qk-card-links">
+        <li><a href="/quickstart/">Quickstart &mdash; Docker in 60s</a></li>
+        <li><a href="/tutorials/python-sdk-end-to-end/">Python SDK end-to-end</a></li>
+        <li><a href="/tutorials/rest-api-integration/">REST API integration</a></li>
+        <li><a href="/how-to/write-a-policy/">Write a policy</a></li>
+      </ul>
+    </div>
+    <div class="qk-card">
+      <div class="qk-card-eyebrow">CTO / Evaluator</div>
+      <div class="qk-card-title">Understand it before you commit</div>
+      <p class="qk-card-desc">Hexagonal design, fourteen governance layers, fail-closed by construction. Read the architecture first.</p>
+      <ul class="qk-card-links">
+        <li><a href="/concepts/architecture/">Architecture &mdash; 14 layers</a></li>
+        <li><a href="/concepts/lifecycle/">Governance lifecycle</a></li>
+        <li><a href="/concepts/security/">Security model</a></li>
+        <li><a href="/concepts/deployment-tiers/">Deployment tiers</a></li>
+      </ul>
+    </div>
+    <div class="qk-card">
+      <div class="qk-card-eyebrow">Compliance / Auditor</div>
+      <div class="qk-card-title">Verify what it proves</div>
+      <p class="qk-card-desc">Offline-verifiable RFC-6962 proofs and a documented policy lifecycle a regulator can check without trusting us.</p>
+      <ul class="qk-card-links">
+        <li><a href="/concepts/governance-layers/">Governance layers K&middot;01&ndash;K&middot;14</a></li>
+        <li><a href="/how-to/verify-ledger-proof/">Verify a ledger proof</a></li>
+        <li><a href="/reference/policy/lifecycle/">Policy lifecycle</a></li>
+        <li><a href="/concepts/security/">Audit invariants</a></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 02 · Production status -->
+<section class="qk-sec">
+  <div class="qk-sec-head">
+    <div class="qk-kicker"><span class="qk-knum">02</span>Production status</div>
+    <div>
+      <h2 class="qk-sec-title">Core layers in production. Extended layers green.</h2>
+      <p class="qk-sec-lead">The kernel ships in two bands &mdash; the governance core is live; the assurance layers are built and passing their suites, entering first deployment via design-partner pilot.</p>
+    </div>
+  </div>
+  <div class="qk-statwrap">
+    <div class="qk-stat">
+      <div class="qk-stat-head">
+        <span class="qk-stat-dot"></span>
+        <span class="qk-stat-tag qk-stat-tag--live">K&middot;01&ndash;K&middot;08 &middot; Production</span>
+      </div>
+      <p class="qk-stat-body">Policy Engine, TrustLedger, HITL Gate, DPDP Consent, AI Gateway, Process Engine, Event Bus, and Model Registry &mdash; the full governance lifecycle, live in production.</p>
+    </div>
+    <div class="qk-stat">
+      <div class="qk-stat-head">
+        <span class="qk-stat-tag">K&middot;09&ndash;K&middot;14 &middot; Pilot</span>
+      </div>
+      <p class="qk-stat-body">Fairness, Drift, Explainability, Incident/Rollback, Sandbox, and Regulatory Mapping &mdash; built and passing their test suites. First live deployment via design-partner pilot.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 03 · Integration -->
+<section class="qk-sec">
+  <div class="qk-sec-head">
+    <div class="qk-kicker"><span class="qk-knum">03</span>Integration</div>
+    <div>
+      <h2 class="qk-sec-title">Governed in three lines, however you build.</h2>
+      <p class="qk-sec-lead">A Python decorator, a REST call, or a container. The governance boundary is the same in every form.</p>
+    </div>
+  </div>
+  <div class="qk-grid qk-grid-3">
+    <div class="qk-code-card">
+      <div class="qk-code-label">Python SDK</div>
+<pre>from delivery.sdk import Kernel
+
+kernel = Kernel.from_config(<span class="qk-g">"kernel.toml"</span>)
+
+<span class="qk-g">@kernel.governed</span>(policy=<span class="qk-g">"credit.approve"</span>)
+async def approve_loan(loan_id, amount):
+    return {<span class="qk-g">"status"</span>: <span class="qk-g">"approved"</span>}</pre>
+    </div>
+    <div class="qk-code-card">
+      <div class="qk-code-label">REST API</div>
+<pre>curl -X POST \
+  https://your-kernel/v1/actions/propose \
+  -H <span class="qk-g">"X-API-Key: $QUAICU_KEY"</span> \
+  -d <span class="qk-g">'{"action_type":"credit.approve",
+       "payload":{"amount":75000}}'</span></pre>
+    </div>
+    <div class="qk-code-card">
+      <div class="qk-code-label">Docker</div>
+<pre>cd delivery/docker
+docker compose up --build
+
+<span class="qk-c"># Kernel  → http://localhost:7000</span>
+<span class="qk-c"># Docs    → http://localhost:7000/docs</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- 04 · Key guarantees -->
+<section class="qk-sec">
+  <div class="qk-sec-head">
+    <div class="qk-kicker"><span class="qk-knum">04</span>Key guarantees</div>
+    <div>
+      <h2 class="qk-sec-title">Five invariants the kernel holds by construction.</h2>
+      <p class="qk-sec-lead">Not policies you configure &mdash; properties the architecture enforces, every path, every time.</p>
+    </div>
+  </div>
+  <table class="qk-table">
+    <thead>
+      <tr><th>Guarantee</th><th>What it means</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Fail-Closed</td><td>Any error, timeout, or policy failure resolves to DENY or HALT. No silent passthrough.</td></tr>
+      <tr><td>No Bypass</td><td>No code path executes a governed action without evaluation.</td></tr>
+      <tr><td>Tenant Isolation</td><td>Schema-per-tenant. Nothing crosses a tenant boundary.</td></tr>
+      <tr><td>Ledger Immutability</td><td>Sealed entries are append-only and cannot be modified.</td></tr>
+      <tr><td>Offline-Verifiable</td><td>A regulator verifies RFC-6962 proofs without trusting QUAICU.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 05 · Licensing -->
+<section class="qk-sec">
+  <div class="qk-sec-head">
+    <div class="qk-kicker"><span class="qk-knum">05</span>Licensing</div>
+    <div>
+      <h2 class="qk-sec-title">Available standalone. Discussed under NDA.</h2>
+      <p class="qk-sec-lead">License, embed, or deploy the kernel under your client's IT policy.</p>
+    </div>
+  </div>
+  <div class="qk-cta">
+    <div>
+      <p class="qk-cta-text"><strong>NDA-first.</strong> The kernel is available standalone &mdash; license it, embed it, or run it inside your own infrastructure.</p>
+      <div class="qk-cta-meta">hello@quaicu.org &middot; quaicu.org &middot; DPDP-NATIVE</div>
+    </div>
+    <div class="qk-hero__btns">
+      <a href="https://quaicu.org/contact.html" class="qk-btn qk-btn--primary">Talk to us about licensing &#8594;</a>
+      <a href="mailto:hello@quaicu.org" class="qk-btn">hello@quaicu.org</a>
+    </div>
+  </div>
+</section>
 {% endblock %}
