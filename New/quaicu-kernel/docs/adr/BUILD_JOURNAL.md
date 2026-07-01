@@ -12,70 +12,37 @@ next cold agent doesn't know it happened.
 
 ---
 
-## Outstanding & deferred work (as of 2026-06-26 — single source of truth; supersedes ACTION_TRACKER)
+## Outstanding & deferred work — Deployment-Readiness Program (as of 2026-06-28)
 
-> The root `ACTION_TRACKER.md` is **deprecated/frozen** (kept for history); everything still open lives
-> here. The product/engineering waves are essentially worked down — what remains is mostly **human/
-> process** + a known set of **deferred** and **code-follow-up** items. Live deployment: revision
-> **`quaicu-kernel-00034-8sx`** (see the `kernel-deployment` memory for prod-state detail). IDs reference
-> the old tracker rows.
+> Supersedes the prior W0–W8 outstanding list (retained in git history + the Log below). The granular,
+> task-level plan with acceptance criteria + dependencies is the **single source of truth in the root
+> `ACTION_TRACKER.md`** (reset 2026-06-28 to this program). This section is the consolidated journal
+> view. **Decisions of record:** ship **both** dedicated single-tenant + shared multi-tenant SaaS on
+> **GCP**; readiness bar = pilot + enterprise GA + marketplace listing; sequence by dependency
+> (*correctness over deadline*).
 
-**A. Human / process — the deal-blocking critical path (mostly drafted; needs sending/booking/counsel):**
-- **W2-1** K·02 ledger crypto review — RFQ send-ready (`docs/operations/CRYPTO_REVIEW_RFQ.md`); **send it**
-  (longest pole; gates bank deployment).
-- **W2-2** SOC 2 (Type I→II) — **start the clock** (not started). **W2-3** independent pen-test — SoW
-  drafted (`docs/compliance/PENTEST_SOW.md`); **book a firm**. **W2-4** ISO 27001 (+27701) — not started.
-- **W2-5 / W3-2** GDPR Art.28 DPA + SCCs — starter (`docs/legal/DPA_ART28_STARTER.md`); **counsel** finalizes.
-  **W3-1** enterprise MSA — starter (`docs/legal/MSA_STARTER.md`); **counsel**. **W3-3** SLA — starter
-  (numbers pending W4 targets) + counsel. **W3-4** order-form/pricing — starter; business sets list pricing.
-  **W3-5** Terms/Privacy/Refunds counsel sign-off — inventory drafted; ⛔ the **draft banner in
-  `console/src/legal/content.ts` stays until counsel clears it** (separate PR).
-- **W3-6** cyber/E&O insurance · **W3-7** selling-entity + cross-border tax (VAT/GST) · **W3-8** live
-  Razorpay keys (KYC) — **also provision the absent `RAZORPAY_WEBHOOK_SECRET`** before enabling
-  `[billing.razorpay]`. **W2-7** PCI SAQ-A — confirm w/ acquirer + QSA. **W2-6** RBI pack — adapt to the
-  licence category + backtest before activating in a real tenant.
-- **W7-1** land an inspected design partner · **W7-5** sign an SI / audit-firm partner. (Both kits built;
-  signing is human.)
+**Verified baseline corrections (confirmed in code 2026-06-28 — the old go-live notes were partly stale):**
+`pyproject.toml` exists (gap = no **lockfile**); `EntitlementRepository` + `PostgresEntitlementRepository`
+exist; `build_saas_app` + `TieredKernelProvider` exist. Genuinely missing: lockfile, **SAML**, the proof
+**trust-anchor/witness**, **push HITL channels**, the **MCP server**, and **gateway tool-call** governance.
 
-**B. Operational / deploy-pending (code or runbook done — ops to execute):**
-- **W4-1** wire log-based metrics + alerts + uptime check · **W4-2** stand up `status.quaicu.org` ·
-  **W4-3** *run the DR restore test* (the real gap behind any RTO/RPO) · **W4-4** staff the on-call
-  rotation · **W4-5** stand up the retention-locked WORM bucket · **W4-6** publish a trust-center page ·
-  **W4-8** IR tabletop + fill `[contacts]` · **W4-9** graduate CI scans report→blocking once the backlog
-  clears.
-- **W5-1** `terraform validate` + import/apply the SaaS-plane IaC (`deploy/terraform/gcp-saas/`) · **W5-2**
-  apply a non-US region (eu/india/gulf presets exist) · **W5-3** stand up the org VPC-SC perimeter + run
-  the zero-egress validation at scale · **W5-4** fill per-zone residency guarantees.
-- **W6-9** `wrangler deploy` from `console/` to ship the self-hosted fonts + CSP/security headers + WCAG-AA
-  contrast + responsive pass (code done; not yet shipped).
+**Phases (see `ACTION_TRACKER.md` for the D0–D6 tasks + DoD):**
+- **D0 — Foundations:** durability audit · dependency **lockfile** · supply-chain CI→blocking (SBOM + cosign + vuln gates) · LICENSE/README · close any in-memory hot-path so `--workers>1` is correct.
+- **D1 — HITL loop:** async-by-default approval on the SDK path (no more poll-once→DENY) · **Email** + **Microsoft Teams** adapters · durable at-least-once delivery · in-browser member maker/checker.
+- **D2 — Interception:** **MCP governance server** · gateway **tool-call** governance · Python SDK hardening.
+- **D3 — Proof (anchor now, audit later):** **key attestation/pinning** (verifier stops trusting the bundle's own key) · **external witness/anchoring** (defeat split-view) · freeze the surface for the K·02 review.
+- **D4 — Multi-tenancy/packaging:** shared SaaS hardening (we operate) · dedicated single-tenant IaC + customer KMS + runbooks (customer-operated) · per-customer **residency** parameterization + zero-egress.
+- **D5 — Identity/billing/ops:** **SAML 2.0** + **Entra** cert · **live Razorpay** (+ the absent `RAZORPAY_WEBHOOK_SECRET`) · observability/alerts/status/on-call · **DR restore test** + WORM bucket + trust center.
+- **D6 — Acceptance (DoD = all):** live pilot end-to-end with **anchor-verified** proofs · external pen-test/security review passed · supply-chain + load + DR green.
+- **Tracked non-code (parallel):** K·02 crypto review (T-1) · SOC 2 (T-2) · pen-test booking (T-3) · DPA/MSA counsel (T-4) · RBI/DPDP + credit-lending pack legal/CRO review (T-5).
+- **Explicitly out of scope this program:** non-Python SDKs · rule-builder UI · multi-step SOP authoring · Slack/Jira HITL · GCP Marketplace *metered* billing (listing-readiness only).
 
-**C. Deferred until a design partner pulls it (per the 2026–2027 strategy — do NOT build ahead):**
-- **W7-3** marketplace listings (GCP/AWS/Azure) · **W7-4** console localization for non-English regulators
-  · **W8-3** polyglot Go split (Merkle/CEL) · **W6-8** auto-subscription billing (PLG-only; the
-  consultancy-led ICP doesn't need it).
-
-**D. Code follow-ups (this session's SaaS arc + earlier wave notes):**
-- **Member console login** — a `COMPLIANCE` member can approve only via their **API key** today; the
-  console only logs in as the owner, so in-browser maker/checker approval needs member auth (password/IdP).
-  (The maker/checker flow itself works end-to-end via the member key — verified live.)
-- **Point-in-time evaluation persistence** on resume (today `resume_after_approval` re-evaluates) ·
-  `@kernel.guard` **closure** async-resume (stays synchronous — closures aren't persistable).
-- **Per-tenant seal locks** + **bounded/lazy account hydration** (next W8 steps after W8-1/W8-2) ·
-  **at-least-once** durable HITL delivery.
-- **Read-only auditor console role** (the W7-5 "Auditor View" as a scoped UI role; today it's the
-  export + offline verifier) · **K·06 process-engine** wiring on the SaaS plane.
-- W6 notes: SCIM **Groups** + IdP-specific certification (W6-1) · **AWS Comprehend** masking adapter +
-  adopt `MaskingPort` in the K·05 `generate` path + DLP batching (W6-3) · verify-by-upload UI + export
-  time-window/regulation filters (W6-6).
-- Strategy-named buildable lever (not yet started): the **MCP governance server** (frictionless
-  integration; "MCP = the AI security issue of 2026").
-
-**E. Honest caveats — not validated against live cloud (fake-client tests only):** the gateway shims
+**Honest caveats — not validated against live cloud (fake-client tests only):** the gateway shims
 (Anthropic / Vertex / Bedrock), Cloud DLP masking, the GCP/AWS KMS shred keyrings, AWS Step Functions, and
-the EventBridge sink. A design-partner pilot is where these first run against a real environment. The K·02
-**crypto review (W2-1) gates bank deployment**.
+the EventBridge sink. A design-partner pilot (D6-1) is where these first run against a real environment.
+The K·02 **crypto review (T-1) gates bank deployment**.
 
-**F. Operational cleanup (this session, on prod — do soon):**
+**Immediate operational hygiene (still open, on prod — do soon):**
 - **Rotate the chat-exposed credentials**: API keys `qk_7beab…` (old owner), `qk_25f9…` (accidental no-op
   owner key), `qk_30fa…` (the member key) + the old console session JWT — console → API Keys → revoke.
 - Clean up demo artifacts on tenant `quaicu-222af5`: the `COMPLIANCE` member `mem_a9abfff3cf1103a4` +
@@ -255,6 +222,21 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-06-28 · Deployment-Readiness Program — tracker reset + journal consolidation · docs · claude** —
+  Replaced the W0–W8 outstanding list with a dependency-ordered **Deployment-Readiness Program** (phases
+  D0–D6 + a tracked non-code workstream); the granular task list with acceptance criteria + dependencies
+  is the single source of truth in the root **`ACTION_TRACKER.md`** (reset 2026-06-28). Driven by explicit
+  **decisions of record**: ship **both** dedicated + shared SaaS on **GCP**; readiness bar = pilot +
+  enterprise GA + marketplace listing; proof layer gets the **trust-anchor/witness now** (external crypto
+  review deferred/tracked, T-1); HITL = **Teams + Email**; integrations = Python SDK harden + **MCP
+  server** + **gateway tool-calls**; **QUAICU-authored packs**; **mixed** ops (we run shared, customer
+  runs dedicated); **per-customer residency**; identity adds **SAML + Entra**; **Razorpay live** +
+  invoice; **in-browser member maker/checker**; DoD = live pilot + security review + supply-chain/load/DR.
+  **Grounded by a fresh code pass that corrected stale go-live notes:** `pyproject.toml`, durable
+  `EntitlementRepository`/`PostgresEntitlementRepository`, and `build_saas_app`/`TieredKernelProvider`
+  already exist; the real gaps are the **lockfile**, **SAML**, the **proof anchor/witness**, **push HITL
+  channels**, and the **MCP/gateway-tool-call** work. Docs only — no code/deploys. **Next:** D0
+  (durability audit + lockfile + supply-chain CI).
 - **2026-06-26 · W8-1/W8-2 non-blocking hot path · core/ledger + delivery/api · claude** —
   Fixed two event-loop-blocking issues; **W8-1 was live on prod**. `TrustLedger.seal` called the signer's
   sync `sign()` inside the async `seal` (under a global lock), and the BUSINESS-tier `gcp_kms` signer's
