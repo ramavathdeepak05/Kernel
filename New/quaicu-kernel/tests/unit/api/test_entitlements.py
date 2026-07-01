@@ -105,12 +105,12 @@ async def test_starter_governs_but_hides_inference():
     assert body["status"] == "ACTIVE"
     f = body["features"]
     # STARTER is now governance-capable (in-memory CEL engine + a small policy allowance).
-    assert f["policies"] is True           # max_policies = 5
+    assert f["policies"] is True           # max_policies = 200 (shared durable plane)
     assert f["policy_simulate"] is True    # CEL engine present
     assert f["approvals"] is True          # the enforcing `standard` profile is allowed
     assert f["inference"] is False         # still no inference adapter on the free tier
     assert f["dashboard"] is True and f["audit"] is True
-    assert body["quotas"]["max_policies"] == 5
+    assert body["quotas"]["max_policies"] == 200
     assert body["quotas"]["rate_limit_per_min"] == 60
 
 
@@ -125,7 +125,7 @@ async def test_business_enables_policy_and_gateway_features():
     assert f["policy_simulate"] is True
     assert f["inference"] is True
     assert f["approvals"] is True
-    assert body["quotas"]["max_policies"] == 200
+    assert body["quotas"]["max_policies"] == 1000
 
 
 async def test_enterprise_is_unbounded():

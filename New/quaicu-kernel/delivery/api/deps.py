@@ -17,11 +17,15 @@ from __future__ import annotations
 
 import hmac
 import os
+from typing import TYPE_CHECKING
 
 from fastapi import Request
 
 from core.types import Actor, ActorId, TenantId
 from delivery.sdk.kernel import Kernel
+
+if TYPE_CHECKING:
+    from core.entitlements import EntitlementEngine
 
 # Shared secret proving a request arrived via our Cloudflare Worker edge. When set, the edge-forwarded
 # client IP is trusted; unset → the trusted-IP path is disabled and we fall back to the peer address.
@@ -137,3 +141,13 @@ def get_request_tenant(request: Request) -> TenantId:
             detail={"error": "Cannot determine tenant for routing", "code": "TENANT_UNRESOLVED"},
         )
     return tenant
+
+
+def get_entitlements(request: Request) -> "EntitlementEngine | None":
+    """The `EntitlementEngine` for tier/quota gating, or ``None`` in single-kernel (no-tier) mode.
+
+    On the shared SaaS plane the provider owns the engine; a dedicated single-kernel deployment has no
+    tiers, so quota gating is skipped (unbounded). Routes that gate a tier feature read this.
+    """
+    provider = getattr(request.app.state, "provider", None)
+    return provider.entitlements if provider is not None else None

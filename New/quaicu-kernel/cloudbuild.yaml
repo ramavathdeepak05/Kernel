@@ -1,14 +1,23 @@
-# Cloud Build: gate (lint+tests) → build → push → scan (W4-9).
+# Cloud Build: gate (lint+tests+pip-audit) → build → push → scan (Trivy) + SBOM → sign (cosign/KMS).
 # Uses delivery/docker/Dockerfile (the shared-plane image with KERNEL_APP selection + baked
 # /etc/quaicu configs) — NOT the root single-kernel Dockerfile.
 #
 #   gcloud builds submit --config cloudbuild.yaml .
 #
-# Scan steps (pip-audit, Trivy, SBOM) run in REPORT mode — they log findings but do NOT fail the
-# build yet. The graduation plan (report → blocking, by severity + patch SLA) lives in
-# docs/operations/VULN_MANAGEMENT.md. The lint+test gate IS blocking: a broken build never ships.
+# Supply-chain posture (D0-3 — graduated from report-mode to BLOCKING; policy: VULN_MANAGEMENT.md):
+#   - lint + unit tests       BLOCKING
+#   - pip-audit (both locks)  BLOCKING (remove --ignore-vuln exceptions only with owner+expiry)
+#   - Trivy HIGH,CRITICAL     BLOCKING (--ignore-unfixed; documented exceptions in .trivyignore)
+#   - CycloneDX SBOM          emitted every build (build fails if it can't be produced)
+#   - cosign sign + attest    every pushed image is signed by a Cloud KMS HSM key, SBOM attested
+#
+# One-time setup the cosign step needs (see VULN_MANAGEMENT.md §3): a Cloud KMS asymmetric-signing key
+# and roles/cloudkms.signerVerifier for the Cloud Build service account, then set _COSIGN_KMS_KEY below.
 substitutions:
   _IMAGE: us-central1-docker.pkg.dev/ordinal-quarter-499114-s2/quaicu/kernel:v1
+  # cosign gcpkms:// resource path (a specific cryptoKeyVersion). Sovereign signing root — same FIPS
+  # 140-2 HSM pattern as the K·02 ledger signer; works inside zero-egress/VPC-SC (no public Rekor).
+  _COSIGN_KMS_KEY: projects/ordinal-quarter-499114-s2/locations/us-central1/keyRings/quaicu-ledger/cryptoKeys/cosign-signer/cryptoKeyVersions/1
 steps:
   # ── Gate: lint + unit tests (blocking) ──────────────────────────────────────
   - id: lint-and-test
@@ -22,19 +31,10 @@ steps:
         ruff check .
         pytest tests/unit -q
 
-  # ── Build the image ─────────────────────────────────────────────────────────
-  - id: build
-    name: gcr.io/cloud-builders/docker
-    waitFor: ["lint-and-test"]
-    args: ["build", "-f", "delivery/docker/Dockerfile", "-t", "${_IMAGE}", "."]
-
-  # ── Push so the scan + deploy resolve the same digest ─────────────────────────
-  - id: push
-    name: gcr.io/cloud-builders/docker
-    waitFor: ["build"]
-    args: ["push", "${_IMAGE}"]
-
-  # ── Dependency vulnerability scan (report-only) ───────────────────────────────
+  # ── Dependency vulnerability scan (BLOCKING) ──────────────────────────────────
+  # Audits both locks: the SDK-free base + the gcp superset that is actually installed into the image
+  # (D0-2). A fixable advisory fails the build. Accepted risks: add `--ignore-vuln <ID>` here with an
+  # owner + expiry recorded in VULN_MANAGEMENT.md §2 — none today.
   - id: pip-audit
     name: python:3.12-slim
     waitFor: ["lint-and-test"]
@@ -42,27 +42,74 @@ steps:
     args:
       - -c
       - |
+        set -euo pipefail
         pip install --no-cache-dir pip-audit
-        # Report mode: never fail the build (W4-9 graduation tracked in VULN_MANAGEMENT.md).
-        pip-audit -r requirements.lock || true
+        pip-audit -r requirements.lock -r requirements-gcp.lock
 
-  # ── Image vulnerability scan (report-only) ────────────────────────────────────
+  # ── Build the image ─────────────────────────────────────────────────────────
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["lint-and-test"]
+    args: ["build", "-f", "delivery/docker/Dockerfile", "-t", "${_IMAGE}", "."]
+
+  # ── Push, then capture the immutable digest so we scan + sign by digest, not the mutable tag ───────
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    waitFor: ["build"]
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        docker push "${_IMAGE}"
+        docker inspect --format '{{index .RepoDigests 0}}' "${_IMAGE}" > /workspace/image.digest
+        echo "pushed digest: $(cat /workspace/image.digest)"
+
+  # ── Image vulnerability scan (BLOCKING) ───────────────────────────────────────
+  # Fails on any fixable HIGH/CRITICAL CVE (matches the shipped release.yml gate). --ignore-unfixed:
+  # don't block on vulns with no upstream patch. Documented exceptions live in .trivyignore (auto-read).
   - id: trivy-scan
     name: aquasec/trivy
     waitFor: ["push"]
     entrypoint: sh
     args:
       - -c
-      - "trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 0 --no-progress ${_IMAGE} || true"
+      - |
+        set -e
+        trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+          --exit-code 1 --no-progress "$(cat /workspace/image.digest)"
 
-  # ── SBOM (CycloneDX) as a build artifact ──────────────────────────────────────
+  # ── SBOM (CycloneDX) — emitted every build (build fails if it can't be produced) ──────────────────
   - id: sbom
     name: aquasec/trivy
     waitFor: ["push"]
     entrypoint: sh
     args:
       - -c
-      - "trivy image --format cyclonedx --output /workspace/sbom.cyclonedx.json ${_IMAGE} || true"
+      - |
+        set -e
+        trivy image --format cyclonedx --output /workspace/sbom.cyclonedx.json \
+          "$(cat /workspace/image.digest)"
+
+  # ── Sign + SBOM-attest the image with Cloud KMS (BLOCKING; runs only after the scan passes) ────────
+  # cosign authenticates via ADC (the Cloud Build service account → roles/cloudkms.signerVerifier on
+  # the key). --tlog-upload=false keeps signing fully sovereign (no public Rekor), so this works inside
+  # a zero-egress/VPC-SC perimeter. A failed scan fails the build, so an unsigned image is never
+  # promoted — consumers gate on `cosign verify --key gcpkms://${_COSIGN_KMS_KEY} <image@digest>`.
+  - id: cosign-sign
+    name: gcr.io/projectsigstore/cosign
+    waitFor: ["push", "trivy-scan", "sbom"]
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        set -e
+        DIGEST="$(cat /workspace/image.digest)"
+        cosign sign --yes --tlog-upload=false \
+          --key "gcpkms://${_COSIGN_KMS_KEY}" "$DIGEST"
+        cosign attest --yes --tlog-upload=false \
+          --key "gcpkms://${_COSIGN_KMS_KEY}" \
+          --type cyclonedx --predicate /workspace/sbom.cyclonedx.json "$DIGEST"
 
 artifacts:
   objects:

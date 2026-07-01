@@ -7,15 +7,19 @@ the module-level ``app``.
 
 Plane-descriptor config shape::
 
-    [plane]                       # one kernel config path per served tier (ENTERPRISE excluded)
-    starter  = "/etc/quaicu/kernel.starter.toml"
-    business = "/etc/quaicu/kernel.business.toml"
+    [plane]                       # ONE durable kernel config serving all self-serve tiers
+    config = "/etc/quaicu/kernel.shared.toml"
 
     [entitlements]                # optional — durable plan store (see entitlements_config)
     dsn = "${ENTITLEMENTS_DSN}"
 
     [billing.stripe]              # optional — self-serve checkout + webhook tier flips (WS-C)
     ...
+
+STARTER and BUSINESS are served by the **same** durable kernel; the commercial tier is a pure feature
+gate enforced at the API edge by the EntitlementEngine, so a STARTER→BUSINESS upgrade is a feature
+unlock, not a data migration. (The former per-tier ``starter = … / business = …`` shape — two separate
+kernels — is no longer supported; see ``plane_config_path``.)
 
 ENTERPRISE is intentionally not a plane tier: it ships as a dedicated single-kernel deployment
 (`delivery/entrypoint.py` + `TieredKernelProvider.for_enterprise`), license-gated.
@@ -29,7 +33,6 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from core.entitlements import FeatureTier
 from delivery.api.app import create_app
 from delivery.sdk.account_config import build_account_engine, require_api_key
 from delivery.sdk.billing_config import build_billing
@@ -41,36 +44,34 @@ from delivery.sdk.signup_payment_config import build_signup_payment
 from delivery.sdk.metering_config import build_usage_meter
 from delivery.sdk.provider import TieredKernelProvider
 
-# Plane keys → tier. STARTER + BUSINESS are the self-serve shared-plane tiers.
-_TIER_KEYS: dict[str, FeatureTier] = {
-    "starter": FeatureTier.STARTER,
-    "business": FeatureTier.BUSINESS,
-}
+def plane_config_path(config: Mapping[str, Any]) -> str:
+    """Resolve the ``[plane]`` section to the single shared-kernel config path (fail-closed).
 
-
-def tier_config_paths(config: Mapping[str, Any]) -> dict[FeatureTier, str]:
-    """Resolve the ``[plane]`` section into a ``{FeatureTier: config_path}`` map (fail-closed)."""
+    The shared self-serve plane is ONE durable kernel serving STARTER + BUSINESS (the tier is a feature
+    gate, not a separate data store). Accepts ``[plane] config = "…"``. The former per-tier shape
+    (``starter = … / business = …`` — two kernels) is rejected with a migration hint.
+    """
     plane = config.get("plane")
     if not isinstance(plane, Mapping) or not plane:
         raise ValueError(
-            "SaaS config needs a [plane] section mapping tier → kernel config path "
-            "(e.g. starter = '…toml', business = '…toml')."
+            "SaaS config needs a [plane] section with a single durable kernel config "
+            '(e.g. config = "/etc/quaicu/kernel.shared.toml").'
         )
     if "enterprise" in plane:
         raise ValueError(
             "ENTERPRISE is a dedicated deployment; use the single-kernel entrypoint with "
             "for_enterprise(), not the SaaS plane."
         )
-    unknown = set(plane) - set(_TIER_KEYS)
-    if unknown:
+    if "starter" in plane or "business" in plane:
         raise ValueError(
-            f"[plane] has unknown tier key(s) {sorted(unknown)}; expected a subset of "
-            f"{sorted(_TIER_KEYS)}."
+            "[plane] now uses a single durable kernel: set `config = \"…/kernel.shared.toml\"` "
+            "instead of the old per-tier `starter = … / business = …`. STARTER and BUSINESS share "
+            "one durable kernel; the tier is a feature gate (upgrade = feature unlock, not migration)."
         )
-    paths = {tier: str(plane[key]) for key, tier in _TIER_KEYS.items() if plane.get(key)}
-    if not paths:
-        raise ValueError("[plane] must declare at least one of: starter, business.")
-    return paths
+    path = plane.get("config")
+    if not path:
+        raise ValueError('[plane] must declare `config = "…/kernel.shared.toml"`.')
+    return str(path)
 
 
 def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
@@ -81,8 +82,8 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
     startup via create_app's lifespan.
     """
     store = build_entitlement_store(config)
-    provider = TieredKernelProvider.for_saas(
-        tier_config_paths=tier_config_paths(config),
+    provider = TieredKernelProvider.for_shared_saas(
+        config_path=plane_config_path(config),
         entitlement_store=store,
     )
     billing_adapters, billing_engine = build_billing(config, store)

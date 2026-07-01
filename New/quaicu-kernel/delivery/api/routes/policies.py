@@ -29,6 +29,7 @@ from core.errors import (
     PolicyActivationError,
     PolicyCompileError,
     PolicyTransitionError,
+    QuotaExceededError,
 )
 from core.fairness.engine import compute_fairness_delta, compute_fairness_metrics
 from core.fairness.model import DecisionRecord
@@ -36,9 +37,14 @@ from core.policy.model import ImpactReport, PolicyEnvelope, PolicyLifecycle
 from core.sandbox.bridge import assemble_impact_report
 from core.sandbox.engine import run_counterfactual_backtest
 from core.account.scopes import POLICY_ADMIN
-from core.types import ApproverRef, Actor, Decision, RequestContext
+from core.types import ApproverRef, Actor, Decision, RequestContext, TenantId
 from delivery.api.auth import enforce_scope
-from delivery.api.deps import get_kernel, get_request_tenant, resolve_governed_actor
+from delivery.api.deps import (
+    get_entitlements,
+    get_kernel,
+    get_request_tenant,
+    resolve_governed_actor,
+)
 from delivery.api.routes.actions import _bearer_token
 from delivery.api.schemas import (
     ActivateRequest,
@@ -121,13 +127,19 @@ async def _require_policy_admin(request: Request) -> tuple[Kernel, Actor]:
 # ── Converters ──────────────────────────────────────────────────────────────────
 
 
-def _to_envelope(req: PolicyRegisterRequest) -> PolicyEnvelope:
-    """Build a DRAFT envelope from a register request. The server always forces DRAFT lifecycle."""
+def _to_envelope(req: PolicyRegisterRequest, tenant: str) -> PolicyEnvelope:
+    """Build a DRAFT envelope from a register request (server always forces DRAFT lifecycle).
+
+    Stamps ``scope.tenant`` to the authenticated tenant: on the shared self-serve plane a tenant
+    authors only its own policies, so the server — not the caller-supplied scope — owns tenant
+    attribution. This makes the per-tenant ``max_policies`` count non-bypassable and prevents a tenant
+    from authoring a policy scoped to a different tenant.
+    """
     return PolicyEnvelope(
         id=req.id,
         version=req.version,
         governs=req.governs,
-        scope=dict(req.scope),
+        scope={**dict(req.scope), "tenant": tenant},
         condition=req.condition,
         decision=Decision(req.decision),
         approvers=tuple(ApproverRef(a) for a in req.approvers),
@@ -261,13 +273,41 @@ async def register_policy(body: PolicyRegisterRequest, request: Request) -> Poli
     400 if the CEL condition fails to compile; 409 if the (id, version) is already finalised.
     """
     kernel, _ = await _require_policy_admin(request)
+    tenant = get_request_tenant(request)
+    _enforce_policy_quota(request, kernel, tenant, new_policy_id=body.id)
     try:
-        env = await kernel.register_policy(_to_envelope(body))
+        env = await kernel.register_policy(_to_envelope(body, str(tenant)))
     except PolicyCompileError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc), "code": exc.code, "detail": exc.detail})
     except PolicyTransitionError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code, "detail": exc.detail})
     return _policy_response(env)
+
+
+def _enforce_policy_quota(
+    request: Request, kernel: Kernel, tenant: TenantId, *, new_policy_id: str
+) -> None:
+    """Fail-closed ``max_policies`` enforcement for the tenant's tier before persisting a NEW policy.
+
+    A new *version* of a policy the tenant already owns consumes no new-policy quota; only a brand-new
+    policy id is gated. Counts distinct policy ids scoped to this tenant (excludes shared ``"*"`` seeds).
+    No-op in single-kernel mode (no provider → no tiers → unbounded). ``assert_within_quota`` is itself
+    fail-closed on an unprovisioned/inactive plan.
+    """
+    engine = get_entitlements(request)
+    if engine is None or kernel.policy_store is None:
+        return
+    owned_ids = {
+        e.id for e in kernel.policy_store.list_policies() if e.scope.get("tenant") == str(tenant)
+    }
+    if new_policy_id in owned_ids:
+        return  # new version of an existing policy — not a new policy
+    try:
+        engine.assert_within_quota(tenant, current_policies=len(owned_ids))
+    except QuotaExceededError as exc:
+        raise HTTPException(
+            status_code=429, detail={"error": str(exc), "code": exc.code, "detail": exc.detail}
+        )
 
 
 @router.get(

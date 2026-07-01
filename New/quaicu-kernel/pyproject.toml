@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,20 @@ name = "quaicu-kernel"
 version = "0.1.0"
 description = "QUAICU Sovereign-tier AI Governance Kernel"
 requires-python = ">=3.11"
-readme = { text = "QUAICU Governance Kernel — see docs/adr/BUILD_JOURNAL.md", content-type = "text/plain" }
+readme = "README.md"
+# Proprietary (PEP 639). LicenseRef-* is the SPDX form for a non-OSI custom license; the full terms are
+# in LICENSE, shipped in the distribution via license-files. Counsel fills the bracketed fields (T-4).
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+classifiers = [
+    # NB: no "License ::" classifier — PEP 639 forbids it alongside the SPDX `license` expression above.
+    "Private :: Do Not Upload",          # proprietary — guard against accidental PyPI publish
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Topic :: Security",
+    "Operating System :: OS Independent",
+]
 
 # Runtime dependencies. Single source of truth (previously pinned only in the Docker image).
 # Verified against actual imports in core/ adapters/ delivery/ — see the import audit in the
@@ -27,6 +40,11 @@ dependencies = [
     "sqlalchemy>=2.0",           # alembic env.py engine
     "psycopg2-binary>=2.9",      # sync driver for alembic offline/migration mode
 ]
+
+[project.urls]
+Homepage = "https://quaicu.org"
+Documentation = "https://kernel.quaicu.org"
+Source = "https://github.com/quaicu/kernel"
 
 [project.optional-dependencies]
 test = [

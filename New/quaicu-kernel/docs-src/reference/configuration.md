@@ -3,7 +3,7 @@
 The kernel is configured via a TOML file. Set the path with the `KERNEL_CONFIG` environment variable (default: `/etc/quaicu/kernel.toml`).
 
 !!! info "Coming soon"
-    The full key-by-key reference is being written. See the example configs in `delivery/docker/` for working templates: `kernel.starter.toml`, `kernel.saas.toml`, `kernel.business.toml`.
+    The full key-by-key reference is being written. See the example configs in `delivery/docker/` for working templates: `kernel.dev.toml`, `kernel.saas.toml`, `kernel.shared.toml`.
 
 ## Minimal starter config
 

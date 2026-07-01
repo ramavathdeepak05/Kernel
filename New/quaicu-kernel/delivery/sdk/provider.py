@@ -108,6 +108,30 @@ class TieredKernelProvider:
         return cls(kernels, EntitlementEngine(entitlement_store))
 
     @classmethod
+    def for_shared_saas(
+        cls,
+        *,
+        config_path: str | Path,
+        entitlement_store: EntitlementStore,
+    ) -> "TieredKernelProvider":
+        """Build the shared self-serve plane: ONE durable kernel serving STARTER **and** BUSINESS.
+
+        Supersedes ``for_saas`` (two kernels by tier). A single durable kernel
+        (``kernel.shared.toml``) is mapped to every self-serve tier, so all self-serve tenants share
+        the same Postgres + KMS ledger. The commercial tier is a pure feature gate enforced at the API
+        edge by the ``EntitlementEngine`` (quotas, rate limit, ``max_policies``, premium capabilities) —
+        not a different data store. A STARTER→BUSINESS upgrade is therefore a feature unlock, not a data
+        migration: the tenant's data is already durable here.
+
+        Enterprise is intentionally excluded — it ships as a dedicated deployment (``for_enterprise``).
+        """
+        kernel = Kernel.from_config(config_path)
+        # Map every self-serve tier to the SAME instance; routing by tier then resolves to one kernel,
+        # and `_distinct_kernels` dedupes so startup/shutdown run exactly once.
+        kernels = {FeatureTier.STARTER: kernel, FeatureTier.BUSINESS: kernel}
+        return cls(kernels, EntitlementEngine(entitlement_store))
+
+    @classmethod
     def for_enterprise(
         cls,
         *,

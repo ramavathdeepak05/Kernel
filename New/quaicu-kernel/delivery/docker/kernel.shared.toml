@@ -1,0 +1,86 @@
+# QUAICU Kernel — shared self-serve plane (ONE durable kernel for STARTER + BUSINESS).
+#
+# Supersedes the former two-kernel plane (kernel.starter.toml + kernel.business.toml). All self-serve
+# tenants — STARTER and BUSINESS alike — are served by THIS single durable kernel; storage, ledger,
+# and policy rows are tenant-scoped internally (F-07). The commercial **tier is a pure feature gate**
+# enforced at the API edge by the EntitlementEngine (quotas, rate limit, max_policies, premium
+# capabilities), NOT a different data store. Consequently a STARTER→BUSINESS upgrade is a **feature
+# unlock, not a data migration**: the tenant's actions, ledger, and policies are already durable here,
+# so flipping the tier just raises limits / unlocks features — nothing moves.
+#
+# Run migrations (001–013) before first boot. An empty policy store fail-closed DENYs every governed
+# action until policies are written + ACTIVATED (the free-tier seed below keeps normal actions flowing).
+# ENTERPRISE is unaffected — it ships as a dedicated, license-gated single-kernel deployment.
+
+[tenant]
+id = "saas-shared"   # labels the plane only; the per-request tenant comes from the verified principal
+
+[adapters]
+policy       = "cel_policy"        # real K·01 CEL evaluator
+policy_store = "postgres_policy"   # durable policy persistence
+hitl         = "in_process"        # built-in approvals queue (/v1/approvals); tenant-scoped list/decide
+ledger       = "gcp_kms_ledger"    # RFC 6962 transparency log, Cloud KMS-signed STHs (FIPS 140-2)
+ledger_store = "postgres_ledger"   # durable Merkle backend (the signer above persists through it)
+storage      = "postgres_storage"  # durable action persistence (idempotency) — safe with workers > 1
+events       = "memory_events"
+identity     = "jwt"
+
+# Governance profile for the shared plane. "standard" = identity + policy + HITL + seal + emit + gateway
+# protections; consent OFF. NB: the only difference between "standard" and "all" is `enforce_consent`,
+# and no consent (K·04) adapter is wired on the self-serve plane (the engine skips the consent step when
+# no port is present — core/lifecycle/engine.py), so "standard" is behavior-identical to the prior
+# BUSINESS "all" default here. When consent becomes a paid feature, gate it per-tier via the entitlement
+# engine (tier-aware profile), not by forking the kernel.
+[governance]
+default = "standard"
+
+[storage]
+dsn = "${KERNEL_DSN}"
+
+[policy_store]
+dsn = "${KERNEL_DSN}"
+
+# Cloud KMS asymmetric signing key (EC_SIGN_P256_SHA256) for signed tree heads. Identifiers are NOT
+# secrets — the private key never leaves KMS; the Cloud Run SA holds roles/cloudkms.signerVerifier.
+[ledger]
+project  = "ordinal-quarter-499114-s2"
+location = "us-central1"
+key_ring = "quaicu-ledger"
+key      = "sth-signer"
+
+# Durable Merkle storage for the KMS-signed ledger above (per-tenant tables, F-07).
+[ledger_store]
+dsn = "${KERNEL_DSN}"
+
+# In-process HITL queue. `store = "postgres"` persists the queue to quaicu_approvals (migration 013) so
+# it is consistent across Cloud Run instances / workers (the in-memory default is per-process). Reuses
+# the kernel DB. For an external approval system instead, set hitl = "webhook" + dispatch_url/poll_url.
+[hitl]
+timeout_seconds = 86400
+store = "postgres"
+dsn   = "${KERNEL_DSN}"
+
+[identity]
+secret_or_key = "${KERNEL_JWT_SECRET}"
+algorithms    = ["HS256"]
+verify        = true
+
+# Free-tier seed: ACTIVATED guardrail policies so a brand-new tenant (any tier) isn't an empty,
+# fail-closed-DENY store out of the box. A `true` allow-baseline keeps normal actions flowing; a deny
+# guardrail makes governance visible. Tenants author their own up to their tier's max_policies.
+[[policy.seed]]
+id        = "shared-allow-baseline"
+condition = "true"
+decision  = "allow"
+
+[[policy.seed]]
+id        = "shared-high-value-guardrail"
+governs   = "demo.payment"
+condition = "payload_amount > 1000000"
+decision  = "deny"
+
+# Record every sealed governed action to the `quaicu.audit` logger (→ Cloud Logging) in addition to the
+# durable KMS-signed ledger — a convenient real-time audit stream for ops/SIEM. Best-effort; a sink
+# failure never breaks the seal path. Add `pubsub_topic`/`webhook_url` to fan out further.
+[events]
+log_sink = true

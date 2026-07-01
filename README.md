@@ -210,6 +210,7 @@ QUAICU is not a single safety hook. It is a unified, 14-layer enterprise-grade g
 Unlock advanced cloud adapters, high-scale storage, and production-grade guarantees:
 
 *   **Sovereign (Free Plan):** Local Docker container and SaaS Starter Tier. Real CEL policy enforcement (the free tier ships seeded, enforcing policies — not a pass-through), up to **10,000 governed actions/day** and 60 requests/min. In-memory storage + a structured audit stream (Cloud Logging), local signing, and community support. Self-serve signup (`POST /v1/signup`) mints a tenant + API key instantly.
+*   **Shared SaaS plane:** STARTER and BUSINESS run on **one durable kernel** (Postgres + Cloud KMS); the commercial tier is a feature gate (quotas, limits, premium capabilities), so upgrading is a **feature unlock, not a data migration** — your governed actions, ledger, and policies stay put (ADR-0013).
 *   **BYOL Private Cloud (Enterprise EULA):** Deploy fully isolated inside your own AWS/GCP VPC — a one-command Terraform module stands up Cloud Run + Cloud KMS (HSM) + Cloud SQL in *your* project, so your data never leaves it. Integrates with OpenBao or Cloud KMS HSMs, dedicated PostgreSQL with multi-tenant RLS, and custom regulatory content packs (a starter DPDP pack ships). Offline-verifiable license keys.
 *   **Dedicated Enterprise SaaS:** Zero-management hosting on isolated single-tenant cloud servers. Custom SLA, dedicated throughput rates, and direct expert compliance support.
 

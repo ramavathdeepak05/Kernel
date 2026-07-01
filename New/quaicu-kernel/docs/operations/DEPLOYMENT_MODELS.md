@@ -16,7 +16,8 @@ model — you don't choose one, you offer both. See also [HOSTING](../HOSTING.md
   (`/v1/policies`), models, consent, and tier — all via your API/console, no redeploy.
 - **What you run:** `quaicu-kernel-saas` (`delivery/entrypoint_saas.py`) with `TieredKernelProvider`
   routing each request to its tier's kernel; durable Postgres (Cloud SQL/Aurora); the signing backend;
-  TLS; scaling. Config: `kernel.saas.toml` → `kernel.starter.toml` + `kernel.business.toml`.
+  TLS; scaling. Config: `kernel.saas.toml` → one durable `kernel.shared.toml` (ADR-0013; the tier is a
+  feature gate, not a separate kernel).
 - **Isolation:** by `tenant_id` — per-tenant ledger tables + RLS (F-07). One tenant can never read
   another's actions/ledger/policies.
 - **Metering & limits:** automatic at the edge — rate limit (per min), daily quota, feature gating

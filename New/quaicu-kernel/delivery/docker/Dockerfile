@@ -20,7 +20,7 @@ WORKDIR /build
 # Reproducible install: the pinned + hashed lockfile (generated from pyproject.toml via
 # `uv pip compile --generate-hashes`) is the single source of truth for runtime deps. Copy only the
 # manifest first so the dependency layer caches unless the lock changes.
-COPY pyproject.toml requirements.lock ./
+COPY pyproject.toml requirements.lock requirements-gcp.lock ./
 RUN pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir --require-hashes -r requirements.lock
 
@@ -30,10 +30,12 @@ COPY . .
 RUN pip install --no-cache-dir --no-deps .
 
 # The shared SaaS plane's BUSINESS tier signs its K·02 ledger with Cloud KMS
-# (adapters/ledger/gcp_kms → GcpKmsTreeSigner). google-cloud-kms is an optional [gcp] extra not in the
-# hash-locked base, so install it explicitly. It layers on top of the reproducible locked base; pin it
-# into requirements.lock for a fully hash-reproducible production build.
-RUN pip install --no-cache-dir google-cloud-kms
+# (adapters/ledger/gcp_kms → GcpKmsTreeSigner). google-cloud-kms is the optional [gcp] extra, kept out
+# of the SDK-free base lock by design. requirements-gcp.lock is a hash-pinned, consistent superset of
+# the base lock + the [gcp] extra (generated with
+# `uv pip compile pyproject.toml --extra gcp --generate-hashes --constraint requirements.lock`), so this
+# layer is fully reproducible — no floating versions reach the production image.
+RUN pip install --no-cache-dir --require-hashes -r requirements-gcp.lock
 
 # ── Stage 2: runtime (non-root, minimal) ─────────────────────────────────────
 FROM python:3.12-slim AS runtime
@@ -58,8 +60,7 @@ COPY --from=builder /build .
 # unaffected; mount that one when running delivery.entrypoint:app.)
 RUN mkdir -p /etc/quaicu \
  && cp delivery/docker/kernel.saas.toml \
-       delivery/docker/kernel.starter.toml \
-       delivery/docker/kernel.business.toml /etc/quaicu/
+       delivery/docker/kernel.shared.toml /etc/quaicu/
 
 USER kernel
 

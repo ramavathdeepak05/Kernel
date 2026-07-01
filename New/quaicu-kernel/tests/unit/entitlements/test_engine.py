@@ -54,11 +54,15 @@ def test_suspended_plan_is_denied():
 
 def test_starter_adapter_gating():
     e = _engine(_plan("t", FeatureTier.STARTER))
-    assert e.is_adapter_allowed("t", "always_allow")
-    assert e.is_adapter_allowed("t", "memory_ledger")
-    # STARTER is now governance-capable (in-memory CEL engine), but still no durable Postgres/HSM.
+    # Shared durable plane: STARTER runs on the SAME durable kernel as BUSINESS, so it is entitled to
+    # the durable adapters (Postgres + KMS ledger). The tier difference is now QUOTAS + premium
+    # capabilities, not the data store — which is what makes upgrade a feature unlock, not a migration.
     assert e.is_adapter_allowed("t", "cel_policy")
-    assert not e.is_adapter_allowed("t", "postgres_ledger")
+    assert e.is_adapter_allowed("t", "postgres_storage")
+    assert e.is_adapter_allowed("t", "postgres_ledger")
+    assert e.is_adapter_allowed("t", "gcp_kms_ledger")
+    # ...but NOT premium-only adapters: the AI gateway (BUSINESS) and OpenBao (ENTERPRISE) stay gated.
+    assert not e.is_adapter_allowed("t", "openai_compat")
     assert not e.is_adapter_allowed("t", "openbao_ledger")
 
 
@@ -84,17 +88,17 @@ def test_profile_gating():
 
 
 def test_policy_quota_enforced_for_business():
-    e = _engine(_plan("t", FeatureTier.BUSINESS))        # max_policies = 200
-    e.assert_within_quota("t", current_policies=199)     # no raise
+    e = _engine(_plan("t", FeatureTier.BUSINESS))        # max_policies = 1000
+    e.assert_within_quota("t", current_policies=999)     # no raise
     with pytest.raises(QuotaExceededError):
-        e.assert_within_quota("t", current_policies=200)
+        e.assert_within_quota("t", current_policies=1000)
 
 
-def test_starter_policy_quota_is_small_but_nonzero():
-    e = _engine(_plan("t", FeatureTier.STARTER))         # max_policies = 5
-    e.assert_within_quota("t", current_policies=4)       # no raise (room for one more)
+def test_starter_policy_quota_is_generous_but_bounded():
+    e = _engine(_plan("t", FeatureTier.STARTER))         # max_policies = 200
+    e.assert_within_quota("t", current_policies=199)     # no raise (room for one more)
     with pytest.raises(QuotaExceededError):
-        e.assert_within_quota("t", current_policies=5)   # at the cap
+        e.assert_within_quota("t", current_policies=200)  # at the cap
 
 
 def test_enterprise_quota_unbounded():

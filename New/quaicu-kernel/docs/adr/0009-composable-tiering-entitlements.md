@@ -1,8 +1,14 @@
 # ADR-0009: Composable tiering via `EntitlementEngine` + shared-plane kernel routing
 
-- **Status:** Accepted
+- **Status:** Accepted — **plane shape superseded by [ADR-0013](0013-shared-durable-plane.md)**
 - **Date:** 2026-06-13
 - **Decided by:** orchestrator
+
+> **Update (2026-07-01, ADR-0013):** the *two-kernel* plane below (in-memory STARTER kernel + durable
+> BUSINESS kernel routed by tier) is replaced by a **single durable kernel** serving all self-serve
+> tiers, with the tier as a pure feature gate (upgrade = feature unlock, not migration). The
+> `EntitlementEngine` + `TIER_MATRIX` model in this ADR is retained; only the per-tier-kernel routing is
+> superseded.
 - **Affects:** `core/entitlements/` (new), `core/license/` (new), `core/errors.py`, `delivery/sdk/provider.py` (new), `delivery/sdk/kernel.py`
 
 ## Context

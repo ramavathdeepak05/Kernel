@@ -8,8 +8,11 @@
 # (delivery/entrypoint.py + TieredKernelProvider.for_enterprise).
 
 [plane]
-starter  = "/etc/quaicu/kernel.starter.toml"    # in-memory tier
-business = "/etc/quaicu/kernel.business.toml"    # durable Postgres + CEL tier
+# ONE durable kernel serves all self-serve tiers (STARTER + BUSINESS). The tier is a feature gate
+# enforced at the API edge by the EntitlementEngine (quotas, rate limit, max_policies, premium
+# capabilities), not a separate data store — so a STARTER→BUSINESS upgrade is a feature unlock, not a
+# data migration. (Replaces the former per-tier `starter = … / business = …` two-kernel shape.)
+config = "/etc/quaicu/kernel.shared.toml"
 
 # Control-plane admin guard (ADR-0010). Set the env var QUAICU_ADMIN_TOKEN (Secret Manager) to enable
 # the /v1/admin/* routes — list tenants, change a tenant's tier (manual upgrade), read usage. Unset →
