@@ -41,7 +41,7 @@ class EmailHITLAdapter(InProcessHITLPort):
         approver_id: str,
         approver_roles: tuple[str, ...] = (),
         link_ttl_seconds: int = 604800,  # 7 days
-        timeout_seconds: int = 86400,
+        timeout_seconds: int = 0,  # 0 = no expiry: a pending approval waits until a human decides (D1-4)
         store: ApprovalStore | None = None,
     ) -> None:
         super().__init__(timeout_seconds=timeout_seconds, store=store)
@@ -62,22 +62,33 @@ class EmailHITLAdapter(InProcessHITLPort):
         approvers: list[ApproverRef],
         tenant: TenantId,
     ) -> ApprovalHandle:
-        # Create the durable record first (so the links carry its handle_id), then dispatch the email.
-        handle = await super().request_approval(
-            action=action, approvers=approvers, tenant=tenant
+        handle_id = self._new_handle_id()
+        approve = self._link(handle_id=handle_id, tenant=str(tenant), decision="approve")
+        reject = self._link(handle_id=handle_id, tenant=str(tenant), decision="reject")
+        record = self._build_record(
+            handle_id=handle_id,
+            action=action,
+            approvers=approvers,
+            tenant=tenant,
+            notify_channel="email",
+            notify_target=self._approver_email,
+            resume_link=approve,
         )
-        message = self._build_message(handle_id=handle.id, tenant=str(tenant), action=action)
+        # Send FIRST (fail-closed): persist a PENDING record only once the approver was notified, so a
+        # PENDING record always implies a delivered notification and a send failure leaves no orphan.
+        message = self._build_message(action=action, approve=approve, reject=reject)
         try:
             await self._sender.send(message)
         except Exception as exc:  # noqa: BLE001 — dispatch failure must fail-closed (HALT the action)
             raise HITLPortError(
                 f"HITL email dispatch failed: {exc}",
-                detail={"action_id": str(action.id), "handle_id": handle.id},
+                detail={"action_id": str(action.id), "handle_id": handle_id},
             ) from exc
+        self._store.put(record)
         log.info(
-            "HITL email sent: handle=%s action=%s to=%s", handle.id, action.id, self._approver_email
+            "HITL email sent: handle=%s action=%s to=%s", handle_id, action.id, self._approver_email
         )
-        return handle
+        return ApprovalHandle(id=handle_id, tenant=tenant, created_at=record.requested_at)
 
     def _link(self, *, handle_id: str, tenant: str, decision: str) -> str:
         token = self._signer.sign(
@@ -90,9 +101,7 @@ class EmailHITLAdapter(InProcessHITLPort):
         )
         return f"{self._base_url}/v1/approvals/link/{token}"
 
-    def _build_message(self, *, handle_id: str, tenant: str, action: Action) -> EmailMessage:
-        approve = self._link(handle_id=handle_id, tenant=tenant, decision="approve")
-        reject = self._link(handle_id=handle_id, tenant=tenant, decision="reject")
+    def _build_message(self, *, action: Action, approve: str, reject: str) -> EmailMessage:
         subject = f"[QUAICU] Approval needed: {action.type}"
         html = (
             f"<p>An action requires your approval.</p>"

@@ -589,6 +589,8 @@ class Kernel:
         hitl_cfg = dict(cfg.get("hitl", {}))
         if name == "email":
             return Kernel._build_email_hitl(hitl_cfg)
+        if name == "teams":
+            return Kernel._build_teams_hitl(hitl_cfg)
         if name != "in_process":
             return _load_adapter(name, **hitl_cfg)
 
@@ -657,6 +659,45 @@ class Kernel:
             signer=ApprovalLinkSigner(secret),
             link_base_url=str(hitl_cfg.get("link_base_url", "")),
             approver_email=str(hitl_cfg.get("approver_email", "")),
+            approver_id=str(hitl_cfg.get("approver_id", "compliance")),
+            approver_roles=roles,
+            link_ttl_seconds=int(hitl_cfg.get("link_ttl_seconds", 604800)),
+            timeout_seconds=int(hitl_cfg.get("timeout_seconds", 86400)),
+            store=store,
+        )
+
+    @staticmethod
+    def _build_teams_hitl(hitl_cfg: dict[str, Any]) -> HITLPort:
+        """Assemble the `MicrosoftTeamsHITLAdapter` from ``[hitl]`` config (hitl = "teams").
+
+        Keys: ``webhook_url`` (required — a Teams incoming webhook), ``link_base_url`` (public origin for
+        the approve/reject links), ``approver_id`` / ``approver_roles`` (identity the link seals; roles
+        must satisfy the policy's approver refs), ``store = "postgres"`` + ``dsn`` (durable queue),
+        ``timeout_seconds``, ``link_ttl_seconds``. The link secret is ``QUAICU_APPROVAL_LINK_SECRET``
+        (fail-closed) — the same signed confirm-page flow as the email channel.
+        """
+        import os
+
+        from adapters.hitl.teams import MicrosoftTeamsHITLAdapter
+        from core.hitl.links import ApprovalLinkSigner
+
+        secret = os.getenv("QUAICU_APPROVAL_LINK_SECRET", "")
+        if not secret:
+            raise ValueError(
+                "hitl = \"teams\" requires QUAICU_APPROVAL_LINK_SECRET (signs the approve/reject links)."
+            )
+
+        store = None
+        if hitl_cfg.get("store") == "postgres" and hitl_cfg.get("dsn"):
+            from adapters.hitl.postgres_store import PostgresApprovalStore
+
+            store = PostgresApprovalStore(str(hitl_cfg["dsn"]))
+
+        roles = tuple(str(r) for r in hitl_cfg.get("approver_roles", ()))
+        return MicrosoftTeamsHITLAdapter(
+            webhook_url=os.path.expandvars(str(hitl_cfg.get("webhook_url", ""))),
+            signer=ApprovalLinkSigner(secret),
+            link_base_url=str(hitl_cfg.get("link_base_url", "")),
             approver_id=str(hitl_cfg.get("approver_id", "compliance")),
             approver_roles=roles,
             link_ttl_seconds=int(hitl_cfg.get("link_ttl_seconds", 604800)),

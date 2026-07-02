@@ -22,6 +22,11 @@ class ApprovalRecord:
     expires_at: datetime | None = None
     # The actor who proposed the action — used to forbid self-approval (separation of duties).
     proposed_by: ActorId | None = None
+    # Durable routing metadata (D1-4): how the approver was notified + the signed resume link, so a
+    # restarted process retains full context of a pending approval. None for the bare in-process port.
+    notify_channel: str | None = None      # "email" | "teams" | None
+    notify_target: str | None = None       # recipient email / webhook URL
+    resume_link: str | None = None         # the signed approve (resume) link the notification carried
 
     def is_expired(self, now: datetime) -> bool:
         return self.expires_at is not None and now >= self.expires_at

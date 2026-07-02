@@ -78,6 +78,20 @@ dsn   = "${KERNEL_DSN}"
 #   store = "postgres"
 #   dsn   = "${KERNEL_DSN}"
 
+# ── Microsoft Teams approvals (D1-3) — set [adapters].hitl = "teams". ─────────────────────────────────
+# Posts an Adaptive Card with Review-&-approve / Review-&-reject buttons to a Teams incoming webhook;
+# the buttons open the same signed confirm-page flow as the email channel (so it reuses
+# QUAICU_APPROVAL_LINK_SECRET + /v1/approvals/link). `approver_roles` must satisfy the policy's approver
+# refs. Reuses the Postgres approval store so /v1/approvals stays consistent across instances.
+#   [adapters] hitl = "teams"
+#   [hitl]
+#   webhook_url    = "${TEAMS_WEBHOOK_URL}"       # a Teams channel incoming webhook
+#   link_base_url  = "https://api.your-domain"    # public origin the card's links point at
+#   approver_id    = "compliance"
+#   approver_roles = ["role:compliance"]
+#   store = "postgres"
+#   dsn   = "${KERNEL_DSN}"
+
 [identity]
 secret_or_key = "${KERNEL_JWT_SECRET}"
 algorithms    = ["HS256"]

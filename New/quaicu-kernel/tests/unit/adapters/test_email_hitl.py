@@ -76,11 +76,31 @@ async def test_request_approval_sends_signed_approve_and_reject_links() -> None:
     assert all(p["t"] == "acme" and p["aid"] == "checker" for p in payloads)
 
 
-async def test_send_failure_is_fail_closed() -> None:
+async def test_request_approval_persists_routing_metadata() -> None:
+    adapter = _adapter(_CaptureSender())
+    handle = await adapter.request_approval(
+        action=_action(), approvers=[ApproverRef("role:approver")], tenant=TenantId("acme")
+    )
+    rec = adapter.get_record(handle.id)
+    assert rec is not None
+    assert rec.notify_channel == "email"
+    assert rec.notify_target == "compliance@x.io"
+    assert rec.resume_link and "/v1/approvals/link/" in rec.resume_link
+    assert rec.expires_at is None  # pending until a human decides (no auto-expiry)
+    # The stored resume_link is the signed approve link for this handle.
+    token = rec.resume_link.rsplit("/", 1)[-1]
+    payload = ApprovalLinkSigner("s3cret").verify(token)
+    assert payload is not None and payload["d"] == "approve" and payload["h"] == handle.id
+
+
+async def test_send_failure_is_fail_closed_with_no_orphan() -> None:
+    adapter = _adapter(_RaisingSender())
     with pytest.raises(HITLPortError):
-        await _adapter(_RaisingSender()).request_approval(
+        await adapter.request_approval(
             action=_action(), approvers=[ApproverRef("role:approver")], tenant=TenantId("acme")
         )
+    # send-then-persist: a failed send stores nothing (no orphan PENDING record).
+    assert adapter.list_pending() == []
 
 
 def test_signer_roundtrip_tamper_and_expiry() -> None:

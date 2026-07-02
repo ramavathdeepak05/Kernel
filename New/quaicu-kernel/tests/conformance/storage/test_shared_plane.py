@@ -23,9 +23,11 @@ from datetime import datetime, timezone
 import pytest
 
 from adapters.entitlements.postgres import PostgresEntitlementRepository
+from adapters.hitl.postgres_store import PostgresApprovalStore
 from adapters.policy.postgres import PostgresPolicyRepository
 from adapters.storage.postgres import PostgresStorageAdapter
 from core.entitlements import CustomerPlan, FeatureTier, PlanStatus
+from core.hitl.model import ApprovalRecord
 from core.policy.model import PolicyEnvelope, PolicyLifecycle
 from core.types import (
     Action,
@@ -33,6 +35,7 @@ from core.types import (
     ActionState,
     Actor,
     ActorId,
+    ApproverRef,
     Decision,
     IdempotencyKey,
     TenantId,
@@ -71,6 +74,7 @@ async def _wipe() -> None:
             await conn.execute("ALTER TABLE quaicu_actions FORCE ROW LEVEL SECURITY")
             await conn.execute("DELETE FROM quaicu_policies WHERE id LIKE 'test-%'")
             await conn.execute("DELETE FROM quaicu_customer_plans WHERE tenant_id LIKE 'test-%'")
+            await conn.execute("DELETE FROM quaicu_approvals WHERE handle_id LIKE 'test-%'")
     await a.close()
 
 
@@ -174,3 +178,30 @@ async def test_upgrade_is_metadata_only_and_data_survives(clean):
     finally:
         await ents.close()
         await policies.close()
+
+
+@pytest.mark.integration
+@skip_no_db
+async def test_approval_routing_metadata_survives_restart(clean):
+    """A pending approval's routing metadata + signed resume link persist durably (D1-4): a fresh store
+    (= restarted process) reads back the channel/target/resume link with full fidelity."""
+    writer = PostgresApprovalStore(DATABASE_URL)
+    writer.put(
+        ApprovalRecord(
+            handle_id="test-h-routing",
+            action_id=ActionId("test-act-routing"),
+            tenant=TenantId(TENANT),
+            required_approvers=(ApproverRef("role:approver"),),
+            requested_at=NOW,
+            proposed_by=ActorId("maker"),
+            notify_channel="email",
+            notify_target="compliance@x.io",
+            resume_link="https://api.x/v1/approvals/link/signed-token",
+        )
+    )
+    # A fresh store instance = a restarted process reading the durable record.
+    got = PostgresApprovalStore(DATABASE_URL).get("test-h-routing")
+    assert got is not None
+    assert got.notify_channel == "email"
+    assert got.notify_target == "compliance@x.io"
+    assert got.resume_link == "https://api.x/v1/approvals/link/signed-token"
