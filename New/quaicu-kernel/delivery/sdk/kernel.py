@@ -26,7 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from core.errors import LifecycleDeniedError, LifecycleHaltedError  # noqa: F401 (re-exported)
+from core.errors import (  # noqa: F401 (re-exported)
+    LifecycleDeniedError,
+    LifecycleHaltedError,
+    LifecyclePendingApprovalError,
+)
 from core.gateway.allowlist import InMemoryModelAllowlist
 from core.gateway.budget import InMemoryBudgetTracker
 from core.gateway.engine import AIGateway
@@ -578,10 +582,15 @@ class Kernel:
         For ``hitl = "in_process"`` an optional ``[hitl].store = "postgres"`` (+ a ``dsn``) backs the
         approvals queue with a durable, cross-instance ``PostgresApprovalStore`` instead of per-process
         memory — so ``/v1/approvals`` is consistent on a horizontally-scaled plane. Omit ``store`` for
-        the in-memory default. Any other adapter (e.g. ``webhook``) is built from the flat registry.
+        the in-memory default. ``hitl = "email"`` builds an ``EmailHITLAdapter`` (in-process store +
+        signed approve/reject links). Any other adapter (e.g. ``webhook``) is built from the flat registry.
         """
         name = adapter_cfg["hitl"]
         hitl_cfg = dict(cfg.get("hitl", {}))
+        if name == "email":
+            return Kernel._build_email_hitl(hitl_cfg)
+        if name == "teams":
+            return Kernel._build_teams_hitl(hitl_cfg)
         if name != "in_process":
             return _load_adapter(name, **hitl_cfg)
 
@@ -600,6 +609,101 @@ class Kernel:
 
                 kwargs["store"] = PostgresApprovalStore(str(dsn))
         return InProcessHITLPort(**kwargs)
+
+    @staticmethod
+    def _build_email_hitl(hitl_cfg: dict[str, Any]) -> HITLPort:
+        """Assemble the `EmailHITLAdapter` from ``[hitl]`` config (hitl = "email").
+
+        Keys: ``approver_email`` (required — the compliance inbox), ``approver_id`` /
+        ``approver_roles`` (the identity the link seals; roles must satisfy the policy's approver refs),
+        ``link_base_url`` (public origin for the links), ``resend_api_key`` / ``from`` (Resend sender,
+        else log-only), ``store = "postgres"`` + ``dsn`` (durable queue), ``timeout_seconds``,
+        ``link_ttl_seconds``. The link secret is read from ``QUAICU_APPROVAL_LINK_SECRET`` (fail-closed).
+        """
+        import os
+
+        from adapters.hitl.email import EmailHITLAdapter
+        from core.hitl.links import ApprovalLinkSigner
+
+        secret = os.getenv("QUAICU_APPROVAL_LINK_SECRET", "")
+        if not secret:
+            raise ValueError(
+                "hitl = \"email\" requires QUAICU_APPROVAL_LINK_SECRET (signs the approve/reject links)."
+            )
+
+        api_key = (
+            os.path.expandvars(str(hitl_cfg.get("resend_api_key", "")))
+            or os.getenv("RESEND_API_KEY", "")
+        ).strip()
+        sender_from = (
+            os.path.expandvars(str(hitl_cfg.get("from", ""))) or os.getenv("EMAIL_FROM", "")
+        ).strip() or "onboarding@resend.dev"
+        if api_key:
+            from adapters.email import ResendEmailAdapter
+
+            sender: Any = ResendEmailAdapter(api_key=api_key, sender=sender_from)
+        else:
+            from adapters.email import LogOnlyEmailSender
+
+            sender = LogOnlyEmailSender()
+
+        store = None
+        if hitl_cfg.get("store") == "postgres" and hitl_cfg.get("dsn"):
+            from adapters.hitl.postgres_store import PostgresApprovalStore
+
+            store = PostgresApprovalStore(str(hitl_cfg["dsn"]))
+
+        roles = tuple(str(r) for r in hitl_cfg.get("approver_roles", ()))
+        return EmailHITLAdapter(
+            sender=sender,
+            signer=ApprovalLinkSigner(secret),
+            link_base_url=str(hitl_cfg.get("link_base_url", "")),
+            approver_email=str(hitl_cfg.get("approver_email", "")),
+            approver_id=str(hitl_cfg.get("approver_id", "compliance")),
+            approver_roles=roles,
+            link_ttl_seconds=int(hitl_cfg.get("link_ttl_seconds", 604800)),
+            timeout_seconds=int(hitl_cfg.get("timeout_seconds", 86400)),
+            store=store,
+        )
+
+    @staticmethod
+    def _build_teams_hitl(hitl_cfg: dict[str, Any]) -> HITLPort:
+        """Assemble the `MicrosoftTeamsHITLAdapter` from ``[hitl]`` config (hitl = "teams").
+
+        Keys: ``webhook_url`` (required — a Teams incoming webhook), ``link_base_url`` (public origin for
+        the approve/reject links), ``approver_id`` / ``approver_roles`` (identity the link seals; roles
+        must satisfy the policy's approver refs), ``store = "postgres"`` + ``dsn`` (durable queue),
+        ``timeout_seconds``, ``link_ttl_seconds``. The link secret is ``QUAICU_APPROVAL_LINK_SECRET``
+        (fail-closed) — the same signed confirm-page flow as the email channel.
+        """
+        import os
+
+        from adapters.hitl.teams import MicrosoftTeamsHITLAdapter
+        from core.hitl.links import ApprovalLinkSigner
+
+        secret = os.getenv("QUAICU_APPROVAL_LINK_SECRET", "")
+        if not secret:
+            raise ValueError(
+                "hitl = \"teams\" requires QUAICU_APPROVAL_LINK_SECRET (signs the approve/reject links)."
+            )
+
+        store = None
+        if hitl_cfg.get("store") == "postgres" and hitl_cfg.get("dsn"):
+            from adapters.hitl.postgres_store import PostgresApprovalStore
+
+            store = PostgresApprovalStore(str(hitl_cfg["dsn"]))
+
+        roles = tuple(str(r) for r in hitl_cfg.get("approver_roles", ()))
+        return MicrosoftTeamsHITLAdapter(
+            webhook_url=os.path.expandvars(str(hitl_cfg.get("webhook_url", ""))),
+            signer=ApprovalLinkSigner(secret),
+            link_base_url=str(hitl_cfg.get("link_base_url", "")),
+            approver_id=str(hitl_cfg.get("approver_id", "compliance")),
+            approver_roles=roles,
+            link_ttl_seconds=int(hitl_cfg.get("link_ttl_seconds", 604800)),
+            timeout_seconds=int(hitl_cfg.get("timeout_seconds", 86400)),
+            store=store,
+        )
 
     @staticmethod
     def _build_ledger(
@@ -876,7 +980,9 @@ class Kernel:
             captured["response"] = resp
             return dict(resp.recorded_output)
 
-        final = await self.engine.run(action, execute_fn, context=context, profile=resolved)
+        final = await self.engine.run(
+            action, execute_fn, context=context, profile=resolved, defer_gate=True
+        )
         self._raise_on_terminal_failure(final, action_type)
         # Surface the action id to the caller (the sealed leaf already covers action.id).
         resp = captured["response"]
@@ -1009,7 +1115,9 @@ class Kernel:
                     return {"result": result}
 
                 resolved = self.resolve_profile(effective_type, profile)
-                final = await self.engine.run(action, execute_fn, profile=resolved)
+                final = await self.engine.run(
+                    action, execute_fn, profile=resolved, defer_gate=True
+                )
                 self._raise_on_terminal_failure(final, effective_type)
                 return captured.get("result")
 
@@ -1101,7 +1209,9 @@ class Kernel:
                 return {"result": result}
 
             resolved = self.resolve_profile(effective_type, profile)
-            final = await self.engine.run(action, execute_fn, profile=resolved)
+            final = await self.engine.run(
+                action, execute_fn, profile=resolved, defer_gate=True
+            )
             self._raise_on_terminal_failure(final, effective_type)
             return captured.get("result")
 
@@ -1142,7 +1252,9 @@ class Kernel:
                     return await fn(*args, **kwargs)
 
                 resolved = self.resolve_profile(effective_type, profile)
-                final = await self.engine.run(action, execute_fn, profile=resolved)
+                final = await self.engine.run(
+                    action, execute_fn, profile=resolved, defer_gate=True
+                )
                 self._raise_on_terminal_failure(final, effective_type)
                 return final
 
@@ -1190,7 +1302,9 @@ class Kernel:
                     return {"result": result}
 
                 resolved = self.resolve_profile(effective_type, profile)
-                final = await self.engine.run(action, execute_fn, profile=resolved)
+                final = await self.engine.run(
+                    action, execute_fn, profile=resolved, defer_gate=True
+                )
                 self._raise_on_terminal_failure(final, effective_type)
                 return captured.get("result")
 
@@ -1219,8 +1333,7 @@ class Kernel:
             proposed_at=datetime.now(tz=timezone.utc),
         )
 
-    @staticmethod
-    def _raise_on_terminal_failure(final: Action, action_type: str) -> None:
+    def _raise_on_terminal_failure(self, final: Action, action_type: str) -> None:
         if final.state is ActionState.DENIED:
             raise LifecycleDeniedError(
                 f"Action {final.id} denied by governance",
@@ -1231,6 +1344,27 @@ class Kernel:
                 f"Action {final.id} halted by governance",
                 detail={"action_id": str(final.id), "type": action_type},
             )
+        if final.state is ActionState.PENDING_APPROVAL:
+            # Not a failure: the require_approval action suspended durably (no false timeout→DENY).
+            # Surface the handle so the caller can point an approver at /v1/approvals or decide_approval.
+            raise LifecyclePendingApprovalError(
+                f"Action {final.id} is pending human approval",
+                detail={
+                    "action_id": str(final.id),
+                    "type": action_type,
+                    "handle_id": self._pending_handle_for(final.id),
+                },
+            )
+
+    def _pending_handle_for(self, action_id: Any) -> str | None:
+        """The in-process HITL handle awaiting a decision for ``action_id``, or None (external queue)."""
+        hitl = self._in_process_hitl()
+        if hitl is None:
+            return None
+        return next(
+            (r.handle_id for r in hitl.list_pending() if str(r.action_id) == str(action_id)),
+            None,
+        )
 
 
 # ── Bound agent handle ──────────────────────────────────────────────────────────

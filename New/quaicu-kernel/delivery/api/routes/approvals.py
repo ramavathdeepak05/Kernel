@@ -8,21 +8,28 @@ enforces approver eligibility + the self-approval guard on decide.
     POST /v1/approvals/{handle_id}/approve   → 200 approve (actor from token)
     POST /v1/approvals/{handle_id}/reject    → 200 reject  (actor from token)
 
-Caveat (deployment model): under the synchronous LifecycleEngine.run (default max_poll_attempts=1) a
-REQUIRE_APPROVAL action polls once and times out → DENIED, which can leave a stale PENDING record.
-A real "suspend then resume on approval" flow needs the async K·06 process engine or the webhook
-adapter (whose queue lives in an external system, so it is not listable here → 503). This surface is
-the operator queue over the in-process approval store; it does not itself resume a denied action.
+Suspend-then-resume (D1-1): a REQUIRE_APPROVAL action now suspends **durably** at PENDING_APPROVAL —
+the SDK entry points (`guard`/`wrap`/`generate`) and `/v1/actions/propose` run with `defer_gate=True`,
+so the action is recorded + its approval registered without polling (no false timeout→DENY). Approving
+here drives `kernel.decide_approval` → `resume_approved` (execute → seal → emit); rejecting DENIES it.
+On the shared durable plane the approval store + action repo are Postgres, so a pending action resumes
+across instances/restarts. (A webhook adapter keeps its queue in an external system → not listable
+here → 503; that path resumes via its own callback.)
 """
 
 from __future__ import annotations
 
+import html
+import os
+
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 from core.account.scopes import APPROVAL_DECIDE, APPROVAL_READ
 from core.errors import HITLPortError, IdentityPortError
+from core.hitl.links import ApprovalLinkSigner
 from core.hitl.model import ApprovalRecord
-from core.types import Actor, RequestContext, TenantId
+from core.types import Actor, ActorId, ApprovalDecision, RequestContext, TenantId
 from delivery.api.auth import enforce_scope
 from delivery.api.deps import get_kernel, get_request_tenant, resolve_governed_actor
 from delivery.api.routes.actions import _bearer_token
@@ -140,3 +147,107 @@ async def _decide(request: Request, handle_id: str, decision: str) -> ApprovalRe
     except HITLPortError as exc:
         raise HTTPException(status_code=409, detail={"error": str(exc), "code": exc.code})
     return _to_response(updated)
+
+
+# ── Signed email-link approval (D1-2) ─────────────────────────────────────────────
+# Authenticated by the HMAC-signed token in the URL (not a bearer). GET renders a confirm page so an
+# email-scanner prefetch cannot auto-decide; POST commits. Single-use is enforced by the store.
+
+
+def _link_signer() -> ApprovalLinkSigner:
+    secret = os.getenv("QUAICU_APPROVAL_LINK_SECRET", "")
+    if not secret:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "Approval links are not configured (QUAICU_APPROVAL_LINK_SECRET unset)",
+                "code": "APPROVAL_LINKS_DISABLED",
+            },
+        )
+    return ApprovalLinkSigner(secret)
+
+
+def _verify_link(token: str) -> dict:
+    payload = _link_signer().verify(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid or expired approval link", "code": "APPROVAL_LINK_INVALID"},
+        )
+    return payload
+
+
+def _kernel_for_tenant(request: Request, tenant: str) -> Kernel:
+    provider = getattr(request.app.state, "provider", None)
+    if provider is None:
+        return request.app.state.kernel
+    return provider.kernel_for(TenantId(tenant))
+
+
+def _page(title: str, body: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(
+        f"<!doctype html><meta charset=utf-8><title>{html.escape(title)}</title>"
+        f"<body style='font-family:system-ui;max-width:34rem;margin:3rem auto;padding:0 1rem'>"
+        f"{body}</body>",
+        status_code=status_code,
+    )
+
+
+@router.get("/link/{token}", response_class=HTMLResponse, summary="Confirm an emailed approval link")
+async def approval_link_page(token: str, request: Request) -> HTMLResponse:
+    """Render a one-click confirmation page for an emailed approve/reject link. Committing is a POST to
+    this same URL (so a link prefetch never decides)."""
+    payload = _verify_link(token)
+    verb = "approve" if payload["d"] == "approve" else "reject"
+    kernel = _kernel_for_tenant(request, str(payload["t"]))
+    hitl = kernel._in_process_hitl()
+    record = hitl.get_record(str(payload["h"])) if hitl is not None else None
+    if record is None or record.decision is not ApprovalDecision.PENDING:
+        return _page(
+            "Approval unavailable",
+            "<p>This approval link is no longer valid — it may have already been decided or expired.</p>",
+            status_code=409,
+        )
+    color = "#0a7d28" if verb == "approve" else "#b00020"
+    return _page(
+        f"Confirm {verb}",
+        f"<h2>Confirm you want to <span style='color:{color}'>{verb}</span> this action</h2>"
+        f"<ul><li><b>Action:</b> {html.escape(record.action_id)}</li>"
+        f"<li><b>Requested by:</b> {html.escape(str(record.proposed_by))}</li></ul>"
+        f"<form method='post' action='/v1/approvals/link/{html.escape(token)}'>"
+        f"<button type='submit' style='padding:.6rem 1.2rem;background:{color};color:#fff;"
+        f"border:0;border-radius:6px;font-size:1rem;cursor:pointer'>Confirm {verb}</button></form>",
+    )
+
+
+@router.post("/link/{token}", response_class=HTMLResponse, summary="Commit an emailed approval decision")
+async def approval_link_commit(token: str, request: Request) -> HTMLResponse:
+    """Verify the signed token and commit the decision as the approver it names. Single-use: an already
+    decided approval → 409."""
+    payload = _verify_link(token)
+    tenant = str(payload["t"])
+    kernel = _kernel_for_tenant(request, tenant)
+    if kernel._in_process_hitl() is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "Approval queue unavailable for this deployment", "code": "HITL_QUEUE_UNAVAILABLE"},
+        )
+    record = kernel._in_process_hitl().get_record(str(payload["h"]))  # type: ignore[union-attr]
+    if record is not None and str(record.tenant) != tenant:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "Approval link tenant mismatch", "code": "TENANT_ISOLATION"},
+        )
+    actor = Actor(
+        id=ActorId(str(payload["aid"])),
+        tenant=TenantId(tenant),
+        roles=tuple(str(r) for r in payload.get("ar", [])),
+    )
+    decision = "approved" if payload["d"] == "approve" else "rejected"
+    try:
+        await kernel.decide_approval(str(payload["h"]), decision=decision, actor=actor)
+    except HITLPortError as exc:
+        # Already decided (single-use), not authorized, expired, or self-approval.
+        return _page("Approval not applied", f"<p>{html.escape(str(exc))}</p>", status_code=409)
+    verb = "approved" if decision == "approved" else "rejected"
+    return _page(f"Action {verb}", f"<h2>You have {verb} this action.</h2><p>You can close this page.</p>")

@@ -29,10 +29,10 @@ from core.types import ActionId, ActorId, ApprovalDecision, ApproverRef, TenantI
 
 _COLS = (
     "handle_id, action_id, tenant_id, required_approvers, requested_at, decision, "
-    "decided_by, decided_at, expires_at, proposed_by"
+    "decided_by, decided_at, expires_at, proposed_by, notify_channel, notify_target, resume_link"
 )
 _INSERT_SQL = (
-    f"INSERT INTO quaicu_approvals ({_COLS}) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+    f"INSERT INTO quaicu_approvals ({_COLS}) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
     "ON CONFLICT (handle_id) DO UPDATE SET "
     "decision = EXCLUDED.decision, decided_by = EXCLUDED.decided_by, "
     "decided_at = EXCLUDED.decided_at, expires_at = EXCLUDED.expires_at"
@@ -56,6 +56,9 @@ def _row_to_record(r: tuple) -> ApprovalRecord:
         decided_at=r[7],
         expires_at=r[8],
         proposed_by=ActorId(r[9]) if r[9] else None,
+        notify_channel=r[10],
+        notify_target=r[11],
+        resume_link=r[12],
     )
 
 
@@ -71,6 +74,9 @@ def _params(rec: ApprovalRecord) -> tuple:
         rec.decided_at,
         rec.expires_at,
         str(rec.proposed_by) if rec.proposed_by else None,
+        rec.notify_channel,
+        rec.notify_target,
+        rec.resume_link,
     )
 
 

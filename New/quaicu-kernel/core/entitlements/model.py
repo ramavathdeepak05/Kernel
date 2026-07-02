@@ -7,8 +7,10 @@ it may run, and its quotas. `TIER_MATRIX` is the **single source of truth** cons
 (to gate features and enforce quotas).
 
 Tiers map to the commercial packaging:
-  - STARTER    — self-serve, memory-only, audit trail (always_allow + in-memory ledger).
-  - BUSINESS   — SaaS: durable Postgres + CEL policy engine + HITL + JWT identity.
+  - STARTER    — self-serve, low quotas; runs on the SAME shared durable kernel as BUSINESS (Postgres
+                 + KMS ledger). The tier gates quotas + premium capabilities, not the data store.
+  - BUSINESS   — self-serve, higher quotas + premium capabilities (e.g. AI gateway). Same durable
+                 kernel as STARTER, so a STARTER→BUSINESS upgrade is a feature unlock, not a migration.
   - ENTERPRISE — dedicated deploy: OpenBao tamper-proof ledger, per-tenant keys, custom profiles.
 
 Design rules (same freeze discipline as `core/policy/model.py`): immutable dataclasses; a tier's
@@ -65,35 +67,42 @@ class TierSpec:
 TIER_MATRIX: dict[FeatureTier, TierSpec] = {
     FeatureTier.STARTER: TierSpec(
         tier=FeatureTier.STARTER,
-        # In-memory, but governance-capable: the CEL engine + a small policy allowance so the free
-        # tier actually enforces (ships with a seeded allow-baseline + a deny guardrail — see
-        # kernel.starter.toml — and a tenant may author a few of their own).
+        # Shared durable plane: STARTER runs on the SAME durable kernel as BUSINESS (Postgres + KMS
+        # ledger), so its allowed adapters are the durable set — the tier difference is now the QUOTAS
+        # and premium capabilities below, NOT the data store. This is what makes a STARTER→BUSINESS
+        # upgrade a feature unlock rather than a data migration. (The in-memory adapters remain for
+        # local dev / tests via kernel.dev.toml; they're just not what a STARTER tenant is entitled to
+        # on the operated plane.) Premium-only adapters (e.g. the AI gateway `openai_compat`) are
+        # deliberately EXCLUDED here so the edge gate (assert_adapter_allowed) denies STARTER.
         allowed_adapters=frozenset(
             {
-                "always_allow", "cel_policy", "memory_policy",
-                "memory_ledger", "memory_storage", "memory_events", "webhook",
+                "cel_policy", "postgres_policy", "memory_policy",
+                "postgres_storage", "postgres_ledger", "gcp_kms_ledger", "memory_ledger_repo",
+                "in_process", "memory_events", "webhook", "jwt",
             }
         ),
         default_profile="standard",
         allowed_profiles=frozenset({"standard", "audit_only", "monitor"}),
-        max_policies=5,
+        max_policies=200,
         max_actions_per_day=10_000,
         rate_limit_per_min=60,
     ),
     FeatureTier.BUSINESS: TierSpec(
         tier=FeatureTier.BUSINESS,
+        # A superset of the shared durable kernel's adapters (so edge gating never denies BUSINESS its
+        # own kernel's adapters) PLUS the premium-only AI gateway (`openai_compat`) that STARTER lacks.
         allowed_adapters=frozenset(
             {
                 "cel_policy", "postgres_policy", "memory_policy",
-                "postgres_storage", "postgres_ledger", "memory_ledger_repo",
-                "memory_events", "webhook", "jwt", "openai_compat",
+                "postgres_storage", "postgres_ledger", "gcp_kms_ledger", "memory_ledger_repo",
+                "in_process", "memory_events", "webhook", "jwt", "openai_compat",
             }
         ),
         default_profile="standard",
         allowed_profiles=frozenset(
             {"all", "standard", "gateway_only", "audit_only", "monitor"}
         ),
-        max_policies=200,
+        max_policies=1000,
         max_actions_per_day=1_000_000,
         rate_limit_per_min=600,
     ),

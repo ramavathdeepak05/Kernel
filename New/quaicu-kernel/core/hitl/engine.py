@@ -43,6 +43,40 @@ class InProcessHITLPort:
 
     # ── HITLPort protocol ────────────────────────────────────────────────────
 
+    @staticmethod
+    def _new_handle_id() -> str:
+        return str(uuid.uuid4())
+
+    def _build_record(
+        self,
+        *,
+        handle_id: str,
+        action: Action,
+        approvers: list[ApproverRef],
+        tenant: TenantId,
+        notify_channel: str | None = None,
+        notify_target: str | None = None,
+        resume_link: str | None = None,
+    ) -> ApprovalRecord:
+        """Build (but do not store) the approval record. Subclasses (email/Teams) use this to attach
+        routing metadata and control the send/persist ordering (D1-4). ``timeout_seconds = 0`` means no
+        expiry — the approval stays pending until a human decides."""
+        now = datetime.now(UTC)
+        return ApprovalRecord(
+            handle_id=handle_id,
+            action_id=action.id,
+            tenant=tenant,
+            required_approvers=tuple(approvers),
+            requested_at=now,
+            expires_at=(
+                now + timedelta(seconds=self._timeout_seconds) if self._timeout_seconds > 0 else None
+            ),
+            proposed_by=action.actor.id,
+            notify_channel=notify_channel,
+            notify_target=notify_target,
+            resume_link=resume_link,
+        )
+
     async def request_approval(
         self,
         *,
@@ -50,16 +84,9 @@ class InProcessHITLPort:
         approvers: list[ApproverRef],
         tenant: TenantId,
     ) -> ApprovalHandle:
-        handle_id = str(uuid.uuid4())
-        now = datetime.now(UTC)
-        record = ApprovalRecord(
-            handle_id=handle_id,
-            action_id=action.id,
-            tenant=tenant,
-            required_approvers=tuple(approvers),
-            requested_at=now,
-            expires_at=now + timedelta(seconds=self._timeout_seconds) if self._timeout_seconds > 0 else None,
-            proposed_by=action.actor.id,
+        handle_id = self._new_handle_id()
+        record = self._build_record(
+            handle_id=handle_id, action=action, approvers=approvers, tenant=tenant
         )
         self._store.put(record)
         log.info(
@@ -68,7 +95,7 @@ class InProcessHITLPort:
             action.id,
             approvers,
         )
-        return ApprovalHandle(id=handle_id, tenant=tenant, created_at=now)
+        return ApprovalHandle(id=handle_id, tenant=tenant, created_at=record.requested_at)
 
     async def poll(self, handle: ApprovalHandle) -> ApprovalOutcome:
         record = self._store.get(handle.id)

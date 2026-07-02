@@ -12,15 +12,53 @@ provisioning for enterprise IdPs is the separate `/scim/v2` router.)
 
 from __future__ import annotations
 
+import logging
+import os
+
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from core.account.roles import Role
 from core.account.scopes import MEMBERS_ADMIN
+from core.email import EmailMessage
 from core.errors import AccountNotFoundError
 from delivery.api.auth import current_principal, enforce_scope
 
 router = APIRouter(prefix="/v1", tags=["members"])
+log = logging.getLogger("quaicu.members")
+
+
+async def _send_set_password_invite(request: Request, engine, member) -> None:
+    """Email the invited member a signed set-password link (best-effort — never fails the invite).
+
+    The link opens the console's /set-password page, which posts the token + a new password to
+    /v1/auth/set-password. With no email provider configured the log-only sender writes the link to the
+    server log (so an admin can still relay it). CONSOLE_BASE_URL is the console's public origin.
+    """
+    sender = getattr(request.app.state, "email_sender", None)
+    if sender is None:
+        return
+    token = engine.mint_member_set_password_token(member)
+    base = os.getenv("CONSOLE_BASE_URL", "").rstrip("/")
+    link = f"{base}/set-password?token={token}"
+    html = (
+        '<div style="font-family:system-ui,sans-serif;max-width:480px">'
+        "<h2 style='margin:0 0 8px'>You've been invited to QUAICU</h2>"
+        f"<p>Set a password to sign in and start reviewing approvals ({member.role} access):</p>"
+        f'<p><a href="{link}">Set your password</a></p>'
+        '<p style="color:#666;font-size:13px">This link expires in 15 minutes.</p></div>'
+    )
+    try:
+        await sender.send(
+            EmailMessage(
+                to=member.email,
+                subject="Set your QUAICU password",
+                html=html,
+                text=f"Set your QUAICU password: {link}\n(This link expires in 15 minutes.)",
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — onboarding email is best-effort; the invite still succeeds
+        log.warning("set-password invite email failed for member=%s: %s", member.member_id, exc)
 
 
 class MemberInfo(BaseModel):
@@ -101,6 +139,7 @@ async def invite_member(body: InviteMemberBody, request: Request) -> MemberInfo:
         )
     except ValueError as exc:  # unknown role (fail-closed)
         raise HTTPException(status_code=400, detail={"error": str(exc), "code": "INVALID_ROLE"})
+    await _send_set_password_invite(request, engine, member)
     return _info(member)
 
 

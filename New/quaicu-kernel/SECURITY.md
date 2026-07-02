@@ -4,7 +4,7 @@ QUAICU is a fail-closed, multi-tenant AI governance kernel. This document is the
 posture + vulnerability-disclosure policy, and the **shared-responsibility boundary** that the
 penetration-test SoW, the GDPR DPA, and the SLA reference.
 
-_Owner: [security] · Tracks ACTION_TRACKER **W4-6** · Last updated: 2026-06-23_
+_Owner: [security] · Tracks ACTION_TRACKER **W4-6 / D0-4** · Last updated: 2026-07-01_
 
 ## Reporting a vulnerability
 - **Email:** security@quaicu.org (or support@quaicu.org). PGP key: `[publish key / link]`.
@@ -32,8 +32,10 @@ revision. Self-hosted (Model B / dedicated) customers receive advisories and pat
 - **Edge:** the Cloudflare Worker forwards a verified real client IP authenticated by a shared edge
   secret (`X-Edge-Auth`), so rate-limiting cannot be defeated by spoofing `X-Forwarded-For`.
 - **Transport/at-rest:** TLS in transit; Google Cloud encryption at rest (Cloud SQL, Secret Manager).
-- **Supply chain:** CI runs lint + unit tests as a blocking gate, plus image (Trivy) + dependency
-  (pip-audit) scanning and an SBOM in report mode — see `cloudbuild.yaml` + `VULN_MANAGEMENT.md`.
+- **Supply chain:** CI runs lint + unit tests, **blocking** dependency (`pip-audit`, both locks) and
+  image (Trivy HIGH/CRITICAL) scans, a CycloneDX **SBOM every build**, and **cosign image signing +
+  SBOM attestation** using a Cloud KMS HSM key (`--tlog-upload=false`, zero-egress-safe) — see
+  `cloudbuild.yaml` + `VULN_MANAGEMENT.md`.
 
 ## Shared-responsibility boundary
 QUAICU builds on third-party managed services and is **not** responsible for vulnerabilities *within*

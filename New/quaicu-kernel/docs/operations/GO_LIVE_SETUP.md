@@ -46,7 +46,7 @@ Set these in your container env (Secret Manager / SSM / k8s Secret — not in th
 KERNEL_CONFIG_SAAS=/etc/quaicu/kernel.saas.toml quaicu-kernel-saas
 # or: uvicorn delivery.entrypoint_saas:app --host 0.0.0.0 --port 7000 --workers 4
 ```
-`kernel.saas.toml` maps tiers → `kernel.starter.toml` + `kernel.business.toml`, points at the durable
+`kernel.saas.toml` points at one durable `kernel.shared.toml` serving all tiers (ADR-0013), the durable
 `[entitlements]` store, and (when configured) wires billing. Metering + per-tier limits are now active
 out of the box (the `UsageMeter` is wired into the SaaS app). Verify: `curl https://api.yourco.com/health`.
 

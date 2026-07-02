@@ -161,3 +161,6 @@ class Member:
     status: MemberStatus
     created_at: datetime
     external_id: str = ""  # SCIM IdP user id (empty for console-invited members)
+    # scrypt hash backing in-browser console login (D1-5); empty until the member sets a password via
+    # the emailed set-password link. IdP/SCIM members authenticate via their IdP token instead.
+    password_hash: str = ""

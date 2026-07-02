@@ -35,6 +35,7 @@ import type {
   ForgotResponse,
   LoginBody,
   ResetBody,
+  SetPasswordBody,
   LoginResponse,
   SignupCompleteBody,
   SignupStartBody,
@@ -104,6 +105,7 @@ export const api = {
 
   // ── Login + password reset ─────────────────────────────────────────────────
   login: (b: LoginBody) => request<LoginResponse>("POST", "/v1/auth/login", b),
+  setPassword: (b: SetPasswordBody) => request<LoginResponse>("POST", "/v1/auth/set-password", b),
   forgotPassword: (b: ForgotBody) => request<ForgotResponse>("POST", "/v1/auth/forgot", b),
   resetPassword: (b: ResetBody) => request<LoginResponse>("POST", "/v1/auth/reset", b),
 

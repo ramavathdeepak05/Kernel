@@ -27,8 +27,8 @@ gcloud builds submit --tag "$IMAGE" -f delivery/docker/Dockerfile .
 ```
 
 ## 2. The SaaS plane needs its config files in the image (or mounted)
-The shared plane reads `KERNEL_CONFIG_SAAS` (a plane descriptor) which points at per-tier config files.
-Simplest path: bake `delivery/docker/kernel.saas.toml`, `kernel.starter.toml`, `kernel.business.toml`
+The shared plane reads `KERNEL_CONFIG_SAAS` (a plane descriptor) which points at one durable kernel
+config (ADR-0013). Simplest path: bake `delivery/docker/kernel.saas.toml` + `kernel.shared.toml`
 into the image at `/etc/quaicu/` (add a `COPY delivery/docker/kernel.*.toml /etc/quaicu/` line to a
 deploy Dockerfile, or mount them via a Secret/volume). The descriptor already references
 `/etc/quaicu/kernel.{starter,business}.toml`.

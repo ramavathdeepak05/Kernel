@@ -50,17 +50,56 @@ class LoginResponse(BaseModel):
 )
 async def login(body: LoginRequest, request: Request) -> LoginResponse:
     engine = _require_engine(request)
+    email, password = body.email.strip(), body.password
+    # Try the account owner first, then a member (D1-5) — one uniform error, no enumeration.
     try:
-        account = engine.authenticate(email=body.email.strip(), password=body.password)
+        account = engine.authenticate(email=email, password=password)
+        token, expires_in = engine.mint_session(account)
+        return LoginResponse(
+            session_token=token, tenant_id=str(account.tenant_id), expires_in=expires_in
+        )
     except AccountNotFoundError:
-        # Uniform error — never reveal whether the email exists.
+        pass
+    try:
+        member = engine.authenticate_member(email=email, password=password)
+    except AccountNotFoundError:
         raise HTTPException(
             status_code=401,
             detail={"error": "Invalid email or password.", "code": "INVALID_CREDENTIALS"},
         )
-    token, expires_in = engine.mint_session(account)
+    token, expires_in = engine.mint_member_session(member)
     return LoginResponse(
-        session_token=token, tenant_id=str(account.tenant_id), expires_in=expires_in
+        session_token=token, tenant_id=str(member.tenant_id), expires_in=expires_in
+    )
+
+
+class SetPasswordRequest(BaseModel):
+    token: str = Field(..., description="The signed set-password token from the invite email.")
+    new_password: str = Field(..., min_length=8, description="New password (min 8 chars).")
+
+
+@router.post(
+    "/auth/set-password",
+    response_model=LoginResponse,
+    summary="Set a member's password with the invite token → session token (auto-login)",
+)
+async def set_password(body: SetPasswordRequest, request: Request) -> LoginResponse:
+    """A member sets their password via the emailed link, then is logged straight in."""
+    engine = _require_engine(request)
+    try:
+        member = engine.set_member_password(token=body.token, new_password=body.new_password)
+    except (SignupVerificationError, AccountNotFoundError):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid or expired set-password link.", "code": "SET_PASSWORD_INVALID"},
+        )
+    except PasswordError as exc:
+        raise HTTPException(
+            status_code=422, detail={"error": str(exc), "code": "PASSWORD_TOO_WEAK"}
+        )
+    token, expires_in = engine.mint_member_session(member)
+    return LoginResponse(
+        session_token=token, tenant_id=str(member.tenant_id), expires_in=expires_in
     )
 
 

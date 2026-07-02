@@ -33,7 +33,7 @@ from core.account.model import (
     SignupDetails,
 )
 from core.account.passwords import hash_password, verify_password
-from core.account.roles import Role, actor_roles_for, parse_role
+from core.account.roles import Role, actor_roles_for, parse_role, role_scopes
 from core.account.scopes import OWNER_SCOPES, normalize_scopes
 from core.account.store import AccountStore
 from core.entitlements import CustomerPlan, EntitlementStore, FeatureTier, PlanStatus
@@ -324,6 +324,74 @@ class AccountEngine:
             "email": account.email,
             "roles": ["policy_admin", "owner"],
             "scopes": sorted(OWNER_SCOPES),
+            "iat": int(now.timestamp()),
+            "exp": int((now + ttl).timestamp()),
+        }
+        token = _jwt.encode(payload, self._session_secret, algorithm="HS256")
+        return token, int(ttl.total_seconds())
+
+    # ── Member console login (invite → set password → session; D1-5) ─────────────────
+
+    def mint_member_set_password_token(self, member: Member) -> str:
+        """A sealed, expiring token that authorizes setting THIS member's password (emailed at invite)."""
+        return self._seal_token(
+            {
+                "v": 1,
+                "purpose": "member_set_password",
+                "member_id": member.member_id,
+                "tenant": str(member.tenant_id),
+                "exp": datetime.now(timezone.utc).timestamp() + _RESET_TTL_SECONDS,
+            }
+        )
+
+    def set_member_password(self, *, token: str, new_password: str) -> Member:
+        """Verify the set-password token + set the member's password (scrypt). Returns the member.
+
+        Raises `SignupVerificationError` (bad/expired token), `AccountNotFoundError` (member gone), or
+        `PasswordError` (weak password — via `hash_password`).
+        """
+        import dataclasses
+
+        payload = self._open_token(token)
+        if payload.get("purpose") != "member_set_password":
+            raise SignupVerificationError("Invalid set-password token.")
+        member = self._accounts.get_member(str(payload.get("member_id", "")))
+        if member is None or str(member.tenant_id) != str(payload.get("tenant", "")):
+            raise AccountNotFoundError("No member to set a password for.", detail={})
+        updated = dataclasses.replace(member, password_hash=hash_password(new_password))
+        self._accounts.replace_member(updated)
+        log.info("member password set: tenant=%s member=%s", updated.tenant_id, updated.member_id)
+        return updated
+
+    def authenticate_member(self, *, email: str, password: str) -> Member:
+        """Verify an email + password against an ACTIVE member (console login).
+
+        Member emails are unique per tenant, so a given email may exist in several tenants — the
+        password disambiguates. Raises `AccountNotFoundError` on no match / wrong password / no
+        password set / deactivated member (one error, no enumeration).
+        """
+        for member in self._accounts.members_with_email(email):
+            if (
+                member.status is MemberStatus.ACTIVE
+                and member.password_hash
+                and verify_password(password, member.password_hash)
+            ):
+                return member
+        raise AccountNotFoundError("Invalid email or password.", detail={"email": email})
+
+    def mint_member_session(self, member: Member) -> tuple[str, int]:
+        """Mint a console session JWT for a MEMBER. `sub = member_id` (so the member is the sealed
+        governance actor — SoD holds), `roles`/`scopes` from the member's role (a COMPLIANCE member
+        carries `("compliance",)` + APPROVAL_DECIDE). Same shape as `mint_session`."""
+        now = datetime.now(timezone.utc)
+        ttl = timedelta(hours=_SESSION_TTL_HOURS)
+        payload = {
+            "sub": member.member_id,
+            "tenant": str(member.tenant_id),
+            "email": member.email,
+            "kind": "member",
+            "roles": list(actor_roles_for(member.role)),
+            "scopes": sorted(role_scopes(member.role)),
             "iat": int(now.timestamp()),
             "exp": int((now + ttl).timestamp()),
         }
