@@ -73,10 +73,14 @@ aws = [
 redis = [
     "redis>=5",                  # adapters/metering/redis_meter — shared cross-replica usage counts
 ]
+mcp = [
+    "mcp>=1.0",                  # delivery/mcp — the MCP governance server/proxy (D2-1)
+]
 
 [project.scripts]
 quaicu-kernel = "delivery.entrypoint:main"
 quaicu-kernel-saas = "delivery.entrypoint_saas:main"
+quaicu-kernel-mcp = "delivery.mcp.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["core*", "adapters*", "delivery*"]

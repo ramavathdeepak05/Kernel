@@ -107,6 +107,18 @@ async def test_rejection_denies_the_pending_action() -> None:
     assert await _action_state(kernel, action_id) is ActionState.DENIED
 
 
+async def test_wrap_require_approval_suspends() -> None:
+    # kernel.wrap must defer like kernel.guard (regression: it was missed by the original defer change).
+    kernel = _kernel()
+
+    async def transfer(amount: int) -> dict:
+        return {"moved": amount}
+
+    governed = kernel.wrap(transfer, policy="payments.transfer", actor=MAKER)
+    with pytest.raises(LifecyclePendingApprovalError):
+        await governed(amount=100)
+
+
 async def test_generate_require_approval_suspends_without_calling_gateway() -> None:
     class _StubGateway:
         async def generate(self, **_: object):  # pragma: no cover - must not run when deferred

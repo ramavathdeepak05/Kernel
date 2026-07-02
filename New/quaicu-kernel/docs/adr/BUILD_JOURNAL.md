@@ -222,6 +222,48 @@ is prioritized.
 
 Each entry: date · unit · agent · what changed · what it now exposes · follow-ups.
 
+- **2026-07-02 · D2-1 MCP governance server · delivery/mcp · claude** — New `delivery/mcp/` surface that
+  governs an agent's **MCP tool calls** through the kernel (policy → HITL → K·02 seal), fail-closed.
+  Reusable, `mcp`-dependency-free core `govern_tool_call`/`ToolOutcome` (a thin wrapper over
+  `kernel.wrap`): allow→execute+seal, deny/halt→**blocked (tool never runs)**, require_approval→durable
+  **PENDING + approval handle**. `GovernedMCPServer` (register handlers + per-tool policy) and
+  `GovernedMCPProxy` (front a downstream MCP server — mirror+govern+forward, no agent/tool code change)
+  build on it via the official `mcp` SDK (lazy import; new `[mcp]` extra + `quaicu-kernel-mcp` proxy
+  entrypoint). **Exposes:** drop-in governance for MCP-based agents + a reusable per-call primitive for
+  D2-2. **Bonus fix:** surfaced + fixed a latent D1-1 bug — `kernel.wrap` had been missed by the
+  defer-gate change (still false-DENYed require_approval); fixed + regression test. **Follow-ups:** D2-2
+  gateway tool-call governance; D2-3 SDK hardening.
+
+- **2026-07-02 · D1 human-approval loop — COMPLETE · core/hitl + adapters/hitl + core/account + console
+  · claude** — The HITL loop now works end-to-end. **D1-1:** SDK entry points (`guard`/`wrap`/`generate`/
+  `governed*`) run `defer_gate=True`, so a `require_approval` action **suspends durably** (PENDING) instead
+  of poll-once→TIMED_OUT→false-DENY; new `LifecyclePendingApprovalError` signals it; approval resumes
+  (execute→seal), reject DENIES, infra failure HALTs. **D1-2/D1-3:** `EmailHITLAdapter` + Teams
+  `MicrosoftTeamsHITLAdapter` (both `InProcessHITLPort` subclasses) send signed, single-use approve/reject
+  links (new pure-stdlib `core/hitl/links.ApprovalLinkSigner`) → the confirm-page flow
+  `GET/POST /v1/approvals/link/{token}`. **D1-4 (owner-reframed — fail-closed routing + pending-until-
+  decided ⇒ no worker):** enriched `ApprovalRecord` with routing metadata + resume link (migration 014);
+  adapters **send-then-persist** (a PENDING record ⇒ delivered notification; no orphan on failure);
+  no auto-expiry. **D1-5:** members get credentials (migration 015) + `mint_member_session`
+  (`sub=member_id` ⇒ member is the sealed approver); `/v1/auth/login` account-or-member; emailed
+  set-password link + console `SetPassword` page. **Exposes:** async suspend → email/Teams push → durable
+  record → **in-browser member maker/checker**, SoD enforced, approver sealed. Verified live on GCP Cloud
+  SQL (migration 014 round-trip). See the [[hitl-approval-model]] decision. **Follow-ups:** per-tenant
+  Teams webhooks + per-member email routing (later).
+
+- **2026-07-01 · D0 foundations — COMPLETE · repo-wide · claude** — Ground-truth + supply-chain + durable
+  plane. **D0-1** durability audit (`docs/operations/DURABILITY_AUDIT.md`, code-cited). **D0-2** closed the
+  floating `google-cloud-kms` install with a hash-pinned `requirements-gcp.lock`. **D0-3** graduated
+  `cloudbuild.yaml` to **blocking** pip-audit + Trivy + a CycloneDX SBOM + **cosign KMS signing +
+  attestation** (needs a one-time operator KMS key). **D0-4** package `LICENSE`/`README` + PEP-639
+  `pyproject` metadata (verified via `uv build`). **D0-5 (owner-reframed):** replaced the two-kernel plane
+  with **one durable kernel** (`kernel.shared.toml`) serving STARTER+BUSINESS on Postgres+KMS — the tier
+  is a pure **feature gate**, so a STARTER→BUSINESS upgrade is a **feature unlock, not a data migration**
+  (ADR-0013); added explicit fail-closed `max_policies` gating + raised caps (200/1000). **Exposes:** no
+  in-memory hot-path (`--workers>1` safe; resolves D0-1 Gap 1) + lossless upgrade — **verified live on GCP
+  Cloud SQL** (cross-worker idempotency, restart durability, upgrade-is-metadata-only). **Follow-ups:**
+  operator provisions the cosign KMS key; extend RLS to policy/approvals/entitlements tables (D0-1 Gap 4).
+
 - **2026-06-28 · Deployment-Readiness Program — tracker reset + journal consolidation · docs · claude** —
   Replaced the W0–W8 outstanding list with a dependency-ordered **Deployment-Readiness Program** (phases
   D0–D6 + a tracked non-code workstream); the granular task list with acceptance criteria + dependencies

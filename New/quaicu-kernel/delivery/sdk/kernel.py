@@ -1209,7 +1209,9 @@ class Kernel:
                 return {"result": result}
 
             resolved = self.resolve_profile(effective_type, profile)
-            final = await self.engine.run(action, execute_fn, profile=resolved)
+            final = await self.engine.run(
+                action, execute_fn, profile=resolved, defer_gate=True
+            )
             self._raise_on_terminal_failure(final, effective_type)
             return captured.get("result")
 
