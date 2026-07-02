@@ -67,6 +67,18 @@ class LifecycleHaltedError(LifecycleError):
     code = "LIFECYCLE_HALTED"
 
 
+class LifecyclePendingApprovalError(LifecycleError):
+    """Action suspended durably awaiting human approval (K·03) — **not** a failure.
+
+    Raised by the SDK entry points (`guard`/`wrap`/`generate`/`governed*`) when a `require_approval`
+    policy defers the action to a durable PENDING_APPROVAL state instead of executing. The action is
+    recorded and its approval request is registered; an authorized approver resolves it (execute → seal
+    on approve, DENY on reject) via `/v1/approvals` or `kernel.decide_approval`. The `detail` carries the
+    ``action_id`` and, when an in-process HITL queue is wired, the ``handle_id`` to decide against."""
+
+    code = "LIFECYCLE_PENDING_APPROVAL"
+
+
 class LifecycleIdempotencyError(LifecycleError):
     """Idempotency key already processed. Return the existing action state."""
 

@@ -60,6 +60,24 @@ timeout_seconds = 86400
 store = "postgres"
 dsn   = "${KERNEL_DSN}"
 
+# ── Email approvals (D1-2) — swap the [adapters].hitl above to "email" to use this. ──────────────────
+# The EmailHITLAdapter is an in-process queue that ALSO emails the approver signed, single-use,
+# expiring approve/reject links (each opens a confirm page → POST commits). Requires
+# QUAICU_APPROVAL_LINK_SECRET in the environment (signs the links; the app verifies with the same secret).
+# `approver_roles` must satisfy the policy's approver refs. Resend is used when RESEND_API_KEY is set,
+# else a log-only sender (the link appears in the server log — handy for local/dev). Reuses the Postgres
+# approval store above so /v1/approvals stays consistent across instances.
+#   [adapters] hitl = "email"
+#   [hitl]
+#   approver_email = "compliance@your-domain"
+#   approver_id    = "compliance"
+#   approver_roles = ["role:compliance"]
+#   link_base_url  = "https://api.your-domain"   # public origin the emailed links point at
+#   resend_api_key = "${RESEND_API_KEY}"          # omit → log-only
+#   from           = "${EMAIL_FROM}"
+#   store = "postgres"
+#   dsn   = "${KERNEL_DSN}"
+
 [identity]
 secret_or_key = "${KERNEL_JWT_SECRET}"
 algorithms    = ["HS256"]
