@@ -8,8 +8,22 @@ from __future__ import annotations
 
 import pytest
 
-from core.errors import LifecycleDeniedError, LifecycleHaltedError
-from core.types import ActionState, Actor, ActorId, ApprovalDecision, Decision, TenantId
+from core.errors import (
+    LifecycleDeniedError,
+    LifecycleHaltedError,
+    LifecyclePendingApprovalError,
+)
+from core.hitl.engine import InProcessHITLPort
+from core.types import (
+    ActionId,
+    ActionState,
+    Actor,
+    ActorId,
+    ApprovalDecision,
+    ApproverRef,
+    Decision,
+    TenantId,
+)
 from delivery.sdk.kernel import Kernel
 from tests.unit.lifecycle.fakes import (
     FakeEvents,
@@ -136,32 +150,55 @@ async def test_c_sdk_05_seal_failure_halts():
         await fn(actor=_actor())
 
 
-# ── C-SDK-06 HITL approval-required flow completes ───────────────────────────────
+# ── C-SDK-06/07 HITL: require_approval suspends durably, then resumes on the decision ─────
+# (D1-1: the SDK path defers instead of poll-once → TIMED_OUT → DENY. The decorated call raises
+# LifecyclePendingApprovalError; an authorized, non-proposing approver resolves it out-of-band.)
+
+_CHECKER = Actor(id=ActorId("checker"), tenant=TENANT, roles=("role:approver",))
+
+
+def _approval_kernel() -> Kernel:
+    return Kernel.from_parts(
+        tenant=TENANT,
+        policy=FakePolicy(
+            decision=Decision.REQUIRE_APPROVAL, approvers=(ApproverRef("role:approver"),)
+        ),
+        hitl=InProcessHITLPort(),
+        ledger=FakeLedger(),
+        events=FakeEvents(),
+    )
+
+
+async def _suspend(fn) -> tuple[str, str]:
+    with pytest.raises(LifecyclePendingApprovalError) as ei:
+        await fn(actor=_actor())
+    return ei.value.detail["handle_id"], ei.value.detail["action_id"]
 
 
 async def test_c_sdk_06_hitl_approval_completes():
-    k = _kernel(require_approval=True, hitl_decision=ApprovalDecision.APPROVED)
+    k = _approval_kernel()
 
     @k.governed(policy="spec.hitl_action")
     async def fn(*, actor: Actor):
         return "approved"
 
-    action = await fn(actor=_actor())
-    assert action.state == ActionState.COMPLETED
-
-
-# ── C-SDK-07 HITL rejection → LifecycleDeniedError ───────────────────────────────
+    handle_id, action_id = await _suspend(fn)
+    await k.decide_approval(handle_id, decision="approved", actor=_CHECKER)
+    action = await k.engine._repo.get_by_id(TENANT, ActionId(action_id))
+    assert action is not None and action.state == ActionState.COMPLETED
 
 
 async def test_c_sdk_07_hitl_rejection_denies():
-    k = _kernel(require_approval=True, hitl_decision=ApprovalDecision.REJECTED)
+    k = _approval_kernel()
 
     @k.governed(policy="spec.hitl_rejection")
     async def fn(*, actor: Actor):
         return "ok"
 
-    with pytest.raises(LifecycleDeniedError):
-        await fn(actor=_actor())
+    handle_id, action_id = await _suspend(fn)
+    await k.decide_approval(handle_id, decision="rejected", actor=_CHECKER)
+    action = await k.engine._repo.get_by_id(TENANT, ActionId(action_id))
+    assert action is not None and action.state == ActionState.DENIED
 
 
 # ── C-SDK-08 Missing actor is a hard TypeError ───────────────────────────────────
