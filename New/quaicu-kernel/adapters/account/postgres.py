@@ -55,19 +55,20 @@ ON CONFLICT (key_id) DO UPDATE SET
 
 _UPSERT_MEMBER_SQL = """
 INSERT INTO quaicu_members
-    (member_id, tenant_id, email, display_name, role, status, created_at, external_id)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    (member_id, tenant_id, email, display_name, role, status, created_at, external_id, password_hash)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (member_id) DO UPDATE SET
-    email        = EXCLUDED.email,
-    display_name = EXCLUDED.display_name,
-    role         = EXCLUDED.role,
-    status       = EXCLUDED.status,
-    external_id  = EXCLUDED.external_id
+    email         = EXCLUDED.email,
+    display_name  = EXCLUDED.display_name,
+    role          = EXCLUDED.role,
+    status        = EXCLUDED.status,
+    external_id   = EXCLUDED.external_id,
+    password_hash = EXCLUDED.password_hash
 """
 
 _SELECT_MEMBERS_SQL = (
     "SELECT member_id, tenant_id, email, COALESCE(display_name, ''), role, status, created_at, "
-    "COALESCE(external_id, '') FROM quaicu_members"
+    "COALESCE(external_id, ''), COALESCE(password_hash, '') FROM quaicu_members"
 )
 
 _SELECT_ACCOUNTS_SQL = (
@@ -174,6 +175,7 @@ class PostgresAccountRepository:
                     status=MemberStatus(r[5]),
                     created_at=r[6],
                     external_id=r[7],
+                    password_hash=r[8],
                 )
                 for r in cur.fetchall()
             ]
@@ -193,6 +195,7 @@ class PostgresAccountRepository:
                     member.status.value,
                     member.created_at,
                     member.external_id,
+                    member.password_hash,
                 ),
             ),
             "save_member",

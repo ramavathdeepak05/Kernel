@@ -19,6 +19,7 @@ import ApiKeys from "./pages/ApiKeys";
 import Team from "./pages/Team";
 import Legal from "./pages/Legal";
 import ResetPassword from "./pages/ResetPassword";
+import SetPassword from "./pages/SetPassword";
 
 function useSession() {
   return useSyncExternalStore(subscribe, getSession);
@@ -254,6 +255,7 @@ export default function App() {
             <Route path="/signup" element={<Signup />} />
             <Route path="/plans" element={<Plans />} />
             <Route path="/reset" element={<ResetPassword />} />
+            <Route path="/set-password" element={<SetPassword />} />
             <Route path="/legal/:doc" element={<Legal />} />
             {authed ? (
               <>

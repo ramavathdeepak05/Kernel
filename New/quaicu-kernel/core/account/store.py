@@ -161,6 +161,13 @@ class AccountStore:
                     return m
         return None
 
+    def members_with_email(self, email: str) -> list[Member]:
+        """Every member with ``email`` across all tenants (member emails are unique per tenant, so a
+        given email can exist in more than one). Used for console login by email — the caller
+        disambiguates by verifying the password against each candidate."""
+        with self._lock:
+            return [m for m in self._members.values() if m.email.lower() == email.lower()]
+
     def find_member_by_external_id(self, tenant: TenantId, external_id: str) -> Member | None:
         if not external_id:
             return None

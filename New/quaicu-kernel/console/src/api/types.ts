@@ -260,6 +260,12 @@ export interface LoginResponse {
   expires_in: number;
 }
 
+// ── Member set-password (invited member sets a password via the emailed link → auto-login) ──
+export interface SetPasswordBody {
+  token: string;
+  new_password: string;
+}
+
 // ── Password reset (forgot → email OTP → new password) ───────────────────────
 export interface ForgotBody {
   email: string;
