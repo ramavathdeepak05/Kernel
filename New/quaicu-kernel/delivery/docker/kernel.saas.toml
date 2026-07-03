@@ -68,3 +68,14 @@ notify_email = "support@quaicu.org"
 # api_key        = "${STRIPE_API_KEY}"
 # [billing.stripe.price_to_tier]
 # "price_business" = "BUSINESS"
+
+# Hosted MCP endpoint (BYO downstream). enabled=true mounts an authenticated Streamable-HTTP endpoint
+# at /mcp: a tenant points their MCP client there with a QUAICU API key, and every tool call is
+# governed by that tenant's mcp.<tool> policies + sealed to their ledger, then forwarded to the
+# tenant's OWN downstream MCP server. Requires the image built with the [mcp] extra.
+#   Before it works for a tenant: they register their downstream at PUT /v1/mcp/connection (console →
+#   MCP gateway) and activate mcp.<tool> policies (else calls are fail-closed DENY).
+# [mcp]
+# enabled        = true
+# default_policy = "mcp.tool"   # optional: govern all tools under one action type (write one
+#                               #   governs="mcp.tool" policy); omit → each tool is mcp.<tool_name>

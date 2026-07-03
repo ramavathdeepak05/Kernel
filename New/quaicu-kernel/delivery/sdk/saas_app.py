@@ -41,6 +41,7 @@ from delivery.sdk.erasure_config import build_erasure
 from delivery.sdk.entitlements_config import build_entitlement_store
 from delivery.sdk.coupon_config import build_coupon_book
 from delivery.sdk.signup_payment_config import build_signup_payment
+from delivery.sdk.mcp_config import build_mcp_gateway
 from delivery.sdk.metering_config import build_usage_meter
 from delivery.sdk.provider import TieredKernelProvider
 
@@ -74,12 +75,21 @@ def plane_config_path(config: Mapping[str, Any]) -> str:
     return str(path)
 
 
-def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
+def build_saas_app(
+    config: Mapping[str, Any], *, mcp_server: Any | None = None, mcp_proxy: Any | None = None
+) -> FastAPI:
     """Build the shared-plane FastAPI app from a plane-descriptor config.
 
     Wires one shared `EntitlementStore` (durable when a DSN is configured) through both the provider's
     routing engine and the billing webhook — one source of truth for plans — and hydrates it at
     startup via create_app's lifespan.
+
+    ``mcp_server`` / ``mcp_proxy`` (pass at most one): the hosted, authenticated, per-tenant MCP
+    endpoint served at ``/mcp`` — each call governed by the caller's tenant policies and sealed to
+    that tenant's ledger. ``mcp_server`` is an operator-built, tools-only `GovernedMCPServer` (register
+    handlers in code — they can't come from TOML). ``mcp_proxy`` is a `GovernedMCPProxy` in
+    **BYO-downstream** mode: each tenant registers their own downstream MCP server at
+    ``PUT /v1/mcp/connection`` and the endpoint mirrors + governs + forwards their tools.
     """
     store = build_entitlement_store(config)
     provider = TieredKernelProvider.for_shared_saas(
@@ -87,8 +97,13 @@ def build_saas_app(config: Mapping[str, Any]) -> FastAPI:
         entitlement_store=store,
     )
     billing_adapters, billing_engine = build_billing(config, store)
+    # Hosted MCP endpoint: an explicit param wins; otherwise build from the [mcp] config section
+    # (BYO-downstream proxy). None → /mcp is not mounted.
+    mcp_proxy = mcp_proxy or build_mcp_gateway(config)
     return create_app(
         provider=provider,
+        mcp_server=mcp_server,
+        mcp_proxy=mcp_proxy,
         entitlement_store=store,
         usage_meter=build_usage_meter(config),  # per-tenant daily-quota + usage; shared Redis if configured
         account_engine=build_account_engine(config, store),  # self-serve signup ([account].enabled)

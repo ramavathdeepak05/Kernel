@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pytest
 
+from delivery.sdk import SdkUsageError
+
 from core.errors import (
     LifecycleDeniedError,
     LifecycleHaltedError,
@@ -211,5 +213,5 @@ async def test_c_sdk_08_missing_actor_is_type_error():
     async def fn(value: int, *, actor: Actor):
         return value
 
-    with pytest.raises(TypeError, match="actor"):
+    with pytest.raises(SdkUsageError, match="actor"):
         await fn(42)

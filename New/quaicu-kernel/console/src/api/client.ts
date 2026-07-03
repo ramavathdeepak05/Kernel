@@ -25,6 +25,8 @@ import type {
   InviteMemberBody,
   AIConnectionStatus,
   AIConnectionBody,
+  MCPConnectionStatus,
+  MCPConnectionBody,
   AuthorizeRequest,
   AuthorizeResponse,
   ConsultCompleteBody,
@@ -136,6 +138,10 @@ export const api = {
   getAIConnection: () => request<AIConnectionStatus>("GET", "/v1/ai/connection"),
   setAIConnection: (b: AIConnectionBody) => request<AIConnectionStatus>("PUT", "/v1/ai/connection", b),
   deleteAIConnection: () => request<AIConnectionStatus>("DELETE", "/v1/ai/connection"),
+
+  getMCPConnection: () => request<MCPConnectionStatus>("GET", "/v1/mcp/connection"),
+  setMCPConnection: (b: MCPConnectionBody) => request<MCPConnectionStatus>("PUT", "/v1/mcp/connection", b),
+  deleteMCPConnection: () => request<MCPConnectionStatus>("DELETE", "/v1/mcp/connection"),
 
   // ── Entitlements (per-tier UI gating) ──────────────────────────────────────
   entitlements: () => request<Entitlements>("GET", "/v1/me/entitlements"),

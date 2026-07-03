@@ -59,19 +59,24 @@ async def govern_tool_call(
     actor: Actor,
     tool_name: str,
     arguments: dict[str, Any] | None,
-    policy: str,
+    policy: str | None = None,
     execute: ToolExecutor,
 ) -> ToolOutcome:
     """Govern one MCP tool call and return its `ToolOutcome`. Never raises for a governance/infra
-    outcome — the status carries it."""
+    outcome — the status carries it.
+
+    The call is governed as action type ``policy`` when given, else ``mcp.<tool_name>`` (the
+    per-tool default). The tool's ``arguments`` become the action **payload** directly, so a CEL
+    policy can condition on ``payload_<field>`` (e.g. ``payload_amount > 10000``). Point several
+    tools at one ``policy`` (action type) to govern them with a single policy.
+    """
     args = dict(arguments or {})
+    action_type = policy or f"mcp.{tool_name}"
 
-    async def _run(*, arguments: dict[str, Any]) -> Any:
-        return await execute(arguments)
-
-    governed = kernel.wrap(_run, policy=policy, action_type=f"mcp.{tool_name}", actor=actor)
     try:
-        result = await governed(arguments=args)
+        result = await kernel.govern_action(
+            action_type=action_type, actor=actor, payload=args, execute=lambda: execute(args)
+        )
         return ToolOutcome(ToolStatus.ALLOWED, result=result)
     except LifecyclePendingApprovalError as exc:
         detail = exc.detail or {}

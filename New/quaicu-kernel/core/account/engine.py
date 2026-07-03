@@ -28,6 +28,7 @@ from core.account.model import (
     AIConnection,
     ApiKey,
     AuthenticatedPrincipal,
+    MCPConnection,
     Member,
     MemberStatus,
     SignupDetails,
@@ -600,6 +601,83 @@ class AccountEngine:
             return False
         profile = dict(account.profile)
         profile.pop("ai_connection", None)
+        self._accounts.add_account(dataclasses.replace(account, profile=profile))
+        return True
+
+    # ── MCP gateway: per-tenant BYO downstream MCP server (mirrors the AI connection) ──
+
+    def set_mcp_connection(
+        self,
+        tenant: TenantId,
+        *,
+        url: str,
+        auth_value: str = "",
+        auth_header: str = "Authorization",
+        transport: str = "streamable_http",
+        name: str = "",
+    ) -> None:
+        """Save (or replace) the tenant's downstream MCP server. The secret is encrypted at rest."""
+        import dataclasses
+
+        account = self._accounts.get_account_by_tenant(tenant)
+        if account is None:
+            raise AccountExistsError(
+                f"No account for tenant {tenant!r}.", detail={"tenant": str(tenant)}
+            )
+        profile = dict(account.profile)
+        profile["mcp_connection"] = {
+            "url": url.rstrip("/"),
+            "enc_auth": self._encrypt_secret(auth_value) if auth_value else "",
+            "auth_header": auth_header or "Authorization",
+            "transport": transport or "streamable_http",
+            "name": name,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._accounts.add_account(dataclasses.replace(account, profile=profile))
+
+    def get_mcp_connection(self, tenant: TenantId) -> MCPConnection | None:
+        """Return the tenant's downstream with the secret decrypted (for the outbound call), or None."""
+        account = self._accounts.get_account_by_tenant(tenant)
+        if account is None:
+            return None
+        raw = account.profile.get("mcp_connection")
+        if not isinstance(raw, Mapping):
+            return None
+        updated = raw.get("updated_at")
+        enc = str(raw.get("enc_auth", ""))
+        return MCPConnection(
+            url=str(raw.get("url", "")),
+            auth_value=self._decrypt_secret(enc) if enc else "",
+            auth_header=str(raw.get("auth_header", "Authorization")),
+            transport=str(raw.get("transport", "streamable_http")),
+            name=str(raw.get("name", "")),
+            updated_at=datetime.fromisoformat(updated) if isinstance(updated, str) else None,
+        )
+
+    def mcp_connection_status(self, tenant: TenantId) -> dict | None:
+        """Masked view of the downstream for display (never returns the secret). None if unset."""
+        conn = self.get_mcp_connection(tenant)
+        if conn is None:
+            return None
+        return {
+            "connected": True,
+            "url": conn.url,
+            "auth_header": conn.auth_header,
+            "auth_set": bool(conn.auth_value),
+            "transport": conn.transport,
+            "name": conn.name,
+            "updated_at": conn.updated_at.isoformat() if conn.updated_at else None,
+        }
+
+    def clear_mcp_connection(self, tenant: TenantId) -> bool:
+        """Remove the tenant's downstream. Returns True if one was present."""
+        import dataclasses
+
+        account = self._accounts.get_account_by_tenant(tenant)
+        if account is None or "mcp_connection" not in account.profile:
+            return False
+        profile = dict(account.profile)
+        profile.pop("mcp_connection", None)
         self._accounts.add_account(dataclasses.replace(account, profile=profile))
         return True
 

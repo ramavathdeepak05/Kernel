@@ -23,6 +23,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -51,6 +52,7 @@ from delivery.api.routes.dashboard import router as dashboard_router
 from delivery.api.routes.entitlements import router as entitlements_router
 from delivery.api.routes.inference import router as inference_router
 from delivery.api.routes.ai_gateway import router as ai_gateway_router
+from delivery.api.routes.mcp_connection import router as mcp_connection_router
 from delivery.api.routes.admin import router as admin_router
 from delivery.api.routes.erasure import router as erasure_router
 from delivery.api.routes.ledger import router as ledger_router
@@ -108,6 +110,8 @@ def create_app(
     cors_origins: list[str] | None = None,
     require_api_key: bool = False,
     rate_limit: bool = True,
+    mcp_server: "Any | None" = None,
+    mcp_proxy: "Any | None" = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -134,6 +138,36 @@ def create_app(
     if (kernel is None) == (provider is None):
         raise ValueError("create_app requires exactly one of `kernel` or `provider`.")
 
+    # Hosted (multi-tenant) MCP endpoint — an authenticated Streamable-HTTP surface that governs an
+    # agent's tool calls per tenant (the MCP analogue of the BYO AI gateway). Either mode:
+    #   - mcp_server: operator-registered tools (same catalogue for every tenant);
+    #   - mcp_proxy:  BYO downstream — each tenant registers their own downstream MCP server
+    #                 (/v1/mcp/connection) and the endpoint mirrors + governs + forwards their tools.
+    # Built here so the session manager's run() can be entered in the lifespan below; mounted at /mcp.
+    mcp_asgi = None
+    mcp_manager = None
+    if mcp_server is not None and mcp_proxy is not None:
+        raise ValueError(
+            "Pass at most one of `mcp_server` (registered tools) or `mcp_proxy` (BYO downstream)."
+        )
+    _mcp = mcp_server if mcp_server is not None else mcp_proxy
+    if _mcp is not None:
+        if provider is None or account_engine is None:
+            raise ValueError(
+                "mcp_server/mcp_proxy requires the shared-plane `provider` + an `account_engine` "
+                "(multi-tenant MCP resolves the tenant + actor from the request's API key)."
+            )
+        from delivery.mcp.auth import MCPAuthenticator
+        from delivery.mcp.http import build_proxy_resolver, build_streamable_http_app
+
+        _authenticator = MCPAuthenticator(account_engine, provider)
+        _resolve = (
+            build_proxy_resolver(_authenticator, account_engine)
+            if mcp_proxy is not None
+            else _authenticator.resolve
+        )
+        mcp_asgi, mcp_manager = build_streamable_http_app(_mcp, resolve_from_request=_resolve)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Initialise async resources (e.g. hydrate the durable policy store) before serving.
@@ -153,9 +187,20 @@ def create_app(
         # draining instance fails readiness while still answering liveness.
         _app.state.ready = True
         try:
-            yield
+            if mcp_manager is not None:
+                # The Streamable-HTTP session manager owns the per-request task group; it must be
+                # entered for the app's lifetime.
+                async with mcp_manager.run():
+                    yield
+            else:
+                yield
         finally:
             _app.state.ready = False
+            if mcp_proxy is not None:
+                # Close the shared downstream HTTP clients (keep-alive pool). Best-effort.
+                from delivery.mcp.downstream import aclose_shared_clients
+
+                await aclose_shared_clients()
             await target.shutdown()
 
     app = FastAPI(
@@ -208,6 +253,7 @@ def create_app(
     app.include_router(authorize_router)
     app.include_router(inference_router)
     app.include_router(ai_gateway_router)
+    app.include_router(mcp_connection_router)
     app.include_router(ledger_router)
     app.include_router(policies_router)
     app.include_router(policy_packs_router)
@@ -223,6 +269,12 @@ def create_app(
     app.include_router(admin_router)
     app.include_router(billing_router)
     app.include_router(erasure_router)
+
+    # Hosted MCP endpoint (opt-in). Mounted OUTSIDE /v1 so the API-key middleware — which needs a
+    # routing tenant it can't extract from a raw qk_ key — doesn't intercept it; the MCP transport
+    # authenticates each request itself (delivery/mcp/http.py).
+    if mcp_asgi is not None:
+        app.mount("/mcp", mcp_asgi)
 
     # ── Middleware stack ──────────────────────────────────────────────────────
     # Starlette runs middleware in REVERSE order of registration (last added = outermost = runs

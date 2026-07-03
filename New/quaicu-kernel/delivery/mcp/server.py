@@ -14,12 +14,15 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.types import Actor
 from delivery.mcp.governance import ToolOutcome, ToolStatus, govern_tool_call
 from delivery.mcp.render import to_call_result
 from delivery.sdk.kernel import Kernel
+
+if TYPE_CHECKING:
+    from delivery.mcp.auth import ResolvedSession
 
 log = logging.getLogger("quaicu.mcp.server")
 
@@ -30,7 +33,7 @@ ToolHandler = Callable[[dict[str, Any]], Any | Awaitable[Any]]
 @dataclass
 class _RegisteredTool:
     handler: ToolHandler
-    policy: str
+    policy: str | None  # action type this tool is governed as; None → default mcp.<tool_name>
     description: str
     input_schema: dict[str, Any]
 
@@ -40,17 +43,44 @@ class GovernedMCPServer:
 
     def __init__(
         self,
-        kernel: Kernel,
+        kernel: Kernel | None = None,
         *,
-        actor: Actor,
+        actor: Actor | None = None,
         name: str = "quaicu-governed",
-        default_policy: str = "mcp.tool",
+        default_policy: str | None = None,
+        session_resolver: "Callable[[], ResolvedSession] | None" = None,
     ) -> None:
+        # Single-tenant: a fixed (kernel, actor) bound at construction (stdio / dedicated).
+        # Multi-tenant (hosted HTTP): a `session_resolver` yields the per-request (kernel, actor) from
+        # the authenticated caller — bound later by the transport (see delivery/mcp/http.py), so the
+        # operator can construct a tools-only server and register handlers before auth is wired.
         self._kernel = kernel
         self._actor = actor
         self._name = name
         self._default_policy = default_policy
+        self._session_resolver = session_resolver
         self._tools: dict[str, _RegisteredTool] = {}
+
+    def bind_session_resolver(self, resolver: "Callable[[], ResolvedSession]") -> "GovernedMCPServer":
+        """Attach the per-request identity resolver (multi-tenant mode). Returns self for chaining."""
+        self._session_resolver = resolver
+        return self
+
+    def _resolve_identity(self) -> tuple[Kernel, Actor]:
+        """The (kernel, actor) this call is governed under — per-request in multi-tenant mode.
+
+        In multi-tenant mode this also acts as the auth gate: ``session_resolver`` reads + verifies
+        the request's API key and raises (fail-closed) on a missing/invalid key.
+        """
+        if self._session_resolver is not None:
+            session = self._session_resolver()
+            return session.kernel, session.actor
+        if self._kernel is not None and self._actor is not None:
+            return self._kernel, self._actor
+        raise RuntimeError(
+            "GovernedMCPServer has no identity: construct with (kernel, actor) for single-tenant "
+            "use, or bind a session_resolver (multi-tenant) before serving."
+        )
 
     def register_tool(
         self,
@@ -73,6 +103,7 @@ class GovernedMCPServer:
 
     async def _govern(self, name: str, arguments: dict[str, Any]) -> ToolOutcome:
         tool = self._tools[name]
+        kernel, actor = self._resolve_identity()
 
         async def execute(args: dict[str, Any]) -> Any:
             result = tool.handler(args)
@@ -81,8 +112,8 @@ class GovernedMCPServer:
             return result
 
         return await govern_tool_call(
-            self._kernel,
-            actor=self._actor,
+            kernel,
+            actor=actor,
             tool_name=name,
             arguments=arguments,
             policy=tool.policy,
@@ -111,6 +142,9 @@ class GovernedMCPServer:
 
         @server.list_tools()
         async def _list() -> list:
+            # In multi-tenant mode this authenticates the caller (raises on a bad key) so the tool
+            # catalogue isn't enumerable without a valid tenant API key. No-op in single-tenant mode.
+            self._resolve_identity()
             return [
                 types.Tool(name=n, description=t.description, inputSchema=t.input_schema)
                 for n, t in self._tools.items()

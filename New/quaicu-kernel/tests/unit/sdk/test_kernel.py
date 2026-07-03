@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from delivery.sdk import SdkUsageError
+
 from core.errors import LifecycleDeniedError, LifecycleHaltedError
 from core.types import Actor, ActorId, Decision, TenantId
 from delivery.sdk.kernel import Kernel
@@ -76,7 +78,7 @@ async def test_governed_missing_actor_raises_type_error():
     async def do_thing(value: int, *, actor: Actor):
         return value
 
-    with pytest.raises(TypeError, match="actor"):
+    with pytest.raises(SdkUsageError, match="actor"):
         await do_thing(42)  # no actor kwarg
 
 

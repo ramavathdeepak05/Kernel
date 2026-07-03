@@ -68,6 +68,24 @@ class AIConnection:
 
 
 @dataclass(frozen=True)
+class MCPConnection:
+    """A tenant's BYO downstream MCP server — fronted + governed by the hosted MCP endpoint.
+
+    The hosted `/mcp` endpoint mirrors this downstream's tools and governs+forwards each call under
+    the tenant's policies (the MCP twin of `AIConnection`). ``auth_value`` is the tenant's secret for
+    reaching their downstream (e.g. ``"Bearer …"``); it is encrypted at rest and only materialised
+    here for the outbound call.
+    """
+
+    url: str                          # downstream MCP server base URL (Streamable HTTP)
+    auth_value: str = ""              # secret sent as {auth_header: auth_value}; "" = no auth header
+    auth_header: str = "Authorization"  # header name to carry the secret
+    transport: str = "streamable_http"  # only streamable_http for now (sse is a follow-up)
+    name: str = ""                    # display label
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class SignupDetails:
     """The customer details collected by the verified-signup form (POST /v1/signup/start).
 

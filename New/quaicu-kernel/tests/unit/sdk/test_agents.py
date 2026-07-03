@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from delivery.sdk import SdkUsageError
+
 from core.errors import LifecycleDeniedError
 from core.types import ActorId, Decision, TenantId
 from delivery.sdk.kernel import Kernel
@@ -87,5 +89,5 @@ async def test_governed_tool_requires_an_actor() -> None:
     async def search(q: str) -> str:
         return "ok"
 
-    with pytest.raises(TypeError):
+    with pytest.raises(SdkUsageError):
         await search(q="x")  # no bound actor and no actor= kwarg

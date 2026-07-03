@@ -8,6 +8,7 @@ import { beginLogin, oidcEnabled } from "./oidc/oidc";
 import Dashboard from "./pages/Dashboard";
 import GetStarted from "./pages/GetStarted";
 import AIGateway from "./pages/AIGateway";
+import MCPGateway from "./pages/MCPGateway";
 import Policies from "./pages/Policies";
 import Audit from "./pages/Audit";
 import Approvals from "./pages/Approvals";
@@ -134,6 +135,7 @@ function Nav() {
       <NavLink to="/audit">Audit trail</NavLink>
       {approvals && <NavLink to="/approvals">Approvals</NavLink>}
       <NavLink to="/ai">AI gateway</NavLink>
+      <NavLink to="/mcp">MCP gateway</NavLink>
       <NavLink to="/keys">API keys</NavLink>
       <NavLink to="/team">Team</NavLink>
       {billing && <NavLink to="/billing">Billing</NavLink>}
@@ -279,6 +281,7 @@ export default function App() {
                   }
                 />
                 <Route path="/ai" element={<AIGateway />} />
+                <Route path="/mcp" element={<MCPGateway />} />
                 <Route path="/keys" element={<ApiKeys />} />
                 <Route path="/team" element={<Team />} />
                 <Route path="/billing" element={<Billing />} />
