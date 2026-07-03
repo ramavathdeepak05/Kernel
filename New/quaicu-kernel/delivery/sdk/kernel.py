@@ -49,6 +49,7 @@ from core.policy import (
     PolicyStore,
 )
 from core.ports import HITLPort, IdentityPort
+from core.ports.anchor import AnchorPort
 from core.ports.consent import ConsentPort
 from core.types import (
     Action,
@@ -187,6 +188,9 @@ class Kernel:
     # Set when a durable ledger backend is wired ([adapters].ledger_store). Exposed so the kernel can
     # close its pool on shutdown; the TrustLedger writes through to it and hydrates from it on boot.
     ledger_repository: LedgerRepository | None = None
+    # An independent witness (AnchorPort) that cosigns the tenant's STH on export (D3-2). None → the
+    # ledger is not externally anchored (exports carry no cosignature).
+    witness: "AnchorPort | None" = None
     # Control-plane roles permitted to author/manage policies via the management API. Normalised to
     # the ``role:<name>`` convention. An actor needs at least one of these to use ``/v1/policies``.
     policy_admin_roles: tuple[str, ...] = ("role:policy_admin",)
@@ -440,6 +444,14 @@ class Kernel:
         signer = getattr(ledger, "_signer", None)
         public_key_pem = getattr(signer, "public_key_pem", None)
 
+        # Anchor the current STH with the independent witness (if wired) — a fork/rewind raises
+        # LedgerTamperError here (fail-closed: no bundle for a tampered log).
+        cosig = None
+        if self.witness is not None:
+            from core.ledger.anchor import anchor_current_sth
+
+            cosig = anchor_current_sth(ledger, self.witness, tenant)
+
         return build_ledger_proof_bundle(
             tenant_id=str(tenant),
             window_start=ws,
@@ -449,6 +461,7 @@ class Kernel:
             public_key_pem=public_key_pem,
             regulation_refs=regulation_refs,
             policy_versions=policy_versions,
+            witness_cosignature=cosig,
         )
 
     # ── Policy authoring (write-through primitives the management API wraps) ──────
@@ -898,6 +911,7 @@ class Kernel:
         policy_repository: PolicyRepository | None = None,
         ledger_repository: LedgerRepository | None = None,
         policy_admin_roles: tuple[str, ...] | None = None,
+        witness: "AnchorPort | None" = None,
         max_poll_attempts: int = 1,
     ) -> "Kernel":
         """Build a Kernel directly from collaborator instances (for tests and SDK demos)."""
@@ -922,6 +936,7 @@ class Kernel:
             policy_store=policy_store,
             policy_repository=policy_repository,
             ledger_repository=ledger_repository,
+            witness=witness,
             policy_admin_roles=(
                 _normalize_roles(policy_admin_roles)
                 if policy_admin_roles is not None

@@ -153,6 +153,80 @@ def _verify_consistency_proof(
     return proof == expected_proof
 
 
+def verify_consistency_proof(
+    old_size: int,
+    old_root: bytes,
+    new_size: int,
+    new_root: bytes,
+    proof: list[bytes],
+) -> bool:
+    """RFC 6962 §2.1.4 consistency proof verification — PROOF-ONLY (no leaf list needed).
+
+    Returns True iff the size-``new_size`` tree with root ``new_root`` is a consistent, append-only
+    extension of the size-``old_size`` tree with root ``old_root``, given ``proof``. Reconstructs
+    BOTH roots from the proof alone, so a party that holds only Signed Tree Heads — an external
+    witness or auditor, which never sees the leaves — can verify continuity (D3-2). This is the
+    canonical CT/Trillian algorithm; it never raises (False on any structural inconsistency).
+    """
+    if old_size < 0 or new_size < 0 or old_size > new_size:
+        return False
+    if old_size == new_size:
+        # Same tree: roots must match and the proof is (correctly) empty.
+        return old_root == new_root and len(proof) == 0
+    if old_size == 0:
+        # Every tree is consistent with the empty tree; the proof must be empty.
+        return len(proof) == 0
+    if not proof:
+        return False
+
+    # Walk the rightmost node of the old tree down to the largest complete subtree it belongs to.
+    node = old_size - 1
+    last = new_size - 1
+    while node & 1:
+        node >>= 1
+        last >>= 1
+
+    idx = 0
+    if node > 0:
+        # Seed both reconstructions from the first proof node (the incomplete-subtree case).
+        first_root = proof[idx]
+        second_root = proof[idx]
+        idx += 1
+    else:
+        # old_size is a power of two → its root is a complete subtree, taken as given.
+        first_root = old_root
+        second_root = old_root
+
+    while node > 0:
+        if node & 1:
+            # Right child: both roots absorb the left sibling from the proof.
+            if idx >= len(proof):
+                return False
+            first_root = internal_hash(proof[idx], first_root)
+            second_root = internal_hash(proof[idx], second_root)
+            idx += 1
+        elif node < last:
+            # Left child with a right sibling present only in the new tree: only the new root grows.
+            if idx >= len(proof):
+                return False
+            second_root = internal_hash(second_root, proof[idx])
+            idx += 1
+        node >>= 1
+        last >>= 1
+
+    # Absorb the remaining right-hand nodes of the new tree into the new root.
+    while last > 0:
+        if idx >= len(proof):
+            return False
+        second_root = internal_hash(second_root, proof[idx])
+        idx += 1
+        last >>= 1
+
+    if idx != len(proof):
+        return False  # proof longer than the reconstruction consumed → reject
+    return first_root == old_root and second_root == new_root
+
+
 # ── MerkleTree class ──────────────────────────────────────────────────────────
 
 

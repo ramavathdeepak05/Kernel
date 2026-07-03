@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 
 from core.ledger.merkle import _recompute_root_from_path
 from core.ledger.signer import SignedTreeHead, _signing_message
+from core.ports.anchor import WitnessCosignature
 from core.regmap.catalog import generate_evidence_pack
 from core.regmap.model import EvidencePack
 from core.types import LedgerEntry
@@ -76,6 +77,8 @@ class LedgerProofBundle:
     generated_at: str
     format_version: str = FORMAT_VERSION
     metadata: dict = field(default_factory=dict)
+    # An independent witness cosignature over this STH (D3-2), or None if the log is not anchored.
+    anchor: dict | None = None
 
     def to_dict(self) -> dict:
         """A fully JSON-serializable view (what the export route returns)."""
@@ -85,6 +88,7 @@ class LedgerProofBundle:
             "window_start": self.window_start,
             "window_end": self.window_end,
             "generated_at": self.generated_at,
+            "anchor": self.anchor,
             "signed_tree_head": {
                 "tree_size": self.sth.tree_size,
                 "root_hash_hex": self.sth.root_hash_hex,
@@ -135,6 +139,7 @@ def build_ledger_proof_bundle(
     public_key_pem: str | None,
     regulation_refs: list[str] | None = None,
     policy_versions: list[str] | None = None,
+    witness_cosignature: "WitnessCosignature | None" = None,
 ) -> LedgerProofBundle:
     """Assemble a `LedgerProofBundle` from sealed entries + their inclusion proofs.
 
@@ -183,6 +188,7 @@ def build_ledger_proof_bundle(
         inclusion_proofs=proofs,
         evidence=pack,
         generated_at=_iso(datetime.now(tz=timezone.utc)),
+        anchor=witness_cosignature.to_dict() if witness_cosignature is not None else None,
     )
 
 
@@ -201,17 +207,23 @@ def trusted_keys_from_signer(signer: object) -> dict[str, str]:
 
 
 def verify_ledger_proof_bundle(
-    bundle_dict: dict, *, trusted_keys: "dict[str, str] | None" = None
+    bundle_dict: dict,
+    *,
+    trusted_keys: "dict[str, str] | None" = None,
+    trusted_witnesses: "dict[str, str] | None" = None,
 ) -> tuple[bool, list[str]]:
     """Independently verify an exported bundle (the code a regulator runs offline).
 
-    Returns ``(ok, errors)``. ``ok`` is True only when **both** hold:
+    Returns ``(ok, errors)``. ``ok`` is True only when all requested checks hold:
 
       1. **Integrity** — every inclusion proof recomputes the *signed* Merkle root (self-contained).
       2. **Authenticity** — the STH signature verifies against an *externally pinned* key selected by
          the bundle's ``key_id`` from ``trusted_keys`` (``key_id → public-key PEM``), NOT the key
          embedded in the bundle. Fail-closed: no ``trusted_keys`` → cannot attest authenticity → fail;
          a ``key_id`` absent from the pinned set (a forged/unknown key) → fail.
+      3. **Anchoring** (optional, D3-2) — when ``trusted_witnesses`` (``witness_id → PEM``) is given,
+         the bundle's independent witness cosignature must verify against the pinned witness key and
+         attest the *same* (tree_size, root) as the STH. Omit ``trusted_witnesses`` to skip this check.
 
     Operates purely on the exported dict + the caller-pinned keys — no kernel state, no network.
     """
@@ -242,7 +254,38 @@ def verify_ledger_proof_bundle(
     # algorithm (Ed25519 vs ECDSA P-256) is inferred from the pinned key, so a GCP/AWS KMS-signed
     # bundle pins the same way as the Ed25519 software/OpenBao signer.
     errors.extend(_verify_authenticity(sth, tree_size, root, trusted_keys))
+
+    # (3) Anchoring: verify the independent witness cosignature against a pinned witness key.
+    if trusted_witnesses is not None:
+        errors.extend(_verify_anchor(bundle_dict.get("anchor"), tree_size, root, trusted_witnesses))
+
     return (not errors), errors
+
+
+def _verify_anchor(
+    anchor: dict | None, tree_size: int, root: bytes, trusted_witnesses: dict[str, str]
+) -> list[str]:
+    if not anchor:
+        return ["no witness cosignature in bundle — anchoring cannot be verified"]
+    try:
+        cosig = WitnessCosignature.from_dict(anchor)
+    except (KeyError, ValueError, TypeError) as exc:
+        return [f"malformed anchor cosignature: {exc}"]
+    if cosig.witness_id not in trusted_witnesses:
+        return [
+            f"anchor witness_id {cosig.witness_id!r} is not in the pinned witness set — "
+            "refusing to trust a self-described witness"
+        ]
+    if cosig.tree_size != tree_size or cosig.root_hash != root:
+        return ["anchor cosignature attests a different tree head than the STH (possible split-view)"]
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+    try:
+        witness_key = load_pem_public_key(trusted_witnesses[cosig.witness_id].encode())
+        _verify_sth_signature(witness_key, cosig.signature, cosig.signing_message())
+    except Exception as exc:  # noqa: BLE001 — any failure is a verification failure
+        return [f"witness cosignature does not verify against the pinned witness key: {exc}"]
+    return []
 
 
 def _verify_authenticity(

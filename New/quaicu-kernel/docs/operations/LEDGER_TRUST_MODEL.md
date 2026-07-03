@@ -55,9 +55,38 @@ ECDSA-P256 (GCP/AWS Cloud KMS) key pin and verify through the same code path.
 own** signing key — so it answers *"did we sign this?"*. For a fully independent check, run
 `verify_ledger_proof_bundle` yourself, offline, against the key you pinned.
 
+## 3. Anchoring — an independent witness (D3-2)
+
+Integrity + authenticity still trust a *single* party's key. A compromised kernel could present two
+different histories (a **split view**) or silently **rewind** its log, each internally consistent and
+correctly signed. An independent **witness** defeats this: it cosigns an STH only after checking the
+STH is a consistent, append-only extension of the last STH it cosigned (RFC 6962 §2.1.4, proof-only —
+the witness never sees the leaves). A fork or rewind is **refused** (`LedgerTamperError`).
+
+The witness cosignature is embedded in the export bundle's `anchor` block and verified by pinning the
+**witness** key — exactly like the signing key:
+
+```
+GET /v1/ledger/witness-key   →   { "witness_id": "...", "public_key_pem": "...", "algorithm": "ed25519" }
+
+ok, errors = verify_ledger_proof_bundle(
+    bundle,
+    trusted_keys={key_id: signing_pem},          # authenticity (§2)
+    trusted_witnesses={witness_id: witness_pem},  # anchoring (§3) — omit to skip
+)
+```
+
+`trusted_witnesses` is optional: omit it and the bundle still verifies for integrity + authenticity,
+just without the split-view guarantee. When supplied, the cosignature must verify against the pinned
+witness key **and** attest the same `(tree_size, root)` as the STH.
+
+For real independence, run the witness as a **separate process/service with its own key** (a remote
+HTTP witness is a follow-up); an auditor who collects cosignatures over time can detect a split view
+because a divergent history cannot produce a witness cosignature that is consistent with the ones
+already seen. Periodic anchoring (beyond export time) is a scheduler/ops concern.
+
 ## Key rotation
 
 Rotating the STH signing key mints a new `key_id`; new exports sign under it. **Retired keys are
 never deleted** while any entry references them, and old bundles stay verifiable — so your pinned
-registry keeps both the old and new `key_id → key` entries. (Cross-signed rotation entries and the
-external witness/anchoring that detects a silent split-view are D3-2.)
+registry keeps both the old and new `key_id → key` entries. The same applies to a rotated witness key.

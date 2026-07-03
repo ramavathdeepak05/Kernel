@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from adapters.ledger.witness import SoftwareWitness
+from core.ledger.anchor import anchor_current_sth
 from core.ledger.engine import TrustLedger
 from core.ledger.signer import InMemoryEd25519Signer
 from core.regmap.export import (
@@ -148,6 +150,72 @@ async def test_missing_embedded_key_still_verifies_against_pin():
     bundle["signed_tree_head"]["public_key_pem"] = None
     ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=_pin(ledger))
     assert ok, errors
+
+
+# ── Anchoring / witness (D3-2) ────────────────────────────────────────────────────
+
+
+async def _anchored_export(ledger: TrustLedger, witness: SoftwareWitness) -> dict:
+    entries = ledger.get_entries(TENANT)
+    ewp = [(e, ledger.get_inclusion_proof(TENANT, e.ledger_seq)[1]) for e in entries]
+    cosig = anchor_current_sth(ledger, witness, TENANT)
+    bundle = build_ledger_proof_bundle(
+        tenant_id=str(TENANT),
+        window_start=entries[0].sealed_at,
+        window_end=entries[-1].sealed_at,
+        entries_with_paths=ewp,
+        sth=ledger.get_signed_tree_head(TENANT),
+        public_key_pem=ledger._signer.public_key_pem,  # type: ignore[attr-defined]
+        witness_cosignature=cosig,
+    )
+    return bundle.to_dict()
+
+
+async def test_anchored_bundle_verifies_with_pinned_witness():
+    ledger = await _ledger_with(3)
+    witness = SoftwareWitness()
+    bundle = await _anchored_export(ledger, witness)
+    pins = {witness.witness_id: witness.public_key_pem}
+    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=_pin(ledger), trusted_witnesses=pins)
+    assert ok, errors
+
+
+async def test_anchoring_skipped_when_no_witness_pinned():
+    # Without trusted_witnesses, integrity+authenticity still verify (anchoring simply not checked).
+    ledger = await _ledger_with(2)
+    bundle = await _anchored_export(ledger, SoftwareWitness())
+    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=_pin(ledger))
+    assert ok, errors
+
+
+async def test_unpinned_witness_rejected():
+    ledger = await _ledger_with(2)
+    bundle = await _anchored_export(ledger, SoftwareWitness())
+    other = {SoftwareWitness().witness_id: SoftwareWitness().public_key_pem}
+    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=_pin(ledger), trusted_witnesses=other)
+    assert not ok
+    assert any("not in the pinned witness set" in e for e in errors)
+
+
+async def test_anchor_attesting_wrong_head_rejected():
+    ledger = await _ledger_with(2)
+    witness = SoftwareWitness()
+    bundle = await _anchored_export(ledger, witness)
+    bundle["anchor"]["root_hash_hex"] = "00" * 32  # cosig now attests a different root
+    pins = {witness.witness_id: witness.public_key_pem}
+    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=_pin(ledger), trusted_witnesses=pins)
+    assert not ok
+    assert any("different tree head" in e or "does not verify" in e for e in errors)
+
+
+async def test_missing_anchor_fails_when_witness_pinned():
+    ledger = await _ledger_with(2)
+    bundle = _export(ledger)  # no witness cosignature
+    ok, errors = verify_ledger_proof_bundle(
+        bundle, trusted_keys=_pin(ledger), trusted_witnesses={"witness:x": "pem"}
+    )
+    assert not ok
+    assert any("no witness cosignature" in e for e in errors)
 
 
 # ── Tamper detection ─────────────────────────────────────────────────────────────

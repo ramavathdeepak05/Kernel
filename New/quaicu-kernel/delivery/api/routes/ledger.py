@@ -172,6 +172,36 @@ async def ledger_signing_key(request: Request) -> SigningKeyResponse:
                               algorithm=_signing_algorithm(str(pem)))
 
 
+class WitnessKeyResponse(BaseModel):
+    witness_id: str
+    public_key_pem: str
+    algorithm: str
+
+
+@router.get(
+    "/witness-key",
+    response_model=WitnessKeyResponse,
+    summary="Publish this deployment's ledger witness key (pin it to verify anchor cosignatures, D3-2)",
+)
+async def ledger_witness_key(request: Request) -> WitnessKeyResponse:
+    """Return the independent anchor witness's verification key ``{witness_id, public_key_pem,
+    algorithm}``. Pin it out-of-band (like the signing key) and pass it as ``trusted_witnesses`` to
+    verify a bundle's anchor cosignature — proof the log was externally attested (no split-view)."""
+    _bearer_token(request)
+    enforce_scope(request, LEDGER_READ)
+    witness = getattr(get_kernel(request), "witness", None)
+    wid = getattr(witness, "witness_id", None)
+    pem = getattr(witness, "public_key_pem", None)
+    if not wid or not pem:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "This deployment has no ledger anchor witness configured",
+                    "code": "WITNESS_UNAVAILABLE"},
+        )
+    return WitnessKeyResponse(witness_id=str(wid), public_key_pem=str(pem),
+                             algorithm=_signing_algorithm(str(pem)))
+
+
 class VerifyResult(BaseModel):
     ok: bool
     errors: list[str]
@@ -192,12 +222,20 @@ async def ledger_export_verify(bundle: dict, request: Request) -> VerifyResult:
 
     _bearer_token(request)
     enforce_scope(request, LEDGER_READ)
-    signer = _ledger_signer(get_kernel(request))
+    kernel = get_kernel(request)
+    signer = _ledger_signer(kernel)
     try:
         trusted_keys = trusted_keys_from_signer(signer) if signer is not None else None
     except ValueError:
         trusted_keys = None
-    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=trusted_keys)
+    # If an anchor witness is wired, also pin it so the anchor cosignature is verified (D3-2).
+    witness = getattr(kernel, "witness", None)
+    wid = getattr(witness, "witness_id", None)
+    wpem = getattr(witness, "public_key_pem", None)
+    trusted_witnesses = {str(wid): str(wpem)} if wid and wpem else None
+    ok, errors = verify_ledger_proof_bundle(
+        bundle, trusted_keys=trusted_keys, trusted_witnesses=trusted_witnesses
+    )
     return VerifyResult(ok=ok, errors=errors)
 
 
