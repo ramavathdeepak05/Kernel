@@ -188,6 +188,25 @@ export interface AIConnectionBody {
   aws_access_key_id?: string;
 }
 
+// ── MCP gateway (BYO downstream MCP server) ──────────────────────────────────
+export interface MCPConnectionStatus {
+  connected: boolean;
+  url?: string;
+  auth_header?: string;
+  auth_set?: boolean;
+  transport?: string;
+  name?: string;
+  updated_at?: string | null;
+}
+
+export interface MCPConnectionBody {
+  url: string;
+  auth_value?: string;
+  auth_header?: string;
+  transport?: string;
+  name?: string;
+}
+
 // ── Starter policy packs (import a regulatory baseline as DRAFTs) ─────────────
 export interface PolicyPackPolicy {
   id: string;

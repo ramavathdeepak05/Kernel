@@ -86,6 +86,12 @@ quaicu-kernel-mcp = "delivery.mcp.__main__:main"
 include = ["core*", "adapters*", "delivery*"]
 exclude = ["tests*", "console*"]
 
+# Ship the PEP 561 marker so downstream users get the SDK's inline type information.
+[tool.setuptools.package-data]
+core = ["py.typed"]
+adapters = ["py.typed"]
+delivery = ["py.typed"]
+
 # ── Tooling (moved here from the former repo-root pyproject.toml; this is now the
 #    authoritative config, so pytest binds rootdir to New/quaicu-kernel/). ──────────
 [tool.pytest.ini_options]

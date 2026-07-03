@@ -15,9 +15,17 @@ Usage::
         await ledger_db.update_stage(loan_id, to_stage)
 """
 
+from core.errors import (
+    LifecycleDeniedError,
+    LifecycleError,
+    LifecycleHaltedError,
+    LifecyclePendingApprovalError,
+    QUAICUError,
+)
 from core.lifecycle.context import async_actor_scope, get_current_actor
 from core.lifecycle.decision import AuthorizationResult
 from core.lifecycle.profile import GovernanceProfile
+from delivery.sdk.errors import SdkUsageError
 from delivery.sdk.kernel import BoundAgent, Kernel
 from delivery.sdk.proxy import GovernedProxy
 
@@ -29,4 +37,11 @@ __all__ = [
     "GovernedProxy",
     "async_actor_scope",
     "get_current_actor",
+    # Error surface — governance outcomes to catch, plus SDK misuse.
+    "QUAICUError",
+    "LifecycleError",
+    "LifecycleDeniedError",
+    "LifecycleHaltedError",
+    "LifecyclePendingApprovalError",
+    "SdkUsageError",
 ]

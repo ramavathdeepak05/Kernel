@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from core.errors import LifecycleDeniedError
+from delivery.sdk import SdkUsageError
 from core.lifecycle.context import get_current_actor
 from core.types import Actor, ActorId, Decision, TenantId
 from delivery.sdk import Kernel
@@ -114,7 +115,7 @@ async def test_guard_no_actor_raises_runtime_error() -> None:
     async def approve(loan_id: str) -> dict:
         return {"approved": True}
 
-    with pytest.raises(RuntimeError, match="no actor in scope"):
+    with pytest.raises(SdkUsageError, match="no actor in scope"):
         await approve("L-1")  # no actor_context → clear error
 
 
@@ -286,7 +287,7 @@ async def test_proxy_no_actor_raises_on_governed_method() -> None:
 
     client = kernel.proxy(raw_client, policies={"generate": "ai.generate"})
 
-    with pytest.raises(RuntimeError, match="no actor in scope"):
+    with pytest.raises(SdkUsageError, match="no actor in scope"):
         await client.generate(prompt="test")
 
 

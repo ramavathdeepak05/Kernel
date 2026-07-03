@@ -41,6 +41,7 @@ from typing import Any
 from core.errors import LifecycleDeniedError
 from core.lifecycle.context import get_current_actor
 from core.types import Actor
+from delivery.sdk.errors import SdkUsageError
 
 
 class _MethodProxy:
@@ -86,7 +87,7 @@ class _MethodProxy:
 
         actor: Actor | None = kwargs.pop("actor", None) or self._bound_actor or get_current_actor()
         if actor is None:
-            raise RuntimeError(
+            raise SdkUsageError(
                 f"GovernedProxy.{self._path}: no actor in scope. "
                 "Call inside `async with kernel.actor_context(actor): ...` "
                 "or pass actor=<Actor> as a keyword argument."

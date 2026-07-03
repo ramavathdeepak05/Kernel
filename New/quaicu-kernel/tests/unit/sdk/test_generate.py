@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from delivery.sdk import SdkUsageError
+
 from core.errors import LifecycleDeniedError, LifecycleHaltedError
 from core.gateway.allowlist import InMemoryModelAllowlist
 from core.gateway.engine import AIGateway
@@ -88,5 +90,5 @@ async def test_gateway_only_profile_skips_policy_and_seal() -> None:
 
 async def test_generate_without_gateway_raises() -> None:
     kernel, _ = _kernel(with_gateway=False)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(SdkUsageError):
         await kernel.generate(prompt_text="hi", model_ref=MODEL, actor=ACTOR)

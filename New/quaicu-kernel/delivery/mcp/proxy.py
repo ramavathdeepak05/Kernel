@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from core.types import Actor
@@ -29,32 +30,69 @@ class Downstream(Protocol):
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> Any: ...
 
 
+@dataclass(frozen=True)
+class ProxySession:
+    """The per-request identity + downstream a hosted (multi-tenant) proxy call is governed under."""
+
+    kernel: Kernel
+    actor: Actor
+    downstream: Downstream
+
+
 class GovernedMCPProxy:
-    """Govern every tool call, then forward allowed ones to a downstream MCP server."""
+    """Govern every tool call, then forward allowed ones to a downstream MCP server.
+
+    Single-tenant (stdio / dedicated): a fixed (kernel, actor, downstream) bound at construction.
+    Multi-tenant (hosted HTTP): a `session_resolver` yields the per-request `ProxySession` from the
+    authenticated caller — bound later by the transport (see delivery/mcp/http.py), so the operator
+    can construct a config-only proxy before auth + the per-tenant downstream are wired.
+    """
 
     def __init__(
         self,
-        kernel: Kernel,
+        kernel: Kernel | None = None,
         *,
-        actor: Actor,
-        downstream: Downstream,
+        actor: Actor | None = None,
+        downstream: Downstream | None = None,
         name: str = "quaicu-governed-proxy",
-        default_policy: str = "mcp.tool",
-        policy_for: Callable[[str], str] | None = None,
+        default_policy: str | None = None,
+        policy_for: Callable[[str], str | None] | None = None,
+        session_resolver: "Callable[[], ProxySession] | None" = None,
     ) -> None:
         self._kernel = kernel
         self._actor = actor
         self._downstream = downstream
         self._name = name
+        # The action type each tool is governed as (None → per-tool default mcp.<tool_name>).
         self._policy_for = policy_for or (lambda _name: default_policy)
+        self._session_resolver = session_resolver
+
+    def bind_session_resolver(self, resolver: "Callable[[], ProxySession]") -> "GovernedMCPProxy":
+        """Attach the per-request identity+downstream resolver (multi-tenant mode). Returns self."""
+        self._session_resolver = resolver
+        return self
+
+    def _resolve(self) -> ProxySession:
+        """The (kernel, actor, downstream) this call is governed under — per-request in multi-tenant
+        mode, where the resolver also authenticates (raises fail-closed on a bad key / no downstream)."""
+        if self._session_resolver is not None:
+            return self._session_resolver()
+        if self._kernel is not None and self._actor is not None and self._downstream is not None:
+            return ProxySession(self._kernel, self._actor, self._downstream)
+        raise RuntimeError(
+            "GovernedMCPProxy has no identity/downstream: construct with (kernel, actor, downstream) "
+            "for single-tenant use, or bind a session_resolver (multi-tenant) before serving."
+        )
 
     async def _govern(self, name: str, arguments: dict[str, Any]) -> ToolOutcome:
+        session = self._resolve()
+
         async def execute(args: dict[str, Any]) -> Any:
-            return await self._downstream.call_tool(name, args)
+            return await session.downstream.call_tool(name, args)
 
         return await govern_tool_call(
-            self._kernel,
-            actor=self._actor,
+            session.kernel,
+            actor=session.actor,
             tool_name=name,
             arguments=arguments,
             policy=self._policy_for(name),
@@ -76,7 +114,10 @@ class GovernedMCPProxy:
 
         @server.list_tools()
         async def _list() -> list:
-            listed = await self._downstream.list_tools()
+            # Multi-tenant: resolves + authenticates the caller, then mirrors THEIR downstream's tools
+            # (so each tenant sees only their own tool catalogue). Fixed downstream in single-tenant mode.
+            session = self._resolve()
+            listed = await session.downstream.list_tools()
             # An mcp ListToolsResult has `.tools`; a plain list is returned as-is.
             return list(getattr(listed, "tools", listed))
 

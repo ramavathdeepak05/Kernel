@@ -62,6 +62,7 @@ from core.types import (
     RequestContext,
     TenantId,
 )
+from delivery.sdk.errors import SdkUsageError
 
 
 def _normalize_roles(roles: Any) -> tuple[str, ...]:
@@ -238,6 +239,31 @@ class Kernel:
         hitl = self._in_process_hitl()
         return hitl.list_pending() if hitl is not None else []
 
+    async def approve(self, handle_id: str, *, actor: Actor) -> Any:
+        """Approve a pending HITL request as ``actor`` and resume the action (execute → seal → emit).
+
+        Ergonomic wrapper over ``decide_approval(handle_id, decision="approved", actor=actor)``. Use
+        it with the ``handle_id`` carried on a caught ``LifecyclePendingApprovalError``::
+
+            try:
+                async with kernel.actor_context(maker):
+                    await approve_loan(loan_id="L-1", amount=5000)
+            except LifecyclePendingApprovalError as exc:
+                await kernel.approve(exc.detail["handle_id"], actor=checker)
+
+        The HITL port enforces approver eligibility and the self-approval guard (raises
+        ``HITLPortError`` otherwise). Returns the updated ``ApprovalRecord``.
+        """
+        return await self.decide_approval(handle_id, decision="approved", actor=actor)
+
+    async def reject(self, handle_id: str, *, actor: Actor) -> Any:
+        """Reject a pending HITL request as ``actor`` (fail-closed DENY of the suspended action).
+
+        Ergonomic wrapper over ``decide_approval(handle_id, decision="rejected", actor=actor)``.
+        Returns the updated ``ApprovalRecord``.
+        """
+        return await self.decide_approval(handle_id, decision="rejected", actor=actor)
+
     async def decide_approval(self, handle_id: str, *, decision: str, actor: Actor) -> Any:
         """Approve or reject a pending HITL request as ``actor``.
 
@@ -247,7 +273,7 @@ class Kernel:
         """
         hitl = self._in_process_hitl()
         if hitl is None:
-            raise RuntimeError("No in-process HITL port configured — approvals unavailable.")
+            raise SdkUsageError("No in-process HITL port configured — approvals unavailable.")
         if decision == "approved":
             await hitl.approve(
                 handle_id, approver_actor_id=actor.id, approver_roles=tuple(actor.roles)
@@ -944,7 +970,7 @@ class Kernel:
         ``LifecycleHaltedError`` otherwise.
         """
         if self.gateway is None:
-            raise RuntimeError(
+            raise SdkUsageError(
                 "No inference adapter configured — kernel.generate is unavailable. "
                 "Set [adapters].inference and [gateway] in your config."
             )
@@ -1098,7 +1124,7 @@ class Kernel:
                 if actor is None:
                     actor = get_current_actor()
                 if actor is None:
-                    raise RuntimeError(
+                    raise SdkUsageError(
                         f"@kernel.guard on {fn.__name__!r}: no actor in scope. "
                         "Call this function inside `async with kernel.actor_context(actor): ...` "
                         "or pass actor=<Actor> as a keyword argument."
@@ -1159,6 +1185,43 @@ class Kernel:
 
         return GovernedProxy(target, policies=policies, kernel=self, actor=actor)
 
+    async def govern_action(
+        self,
+        *,
+        action_type: str,
+        actor: Actor,
+        payload: dict[str, Any],
+        execute: Callable[[], Any],
+        profile: GovernanceProfile | None = None,
+        tenant: TenantId | None = None,
+    ) -> Any:
+        """Govern an action with an **explicit payload dict** + an ``execute`` closure (execute → seal
+        → emit), returning the closure's result.
+
+        Unlike ``guard``/``wrap`` (which build the payload from the wrapped function's kwargs), the
+        payload is passed directly. Use this when the governed inputs aren't Python kwargs — e.g. an
+        MCP tool call, whose ``arguments`` become top-level payload fields so a CEL policy can
+        reference ``payload_<field>`` (and a tool argument named ``actor`` is just ``payload_actor``,
+        never consumed as the governance actor).
+
+        Raises ``LifecycleDeniedError`` / ``LifecycleHaltedError`` / ``LifecyclePendingApprovalError``
+        on the terminal outcome (same fail-closed contract as ``wrap``).
+        """
+        resolved = self.resolve_profile(action_type, profile)
+        action = self._build_action(action_type, dict(payload), actor, tenant)
+        captured: dict[str, Any] = {}
+
+        async def execute_fn() -> dict[str, Any]:
+            result = execute()
+            if inspect.isawaitable(result):
+                result = await result
+            captured["result"] = result
+            return {"result": result}
+
+        final = await self.engine.run(action, execute_fn, profile=resolved, defer_gate=True)
+        self._raise_on_terminal_failure(final, action_type)
+        return captured.get("result")
+
     def wrap(
         self,
         fn: Callable,
@@ -1192,7 +1255,7 @@ class Kernel:
             # Priority: call-time actor= kwarg > wrap-time bound actor > context var
             act: Actor | None = kwargs.pop("actor", None) or bound_actor or get_current_actor()
             if act is None:
-                raise RuntimeError(
+                raise SdkUsageError(
                     f"kernel.wrap({fn.__name__!r}): no actor in scope. "
                     "Call inside `async with kernel.actor_context(actor): ...` "
                     "or pass actor=<Actor> as a keyword argument."
@@ -1242,7 +1305,7 @@ class Kernel:
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 actor: Actor | None = kwargs.get("actor")
                 if actor is None:
-                    raise TypeError(
+                    raise SdkUsageError(
                         f"@governed function {fn.__name__!r} must receive actor=<Actor> as a kwarg"
                     )
                 payload = {k: v for k, v in kwargs.items() if k != "actor"}
@@ -1285,7 +1348,7 @@ class Kernel:
             async def wrapper(*args: Any, **kwargs: Any) -> Any:
                 act: Actor | None = kwargs.pop("actor", None) or actor
                 if act is None:
-                    raise TypeError(
+                    raise SdkUsageError(
                         f"governed tool {fn.__name__!r} needs an actor — bind one with "
                         "kernel.for_agent(...) or pass actor=<Actor> at call time"
                     )

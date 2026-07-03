@@ -30,11 +30,11 @@ COPY . .
 RUN pip install --no-cache-dir --no-deps .
 
 # The shared SaaS plane's BUSINESS tier signs its K·02 ledger with Cloud KMS
-# (adapters/ledger/gcp_kms → GcpKmsTreeSigner). google-cloud-kms is the optional [gcp] extra, kept out
-# of the SDK-free base lock by design. requirements-gcp.lock is a hash-pinned, consistent superset of
-# the base lock + the [gcp] extra (generated with
-# `uv pip compile pyproject.toml --extra gcp --generate-hashes --constraint requirements.lock`), so this
-# layer is fully reproducible — no floating versions reach the production image.
+# (adapters/ledger/gcp_kms → GcpKmsTreeSigner), and the hosted /mcp endpoint needs the MCP SDK — both
+# optional extras kept out of the SDK-free base lock by design. requirements-gcp.lock is a hash-pinned,
+# consistent superset of the base lock + the [gcp] + [mcp] extras (generated with
+# `uv pip compile pyproject.toml --extra gcp --extra mcp --generate-hashes --constraint requirements.lock`),
+# so this layer is fully reproducible — no floating versions reach the production image.
 RUN pip install --no-cache-dir --require-hashes -r requirements-gcp.lock
 
 # ── Stage 2: runtime (non-root, minimal) ─────────────────────────────────────
