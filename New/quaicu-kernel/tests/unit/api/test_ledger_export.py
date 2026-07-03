@@ -64,9 +64,28 @@ async def test_export_then_verify_roundtrip():
         assert bundle["format_version"].startswith("quaicu.ledger-proof")
         assert len(bundle["inclusion_proofs"]) == 4
 
-        verified = await client.post("/v1/ledger/export/verify", json=bundle)
+        verified = await client.post("/v1/ledger/export/verify", json=bundle, headers=AUTH)
     assert verified.status_code == 200
     assert verified.json() == {"ok": True, "errors": []}
+
+
+async def test_signing_key_published_for_pinning():
+    kernel = await _kernel_with_sealed("ciro-bank", 1)
+    app = create_app(kernel)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get("/v1/ledger/signing-key", headers=AUTH)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["key_id"] and "BEGIN PUBLIC KEY" in body["public_key_pem"]
+    assert body["algorithm"] == "ed25519"
+
+
+async def test_verify_requires_bearer_token():
+    kernel = await _kernel_with_sealed("ciro-bank", 1)
+    app = create_app(kernel)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post("/v1/ledger/export/verify", json={"x": 1})  # no token
+    assert resp.status_code == 401
 
 
 async def test_export_requires_bearer_token():
@@ -93,7 +112,7 @@ async def test_verify_rejects_tampered_bundle():
         bundle = (await client.get("/v1/ledger/ciro-bank/export", headers=AUTH)).json()
         sig = bundle["signed_tree_head"]["signature_hex"]
         bundle["signed_tree_head"]["signature_hex"] = ("0" if sig[0] != "0" else "1") + sig[1:]
-        verified = await client.post("/v1/ledger/export/verify", json=bundle)
+        verified = await client.post("/v1/ledger/export/verify", json=bundle, headers=AUTH)
     assert verified.status_code == 200
     body = verified.json()
     assert body["ok"] is False

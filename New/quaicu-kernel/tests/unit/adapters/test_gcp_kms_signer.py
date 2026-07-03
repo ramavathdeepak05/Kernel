@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from adapters.ledger.gcp_kms import GcpKmsTreeSigner
 from core.errors import LedgerSealError
 from core.ledger.signer import SignedTreeHead, _signing_message
-from core.regmap.export import verify_ledger_proof_bundle
+from core.regmap.export import trusted_keys_from_signer, verify_ledger_proof_bundle
 
 NOW = datetime(2026, 6, 16, 12, 0, tzinfo=timezone.utc)
 TREE_SIZE = 5
@@ -127,9 +127,10 @@ def test_ecdsa_signed_bundle_verifies_through_offline_verifier():
             "tree_size": TREE_SIZE,
             "root_hash_hex": ROOT_HASH.hex(),
             "signature_hex": sth.signature.hex(),
+            "key_id": signer.key_id,
             "public_key_pem": signer.public_key_pem,
         },
         "inclusion_proofs": [],  # signature-only check
     }
-    ok, errors = verify_ledger_proof_bundle(bundle)
+    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=trusted_keys_from_signer(signer))
     assert ok, errors
