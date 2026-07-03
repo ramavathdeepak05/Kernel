@@ -235,3 +235,181 @@ async def test_bedrock_missing_boto3_raises_dependency_error():
         raise AssertionError("expected ProviderDependencyError")
     except ProviderDependencyError:
         pass
+
+
+# ── D2-2: tool-call translation across shims ──────────────────────────────────────
+
+_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Look up weather",
+            "parameters": {"type": "object", "properties": {"city": {"type": "string"}}},
+        },
+    }
+]
+
+
+async def test_anthropic_build_request_translates_tools_and_tool_messages():
+    shim = AnthropicShim()
+    body = {
+        "messages": [
+            {"role": "user", "content": "weather?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"id": "call_1", "type": "function",
+                     "function": {"name": "get_weather", "arguments": '{"city": "Pune"}'}}
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "31C"},
+        ],
+        "tools": _TOOLS,
+        "tool_choice": "auto",
+    }
+    req = await shim.build_request(_Conn("anthropic", "https://api.anthropic.com"), "claude-3-5", body)
+    # Tools mapped to Anthropic shape.
+    assert req.json_body["tools"] == [
+        {"name": "get_weather", "description": "Look up weather",
+         "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}}}
+    ]
+    assert "tool_choice" not in req.json_body  # "auto" → omitted (Anthropic default)
+    msgs = req.json_body["messages"]
+    # Assistant tool_calls → tool_use block; tool result → user tool_result block.
+    assert msgs[1]["content"] == [
+        {"type": "tool_use", "id": "call_1", "name": "get_weather", "input": {"city": "Pune"}}
+    ]
+    assert msgs[2] == {
+        "role": "user",
+        "content": [{"type": "tool_result", "tool_use_id": "call_1", "content": "31C"}],
+    }
+
+
+async def test_anthropic_build_request_forces_named_tool_choice():
+    shim = AnthropicShim()
+    body = {"messages": [{"role": "user", "content": "hi"}], "tools": _TOOLS,
+            "tool_choice": {"type": "function", "function": {"name": "get_weather"}}}
+    req = await shim.build_request(_Conn("anthropic", "https://api.anthropic.com"), "m", body)
+    assert req.json_body["tool_choice"] == {"type": "tool", "name": "get_weather"}
+
+
+def test_anthropic_translate_response_surfaces_tool_use_as_tool_calls():
+    shim = AnthropicShim()
+    anthropic = {
+        "id": "msg_1",
+        "model": "claude-3-5",
+        "content": [
+            {"type": "text", "text": "let me check"},
+            {"type": "tool_use", "id": "toolu_1", "name": "get_weather", "input": {"city": "Pune"}},
+        ],
+        "stop_reason": "tool_use",
+        "usage": {"input_tokens": 4, "output_tokens": 6},
+    }
+    out = shim.translate_response(anthropic)
+    msg = out["choices"][0]["message"]
+    assert out["choices"][0]["finish_reason"] == "tool_calls"
+    assert msg["tool_calls"] == [
+        {"id": "toolu_1", "type": "function",
+         "function": {"name": "get_weather", "arguments": json.dumps({"city": "Pune"})}}
+    ]
+
+
+async def test_anthropic_translate_stream_surfaces_tool_call_deltas():
+    shim = AnthropicShim()
+    events = [
+        'data: {"type":"message_start","message":{"id":"msg_1","model":"claude-3-5"}}',
+        'data: {"type":"content_block_start","index":0,'
+        '"content_block":{"type":"tool_use","id":"toolu_1","name":"get_weather"}}',
+        'data: {"type":"content_block_delta","index":0,'
+        '"delta":{"type":"input_json_delta","partial_json":"{\\"city\\":"}}',
+        'data: {"type":"content_block_delta","index":0,'
+        '"delta":{"type":"input_json_delta","partial_json":" \\"Pune\\"}"}}',
+        'data: {"type":"message_delta","delta":{"stop_reason":"tool_use"}}',
+        'data: {"type":"message_stop"}',
+    ]
+    out = [c async for c in shim.translate_stream(iter_to_async(events))]
+    args, name = "", ""
+    for line in "".join(out).splitlines():
+        line = line.strip()
+        if line.startswith("data:") and "[DONE]" not in line:
+            tcs = json.loads(line[len("data:"):].strip())["choices"][0]["delta"].get("tool_calls")
+            if tcs:
+                fn = tcs[0].get("function") or {}
+                name += fn.get("name", "")
+                args += fn.get("arguments", "")
+    assert name == "get_weather"
+    assert json.loads(args) == {"city": "Pune"}
+
+
+def test_bedrock_openai_to_converse_translates_tools_and_tool_result():
+    out = openai_to_converse({
+        "messages": [
+            {"role": "user", "content": "weather?"},
+            {"role": "assistant", "content": "",
+             "tool_calls": [{"id": "c1", "type": "function",
+                             "function": {"name": "get_weather", "arguments": '{"city":"Pune"}'}}]},
+            {"role": "tool", "tool_call_id": "c1", "content": "31C"},
+        ],
+        "tools": _TOOLS,
+        "tool_choice": "required",
+    })
+    assert out["toolConfig"]["toolChoice"] == {"any": {}}
+    assert out["toolConfig"]["tools"][0]["toolSpec"]["name"] == "get_weather"
+    assert out["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"]["json"]["type"] == "object"
+    # Assistant toolUse block + tool result folded into a user turn.
+    assert out["messages"][1] == {
+        "role": "assistant",
+        "content": [{"toolUse": {"toolUseId": "c1", "name": "get_weather", "input": {"city": "Pune"}}}],
+    }
+    assert out["messages"][2] == {
+        "role": "user",
+        "content": [{"toolResult": {"toolUseId": "c1", "content": [{"text": "31C"}]}}],
+    }
+
+
+def test_bedrock_converse_to_openai_surfaces_tooluse():
+    resp = {
+        "output": {"message": {"content": [
+            {"text": "checking"},
+            {"toolUse": {"toolUseId": "tu1", "name": "get_weather", "input": {"city": "Pune"}}},
+        ]}},
+        "stopReason": "tool_use",
+        "usage": {"inputTokens": 4, "outputTokens": 6},
+    }
+    out = converse_to_openai(resp, model="anthropic.claude")
+    assert out["choices"][0]["finish_reason"] == "tool_calls"
+    assert out["choices"][0]["message"]["tool_calls"] == [
+        {"id": "tu1", "type": "function",
+         "function": {"name": "get_weather", "arguments": json.dumps({"city": "Pune"})}}
+    ]
+
+
+# ── D2-2: embeddings_request across shims ──────────────────────────────────────────
+
+
+async def test_openai_compat_embeddings_request_url_and_bearer():
+    shim = OpenAICompatShim()
+    req = await shim.embeddings_request(
+        _Conn("openai", "https://api.openai.com/v1", api_key="sk-e"), "text-embedding-3-small",
+        {"input": ["hi"], "model": "text-embedding-3-small"},
+    )
+    assert req.url == "https://api.openai.com/v1/embeddings"
+    assert req.headers["Authorization"] == "Bearer sk-e"
+
+
+async def test_azure_embeddings_request_uses_deployment_and_api_key():
+    shim = OpenAICompatShim()
+    req = await shim.embeddings_request(
+        _Conn("azure", "https://r.openai.azure.com", api_key="ak", api_version="2024-10-21"),
+        "embed-dep", {"input": "hi"},
+    )
+    assert req.url == "https://r.openai.azure.com/openai/deployments/embed-dep/embeddings?api-version=2024-10-21"
+    assert req.headers["api-key"] == "ak" and "Authorization" not in req.headers
+
+
+def test_anthropic_and_bedrock_have_no_embeddings_endpoint():
+    # The route relies on hasattr(shim, "embeddings_request") to 501 unsupported providers.
+    assert not hasattr(AnthropicShim(), "embeddings_request")
+    assert not hasattr(BedrockShim(), "embeddings_request")

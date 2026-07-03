@@ -54,6 +54,15 @@ class OpenAICompatShim:
         url = f"{conn.base_url}/chat/completions"
         return UpstreamRequest(url, {"Authorization": f"Bearer {conn.api_key}", **json_ct}, body)
 
+    async def embeddings_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
+        json_ct = {"Content-Type": "application/json"}
+        if str(getattr(conn, "provider", "")).lower() == "azure":
+            api_version = getattr(conn, "api_version", "") or _AZURE_DEFAULT_API_VERSION
+            url = f"{conn.base_url}/openai/deployments/{model}/embeddings?api-version={api_version}"
+            return UpstreamRequest(url, {"api-key": conn.api_key, **json_ct}, body)
+        url = f"{conn.base_url}/embeddings"
+        return UpstreamRequest(url, {"Authorization": f"Bearer {conn.api_key}", **json_ct}, body)
+
     def translate_response(self, data: dict[str, Any]) -> dict[str, Any]:
         return data  # already OpenAI-shaped
 
@@ -75,8 +84,53 @@ _STOP_REASON = {
 }
 
 
+def _load_args(arguments: Any) -> dict[str, Any]:
+    """Parse an OpenAI tool_call's ``arguments`` (a JSON string) into a dict; tolerate junk."""
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str) and arguments.strip():
+        try:
+            parsed = json.loads(arguments)
+            return parsed if isinstance(parsed, dict) else {}
+        except ValueError:
+            return {}
+    return {}
+
+
+def _openai_tools_to_anthropic(tools: Any) -> list[dict[str, Any]]:
+    """OpenAI ``tools`` (function schemas) → Anthropic ``tools`` (name/description/input_schema)."""
+    out: list[dict[str, Any]] = []
+    for t in tools or []:
+        if not isinstance(t, dict) or t.get("type") != "function":
+            continue
+        fn = t.get("function") or {}
+        out.append(
+            {
+                "name": fn.get("name", ""),
+                "description": fn.get("description", ""),
+                "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+            }
+        )
+    return out
+
+
+def _anthropic_tool_choice(choice: Any) -> dict[str, Any] | None:
+    """OpenAI ``tool_choice`` → Anthropic ``tool_choice`` (auto/any/tool)."""
+    if choice in (None, "auto"):
+        return None
+    if choice in ("required", "any"):
+        return {"type": "any"}
+    if choice == "none":
+        return None
+    if isinstance(choice, dict) and choice.get("type") == "function":
+        name = (choice.get("function") or {}).get("name")
+        if name:
+            return {"type": "tool", "name": name}
+    return None
+
+
 class AnthropicShim:
-    """Translate OpenAI chat-completions ⇄ Anthropic Messages API (text content)."""
+    """Translate OpenAI chat-completions ⇄ Anthropic Messages API (text + tool use)."""
 
     async def build_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
         system_parts: list[str] = []
@@ -89,8 +143,38 @@ class AnthropicShim:
             if role == "system":
                 if isinstance(content, str):
                     system_parts.append(content)
-            elif role in ("user", "assistant"):
-                messages.append({"role": role, "content": content})
+            elif role == "assistant":
+                # An assistant turn may carry text and/or OpenAI tool_calls → Anthropic tool_use blocks.
+                blocks: list[dict[str, Any]] = []
+                if isinstance(content, str) and content:
+                    blocks.append({"type": "text", "text": content})
+                for tc in m.get("tool_calls") or []:
+                    fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id", "") if isinstance(tc, dict) else "",
+                            "name": fn.get("name", ""),
+                            "input": _load_args(fn.get("arguments")),
+                        }
+                    )
+                messages.append({"role": "assistant", "content": blocks or content})
+            elif role == "tool":
+                # An OpenAI tool result → an Anthropic user turn with a tool_result block.
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": m.get("tool_call_id", ""),
+                                "content": content if isinstance(content, str) else json.dumps(content),
+                            }
+                        ],
+                    }
+                )
+            elif role == "user":
+                messages.append({"role": "user", "content": content})
 
         out: dict[str, Any] = {
             "model": model,
@@ -101,6 +185,12 @@ class AnthropicShim:
         }
         if system_parts:
             out["system"] = "\n".join(system_parts)
+        tools = _openai_tools_to_anthropic(body.get("tools"))
+        if tools:
+            out["tools"] = tools
+            choice = _anthropic_tool_choice(body.get("tool_choice"))
+            if choice is not None:
+                out["tool_choice"] = choice
         for src, dst in (("temperature", "temperature"), ("top_p", "top_p")):
             if body.get(src) is not None:
                 out[dst] = body[src]
@@ -118,11 +208,26 @@ class AnthropicShim:
         return UpstreamRequest(f"{conn.base_url}/v1/messages", headers, out)
 
     def translate_response(self, data: dict[str, Any]) -> dict[str, Any]:
+        blocks = data.get("content") or []
         text = "".join(
-            b.get("text", "")
-            for b in (data.get("content") or [])
-            if isinstance(b, dict) and b.get("type") == "text"
+            b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"
         )
+        tool_calls: list[dict[str, Any]] = []
+        for b in blocks:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                tool_calls.append(
+                    {
+                        "id": b.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": b.get("name", ""),
+                            "arguments": json.dumps(b.get("input") or {}),
+                        },
+                    }
+                )
+        message: dict[str, Any] = {"role": "assistant", "content": text or None}
+        if tool_calls:
+            message["tool_calls"] = tool_calls
         usage = data.get("usage") or {}
         prompt = int(usage.get("input_tokens", 0) or 0)
         completion = int(usage.get("output_tokens", 0) or 0)
@@ -134,7 +239,7 @@ class AnthropicShim:
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": text},
+                    "message": message,
                     "finish_reason": _STOP_REASON.get(str(data.get("stop_reason")), "stop"),
                 }
             ],
@@ -151,6 +256,9 @@ class AnthropicShim:
         model = ""
         finish = "stop"
         created = int(time.time())
+        # Anthropic block index → sequential OpenAI tool_call index (text blocks don't count).
+        tool_block_index: dict[int, int] = {}
+        next_tool_idx = 0
 
         def _chunk(delta: dict[str, Any], finish_reason: Any) -> str:
             payload = {
@@ -177,10 +285,41 @@ class AnthropicShim:
                 msg_id = msg.get("id", msg_id)
                 model = msg.get("model", model)
                 yield _chunk({"role": "assistant", "content": ""}, None)
+            elif etype == "content_block_start":
+                block = event.get("content_block") or {}
+                if block.get("type") == "tool_use":
+                    tc_idx = next_tool_idx
+                    next_tool_idx += 1
+                    tool_block_index[event.get("index")] = tc_idx
+                    yield _chunk(
+                        {
+                            "tool_calls": [
+                                {
+                                    "index": tc_idx,
+                                    "id": block.get("id", ""),
+                                    "type": "function",
+                                    "function": {"name": block.get("name", ""), "arguments": ""},
+                                }
+                            ]
+                        },
+                        None,
+                    )
             elif etype == "content_block_delta":
                 delta = event.get("delta") or {}
                 if delta.get("type") == "text_delta" and delta.get("text"):
                     yield _chunk({"content": delta["text"]}, None)
+                elif delta.get("type") == "input_json_delta" and event.get("index") in tool_block_index:
+                    yield _chunk(
+                        {
+                            "tool_calls": [
+                                {
+                                    "index": tool_block_index[event.get("index")],
+                                    "function": {"arguments": delta.get("partial_json", "")},
+                                }
+                            ]
+                        },
+                        None,
+                    )
             elif etype == "message_delta":
                 sr = (event.get("delta") or {}).get("stop_reason")
                 if sr:
@@ -238,6 +377,23 @@ class VertexShim:
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         return UpstreamRequest(url, headers, body)
 
+    async def embeddings_request(self, conn: Any, model: str, body: dict[str, Any]) -> UpstreamRequest:
+        try:
+            sa_info = json.loads(conn.api_key)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Vertex connection's service-account JSON is not valid JSON.") from exc
+        project = (getattr(conn, "project", "") or "").strip()
+        location = (getattr(conn, "location", "") or "").strip()
+        if not project or not location:
+            raise ValueError("Vertex connection requires both 'project' and 'location'.")
+        token = await self._token(sa_info)
+        url = (
+            f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project}"
+            f"/locations/{location}/endpoints/openapi/embeddings"
+        )
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        return UpstreamRequest(url, headers, body)
+
     async def _token(self, sa_info: dict[str, Any]) -> str:
         key = str(sa_info.get("client_email", "")) or json.dumps(sa_info, sort_keys=True)
         now = time.time()
@@ -268,7 +424,7 @@ class ProviderDependencyError(RuntimeError):
 
 
 def openai_to_converse(body: dict[str, Any]) -> dict[str, Any]:
-    """OpenAI chat-completions → Bedrock Converse request fields (messages/system/inferenceConfig)."""
+    """OpenAI chat-completions → Bedrock Converse request fields (messages/system/inference/tools)."""
     system: list[dict[str, str]] = []
     messages: list[dict[str, Any]] = []
     for m in body.get("messages", []) or []:
@@ -278,8 +434,37 @@ def openai_to_converse(body: dict[str, Any]) -> dict[str, Any]:
         if role == "system":
             if isinstance(content, str) and content:
                 system.append({"text": content})
-        elif role in ("user", "assistant") and isinstance(content, str):
-            messages.append({"role": role, "content": [{"text": content}]})
+        elif role == "assistant":
+            blocks: list[dict[str, Any]] = []
+            if isinstance(content, str) and content:
+                blocks.append({"text": content})
+            for tc in m.get("tool_calls") or []:
+                fn = (tc.get("function") or {}) if isinstance(tc, dict) else {}
+                blocks.append(
+                    {
+                        "toolUse": {
+                            "toolUseId": tc.get("id", "") if isinstance(tc, dict) else "",
+                            "name": fn.get("name", ""),
+                            "input": _load_args(fn.get("arguments")),
+                        }
+                    }
+                )
+            if blocks:
+                messages.append({"role": "assistant", "content": blocks})
+        elif role == "user" and isinstance(content, str):
+            messages.append({"role": "user", "content": [{"text": content}]})
+        elif role == "tool":
+            # Bedrock carries a tool result in a user turn; merge into the trailing user turn if any.
+            block = {
+                "toolResult": {
+                    "toolUseId": m.get("tool_call_id", ""),
+                    "content": [{"text": content if isinstance(content, str) else json.dumps(content)}],
+                }
+            }
+            if messages and messages[-1]["role"] == "user":
+                messages[-1]["content"].append(block)
+            else:
+                messages.append({"role": "user", "content": [block]})
 
     inference: dict[str, Any] = {}
     if body.get("max_tokens") or body.get("max_completion_tokens"):
@@ -297,6 +482,39 @@ def openai_to_converse(body: dict[str, Any]) -> dict[str, Any]:
         out["system"] = system
     if inference:
         out["inferenceConfig"] = inference
+    tool_config = _openai_tools_to_converse(body.get("tools"), body.get("tool_choice"))
+    if tool_config:
+        out["toolConfig"] = tool_config
+    return out
+
+
+def _openai_tools_to_converse(tools: Any, tool_choice: Any) -> dict[str, Any] | None:
+    """OpenAI ``tools``/``tool_choice`` → Bedrock Converse ``toolConfig``."""
+    specs: list[dict[str, Any]] = []
+    for t in tools or []:
+        if not isinstance(t, dict) or t.get("type") != "function":
+            continue
+        fn = t.get("function") or {}
+        specs.append(
+            {
+                "toolSpec": {
+                    "name": fn.get("name", ""),
+                    "description": fn.get("description", ""),
+                    "inputSchema": {"json": fn.get("parameters") or {"type": "object", "properties": {}}},
+                }
+            }
+        )
+    if not specs:
+        return None
+    out: dict[str, Any] = {"tools": specs}
+    if tool_choice in ("required", "any"):
+        out["toolChoice"] = {"any": {}}
+    elif tool_choice == "auto":
+        out["toolChoice"] = {"auto": {}}
+    elif isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        name = (tool_choice.get("function") or {}).get("name")
+        if name:
+            out["toolChoice"] = {"tool": {"name": name}}
     return out
 
 
@@ -304,6 +522,20 @@ def converse_to_openai(resp: dict[str, Any], model: str = "") -> dict[str, Any]:
     """Bedrock Converse response → OpenAI chat.completion."""
     blocks = (((resp.get("output") or {}).get("message") or {}).get("content")) or []
     text = "".join(b.get("text", "") for b in blocks if isinstance(b, dict))
+    tool_calls: list[dict[str, Any]] = []
+    for b in blocks:
+        if isinstance(b, dict) and "toolUse" in b:
+            tu = b["toolUse"] or {}
+            tool_calls.append(
+                {
+                    "id": tu.get("toolUseId", ""),
+                    "type": "function",
+                    "function": {"name": tu.get("name", ""), "arguments": json.dumps(tu.get("input") or {})},
+                }
+            )
+    message: dict[str, Any] = {"role": "assistant", "content": text or None}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
     usage = resp.get("usage") or {}
     prompt = int(usage.get("inputTokens", 0) or 0)
     completion = int(usage.get("outputTokens", 0) or 0)
@@ -315,7 +547,7 @@ def converse_to_openai(resp: dict[str, Any], model: str = "") -> dict[str, Any]:
         "choices": [
             {
                 "index": 0,
-                "message": {"role": "assistant", "content": text},
+                "message": message,
                 "finish_reason": _BEDROCK_STOP.get(str(resp.get("stopReason")), "stop"),
             }
         ],
@@ -398,6 +630,9 @@ class BedrockShim:
 
         worker = asyncio.create_task(asyncio.to_thread(_drain))
         finish = "stop"
+        # Bedrock contentBlockIndex → sequential OpenAI tool_call index (text blocks don't count).
+        tool_block_index: dict[int, int] = {}
+        next_tool_idx = 0
         try:
             while True:
                 kind, payload = await queue.get()
@@ -412,10 +647,39 @@ class BedrockShim:
                 ev = payload
                 if "messageStart" in ev:
                     yield _chunk({"role": "assistant", "content": ""}, None)
+                elif "contentBlockStart" in ev:
+                    start = (ev["contentBlockStart"].get("start") or {}).get("toolUse")
+                    if start:
+                        block_idx = ev["contentBlockStart"].get("contentBlockIndex")
+                        tc_idx = next_tool_idx
+                        next_tool_idx += 1
+                        tool_block_index[block_idx] = tc_idx
+                        yield _chunk(
+                            {
+                                "tool_calls": [
+                                    {
+                                        "index": tc_idx,
+                                        "id": start.get("toolUseId", ""),
+                                        "type": "function",
+                                        "function": {"name": start.get("name", ""), "arguments": ""},
+                                    }
+                                ]
+                            },
+                            None,
+                        )
                 elif "contentBlockDelta" in ev:
-                    txt = ((ev["contentBlockDelta"].get("delta") or {}).get("text"))
+                    delta = ev["contentBlockDelta"].get("delta") or {}
+                    txt = delta.get("text")
                     if txt:
                         yield _chunk({"content": txt}, None)
+                    tu = delta.get("toolUse")
+                    if tu is not None:
+                        block_idx = ev["contentBlockDelta"].get("contentBlockIndex")
+                        tc_idx = tool_block_index.get(block_idx, 0)
+                        yield _chunk(
+                            {"tool_calls": [{"index": tc_idx, "function": {"arguments": tu.get("input", "")}}]},
+                            None,
+                        )
                 elif "messageStop" in ev:
                     finish = _BEDROCK_STOP.get(str(ev["messageStop"].get("stopReason")), "stop")
             yield _chunk({}, finish)
