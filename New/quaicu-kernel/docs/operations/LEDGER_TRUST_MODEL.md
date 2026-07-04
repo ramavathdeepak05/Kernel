@@ -80,10 +80,22 @@ ok, errors = verify_ledger_proof_bundle(
 just without the split-view guarantee. When supplied, the cosignature must verify against the pinned
 witness key **and** attest the same `(tree_size, root)` as the STH.
 
-For real independence, run the witness as a **separate process/service with its own key** (a remote
-HTTP witness is a follow-up); an auditor who collects cosignatures over time can detect a split view
-because a divergent history cannot produce a witness cosignature that is consistent with the ones
-already seen. Periodic anchoring (beyond export time) is a scheduler/ops concern.
+For real independence, run the witness as a **separate service with its own key** —
+`quaicu-kernel-witness` (`delivery/entrypoint_witness.py`) is that service:
+
+- Its **stable** Ed25519 key comes from `QUAICU_WITNESS_KEY_PEM` (pin its public half; the key must
+  outlive restarts, or every restart changes what auditors pin). `QUAICU_WITNESS_TOKEN` is the shared
+  bearer the kernel presents; `QUAICU_WITNESS_DSN` gives it **durable, monotonic** last-seen state
+  (`quaicu_witness_state`, migration 016) so a rewind *after a restart* is still caught.
+- The kernel reaches it via `adapters.ledger.http_witness.HttpWitness`, wired from config —
+  `kernel.shared.toml` `[adapters] witness = "http_witness"` + `[witness] base_url, token`. A fork /
+  rewind the witness refuses comes back as `409` → `LedgerTamperError` (fail-closed, no bundle).
+- **Continuous** observation: set `[anchor] interval_seconds` (kernel.saas.toml) so the kernel
+  cosigns every tenant's STH on a cadence, not only at export — a split-view/rewind is caught promptly.
+
+An auditor who collects cosignatures over time detects a split view because a divergent history cannot
+produce witness cosignatures consistent with the ones already seen. Deploy the witness in a different
+trust domain (ideally different key custody) from the kernel.
 
 ## Key rotation
 

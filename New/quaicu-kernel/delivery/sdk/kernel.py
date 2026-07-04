@@ -592,6 +592,9 @@ class Kernel:
         # Optional AI Gateway for governed inference.
         gateway = cls._build_gateway(tenant, adapter_cfg, cfg) if "inference" in adapter_cfg else None
 
+        # Optional external anchor witness (D3-2) — cosigns the STH on export / periodic anchoring.
+        witness = cls._build_witness(adapter_cfg, cfg) if "witness" in adapter_cfg else None
+
         engine = LifecycleEngine(
             repository=repo,
             policy=policy,
@@ -611,8 +614,28 @@ class Kernel:
             policy_store=policy_store,
             policy_repository=policy_repository,
             ledger_repository=ledger_repository,
+            witness=witness,
             policy_admin_roles=policy_admin_roles,
         )
+
+    @staticmethod
+    def _build_witness(adapter_cfg: dict[str, Any], cfg: dict[str, Any]) -> "AnchorPort | None":
+        """Build the anchor witness from ``[adapters].witness`` + ``[witness]``.
+
+        Only ``http_witness`` is config-constructible (an out-of-process witness at ``base_url``, with
+        a shared ``token``). An in-process ``SoftwareWitness`` is wired programmatically (tests / a
+        sovereign single node), not from TOML.
+        """
+        name = adapter_cfg.get("witness")
+        if name != "http_witness":
+            raise ValueError(f"unknown witness adapter {name!r}; expected 'http_witness'")
+        wcfg = cfg.get("witness", {})
+        base_url = str(wcfg.get("base_url", "")).strip()
+        if not base_url:
+            raise ValueError("[witness] requires base_url for the http_witness adapter")
+        from adapters.ledger.http_witness import HttpWitness
+
+        return HttpWitness(base_url, str(wcfg.get("token", "")).strip() or None)
 
     @staticmethod
     def _build_hitl(adapter_cfg: dict[str, Any], cfg: dict[str, Any]) -> HITLPort:

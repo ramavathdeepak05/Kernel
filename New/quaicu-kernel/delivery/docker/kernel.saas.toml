@@ -79,3 +79,10 @@ notify_email = "support@quaicu.org"
 # enabled        = true
 # default_policy = "mcp.tool"   # optional: govern all tools under one action type (write one
 #                               #   governs="mcp.tool" policy); omit → each tool is mcp.<tool_name>
+
+# Periodic ledger anchoring (D3-2). When an anchor witness is wired (kernel.shared.toml
+# adapters.witness = "http_witness"), cosign every tenant's STH on this cadence so the witness
+# observes the log's progression continuously — a split-view/rewind is caught promptly, not only at
+# export. Omit / 0 → anchor only at export time.
+# [anchor]
+# interval_seconds = 300

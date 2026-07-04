@@ -24,6 +24,14 @@ ledger_store = "postgres_ledger"   # durable Merkle backend (the signer above pe
 storage      = "postgres_storage"  # durable action persistence (idempotency) — safe with workers > 1
 events       = "memory_events"
 identity     = "jwt"
+# Optional: external anchor witness (D3-2) — cosigns each STH so a split-view/rewind is detected.
+# Uncomment + run the witness service separately (quaicu-kernel-witness, its own key + DB). Pin its
+# public key (GET /v1/ledger/witness-key) to verify anchor cosignatures in exports.
+# witness    = "http_witness"
+
+# [witness]                        # required when adapters.witness = "http_witness"
+# base_url = "${WITNESS_BASE_URL}" # e.g. https://witness.quaicu.internal
+# token    = "${WITNESS_TOKEN}"    # shared bearer the kernel presents to the witness
 
 # Governance profile for the shared plane. "standard" = identity + policy + HITL + seal + emit + gateway
 # protections; consent OFF. NB: the only difference between "standard" and "all" is `enforce_consent`,

@@ -10,11 +10,45 @@ Call at export time (so the bundle carries a fresh cosignature) and/or periodica
 
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
+from core.errors import LedgerTamperError
 from core.ledger.signer import SignedTreeHead
 from core.ports.anchor import AnchorPort, WitnessCosignature
 from core.types import TenantId
+
+log = logging.getLogger("quaicu.ledger.anchor")
+
+
+class WitnessStateStore(Protocol):
+    """The witness's durable memory of the last STH it cosigned per tenant (monotonic).
+
+    Its integrity is the witness's security: it must survive restarts, or a replayed smaller STH
+    after a restart would be treated as a fresh first STH and cosigned (a rewind slips through).
+    """
+
+    def get(self, tenant: TenantId) -> tuple[int, bytes] | None: ...
+
+    def advance(self, tenant: TenantId, tree_size: int, root_hash: bytes) -> None:
+        """Record (tree_size, root_hash) as the last seen. Advance-only — never regresses tree_size."""
+        ...
+
+
+class InMemoryWitnessStateStore:
+    """Non-durable state store (dev / tests / single sovereign node). Advance-only."""
+
+    def __init__(self) -> None:
+        self._last: dict[TenantId, tuple[int, bytes]] = {}
+
+    def get(self, tenant: TenantId) -> tuple[int, bytes] | None:
+        return self._last.get(tenant)
+
+    def advance(self, tenant: TenantId, tree_size: int, root_hash: bytes) -> None:
+        cur = self._last.get(tenant)
+        if cur is not None and tree_size < cur[0]:
+            return  # never regress (the witness already verified consistency before calling)
+        self._last[tenant] = (tree_size, root_hash)
 
 
 class _LedgerView(Protocol):
@@ -22,6 +56,7 @@ class _LedgerView(Protocol):
     def get_consistency_proof(
         self, tenant: TenantId, old_size: int
     ) -> tuple[bytes, bytes, list[bytes]]: ...
+    def tenants(self) -> list[TenantId]: ...
 
 
 def anchor_current_sth(
@@ -41,3 +76,23 @@ def anchor_current_sth(
     else:
         _, _, proof = ledger.get_consistency_proof(tenant, last[0])
     return witness.cosign(tenant, sth, proof)
+
+
+def anchor_all_tenants(ledger: _LedgerView, witness: AnchorPort) -> dict[TenantId, str]:
+    """Anchor every tenant that has an STH. Returns ``{tenant: "ok" | "<error>"}``.
+
+    A tamper on one tenant is logged as a CRITICAL alert and does NOT stop anchoring the rest — the
+    loop must keep observing every other tenant's log. Intended for a periodic scheduler.
+    """
+    results: dict[TenantId, str] = {}
+    for tenant in ledger.tenants():
+        try:
+            anchor_current_sth(ledger, witness, tenant)
+            results[tenant] = "ok"
+        except LedgerTamperError as exc:
+            log.critical("ledger anchor TAMPER for tenant=%s: %s", tenant, exc)
+            results[tenant] = f"TAMPER: {exc.code}"
+        except Exception as exc:  # noqa: BLE001 — an anchor outage must not crash the loop
+            log.error("ledger anchor failed for tenant=%s: %s", tenant, exc)
+            results[tenant] = f"error: {exc}"
+    return results

@@ -18,9 +18,10 @@ from datetime import datetime, timezone
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
+from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
 
 from core.errors import LedgerTamperError
+from core.ledger.anchor import InMemoryWitnessStateStore, WitnessStateStore
 from core.ledger.merkle import verify_consistency_proof
 from core.ledger.signer import SignedTreeHead
 from core.ports.anchor import WitnessCosignature
@@ -28,13 +29,31 @@ from core.types import TenantId
 
 
 class SoftwareWitness:
-    """An independent in-process Ed25519 witness. Satisfies `AnchorPort`."""
+    """An independent Ed25519 witness. Satisfies `AnchorPort`.
 
-    def __init__(self, witness_id: str | None = None) -> None:
-        self._private_key = Ed25519PrivateKey.generate()
+    ``private_key_pem`` loads a **stable** key (so the pinned witness key survives restarts and cross
+    replicas); omit it only for dev/tests, where an ephemeral key is generated. ``state_store`` is the
+    witness's durable memory of the last STH it cosigned per tenant — pass a `PostgresWitnessStateStore`
+    in production so a rewind after a restart is still caught (an in-memory default forgets on restart).
+    """
+
+    def __init__(
+        self,
+        *,
+        private_key_pem: str | None = None,
+        witness_id: str | None = None,
+        state_store: WitnessStateStore | None = None,
+    ) -> None:
+        if private_key_pem:
+            key = load_pem_private_key(private_key_pem.encode(), password=None)
+            if not isinstance(key, Ed25519PrivateKey):
+                raise ValueError("witness private key must be Ed25519")
+            self._private_key = key
+        else:
+            self._private_key = Ed25519PrivateKey.generate()
         self._public_key = self._private_key.public_key()
         self._witness_id = witness_id or f"witness:{uuid.uuid4()}"
-        self._last: dict[TenantId, tuple[int, bytes]] = {}
+        self._store: WitnessStateStore = state_store or InMemoryWitnessStateStore()
 
     @property
     def witness_id(self) -> str:
@@ -48,12 +67,12 @@ class SoftwareWitness:
         ).decode()
 
     def last_seen(self, tenant: TenantId) -> tuple[int, bytes] | None:
-        return self._last.get(tenant)
+        return self._store.get(tenant)
 
     def cosign(
         self, tenant: TenantId, sth: SignedTreeHead, consistency_proof: list[bytes]
     ) -> WitnessCosignature:
-        last = self._last.get(tenant)
+        last = self._store.get(tenant)
         if last is not None:
             old_size, old_root = last
             if not verify_consistency_proof(
@@ -74,7 +93,7 @@ class SoftwareWitness:
             signature=b"",
         )
         cosig = dataclasses.replace(cosig, signature=self._private_key.sign(cosig.signing_message()))
-        self._last[tenant] = (sth.tree_size, sth.root_hash)
+        self._store.advance(tenant, sth.tree_size, sth.root_hash)
         return cosig
 
     def verify(self, cosig: WitnessCosignature, public_key_pem: str) -> bool:
