@@ -1,0 +1,47 @@
+# Load-test shared-kernel config (D4-1) — the production kernel.shared.toml shape with two swaps:
+#   - ledger signer: memory_signed_ledger (software Ed25519, per-process key) instead of Cloud KMS,
+#     so the load test measures the kernel + Postgres, not KMS latency/quota. The durable Merkle
+#     backend (postgres_ledger) is the SAME as production — the multi-worker seal linearization
+#     under test is exactly the production path.
+#   - DSN: ${LOADTEST_DSN} — point at the TEST database (never quaicu_prod).
+# See scripts/load_saas.py for the runner.
+
+[tenant]
+id = "saas-shared"
+
+[adapters]
+policy       = "cel_policy"
+policy_store = "postgres_policy"
+hitl         = "in_process"
+ledger       = "memory_signed_ledger"
+ledger_store = "postgres_ledger"
+storage      = "postgres_storage"
+events       = "memory_events"
+identity     = "jwt"
+
+[governance]
+default = "standard"
+
+[storage]
+dsn = "${LOADTEST_DSN}"
+
+[policy_store]
+dsn = "${LOADTEST_DSN}"
+
+[ledger_store]
+dsn = "${LOADTEST_DSN}"
+
+[hitl]
+timeout_seconds = 86400
+store = "postgres"
+dsn   = "${LOADTEST_DSN}"
+
+[identity]
+secret_or_key = "${KERNEL_JWT_SECRET}"
+algorithms    = ["HS256"]
+verify        = true
+
+[[policy.seed]]
+id        = "loadtest-allow-baseline"
+condition = "true"
+decision  = "allow"

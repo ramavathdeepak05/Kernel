@@ -83,7 +83,10 @@ def test_put_then_get() -> None:
     rec = _record()
     put_cur = _FakeCursor(rows=[])
     _store(put_cur).put(rec)
-    assert "INSERT INTO quaicu_approvals" in put_cur.executed[0][0]
+    # First statement sets the RLS tenant GUC (migration 017) with the record's tenant; then the insert.
+    assert "set_config('app.current_tenant'" in put_cur.executed[0][0]
+    assert put_cur.executed[0][1] == ("acme",)
+    assert "INSERT INTO quaicu_approvals" in put_cur.executed[1][0]
 
     get_cur = _FakeCursor(rows=[_params(rec)])
     got = _store(get_cur).get("h-1")

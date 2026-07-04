@@ -33,6 +33,7 @@ start of every session, so anything written here is visible to both.
 
 ## Handoffs / open threads
 <!-- Work in progress one agent is passing to the other. -->
+- [2026-07-04] (claude) Phase D3 (proof layer) DONE + merged to main (23ba6059), tag `k02-review-v1`. FREEZE: core/ledger/, core/ports/anchor.py, core/regmap/export.py, adapters/ledger/, delivery/witness_app.py need owner sign-off until the T-1 crypto review lands (spec: New/quaicu-kernel/docs/operations/K02_REVIEW_PACKAGE.md).
 - [2026-06-16] (claude) Fixed the 4 code-review findings in New/quaicu-kernel: (1) Critical rate-limit DoS — reordered middleware so ApiKeyAuth runs before RateLimit; counter now keys on verified principal.tenant_id else client IP, never the spoofable X-Tenant-Id (delivery/api/ratelimit.py, app.py). (2) OpenBao verify() raises LedgerSealError on infra errors vs returning the real valid bool (adapters/ledger/openbao.py). (3) Event-bus emit() logs subscriber failures (adapters/events/memory.py). (4) API-key hashing → HMAC-SHA256 + QUAICU_API_KEY_PEPPER (core/account/engine.py). Suite: 885 passed / 10 skipped; ruff clean. Gemini 3.1-pro re-review confirmed all 4.
 - [2026-06-16] (claude) OPEN follow-up (deployment hardening, not a code bug): the rate limiter's unauthenticated IP fallback uses request.client.host; behind an LB it collapses to the proxy IP. Needs a trusted forwarded-for handler at the ASGI edge (do NOT trust raw X-Forwarded-For). Authenticated traffic is unaffected.
 

@@ -5,10 +5,11 @@ dependency): accounts are written only on the infrequent signup / key-issue path
 path reads the in-memory `AccountStore` cache (hydrated at startup), so keeping this sync avoids making
 the whole account/auth surface async. A short blocking write on signup is acceptable.
 
-Tables (see migration 006_create_account_tables.py) — control-plane registries, intentionally NOT
-under RLS (like quaicu_customer_plans), since `load_all()` must read every tenant's records:
-  quaicu_accounts  — one row per account (1:1 with a tenant on signup)
-  quaicu_api_keys  — hashed API-key records
+Tables (see migrations 006 + 011): quaicu_accounts, quaicu_api_keys, quaicu_members. Since
+migration 017 (D4-1) these are under FORCE RLS, so every operation sets the ``app.current_tenant``
+GUC for its transaction — the owning tenant for writes, the ``'*'`` read-only sentinel for the
+legitimately cross-tenant reads (`load_all`, email lookup, key-by-id — identity precedes tenant
+knowledge on those paths; the sentinel can never write, see migration 007).
 
 Writes use INSERT … ON CONFLICT DO UPDATE so re-persisting is idempotent. All exceptions are wrapped
 as `AccountPersistenceError`.
@@ -83,6 +84,10 @@ _SELECT_API_KEYS_SQL = (
 
 _SELECT_ACCOUNT_BY_EMAIL_SQL = _SELECT_ACCOUNTS_SQL + " WHERE lower(email) = lower(%s)"
 
+_SELECT_ACCOUNT_BY_TENANT_SQL = _SELECT_ACCOUNTS_SQL + " WHERE tenant_id = %s"
+
+_SELECT_API_KEY_SQL = _SELECT_API_KEYS_SQL + " WHERE key_id = %s"
+
 
 def _scopes_from(raw: Any) -> frozenset[str]:
     if isinstance(raw, str):
@@ -124,11 +129,18 @@ class PostgresAccountRepository:
 
         return psycopg2.connect(self._dsn)
 
-    def _run(self, fn: Callable[[Any], Any], op: str) -> Any:
+    def _run(self, fn: Callable[[Any], Any], op: str, *, tenant: str = "*") -> Any:
+        """Run ``fn`` in one transaction with the RLS tenant GUC set (migration 017).
+
+        ``tenant`` defaults to the ``'*'`` read-only sentinel for cross-tenant reads; writes pass
+        the owning tenant (the sentinel cannot pass any WITH CHECK, so a mis-tagged write fails
+        loudly instead of landing in another tenant's partition).
+        """
         try:
             conn = self._connect()
             try:
                 with conn.cursor() as cur:
+                    cur.execute("SELECT set_config('app.current_tenant', %s, true)", (tenant,))
                     result = fn(cur)
                 conn.commit()
                 return result
@@ -199,6 +211,7 @@ class PostgresAccountRepository:
                 ),
             ),
             "save_member",
+            tenant=str(member.tenant_id),
         )
 
     def replace_member(self, member: Member) -> None:
@@ -211,6 +224,38 @@ class PostgresAccountRepository:
             return _row_to_account(row) if row else None
 
         return self._run(_q, "get_account_by_email")
+
+    def get_account_by_tenant(self, tenant: TenantId) -> Account | None:
+        def _q(cur: Any) -> Account | None:
+            cur.execute(_SELECT_ACCOUNT_BY_TENANT_SQL, (str(tenant),))
+            row = cur.fetchone()
+            return _row_to_account(row) if row else None
+
+        return self._run(_q, "get_account_by_tenant", tenant=str(tenant))
+
+    def get_api_key(self, key_id: str) -> ApiKey | None:
+        """Single-key durable lookup — the cross-worker fallback for the auth path (D4-1).
+
+        A key minted on another worker/instance is not in this process's cache until re-hydrate;
+        the store falls back here so fresh keys authenticate everywhere immediately.
+        """
+
+        def _q(cur: Any) -> ApiKey | None:
+            cur.execute(_SELECT_API_KEY_SQL, (key_id,))
+            r = cur.fetchone()
+            if not r:
+                return None
+            return ApiKey(
+                key_id=r[0],
+                tenant_id=TenantId(r[1]),
+                hashed_secret=r[2],
+                created_at=r[3],
+                revoked=bool(r[4]),
+                scopes=_scopes_from(r[5]),
+                member_id=r[6],
+            )
+
+        return self._run(_q, "get_api_key")
 
     def save_account(self, account: Account) -> None:
         self._run(
@@ -232,10 +277,15 @@ class PostgresAccountRepository:
                 ),
             ),
             "save_account",
+            tenant=str(account.tenant_id),
         )
 
     def save_api_key(self, key: ApiKey) -> None:
-        self._run(lambda cur: cur.execute(_UPSERT_API_KEY_SQL, self._api_key_params(key)), "save_api_key")
+        self._run(
+            lambda cur: cur.execute(_UPSERT_API_KEY_SQL, self._api_key_params(key)),
+            "save_api_key",
+            tenant=str(key.tenant_id),
+        )
 
     def replace_api_key(self, key: ApiKey) -> None:
         # Upsert handles both insert and update (e.g. revoked flips).

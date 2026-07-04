@@ -47,6 +47,25 @@ class EntitlementStore:
         log.info("plan upserted: tenant=%s tier=%s status=%s", plan.tenant_id, plan.tier.value, plan.status.value)
         return plan
 
+    async def find_plan(self, tenant: TenantId) -> CustomerPlan | None:
+        """Authoritative plan lookup: cache fast-path, durable-repository fallback (D4-1).
+
+        A tenant provisioned on another worker/instance isn't in this cache until the next
+        re-hydrate; the fallback closes that window (mirrors `AccountStore.find_api_key`).
+        A found plan is cached. Store faults propagate (fail-closed — no tier is granted on
+        an unverifiable plan).
+        """
+        cached = self.get(tenant)
+        if cached is not None:
+            return cached
+        getter = getattr(self._repository, "get_plan", None)
+        if getter is None:
+            return None
+        plan = await getter(tenant)
+        if plan is not None:
+            self.upsert(plan)
+        return plan
+
     # ── Durable write-through (async; off the hot path) ──────────────────────────
 
     async def hydrate(self) -> None:

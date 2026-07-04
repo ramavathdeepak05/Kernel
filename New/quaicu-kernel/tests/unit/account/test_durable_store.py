@@ -84,7 +84,10 @@ def _repo(backend: _FakeBackend) -> PostgresAccountRepository:
 def test_save_account_upserts_and_commits():
     b = _FakeBackend()
     _repo(b).save_account(_account())
-    sql, params = b.calls[0]
+    # calls[0] sets the RLS tenant GUC (migration 017) to the owning tenant; calls[1] upserts.
+    assert "set_config('app.current_tenant'" in b.calls[0][0]
+    assert b.calls[0][1] == ("acme",)
+    sql, params = b.calls[1]
     assert "INSERT INTO quaicu_accounts" in sql and "ON CONFLICT (account_id)" in sql
     assert params[0] == "acct_1" and params[1] == "acme" and params[4] == "ACTIVE"
     assert b.commits == 1 and b.closed == 1
@@ -93,7 +96,7 @@ def test_save_account_upserts_and_commits():
 def test_save_api_key_serializes_scopes_as_json():
     b = _FakeBackend()
     _repo(b).save_api_key(ApiKey("k1", TenantId("acme"), "h", NOW, scopes=frozenset({"a", "b"})))
-    sql, params = b.calls[0]
+    sql, params = b.calls[1]  # calls[0] = RLS tenant GUC
     assert "INSERT INTO quaicu_api_keys" in sql
     assert params[5] == '["a", "b"]'  # sorted JSON array
 

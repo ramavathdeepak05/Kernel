@@ -50,6 +50,8 @@ SELECT tenant_id, tier, status, created_at, updated_at,
 FROM   quaicu_customer_plans
 """
 
+_SELECT_PLAN_SQL = _SELECT_ALL_PLANS_SQL + " WHERE tenant_id = $1"
+
 _SET_TIER_SQL = """
 UPDATE quaicu_customer_plans
 SET    tier = $2, updated_at = now()
@@ -114,28 +116,52 @@ class PostgresEntitlementRepository:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                rows = await conn.fetch(_SELECT_ALL_PLANS_SQL)
+                async with conn.transaction():
+                    # Cross-tenant hydration read via the RLS read-only sentinel (migration 017).
+                    await conn.execute("SELECT set_config('app.current_tenant', '*', true)")
+                    rows = await conn.fetch(_SELECT_ALL_PLANS_SQL)
             return [_row_to_plan(r) for r in rows]
         except EntitlementPersistenceError:
             raise
         except Exception as exc:
             raise EntitlementPersistenceError(f"load_all failed: {exc}") from exc
 
+    async def get_plan(self, tenant: TenantId) -> CustomerPlan | None:
+        try:
+            pool = await self._get_pool()
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT set_config('app.current_tenant', $1, true)", str(tenant)
+                    )
+                    row = await conn.fetchrow(_SELECT_PLAN_SQL, str(tenant))
+            return _row_to_plan(row) if row else None
+        except EntitlementPersistenceError:
+            raise
+        except Exception as exc:
+            raise EntitlementPersistenceError(
+                f"get_plan failed for tenant {tenant}: {exc}", detail={"tenant": str(tenant)}
+            ) from exc
+
     async def save_plan(self, plan: CustomerPlan) -> None:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                await conn.execute(
-                    _UPSERT_PLAN_SQL,
-                    str(plan.tenant_id),
-                    plan.tier.value,
-                    plan.status.value,
-                    plan.created_at,
-                    plan.updated_at,
-                    plan.billing_provider,
-                    plan.billing_ref,
-                    json.dumps(dict(plan.quota_overrides)),
-                )
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT set_config('app.current_tenant', $1, true)", str(plan.tenant_id)
+                    )
+                    await conn.execute(
+                        _UPSERT_PLAN_SQL,
+                        str(plan.tenant_id),
+                        plan.tier.value,
+                        plan.status.value,
+                        plan.created_at,
+                        plan.updated_at,
+                        plan.billing_provider,
+                        plan.billing_ref,
+                        json.dumps(dict(plan.quota_overrides)),
+                    )
         except EntitlementPersistenceError:
             raise
         except Exception as exc:
@@ -154,7 +180,11 @@ class PostgresEntitlementRepository:
         try:
             pool = await self._get_pool()
             async with pool.acquire() as conn:
-                result = await conn.execute(sql, str(tenant), value)
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT set_config('app.current_tenant', $1, true)", str(tenant)
+                    )
+                    result = await conn.execute(sql, str(tenant), value)
             count = int(result.split()[-1])
             if count == 0:
                 raise EntitlementPersistenceError(

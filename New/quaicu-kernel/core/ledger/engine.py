@@ -19,7 +19,7 @@ from typing import Any
 
 from collections import defaultdict
 
-from core.errors import LedgerSealError
+from core.errors import LedgerSealError, LedgerSequenceConflictError
 from core.ledger.merkle import MerkleTree
 from core.ledger.repository import LedgerRepository
 from core.ledger.signer import InMemoryEd25519Signer, SignedTreeHead, TreeSigner
@@ -114,6 +114,9 @@ class TrustLedger:
 
     # ── Ledger protocol ───────────────────────────────────────────────────────
 
+    # Bounded optimistic retries when another worker wins a sequence slot (multi-worker sealing).
+    _MAX_SEAL_ATTEMPTS = 3
+
     async def seal(
         self,
         *,
@@ -126,6 +129,14 @@ class TrustLedger:
 
         Raises LedgerSealError on ANY failure so the lifecycle engine HALTS the action (F-03).
         An action is never marked COMPLETED without a successful seal.
+
+        Multi-worker linearization (D4-1): the durable `append_entry` is the linearization point —
+        a seal succeeds iff its row actually inserted at (tenant, ledger_seq). When a sibling
+        worker wins the slot the repository raises `LedgerSequenceConflictError`; this method rolls
+        back the in-memory append, rehydrates the tenant's tree from the durable log, and retries
+        (bounded), then fails closed. Each worker's in-memory tree is therefore always a consistent
+        PREFIX of the durable log — proofs served by a lagging worker are RFC 6962-consistent,
+        never a fork.
         """
         try:
             async with self._lock:
@@ -138,62 +149,86 @@ class TrustLedger:
                 # The enforced governance layers (composable enforcement) — sealed for audit.
                 governance_profile = list(evaluation.metadata.get("governance_profile", []))
 
-                seq = self._sequences[tenant]
+                # Leaf bytes are position-independent (no seq inside), so the same leaf is
+                # re-appended at the fresh position on each retry.
                 entry_bytes = _canonical_bytes(
                     action, evaluation, recorded_result, approver, consent_state, governance_profile
                 )
-                idx, lh = self._trees[tenant].append(entry_bytes)
-                now = datetime.now(tz=timezone.utc)
 
-                # Build the entry, sign the new head, and (write-through) persist both BEFORE
-                # committing the rest of the in-memory state. If signing or the durable write
-                # fails, roll back the tree append so the in-memory tree never gets ahead of the
-                # durable log; the failure propagates → LedgerSealError → the action HALTs (F-03).
-                try:
-                    entry = LedgerEntry(
-                        ledger_seq=seq,
-                        tenant=tenant,
-                        action_id=action.id,
-                        action_type=action.type,
-                        actor_id=action.actor.id,
-                        decision=evaluation.decision,
-                        policy_versions=evaluation.policy_versions,
-                        leaf_hash=lh,
-                        sealed_at=now,
-                        approver=approver,
-                        consent_state=consent_state,
-                        recorded_result=recorded_result if isinstance(recorded_result, dict) else {},
-                        actor_roles=tuple(action.actor.roles),
+                for attempt in range(1, self._MAX_SEAL_ATTEMPTS + 1):
+                    seq = self._sequences[tenant]
+                    idx, lh = self._trees[tenant].append(entry_bytes)
+                    now = datetime.now(tz=timezone.utc)
+
+                    # Build the entry, sign the new head, and (write-through) persist both BEFORE
+                    # committing the rest of the in-memory state. If signing or the durable write
+                    # fails, roll back the tree append so the in-memory tree never gets ahead of
+                    # the durable log; the failure propagates → LedgerSealError → HALT (F-03).
+                    try:
+                        entry = LedgerEntry(
+                            ledger_seq=seq,
+                            tenant=tenant,
+                            action_id=action.id,
+                            action_type=action.type,
+                            actor_id=action.actor.id,
+                            decision=evaluation.decision,
+                            policy_versions=evaluation.policy_versions,
+                            leaf_hash=lh,
+                            sealed_at=now,
+                            approver=approver,
+                            consent_state=consent_state,
+                            recorded_result=recorded_result
+                            if isinstance(recorded_result, dict)
+                            else {},
+                            actor_roles=tuple(action.actor.roles),
+                        )
+                        root = self._trees[tenant].root()
+                        # Sign off the event loop: a durable signer (Cloud KMS / OpenBao) makes a
+                        # blocking network call, and seal runs in the request path. The global lock
+                        # above already serializes signs, so the (non-thread-safe) signer client is
+                        # never used concurrently.
+                        sth = await asyncio.to_thread(
+                            self._signer.sign, self._trees[tenant].size, root, now
+                        )
+                        if self._repository is not None:
+                            await self._repository.append_entry(entry)
+                            await self._repository.save_sth(tenant, sth)
+                    except LedgerSequenceConflictError:
+                        # A sibling worker won this seq. Undo our speculative append, resync this
+                        # tenant's tree from the durable log, and retry at the new position.
+                        self._trees[tenant].pop_last()
+                        if attempt >= self._MAX_SEAL_ATTEMPTS:
+                            raise
+                        _log.warning(
+                            "ledger seq conflict — rehydrating tenant and retrying",
+                            extra={"tenant": tenant, "seq": seq, "attempt": attempt},
+                        )
+                        await self._rehydrate_tenant(tenant)
+                        continue
+                    except Exception:
+                        self._trees[tenant].pop_last()  # undo the append; nothing else committed
+                        raise
+
+                    # Durable write succeeded (or no repository) — commit the in-memory state.
+                    self._entries[tenant].append(entry)
+                    self._sequences[tenant] = seq + 1
+                    self._sths[tenant] = sth
+
+                    _log.debug(
+                        "sealed action",
+                        extra={
+                            "tenant": tenant,
+                            "seq": seq,
+                            "action_id": str(action.id),
+                            "tree_size": self._trees[tenant].size,
+                        },
                     )
-                    root = self._trees[tenant].root()
-                    # Sign off the event loop: a durable signer (Cloud KMS / OpenBao) makes a blocking
-                    # network call, and seal runs in the request path. The global lock above already
-                    # serializes signs, so the (non-thread-safe) signer client is never used concurrently.
-                    sth = await asyncio.to_thread(
-                        self._signer.sign, self._trees[tenant].size, root, now
-                    )
-                    if self._repository is not None:
-                        await self._repository.append_entry(entry)
-                        await self._repository.save_sth(tenant, sth)
-                except Exception:
-                    self._trees[tenant].pop_last()  # undo the append; nothing else committed yet
-                    raise
+                    return entry
 
-                # Durable write succeeded (or no repository) — now commit the in-memory state.
-                self._entries[tenant].append(entry)
-                self._sequences[tenant] = seq + 1
-                self._sths[tenant] = sth
-
-                _log.debug(
-                    "sealed action",
-                    extra={
-                        "tenant": tenant,
-                        "seq": seq,
-                        "action_id": str(action.id),
-                        "tree_size": self._trees[tenant].size,
-                    },
+                raise LedgerSealError(  # pragma: no cover — loop exits via return or raise
+                    f"seal retries exhausted for action {action.id}",
+                    detail={"action_id": str(action.id), "tenant": str(action.tenant)},
                 )
-                return entry
 
         except LedgerSealError:
             raise
@@ -202,6 +237,25 @@ class TrustLedger:
                 f"Failed to seal action {action.id} for tenant {action.tenant}: {exc}",
                 detail={"action_id": str(action.id), "tenant": str(action.tenant)},
             ) from exc
+
+    async def _rehydrate_tenant(self, tenant: TenantId) -> None:
+        """Resync one tenant's in-memory tree/entries/sequence from the durable log.
+
+        Called (under the seal lock) after a sequence conflict proved this worker's view stale.
+        The STH is deliberately left to the retry that follows (it re-signs the new head).
+        """
+        if self._repository is None:  # pragma: no cover — conflicts only arise with a repository
+            return
+        tenant_entries = await self._repository.load_tenant_entries(tenant)
+        tenant_entries.sort(key=lambda e: e.ledger_seq)
+        tree = MerkleTree()
+        for entry in tenant_entries:
+            tree.append_leaf_hash(entry.leaf_hash)
+        self._trees[tenant] = tree
+        self._entries[tenant] = list(tenant_entries)
+        self._sequences[tenant] = (
+            tenant_entries[-1].ledger_seq + 1 if tenant_entries else 0
+        )
 
     async def hydrate(self) -> None:
         """Rebuild the in-memory trees, entries, and STHs from the durable repository.

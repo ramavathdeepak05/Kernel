@@ -66,15 +66,20 @@ def _action(ikey: str, state: ActionState = ActionState.PROPOSED) -> Action:
 async def _wipe() -> None:
     a = PostgresStorageAdapter(dsn=DATABASE_URL)
     pool = await a._get_pool()
+    # quaicu_customer_plans + quaicu_approvals joined the RLS set in migration 017, so cleanup
+    # uses the same owner NO FORCE + row_security=off toggle as quaicu_actions.
+    rls_tables = ("quaicu_actions", "quaicu_customer_plans", "quaicu_approvals")
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await conn.execute("ALTER TABLE quaicu_actions NO FORCE ROW LEVEL SECURITY")
+            for table in rls_tables:
+                await conn.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
             await conn.execute("SET LOCAL row_security = off")
             await conn.execute("DELETE FROM quaicu_actions WHERE tenant_id LIKE 'test-%'")
-            await conn.execute("ALTER TABLE quaicu_actions FORCE ROW LEVEL SECURITY")
-            await conn.execute("DELETE FROM quaicu_policies WHERE id LIKE 'test-%'")
             await conn.execute("DELETE FROM quaicu_customer_plans WHERE tenant_id LIKE 'test-%'")
             await conn.execute("DELETE FROM quaicu_approvals WHERE handle_id LIKE 'test-%'")
+            await conn.execute("DELETE FROM quaicu_policies WHERE id LIKE 'test-%'")
+            for table in rls_tables:
+                await conn.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
     await a.close()
 
 

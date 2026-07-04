@@ -9,13 +9,20 @@ scale-out. Persistence is synchronous — it runs only on the infrequent signup 
 from __future__ import annotations
 
 import logging
+import os
 import threading
+import time
 
 from core.account.model import Account, ApiKey, Member
 from core.account.repository import AccountRepository
 from core.types import TenantId
 
 log = logging.getLogger("quaicu.account")
+
+# How long a cached API key is trusted before being re-read from the durable store (seconds).
+# Bounds cross-worker revocation propagation: a key revoked on another worker stays valid here
+# for at most this long. 0 disables the re-read (cache trusted until restart).
+_API_KEY_TTL_SECONDS = float(os.getenv("QUAICU_APIKEY_TTL", "60"))
 
 
 class AccountStore:
@@ -26,6 +33,7 @@ class AccountStore:
         self._email_index: dict[str, str] = {}             # lower(email) -> account_id
         self._tenant_index: dict[str, str] = {}            # tenant_id -> account_id
         self._api_keys: dict[str, ApiKey] = {}             # key_id -> ApiKey
+        self._api_key_read_at: dict[str, float] = {}       # key_id -> monotonic fetch time (TTL)
         self._members: dict[str, Member] = {}              # member_id -> Member (W6-1)
         self._lock = threading.Lock()
         self._repository = repository
@@ -40,8 +48,10 @@ class AccountStore:
                 self._accounts[account.account_id] = account
                 self._email_index[account.email.lower()] = account.account_id
                 self._tenant_index[str(account.tenant_id)] = account.account_id
+            now = time.monotonic()
             for key in keys:
                 self._api_keys[key.key_id] = key
+                self._api_key_read_at[key.key_id] = now
         members = []
         loader = getattr(self._repository, "load_members", None)
         if loader is not None:
@@ -108,6 +118,7 @@ class AccountStore:
             self._repository.save_api_key(key)
         with self._lock:
             self._api_keys[key.key_id] = key
+            self._api_key_read_at[key.key_id] = time.monotonic()
         log.info("api key issued: key_id=%s tenant=%s", key.key_id, key.tenant_id)
         return key
 
@@ -115,11 +126,74 @@ class AccountStore:
         with self._lock:
             return self._api_keys.get(key_id)
 
+    def find_api_key(self, key_id: str) -> ApiKey | None:
+        """Authoritative key lookup: cache fast-path, durable-repository fallback + TTL (D4-1).
+
+        Cross-worker correctness: a key minted on another worker/instance isn't in this cache until
+        re-hydrate, so a miss falls back to the repository (mirrors `find_account_by_email`).
+        A cache HIT older than `QUAICU_APIKEY_TTL` is re-read so a revocation flipped elsewhere
+        propagates within the TTL; if that refresh hits a transient store fault the cached copy is
+        served (auth availability) and the fault logged — a cache MISS with a store fault still
+        fails closed (the error propagates: an unverifiable key never authenticates).
+        """
+        now = time.monotonic()
+        with self._lock:
+            cached = self._api_keys.get(key_id)
+            read_at = self._api_key_read_at.get(key_id)
+        getter = getattr(self._repository, "get_api_key", None)
+        if cached is not None:
+            fresh = (
+                _API_KEY_TTL_SECONDS <= 0
+                or (read_at is not None and now - read_at < _API_KEY_TTL_SECONDS)
+            )
+            if fresh or getter is None:
+                return cached
+            try:
+                latest = getter(key_id)
+            except Exception:  # noqa: BLE001 — refresh is best-effort when we hold a copy
+                log.warning("api-key TTL refresh failed for %s; serving cached copy", key_id)
+                return cached
+            with self._lock:
+                if latest is None:
+                    self._api_keys.pop(key_id, None)
+                    self._api_key_read_at.pop(key_id, None)
+                else:
+                    self._api_keys[key_id] = latest
+                    self._api_key_read_at[key_id] = now
+            return latest
+        if getter is None:
+            return None
+        latest = getter(key_id)  # miss + fault → propagate (fail-closed)
+        if latest is not None:
+            with self._lock:
+                self._api_keys[key_id] = latest
+                self._api_key_read_at[key_id] = now
+        return latest
+
+    def find_account_by_tenant(self, tenant: TenantId) -> Account | None:
+        """Authoritative tenant→account lookup: cache fast-path, repository fallback (D4-1).
+
+        Pairs with `find_api_key` on the auth path: an account signed up on another worker must
+        resolve here before this worker's next hydrate.
+        """
+        cached = self.get_account_by_tenant(tenant)
+        if cached is not None:
+            return cached
+        getter = getattr(self._repository, "get_account_by_tenant", None)
+        account = getter(tenant) if getter is not None else None
+        if account is not None:
+            with self._lock:
+                self._accounts[account.account_id] = account
+                self._email_index[account.email.lower()] = account.account_id
+                self._tenant_index[str(account.tenant_id)] = account.account_id
+        return account
+
     def replace_api_key(self, key: ApiKey) -> None:
         if self._repository is not None:
             self._repository.replace_api_key(key)
         with self._lock:
             self._api_keys[key.key_id] = key
+            self._api_key_read_at[key.key_id] = time.monotonic()
 
     def list_api_keys(self, tenant: TenantId) -> list[ApiKey]:
         with self._lock:
