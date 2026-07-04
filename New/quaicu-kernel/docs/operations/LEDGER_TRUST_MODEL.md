@@ -1,6 +1,7 @@
 # Ledger proof-bundle trust model (K·02 / D3-1)
 
-How an auditor or regulator independently trusts a QUAICU ledger export. A proof bundle
+How an auditor or regulator independently trusts a QUAICU ledger export. (The byte-exact
+serialization spec, threat model, and frozen review surface live in `K02_REVIEW_PACKAGE.md`.) A proof bundle
 (`GET /v1/ledger/{tenant}/export`) asserts that a set of governed actions were sealed into an
 append-only RFC 6962 transparency log. Verifying it has **two separable properties**.
 
