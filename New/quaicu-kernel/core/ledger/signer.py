@@ -46,6 +46,11 @@ class TreeSigner(Protocol):
     @property
     def key_id(self) -> str: ...
 
+    @property
+    def public_key_pem(self) -> str:
+        """The verification key as an SPKI PEM — the trust anchor a regulator pins out-of-band (D3-1)."""
+        ...
+
 
 # ── Stub implementation ───────────────────────────────────────────────────────
 

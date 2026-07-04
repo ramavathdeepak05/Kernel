@@ -119,6 +119,89 @@ async def ledger_export(tenant: str, request: Request) -> dict:
     return bundle.to_dict()
 
 
+def _ledger_signer(kernel: object) -> object | None:
+    """The tenant kernel's STH signer (the source of the pinned trust anchor), or None."""
+    ledger = getattr(getattr(kernel, "engine", None), "_ledger", None)
+    return getattr(ledger, "_signer", None)
+
+
+def _signing_algorithm(pem: str) -> str:
+    """Human label for the signing algorithm, inferred from the public key type."""
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from cryptography.hazmat.primitives.serialization import load_pem_public_key
+
+    key = load_pem_public_key(pem.encode())
+    if isinstance(key, Ed25519PublicKey):
+        return "ed25519"
+    if isinstance(key, ec.EllipticCurvePublicKey):
+        return "ecdsa-p256"
+    return "unknown"
+
+
+class SigningKeyResponse(BaseModel):
+    key_id: str
+    public_key_pem: str
+    algorithm: str
+
+
+@router.get(
+    "/signing-key",
+    response_model=SigningKeyResponse,
+    summary="Publish this tenant's ledger signing key (pin it out-of-band to verify exports, D3-1)",
+)
+async def ledger_signing_key(request: Request) -> SigningKeyResponse:
+    """Return the tenant's STH verification key ``{key_id, public_key_pem, algorithm}``.
+
+    This is the trust anchor a regulator records **once at onboarding** and pins, then verifies every
+    future export against it (``verify_ledger_proof_bundle(bundle, trusted_keys={key_id: pem})``) — so
+    a later kernel-side key swap cannot pass. Tenant-private, like the trail/export.
+    """
+    _bearer_token(request)
+    enforce_scope(request, LEDGER_READ)
+    signer = _ledger_signer(get_kernel(request))
+    key_id = getattr(signer, "key_id", None)
+    pem = getattr(signer, "public_key_pem", None)
+    if not key_id or not pem:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "This deployment's ledger signer does not expose a public key",
+                    "code": "SIGNING_KEY_UNAVAILABLE"},
+        )
+    return SigningKeyResponse(key_id=str(key_id), public_key_pem=str(pem),
+                              algorithm=_signing_algorithm(str(pem)))
+
+
+class WitnessKeyResponse(BaseModel):
+    witness_id: str
+    public_key_pem: str
+    algorithm: str
+
+
+@router.get(
+    "/witness-key",
+    response_model=WitnessKeyResponse,
+    summary="Publish this deployment's ledger witness key (pin it to verify anchor cosignatures, D3-2)",
+)
+async def ledger_witness_key(request: Request) -> WitnessKeyResponse:
+    """Return the independent anchor witness's verification key ``{witness_id, public_key_pem,
+    algorithm}``. Pin it out-of-band (like the signing key) and pass it as ``trusted_witnesses`` to
+    verify a bundle's anchor cosignature — proof the log was externally attested (no split-view)."""
+    _bearer_token(request)
+    enforce_scope(request, LEDGER_READ)
+    witness = getattr(get_kernel(request), "witness", None)
+    wid = getattr(witness, "witness_id", None)
+    pem = getattr(witness, "public_key_pem", None)
+    if not wid or not pem:
+        raise HTTPException(
+            status_code=503,
+            detail={"error": "This deployment has no ledger anchor witness configured",
+                    "code": "WITNESS_UNAVAILABLE"},
+        )
+    return WitnessKeyResponse(witness_id=str(wid), public_key_pem=str(pem),
+                             algorithm=_signing_algorithm(str(pem)))
+
+
 class VerifyResult(BaseModel):
     ok: bool
     errors: list[str]
@@ -127,14 +210,32 @@ class VerifyResult(BaseModel):
 @router.post(
     "/export/verify",
     response_model=VerifyResult,
-    summary="Verify a ledger-proof bundle (stateless; the same check a regulator runs offline)",
+    summary="Verify a ledger-proof bundle against this tenant's pinned signing key",
 )
 async def ledger_export_verify(bundle: dict, request: Request) -> VerifyResult:
-    """Re-run the independent bundle verifier on a posted export. No kernel state is read — this is a
-    convenience mirror of the offline verifier so a regulator can confirm a bundle via the API too."""
-    from core.regmap.export import verify_ledger_proof_bundle
+    """Verify a posted export. Integrity is checked from the bundle; **authenticity is pinned against
+    this tenant kernel's signing key** (D3-1) — so this answers "did we sign this?", not "is the
+    bundle self-consistent?". A bundle carrying a forged/unknown key_id fails. For a fully independent
+    check, a regulator runs `core.regmap.export.verify_ledger_proof_bundle` offline against the key
+    they pinned from `GET /v1/ledger/signing-key`."""
+    from core.regmap.export import trusted_keys_from_signer, verify_ledger_proof_bundle
 
-    ok, errors = verify_ledger_proof_bundle(bundle)
+    _bearer_token(request)
+    enforce_scope(request, LEDGER_READ)
+    kernel = get_kernel(request)
+    signer = _ledger_signer(kernel)
+    try:
+        trusted_keys = trusted_keys_from_signer(signer) if signer is not None else None
+    except ValueError:
+        trusted_keys = None
+    # If an anchor witness is wired, also pin it so the anchor cosignature is verified (D3-2).
+    witness = getattr(kernel, "witness", None)
+    wid = getattr(witness, "witness_id", None)
+    wpem = getattr(witness, "public_key_pem", None)
+    trusted_witnesses = {str(wid): str(wpem)} if wid and wpem else None
+    ok, errors = verify_ledger_proof_bundle(
+        bundle, trusted_keys=trusted_keys, trusted_witnesses=trusted_witnesses
+    )
     return VerifyResult(ok=ok, errors=errors)
 
 

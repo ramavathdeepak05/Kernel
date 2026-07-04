@@ -112,6 +112,7 @@ def create_app(
     rate_limit: bool = True,
     mcp_server: "Any | None" = None,
     mcp_proxy: "Any | None" = None,
+    anchor_interval: float | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -169,6 +170,22 @@ def create_app(
         mcp_asgi, mcp_manager = build_streamable_http_app(_mcp, resolve_from_request=_resolve)
 
     @asynccontextmanager
+    # Kernels with an anchor witness wired — the periodic anchor loop cosigns their STHs (D3-2).
+    def _witness_kernels() -> list:
+        candidates = provider._distinct_kernels() if provider is not None else [kernel]
+        return [k for k in candidates if getattr(k, "witness", None) is not None]
+
+    async def _anchor_loop() -> None:
+        from core.ledger.anchor import anchor_all_tenants
+
+        while True:
+            await asyncio.sleep(anchor_interval)  # type: ignore[arg-type]
+            for k in _witness_kernels():
+                try:
+                    await asyncio.to_thread(anchor_all_tenants, k.engine._ledger, k.witness)
+                except Exception:  # noqa: BLE001 — a witness outage must not kill the loop
+                    _log.exception("periodic ledger anchor pass failed")
+
     async def lifespan(_app: FastAPI):
         # Initialise async resources (e.g. hydrate the durable policy store) before serving.
         target = provider if provider is not None else kernel
@@ -186,6 +203,11 @@ def create_app(
         # Startup hydration done → /readyz reports ready. Flipped back off during shutdown so a
         # draining instance fails readiness while still answering liveness.
         _app.state.ready = True
+        # Periodic ledger anchoring (D3-2): cosign each tenant's STH with the external witness on a
+        # cadence, so the witness observes the log's progression continuously (not only at export).
+        anchor_task = None
+        if anchor_interval and anchor_interval > 0 and _witness_kernels():
+            anchor_task = asyncio.create_task(_anchor_loop())
         try:
             if mcp_manager is not None:
                 # The Streamable-HTTP session manager owns the per-request task group; it must be
@@ -196,6 +218,12 @@ def create_app(
                 yield
         finally:
             _app.state.ready = False
+            if anchor_task is not None:
+                anchor_task.cancel()
+                try:
+                    await anchor_task
+                except asyncio.CancelledError:
+                    pass
             if mcp_proxy is not None:
                 # Close the shared downstream HTTP clients (keep-alive pool). Best-effort.
                 from delivery.mcp.downstream import aclose_shared_clients

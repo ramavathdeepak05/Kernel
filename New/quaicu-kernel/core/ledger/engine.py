@@ -263,6 +263,10 @@ class TrustLedger:
             raise KeyError(f"No STH for tenant={tenant}")
         return self._sths[tenant]
 
+    def tenants(self) -> list[TenantId]:
+        """Tenants that have at least one sealed entry (i.e. a current STH) — for periodic anchoring."""
+        return list(self._sths.keys())
+
     def get_inclusion_proof(
         self, tenant: TenantId, seq: int
     ) -> tuple[bytes, list[bytes]]:

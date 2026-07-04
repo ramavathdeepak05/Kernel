@@ -100,10 +100,13 @@ def build_saas_app(
     # Hosted MCP endpoint: an explicit param wins; otherwise build from the [mcp] config section
     # (BYO-downstream proxy). None → /mcp is not mounted.
     mcp_proxy = mcp_proxy or build_mcp_gateway(config)
+    # Periodic ledger anchoring (D3-2): [anchor] interval_seconds → cosign each STH on a cadence.
+    anchor_interval = float(config.get("anchor", {}).get("interval_seconds", 0) or 0) or None
     return create_app(
         provider=provider,
         mcp_server=mcp_server,
         mcp_proxy=mcp_proxy,
+        anchor_interval=anchor_interval,
         entitlement_store=store,
         usage_meter=build_usage_meter(config),  # per-tenant daily-quota + usage; shared Redis if configured
         account_engine=build_account_engine(config, store),  # self-serve signup ([account].enabled)

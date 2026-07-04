@@ -49,6 +49,7 @@ from core.policy import (
     PolicyStore,
 )
 from core.ports import HITLPort, IdentityPort
+from core.ports.anchor import AnchorPort
 from core.ports.consent import ConsentPort
 from core.types import (
     Action,
@@ -187,6 +188,9 @@ class Kernel:
     # Set when a durable ledger backend is wired ([adapters].ledger_store). Exposed so the kernel can
     # close its pool on shutdown; the TrustLedger writes through to it and hydrates from it on boot.
     ledger_repository: LedgerRepository | None = None
+    # An independent witness (AnchorPort) that cosigns the tenant's STH on export (D3-2). None → the
+    # ledger is not externally anchored (exports carry no cosignature).
+    witness: "AnchorPort | None" = None
     # Control-plane roles permitted to author/manage policies via the management API. Normalised to
     # the ``role:<name>`` convention. An actor needs at least one of these to use ``/v1/policies``.
     policy_admin_roles: tuple[str, ...] = ("role:policy_admin",)
@@ -440,6 +444,14 @@ class Kernel:
         signer = getattr(ledger, "_signer", None)
         public_key_pem = getattr(signer, "public_key_pem", None)
 
+        # Anchor the current STH with the independent witness (if wired) — a fork/rewind raises
+        # LedgerTamperError here (fail-closed: no bundle for a tampered log).
+        cosig = None
+        if self.witness is not None:
+            from core.ledger.anchor import anchor_current_sth
+
+            cosig = anchor_current_sth(ledger, self.witness, tenant)
+
         return build_ledger_proof_bundle(
             tenant_id=str(tenant),
             window_start=ws,
@@ -449,6 +461,7 @@ class Kernel:
             public_key_pem=public_key_pem,
             regulation_refs=regulation_refs,
             policy_versions=policy_versions,
+            witness_cosignature=cosig,
         )
 
     # ── Policy authoring (write-through primitives the management API wraps) ──────
@@ -579,6 +592,9 @@ class Kernel:
         # Optional AI Gateway for governed inference.
         gateway = cls._build_gateway(tenant, adapter_cfg, cfg) if "inference" in adapter_cfg else None
 
+        # Optional external anchor witness (D3-2) — cosigns the STH on export / periodic anchoring.
+        witness = cls._build_witness(adapter_cfg, cfg) if "witness" in adapter_cfg else None
+
         engine = LifecycleEngine(
             repository=repo,
             policy=policy,
@@ -598,8 +614,28 @@ class Kernel:
             policy_store=policy_store,
             policy_repository=policy_repository,
             ledger_repository=ledger_repository,
+            witness=witness,
             policy_admin_roles=policy_admin_roles,
         )
+
+    @staticmethod
+    def _build_witness(adapter_cfg: dict[str, Any], cfg: dict[str, Any]) -> "AnchorPort | None":
+        """Build the anchor witness from ``[adapters].witness`` + ``[witness]``.
+
+        Only ``http_witness`` is config-constructible (an out-of-process witness at ``base_url``, with
+        a shared ``token``). An in-process ``SoftwareWitness`` is wired programmatically (tests / a
+        sovereign single node), not from TOML.
+        """
+        name = adapter_cfg.get("witness")
+        if name != "http_witness":
+            raise ValueError(f"unknown witness adapter {name!r}; expected 'http_witness'")
+        wcfg = cfg.get("witness", {})
+        base_url = str(wcfg.get("base_url", "")).strip()
+        if not base_url:
+            raise ValueError("[witness] requires base_url for the http_witness adapter")
+        from adapters.ledger.http_witness import HttpWitness
+
+        return HttpWitness(base_url, str(wcfg.get("token", "")).strip() or None)
 
     @staticmethod
     def _build_hitl(adapter_cfg: dict[str, Any], cfg: dict[str, Any]) -> HITLPort:
@@ -898,6 +934,7 @@ class Kernel:
         policy_repository: PolicyRepository | None = None,
         ledger_repository: LedgerRepository | None = None,
         policy_admin_roles: tuple[str, ...] | None = None,
+        witness: "AnchorPort | None" = None,
         max_poll_attempts: int = 1,
     ) -> "Kernel":
         """Build a Kernel directly from collaborator instances (for tests and SDK demos)."""
@@ -922,6 +959,7 @@ class Kernel:
             policy_store=policy_store,
             policy_repository=policy_repository,
             ledger_repository=ledger_repository,
+            witness=witness,
             policy_admin_roles=(
                 _normalize_roles(policy_admin_roles)
                 if policy_admin_roles is not None

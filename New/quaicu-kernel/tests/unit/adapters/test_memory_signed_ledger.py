@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from core.regmap.export import verify_ledger_proof_bundle
+from core.regmap.export import trusted_keys_from_signer, verify_ledger_proof_bundle
 from delivery.sdk.kernel import Kernel
 
 _DEMO_CONFIG = Path(__file__).resolve().parents[3] / "examples" / "underwriting-demo" / "kernel.demo.toml"
@@ -33,7 +33,8 @@ async def test_sealed_action_export_verifies_offline() -> None:
         await draft(applicant="A. Sharma", amount=250_000)  # low-risk → allow → sealed
 
     bundle = _as_dict(kernel.export_ledger_proof(kernel.tenant))
-    ok, errors = verify_ledger_proof_bundle(bundle)
+    pin = trusted_keys_from_signer(kernel.engine._ledger._signer)  # type: ignore[attr-defined]
+    ok, errors = verify_ledger_proof_bundle(bundle, trusted_keys=pin)
 
     assert ok, errors
     assert bundle["inclusion_proofs"], "expected at least one sealed action"

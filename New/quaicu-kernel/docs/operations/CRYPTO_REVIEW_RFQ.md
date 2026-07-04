@@ -11,22 +11,35 @@ tree head (STH), so a regulator can independently verify the audit trail offline
 require third-party attestation of this component.
 
 ## 2. Scope of review
-Source: `core/ledger/` (Merkle tree, inclusion/consistency proofs, STH signing), the offline verifier
-`core/regmap/export.py`, and the two signer adapters `adapters/ledger/openbao.py` (Ed25519) and
-`adapters/ledger/gcp_kms.py` (**ECDSA P-256** — Cloud KMS has no Ed25519; this path is new and must be
-in scope). Commit/tag: **[TAG]**.
+Source: `core/ledger/` (Merkle tree, inclusion/consistency proofs, STH signing, anchor
+orchestration), the anchor port `core/ports/anchor.py`, the offline verifier
+`core/regmap/export.py`, the signer adapters `adapters/ledger/openbao.py` (Ed25519) and
+`adapters/ledger/{gcp_kms,aws_kms}.py` (**ECDSA P-256** — Cloud KMS has no Ed25519; these paths must
+be in scope), and the **witness subsystem** `adapters/ledger/{witness,http_witness,witness_store_postgres}.py`
++ `delivery/witness_app.py` (independent Ed25519 cosigner, D3-2). Commit/tag: **`k02-review-v1`**.
+The full design spec + threat model + file inventory is `docs/operations/K02_REVIEW_PACKAGE.md`.
 
 Specifically assess:
 1. **RFC 6962 conformance** — leaf/node hashing with 0x00/0x01 domain separation; inclusion and
-   consistency proof construction and verification; canonical serialization.
-2. **STH signing** — both schemes: Ed25519 (software/OpenBao) and ECDSA-P256-SHA256 (Cloud KMS). The
-   verifier dispatches on public-key type rather than a wire tag — confirm this can't be downgraded
-   or confused. Key never leaves the HSM (KMS/OpenBao).
+   consistency proof construction and verification, including the **proof-only §2.1.4 verifier**
+   (`verify_consistency_proof`, used by parties holding only STHs); canonical serialization.
+2. **STH signing** — both schemes: Ed25519 (software/OpenBao) and ECDSA-P256-SHA256 (GCP/AWS KMS).
+   The verifier dispatches on the type of the *pinned* public key rather than a wire tag — confirm
+   this can't be downgraded or confused. Key never leaves the HSM (KMS/OpenBao).
 3. **Append-only / tamper-evidence** — can any sequence of operations produce two valid STHs that
    are inconsistent? Replay/rollback resistance; per-tenant isolation of logs.
-4. **Proof export** — the signed evidence pack (`verify_ledger_proof_bundle`) verifies offline with no
-   kernel state; confirm there is no trust-the-server gap.
-5. **Implementation hygiene** — timing side channels, error handling (fail-closed), dependency risk.
+4. **Proof export + key pinning (D3-1)** — the signed evidence pack (`verify_ledger_proof_bundle`)
+   verifies offline with no kernel state, against a caller-pinned `{key_id → PEM}` trust anchor
+   (the bundle-embedded key is advisory only); confirm there is no trust-the-server gap and no way
+   for a forged bundle carrying its own keypair to pass.
+5. **Witness cosigning protocol (D3-2)** — the independent witness cosigns an STH only if a
+   consistency proof shows it extends the last STH it cosigned (durable, advance-only per-tenant
+   state). Confirm split-view / silent-rewind resistance; in particular, **can the empty-proof path
+   in `anchor_current_sth` (taken when the witness's last-seen size ≥ the presented size) be abused
+   to obtain a cosignature over a forked or rewound history?** Also: cosignature domain separation
+   (`quaicu.witness.v1` prefix) vs the STH signing message; witness state monotonicity across
+   restarts (migration 016 upsert guard).
+6. **Implementation hygiene** — timing side channels, error handling (fail-closed), dependency risk.
 
 ## 3. Deliverables
 - A written report (findings by severity, with reproduction), a remediation review of our fixes, and
@@ -47,7 +60,7 @@ This RFQ gates the regulated-enterprise launch and has the longest lead time in 
 commission it **first**. To turn this draft into an outbound RFQ:
 
 **Fill these before sending:**
-- [ ] `[TAG]` (§2) — pin to a specific release commit/tag so the firm reviews a frozen tree.
+- [x] `[TAG]` (§2) — pinned to **`k02-review-v1`** (D3-3 freeze; see `K02_REVIEW_PACKAGE.md`).
 - [ ] `[N]` weeks (§4) — proposed report timeline (typical 3–4 wk) and remediation re-review window.
 - [ ] Budget band (§4) — set an internal ceiling; a focused K·02 review is usually a few-week fixed-fee engagement.
 - [ ] NDA — attach your mutual NDA; most firms will counter-sign or supply their own.

@@ -81,6 +81,7 @@ mcp = [
 quaicu-kernel = "delivery.entrypoint:main"
 quaicu-kernel-saas = "delivery.entrypoint_saas:main"
 quaicu-kernel-mcp = "delivery.mcp.__main__:main"
+quaicu-kernel-witness = "delivery.entrypoint_witness:main"
 
 [tool.setuptools.packages.find]
 include = ["core*", "adapters*", "delivery*"]
