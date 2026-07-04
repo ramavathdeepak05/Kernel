@@ -21,6 +21,11 @@ class EntitlementRepository(Protocol):
         """Return every persisted plan. Called once at startup to hydrate the cache."""
         ...
 
+    async def get_plan(self, tenant: TenantId) -> CustomerPlan | None:
+        """Return one tenant's plan, or None. The cache-miss fallback (D4-1): a tenant provisioned
+        on another worker/instance resolves here before this worker's next re-hydrate."""
+        ...
+
     async def save_plan(self, plan: CustomerPlan) -> None:
         """Upsert a plan keyed by ``tenant_id`` (idempotent)."""
         ...

@@ -780,7 +780,15 @@ class Kernel:
         ``kernel.startup()``.
         """
         # TrustLedger-based signing adapters that accept a durable LedgerRepository kwarg.
-        _DURABLE_LEDGERS = {"openbao_ledger", "gcp_kms_ledger", "aws_kms_ledger"}
+        # memory_signed_ledger + a Postgres store = the real durable transparency log with a
+        # software (per-process, ephemeral) signer — for load tests / dev multi-worker runs where
+        # provisioning KMS/OpenBao is overkill. Production signing stays KMS/OpenBao (stable key).
+        _DURABLE_LEDGERS = {
+            "openbao_ledger",
+            "gcp_kms_ledger",
+            "aws_kms_ledger",
+            "memory_signed_ledger",
+        }
         name = adapter_cfg["ledger"]
         ledger_kwargs = cfg.get("ledger", {})
         repository: LedgerRepository | None = None

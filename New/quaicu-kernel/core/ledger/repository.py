@@ -24,8 +24,12 @@ class LedgerRepository(Protocol):
     """Durable store for sealed ledger entries and per-tenant Signed Tree Heads."""
 
     async def append_entry(self, entry: LedgerEntry) -> None:
-        """Persist one sealed entry. Idempotent on (tenant, ledger_seq) — re-appending the same
-        sealed entry must not duplicate or error."""
+        """Persist one sealed entry. The insert is the multi-worker linearization point.
+
+        Contract (D4-1): if a row already exists at (tenant, ledger_seq) with the SAME leaf hash,
+        this is an idempotent replay — succeed as a no-op. If it exists with a DIFFERENT leaf hash,
+        another worker won the sequence slot — raise `LedgerSequenceConflictError` so the caller
+        can rehydrate its stale tree and retry. Never silently drop a differing entry."""
         ...
 
     async def load_entries(self) -> list[LedgerEntry]:
@@ -35,8 +39,18 @@ class LedgerRepository(Protocol):
         stored leaf hashes on hydrate."""
         ...
 
+    async def load_tenant_entries(self, tenant: TenantId) -> list[LedgerEntry]:
+        """Return one tenant's entries ordered by ledger_seq (tenant-scoped read).
+
+        Used by `TrustLedger` to rehydrate a single tenant's tree after a sequence conflict
+        without reloading every tenant."""
+        ...
+
     async def save_sth(self, tenant: TenantId, sth: SignedTreeHead) -> None:
-        """Upsert the latest Signed Tree Head for `tenant` (one row per tenant)."""
+        """Upsert the latest Signed Tree Head for `tenant` (one row per tenant).
+
+        Contract (D4-1): advance-only — an incoming STH with a smaller tree_size than the stored
+        one must be skipped (a stale worker's late save can never regress the durable head)."""
         ...
 
     async def load_sths(self) -> dict[str, SignedTreeHead]:

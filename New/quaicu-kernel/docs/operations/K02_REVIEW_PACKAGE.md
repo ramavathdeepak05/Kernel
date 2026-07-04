@@ -4,7 +4,8 @@
 `CRYPTO_REVIEW_RFQ.md` (tracked as T-1). Companion to the operator-facing
 `LEDGER_TRUST_MODEL.md`. This document plus the pinned tag IS the frozen review surface.*
 
-> **FREEZE NOTICE.** As of tag **`k02-review-v1`**, changes to any file listed in §6
+> **FREEZE NOTICE.** As of tag **`k02-review-v2`** (supersedes `k02-review-v1`; delta in §8),
+> changes to any file listed in §6
 > (everything under `core/ledger/`, `core/ports/anchor.py`, `core/regmap/export.py`,
 > `adapters/ledger/`, `delivery/witness_app.py`) require explicit owner sign-off until the
 > T-1 review report + remediation re-review land. Bug fixes found *by* the review go through
@@ -93,7 +94,26 @@ encodings can contain NUL: `witness_id`/`tenant` are identifiers, size is decima
 root is hex, timestamp is ISO-8601). Unlike the STH, the witness signature **does** cover
 its timestamp, so a cosignature is a dated attestation "root R existed at size S at time T".
 
-### 2.5 Bundle wire format
+### 2.5 Multi-worker seal linearization (D4-1)
+
+Multiple workers/instances each hold an in-memory copy of a tenant's tree (the fast read path,
+ADR-0005) over ONE durable log. The **durable insert is the linearization point**:
+
+- A seal succeeds iff its `INSERT` at `(tenant_id, ledger_seq)` actually inserted a row.
+- A conflicting insert (same slot, **different** leaf hash) raises a typed
+  `LedgerSequenceConflictError`; the losing worker rolls back its speculative in-memory append,
+  **rehydrates that tenant's tree from the durable log**, recomputes position + root, re-signs,
+  and retries (bounded at 3, then fail-closed HALT — F-03). An identical-leaf replay is an
+  idempotent success.
+- The durable STH upsert is **advance-only** (`WHERE stored.tree_size <= EXCLUDED.tree_size`), so
+  a stale worker's late save can never regress the head.
+
+Invariant: every worker's in-memory tree is always a *consistent prefix* of the durable log —
+proofs served by a lagging worker are RFC 6962-consistent with the head; a fork is structurally
+unreachable through this path. (Pre-D4-1 the insert was `ON CONFLICT DO NOTHING` with no status
+check — a racing worker's seal was silently dropped while it reported success; threat row 12.)
+
+### 2.6 Bundle wire format
 
 `core/regmap/export.py::LedgerProofBundle.to_dict()` — `format_version =
 "quaicu.ledger-proof/1.0"`. JSON; all hashes/signatures hex-encoded (`*_hex`); the STH block
@@ -180,13 +200,14 @@ Witness key pinned once via `GET /v1/ledger/witness-key`.
 | 9 | Second-preimage on the tree | RFC 6962 0x00/0x01 domain separation | `test_merkle.py::test_leaf_hash_uses_0x00_domain_separator`, `test_internal_hash_uses_0x01_domain_separator` |
 | 10 | Cross-protocol signature reuse (STH vs cosignature) | Disjoint signing messages: STH = raw `size‖root` under the *ledger* key; cosignature = `quaicu.witness.v1`-prefixed under the *witness* key (different keys, different formats) | reviewer to confirm |
 | 11 | Cross-tenant proof replay | Per-tenant trees/tables (F-07); tenant in the cosignature signing message | `test_engine.py` isolation cases |
+| 12 | Concurrent multi-worker sealing → lost entries / STH-vs-entries fork | Optimistic seal linearization (§2.5): PK insert arbitrates; loser rehydrates + retries; advance-only STH | `test_concurrent_seal.py` (no-loss interleave, STH == recomputed root, stale-STH rejection, exhaustion → HALT, benign replay) |
 
 Out of scope for the mechanism (documented honestly): a kernel + witness that **collude**
 from genesis; compromise of the verifier's own pinned-key records; availability of the
 witness (an outage blocks anchored exports — fail-closed by design, tracked as an ops
 concern, not a soundness one).
 
-## 6. Review surface — file inventory (at tag `k02-review-v1`)
+## 6. Review surface — file inventory (at tag `k02-review-v2`)
 
 | Area | Files |
 |---|---|
@@ -197,7 +218,7 @@ concern, not a soundness one).
 | Witness | `adapters/ledger/witness.py`, `adapters/ledger/witness_store_postgres.py` (+ migration `016_create_witness_state.py`), `adapters/ledger/http_witness.py`, `delivery/witness_app.py`, `delivery/entrypoint_witness.py` |
 | Offline verifier + bundle | `core/regmap/export.py` |
 | Persistence | `adapters/ledger/postgres.py` (append-only, per-tenant), `adapters/ledger/memory*.py` (tests) |
-| Tests | `tests/unit/ledger/` (merkle, engine, consistency_proof, witness, witness_state, witness_service, persistence, nonblocking_seal), `tests/unit/regmap/test_export.py` |
+| Tests | `tests/unit/ledger/` (merkle, engine, consistency_proof, witness, witness_state, witness_service, persistence, nonblocking_seal, **concurrent_seal**), `tests/unit/regmap/test_export.py` |
 
 Key-custody surfaces (`openbao.py`, `gcp_kms.py`, `aws_kms.py`) are in scope per RFQ §2.
 
@@ -211,3 +232,28 @@ python -m pytest tests/unit -q                              # full unit suite (~
 
 All crypto uses `cryptography` (pyca) + `hashlib.sha256`; there is no hand-rolled primitive —
 the review target is the *protocol composition and its fail-closed verifier*, not cipher code.
+
+## 8. Changes since `k02-review-v1` (why the freeze was re-tagged)
+
+The D4-1 shared-plane hardening surfaced a **multi-worker sealing defect** in the v1 surface: the
+durable entry insert was `ON CONFLICT DO NOTHING` with no status check, so with `--workers > 1`
+two workers racing the same `(tenant, ledger_seq)` slot silently dropped one seal while both
+reported success, and the last-writer-wins STH upsert could persist an STH inconsistent with the
+persisted entries (an accidental same-size fork — exactly what the D3-2 witness flags). Since the
+T-1 RFQ was unsent, the owner elected to fix and re-freeze rather than hand reviewers a known-bad
+concurrency story.
+
+Delta (everything else in §6 is byte-identical to v1):
+
+| File | Change |
+|---|---|
+| `core/errors.py` | new `LedgerSequenceConflictError(LedgerPersistenceError)` |
+| `core/ledger/engine.py` | `seal` = bounded optimistic retry: conflict → `pop_last` → `_rehydrate_tenant` (new) → retry; exhaustion → HALT |
+| `core/ledger/repository.py` | conflict + advance-only contracts documented; new `load_tenant_entries(tenant)` |
+| `adapters/ledger/postgres.py` | insert status-tag conflict detection + benign-replay check; advance-only STH upsert; `load_tenant_entries` |
+| `adapters/ledger/memory_repo.py` | mirrors the same contract (drives the unit suite) |
+| `tests/unit/ledger/test_concurrent_seal.py` | new — two ledgers over one repository simulate two workers |
+
+No change to hashing, proofs, signing messages, the witness protocol, or the offline verifier —
+§2.1–2.4 and §3 are exactly the v1 semantics. §2.5 (the linearization invariant) and threat row 12
+are the new review material.

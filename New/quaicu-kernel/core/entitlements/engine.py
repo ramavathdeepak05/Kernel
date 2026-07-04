@@ -35,6 +35,15 @@ class EntitlementEngine:
 
     # ── Resolution ───────────────────────────────────────────────────────────────
 
+    async def ensure_loaded(self, tenant: TenantId) -> None:
+        """Pull the tenant's plan into the cache if missing (cross-worker miss, D4-1).
+
+        Call from async edges (API deps, MCP auth) before the sync `resolve_plan` path so a tenant
+        provisioned on another worker resolves immediately instead of failing until re-hydrate.
+        """
+        if self._store.get(tenant) is None:
+            await self._store.find_plan(tenant)
+
     def resolve_plan(self, tenant: TenantId) -> CustomerPlan:
         """Return the tenant's ACTIVE plan, or raise. Fail-closed on missing/inactive plans."""
         plan = self._store.get(tenant)

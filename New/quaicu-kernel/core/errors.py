@@ -178,6 +178,20 @@ class LedgerPersistenceError(LedgerError):
     code = "LEDGER_PERSISTENCE_ERROR"
 
 
+class LedgerSequenceConflictError(LedgerPersistenceError):
+    """Another writer already persisted a DIFFERENT entry at this (tenant, ledger_seq).
+
+    The durable insert is the linearization point for multi-worker sealing: this error means the
+    caller's in-memory view of the tenant's tree is stale (a sibling worker won the sequence slot).
+    `TrustLedger.seal` handles it by rolling back its in-memory append, rehydrating the tenant's
+    tree from the durable log, and retrying; if unhandled it degrades to the fail-closed
+    `LedgerPersistenceError` path (HALT). A replay of the IDENTICAL entry (same leaf hash) is NOT a
+    conflict — adapters must treat that as an idempotent no-op success.
+    """
+
+    code = "LEDGER_SEQUENCE_CONFLICT"
+
+
 class LedgerProofError(LedgerError):
     """Merkle inclusion/consistency proof verification failed."""
 

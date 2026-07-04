@@ -88,6 +88,66 @@ VITE_API_BASE="$URL" npx wrangler pages deploy dist
 Set `VITE_OIDC_ISSUER` / `VITE_OIDC_CLIENT_ID` for OIDC login (the kernel's `audience` must equal the
 client id), and add the console origin to the API's CORS allow-list (`create_app(cors_origins=[…])`).
 
+## 8. Rolling deploys — zero-downtime runbook (D4-1)
+
+A Cloud Run deploy creates a **new revision** and shifts traffic when it is "ready". Two things make
+that genuinely zero-downtime here:
+
+1. **Readiness-gated rollout.** The Terraform module sets a `startup_probe` on **`/readyz`**, which
+   only returns 200 after the app's lifespan hydration (policies + ledger trees + accounts) is done.
+   A new revision therefore takes no traffic while hydrating; a revision that can't become ready is
+   marked failed and the old revision keeps serving. (A plain `gcloud run deploy` without the probe
+   gates only on "container listens on $PORT" — traffic can arrive mid-hydration; prefer the module,
+   or add `--startup-probe` flags.)
+2. **Graceful drain on the way out.** On SIGTERM the app flips `/readyz` to 503 (so the balancer
+   stops routing to it), cancels the anchor/entitlement background tasks, closes MCP clients and DB
+   pools, and lets in-flight requests finish (uvicorn default behavior). `/health` (liveness) keeps
+   passing during the drain, so the instance isn't killed early.
+
+Rolling deploy + verification:
+
+```bash
+# 1. Deploy the new image (new revision; traffic auto-shifts once the startup probe passes):
+gcloud run deploy quaicu-kernel --image "$IMAGE" --region "$REGION"
+
+# 2. In a second terminal DURING the rollout, prove no dropped requests:
+while true; do curl -s -o /dev/null -w '%{http_code}\n' "$URL/v1/me/entitlements" \
+  -H "Authorization: Bearer $QK_KEY"; sleep 0.5; done   # expect an unbroken run of 200s
+
+# 3. Confirm the new revision serves and the old one drained:
+gcloud run revisions list --service quaicu-kernel --region "$REGION"
+
+# 4. Roll back instantly if needed (traffic pinning, no rebuild):
+gcloud run services update-traffic quaicu-kernel --region "$REGION" \
+  --to-revisions <previous-revision>=100
+```
+
+**Database-migration ordering** (matters when a release carries a migration): deploy the new image
+FIRST, then run `alembic upgrade head`. D4-1's migration 017 (RLS on 6 more tables) specifically
+requires the GUC-setting adapter build to be live before the migration flips FORCE RLS on, or reads
+return empty. Additive migrations are generally deploy-then-migrate safe here because adapters set
+their tenant GUC unconditionally (harmless pre-RLS).
+
+## Multi-worker semantics (D4-1) — what's exact vs approximate
+
+With `KERNEL_WORKERS > 1` and/or multiple instances, the shared plane is **correct** on everything
+durable: actions (idempotency), the ledger (optimistic seal linearization — concurrent seals never
+lose entries or fork the log), approvals, accounts/API keys (durable fallback + ≤60s revocation
+TTL, `QUAICU_APIKEY_TTL`), entitlements (durable fallback + periodic re-read,
+`QUAICU_ENTITLEMENTS_REFRESH`, default 60s — a tier flip propagates within that window).
+
+Approximate by design (per-process counters, documented trade-off):
+- **Per-minute rate limit** (`rate_limit_per_min`): enforced per worker → effective ceiling ≈
+  configured × workers × instances. It is a coarse DoS guard, not billing; size the configured
+  value accordingly.
+- **AI-gateway token budget** (`QUAICU_AI_DEFAULT_MAX_TOKENS`): tracked per process.
+- **Daily action quota** (`max_actions_per_day`): per-process **unless** `REDIS_URL` /
+  `[metering].redis_url` is set (Memorystore) — then counts are exact across all workers/instances.
+  The Terraform module provisions this opt-in via `enable_redis_metering = true`.
+
+The periodic ledger **anchor loop** (D3-2, `[anchor] interval_seconds`) elects a single runner per
+pass via a Postgres advisory lock, so N workers do not multiply witness cosign requests.
+
 ## Notes
 - **Payments (BUSINESS):** add a `[billing.stripe]` / `[billing.razorpay]` section to
   `kernel.saas.toml` + the webhook endpoint; see [GO_LIVE_SETUP](GO_LIVE_SETUP.md) §4 (same dir).

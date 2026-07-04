@@ -2,9 +2,11 @@
 
 Implements `WrappedDekStore` (adapters/erasure/gcp_kms) on psycopg2, mirroring
 `adapters/account/postgres.PostgresAccountRepository`. Synchronous: erasure/provisioning is off the hot
-path. Table `quaicu_shred_keys` (migration 012) is a control-plane registry (not under RLS — the keyring
-loads by (tenant, subject) across tenants). Only KMS-**wrapped** DEKs are stored — the plaintext DEK is
-never persisted; ``destroy`` nulls the wrapped blob and sets the tombstone so the subject can't resurrect.
+path. Table `quaicu_shred_keys` (migration 012) is under FORCE RLS since migration 017 (D4-1): the
+(tenant, subject)-keyed operations set the ``app.current_tenant`` GUC to the ref's tenant; only the
+by-key_id ``get`` uses the ``'*'`` read-only sentinel (a key id precedes tenant knowledge). Only
+KMS-**wrapped** DEKs are stored — the plaintext DEK is never persisted; ``destroy`` nulls the wrapped
+blob and sets the tombstone so the subject can't resurrect.
 """
 
 from __future__ import annotations
@@ -54,11 +56,14 @@ class PostgresWrappedDekStore:
 
         return psycopg2.connect(self._dsn)
 
-    def _run(self, fn: Callable[[Any], Any], op: str) -> Any:
+    def _run(self, fn: Callable[[Any], Any], op: str, *, tenant: str = "*") -> Any:
+        """One transaction with the RLS tenant GUC set (migration 017): the ref's tenant for
+        (tenant, subject)-keyed operations, the '*' read-only sentinel for the by-key_id read."""
         try:
             conn = self._connect()
             try:
                 with conn.cursor() as cur:
+                    cur.execute("SELECT set_config('app.current_tenant', %s, true)", (tenant,))
                     result = fn(cur)
                 conn.commit()
                 return result
@@ -75,7 +80,7 @@ class PostgresWrappedDekStore:
             row = cur.fetchone()
             return row[0] if row else None
 
-        return self._run(_q, "key_id_for")
+        return self._run(_q, "key_id_for", tenant=str(ref[0]))
 
     def get(self, key_id: str) -> bytes | None:
         def _q(cur: Any) -> bytes | None:
@@ -86,7 +91,11 @@ class PostgresWrappedDekStore:
         return self._run(_q, "get")
 
     def put(self, ref: SubjectRef, key_id: str, wrapped: bytes) -> None:
-        self._run(lambda cur: cur.execute(_PUT_SQL, (ref[0], ref[1], key_id, wrapped)), "put")
+        self._run(
+            lambda cur: cur.execute(_PUT_SQL, (ref[0], ref[1], key_id, wrapped)),
+            "put",
+            tenant=str(ref[0]),
+        )
 
     def delete(self, ref: SubjectRef) -> str | None:
         def _d(cur: Any) -> str | None:
@@ -94,10 +103,14 @@ class PostgresWrappedDekStore:
             row = cur.fetchone()
             return row[0] if row else None
 
-        return self._run(_d, "delete")
+        return self._run(_d, "delete", tenant=str(ref[0]))
 
     def tombstone(self, ref: SubjectRef) -> None:
-        self._run(lambda cur: cur.execute(_TOMBSTONE_SQL, (ref[0], ref[1])), "tombstone")
+        self._run(
+            lambda cur: cur.execute(_TOMBSTONE_SQL, (ref[0], ref[1])),
+            "tombstone",
+            tenant=str(ref[0]),
+        )
 
     def is_tombstoned(self, ref: SubjectRef) -> bool:
         def _q(cur: Any) -> bool:
@@ -105,4 +118,4 @@ class PostgresWrappedDekStore:
             row = cur.fetchone()
             return bool(row[0]) if row else False
 
-        return self._run(_q, "is_tombstoned")
+        return self._run(_q, "is_tombstoned", tenant=str(ref[0]))

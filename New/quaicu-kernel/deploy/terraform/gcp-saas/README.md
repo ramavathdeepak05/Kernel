@@ -18,6 +18,13 @@ service: STARTER free + BUSINESS paid). It codifies the previously hand-run depl
   `ACCOUNT_DSN`, `QUAICU_EDGE_SECRET`, and (optionally) `RAZORPAY_KEY_ID/SECRET`.
 - **Cloud Run v2** shared-plane service (`KERNEL_APP=delivery.entrypoint_saas:app`), wired to the
   secrets + the Cloud SQL connector socket, public-invoker by default (behind the Cloudflare Worker).
+  Production-shaped since D4-1: CPU/memory limits + `startup_cpu_boost`, per-instance request
+  `concurrency` (autoscaling signal, pairs with `kernel_workers`), a **startup probe on `/readyz`**
+  (a new revision receives traffic only after lifespan hydration completes → zero-downtime rolling
+  deploys) and a **liveness probe on `/health`**.
+- **Optional Memorystore Redis** (`enable_redis_metering = true`, requires the private-egress
+  connector): injects `REDIS_URL` so daily usage quotas count exactly across workers/instances.
+  Default off = per-process meter (approximate at scale-out).
 
 ## Usage
 ```bash

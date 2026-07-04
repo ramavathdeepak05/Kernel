@@ -169,23 +169,44 @@ def create_app(
         )
         mcp_asgi, mcp_manager = build_streamable_http_app(_mcp, resolve_from_request=_resolve)
 
-    @asynccontextmanager
     # Kernels with an anchor witness wired — the periodic anchor loop cosigns their STHs (D3-2).
+    # (D4-1 fix: a stray @asynccontextmanager previously decorated THIS helper — meant for
+    # `lifespan` below — making it return a context manager and killing the loop's iteration.)
     def _witness_kernels() -> list:
         candidates = provider._distinct_kernels() if provider is not None else [kernel]
         return [k for k in candidates if getattr(k, "witness", None) is not None]
 
     async def _anchor_loop() -> None:
         from core.ledger.anchor import anchor_all_tenants
+        from delivery.api.leader import ANCHOR_LOCK_NAME, ledger_dsn_of, try_advisory_gate
 
         while True:
             await asyncio.sleep(anchor_interval)  # type: ignore[arg-type]
             for k in _witness_kernels():
                 try:
-                    await asyncio.to_thread(anchor_all_tenants, k.engine._ledger, k.witness)
+                    # Single-runner gate (D4-1): with --workers N every worker runs this loop; a
+                    # Postgres advisory lock elects one runner per pass so the witness sees one
+                    # cosign request per cadence, not N.
+                    async with try_advisory_gate(ledger_dsn_of(k), ANCHOR_LOCK_NAME) as won:
+                        if not won:
+                            continue
+                        await asyncio.to_thread(anchor_all_tenants, k.engine._ledger, k.witness)
                 except Exception:  # noqa: BLE001 — a witness outage must not kill the loop
                     _log.exception("periodic ledger anchor pass failed")
 
+    # Cross-worker entitlement freshness (D4-1): re-read the durable plans on a cadence so a tier
+    # flip (billing webhook / admin) applied on another worker propagates here within the interval.
+    _entitlement_refresh = float(os.getenv("QUAICU_ENTITLEMENTS_REFRESH", "60"))
+
+    async def _entitlement_refresh_loop() -> None:
+        while True:
+            await asyncio.sleep(_entitlement_refresh)
+            try:
+                await entitlement_store.hydrate()  # type: ignore[union-attr]
+            except Exception:  # noqa: BLE001 — a transient store fault must not kill the loop
+                _log.exception("periodic entitlement re-hydrate failed")
+
+    @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Initialise async resources (e.g. hydrate the durable policy store) before serving.
         target = provider if provider is not None else kernel
@@ -208,6 +229,14 @@ def create_app(
         anchor_task = None
         if anchor_interval and anchor_interval > 0 and _witness_kernels():
             anchor_task = asyncio.create_task(_anchor_loop())
+        # Periodic entitlement re-hydrate (D4-1) — only meaningful with a durable repository.
+        entitlement_task = None
+        if (
+            entitlement_store is not None
+            and getattr(entitlement_store, "_repository", None) is not None
+            and _entitlement_refresh > 0
+        ):
+            entitlement_task = asyncio.create_task(_entitlement_refresh_loop())
         try:
             if mcp_manager is not None:
                 # The Streamable-HTTP session manager owns the per-request task group; it must be
@@ -218,12 +247,13 @@ def create_app(
                 yield
         finally:
             _app.state.ready = False
-            if anchor_task is not None:
-                anchor_task.cancel()
-                try:
-                    await anchor_task
-                except asyncio.CancelledError:
-                    pass
+            for task in (anchor_task, entitlement_task):
+                if task is not None:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
             if mcp_proxy is not None:
                 # Close the shared downstream HTTP clients (keep-alive pool). Best-effort.
                 from delivery.mcp.downstream import aclose_shared_clients

@@ -16,7 +16,8 @@ orchestration), the anchor port `core/ports/anchor.py`, the offline verifier
 `core/regmap/export.py`, the signer adapters `adapters/ledger/openbao.py` (Ed25519) and
 `adapters/ledger/{gcp_kms,aws_kms}.py` (**ECDSA P-256** — Cloud KMS has no Ed25519; these paths must
 be in scope), and the **witness subsystem** `adapters/ledger/{witness,http_witness,witness_store_postgres}.py`
-+ `delivery/witness_app.py` (independent Ed25519 cosigner, D3-2). Commit/tag: **`k02-review-v1`**.
++ `delivery/witness_app.py` (independent Ed25519 cosigner, D3-2). Commit/tag: **`k02-review-v2`**
+(v1 + the D4-1 multi-worker seal-linearization fix — delta in K02_REVIEW_PACKAGE.md §8).
 The full design spec + threat model + file inventory is `docs/operations/K02_REVIEW_PACKAGE.md`.
 
 Specifically assess:
@@ -60,7 +61,7 @@ This RFQ gates the regulated-enterprise launch and has the longest lead time in 
 commission it **first**. To turn this draft into an outbound RFQ:
 
 **Fill these before sending:**
-- [x] `[TAG]` (§2) — pinned to **`k02-review-v1`** (D3-3 freeze; see `K02_REVIEW_PACKAGE.md`).
+- [x] `[TAG]` (§2) — pinned to **`k02-review-v2`** (D3-3 freeze, re-tagged after the D4-1 seal-linearization fix; see `K02_REVIEW_PACKAGE.md` §8).
 - [ ] `[N]` weeks (§4) — proposed report timeline (typical 3–4 wk) and remediation re-review window.
 - [ ] Budget band (§4) — set an internal ceiling; a focused K·02 review is usually a few-week fixed-fee engagement.
 - [ ] NDA — attach your mutual NDA; most firms will counter-sign or supply their own.

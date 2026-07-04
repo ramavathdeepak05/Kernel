@@ -804,7 +804,7 @@ class AccountEngine:
         """
         import dataclasses
 
-        existing = self._accounts.get_api_key(key_id)
+        existing = self._accounts.find_api_key(key_id)
         if existing is None or (tenant is not None and str(existing.tenant_id) != str(tenant)):
             raise ApiKeyInvalidError(
                 f"No API key {key_id!r} to revoke.", detail={"key_id": key_id}
@@ -822,7 +822,9 @@ class AccountEngine:
             raise ApiKeyInvalidError("Malformed API key (expected 'qk_<id>_<secret>').")
 
         _, key_id, secret = parts
-        record = self._accounts.get_api_key(key_id)
+        # Authoritative lookups (cache fast-path + durable fallback + TTL) so a key minted or
+        # revoked on another worker/instance resolves correctly here too (D4-1).
+        record = self._accounts.find_api_key(key_id)
         if record is None or record.revoked:
             raise ApiKeyInvalidError(
                 "API key is unknown or revoked.", detail={"key_id": key_id}
@@ -830,7 +832,7 @@ class AccountEngine:
         if not hmac.compare_digest(record.hashed_secret, self._hash_secret(secret)):
             raise ApiKeyInvalidError("API key secret does not match.", detail={"key_id": key_id})
 
-        account = self._accounts.get_account_by_tenant(record.tenant_id)
+        account = self._accounts.find_account_by_tenant(record.tenant_id)
         if account is None:
             raise ApiKeyInvalidError(
                 "API key has no owning account.", detail={"key_id": key_id}

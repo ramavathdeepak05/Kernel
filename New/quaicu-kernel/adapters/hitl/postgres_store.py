@@ -11,11 +11,12 @@ operations happen on the gate (a ``require_approval`` action) and on approvals l
 frequency, not the per-action hot path — so the blocking call is acceptable, matching the sync
 ``PostgresAccountRepository`` precedent.
 
-Like ``quaicu_accounts``, this is a **control-plane** table with no RLS: ``list_pending`` /
-``pending_count`` are intentionally cross-tenant (the dashboard queue-depth + the operator queue), and
-**tenant isolation is enforced at the route** — ``delivery/api/routes/approvals.py`` filters the list by
-the request tenant and rejects deciding another tenant's approval (403). This mirrors the in-memory
-store's existing cross-tenant-then-filter semantics exactly.
+Since migration 017 (D4-1) ``quaicu_approvals`` is under FORCE RLS, so every operation sets the
+``app.current_tenant`` GUC for its transaction: writes use the record's tenant; the by-handle /
+by-action reads and the queue reads use the ``'*'`` read-only sentinel (a handle id precedes tenant
+knowledge, and ``list_pending`` / ``pending_count`` are intentionally cross-tenant for the operator
+queue — the route still filters by the request tenant and rejects deciding another tenant's
+approval with 403, exactly as before; the sentinel cannot write).
 """
 
 from __future__ import annotations
@@ -94,10 +95,13 @@ class PostgresApprovalStore:
 
         return psycopg2.connect(self._dsn)
 
-    def _run(self, fn: Callable[[Any], Any]) -> Any:
+    def _run(self, fn: Callable[[Any], Any], *, tenant: str = "*") -> Any:
+        """One transaction with the RLS tenant GUC set (migration 017): owning tenant for writes,
+        the '*' read-only sentinel for by-handle / cross-tenant queue reads."""
         conn = self._connect()
         try:
             with conn.cursor() as cur:
+                cur.execute("SELECT set_config('app.current_tenant', %s, true)", (tenant,))
                 result = fn(cur)
             conn.commit()
             return result
@@ -107,7 +111,9 @@ class PostgresApprovalStore:
     # ── ApprovalStore surface ──────────────────────────────────────────────────
 
     def put(self, record: ApprovalRecord) -> None:
-        self._run(lambda cur: cur.execute(_INSERT_SQL, _params(record)))
+        self._run(
+            lambda cur: cur.execute(_INSERT_SQL, _params(record)), tenant=str(record.tenant)
+        )
 
     def get(self, handle_id: str) -> ApprovalRecord | None:
         def _q(cur: Any) -> ApprovalRecord | None:
@@ -132,7 +138,7 @@ class PostgresApprovalStore:
             if cur.rowcount == 0:
                 raise KeyError(f"Handle {record.handle_id!r} not in store.")
 
-        self._run(_u)
+        self._run(_u, tenant=str(record.tenant))
 
     def get_by_action(self, action_id: ActionId) -> ApprovalRecord | None:
         def _q(cur: Any) -> ApprovalRecord | None:

@@ -19,6 +19,7 @@ only to pick the kernel; this layer additionally proves the *caller* (via the ke
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -81,7 +82,11 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
         if presented is None:
             return _unauth("Missing API key", "API_KEY_REQUIRED")
         try:
-            principal: AuthenticatedPrincipal = self._accounts.resolve_principal(presented)
+            # Off the event loop: the authoritative key lookup may fall back to the durable store
+            # (a blocking psycopg2 read) when the key was minted on another worker (D4-1).
+            principal: AuthenticatedPrincipal = await asyncio.to_thread(
+                self._accounts.resolve_principal, presented
+            )
         except ApiKeyInvalidError as exc:
             return _unauth(str(exc), exc.code)
 
@@ -97,6 +102,16 @@ class ApiKeyAuthMiddleware(BaseHTTPMiddleware):
                     "detail": {"key_tenant": str(principal.tenant_id), "request_tenant": routing_tenant},
                 },
             )
+
+        # Cross-worker plan visibility (D4-1): a tenant provisioned on another worker isn't in this
+        # worker's entitlement cache yet — pull it in before the sync tier-resolution path runs.
+        # Best-effort: on a store fault the downstream resolve_plan still fails closed.
+        provider = getattr(request.app.state, "provider", None)
+        if provider is not None:
+            try:
+                await provider.entitlements.ensure_loaded(principal.tenant_id)
+            except Exception:  # noqa: BLE001 — resolve_plan downstream stays fail-closed
+                pass
 
         request.state.principal = principal
         return await call_next(request)

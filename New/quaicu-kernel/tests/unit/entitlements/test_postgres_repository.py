@@ -25,6 +25,12 @@ def _fake_pool(conn: AsyncMock) -> MagicMock:
     acquire_cm.__aenter__ = AsyncMock(return_value=conn)
     acquire_cm.__aexit__ = AsyncMock(return_value=False)
     pool.acquire = MagicMock(return_value=acquire_cm)
+    # conn.transaction() is a SYNC call returning an async CM (real asyncpg semantics) — the
+    # adapter wraps every op in a transaction so the RLS GUC (set_config) is transaction-local.
+    txn_cm = MagicMock()
+    txn_cm.__aenter__ = AsyncMock(return_value=None)
+    txn_cm.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction = MagicMock(return_value=txn_cm)
     return pool
 
 
@@ -83,7 +89,8 @@ async def test_save_plan_executes_upsert() -> None:
     repo._pool = _fake_pool(conn)
 
     await repo.save_plan(_plan())
-    conn.execute.assert_awaited_once()
+    # Two awaits: the RLS set_config, then the upsert (await_args = the last call).
+    assert conn.execute.await_count == 2
     args = conn.execute.await_args.args
     # args[0] is the SQL; $1.. → tenant_id, tier, status, created_at, updated_at, provider, ref, qo
     assert args[1] == "acme"

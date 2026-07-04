@@ -36,4 +36,7 @@ def main() -> None:
 
     host = os.getenv("KERNEL_HOST", "0.0.0.0")
     port = int(os.getenv("KERNEL_PORT", "7000"))
-    uvicorn.run("delivery.entrypoint_saas:app", host=host, port=port, workers=1)
+    # KERNEL_WORKERS mirrors the Docker CMD: the shared plane is all-durable (D0-5/D4-1), so
+    # horizontal workers are safe; the in-memory dev profile should keep the default of 1.
+    workers = int(os.getenv("KERNEL_WORKERS", "1"))
+    uvicorn.run("delivery.entrypoint_saas:app", host=host, port=port, workers=workers)

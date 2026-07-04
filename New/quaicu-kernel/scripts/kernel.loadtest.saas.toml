@@ -1,0 +1,13 @@
+# Load-test plane descriptor (D4-1): the production build_saas_app entrypoint over the load-test
+# shared kernel. Durable entitlements + accounts on the TEST database; no signup fee, no email
+# sender (so the legacy one-step POST /v1/signup provisions instantly and returns an API key).
+
+[plane]
+config = "scripts/kernel.loadtest.shared.toml"
+
+[entitlements]
+dsn = "${LOADTEST_DSN}"
+
+[account]
+enabled = true
+dsn = "${LOADTEST_DSN}"
