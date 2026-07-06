@@ -16,3 +16,7 @@ venv/
 # Local config & secrets (never commit — injected from OpenBao at runtime)
 *.local.toml
 .env
+
+# Load-test / rollout runtime artifacts (local only)
+loadtest-server.*.log
+rollout-probe*.log

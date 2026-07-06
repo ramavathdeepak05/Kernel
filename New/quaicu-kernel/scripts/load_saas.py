@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+# Default p99 gate assumes a nearby database. Override with --p99-ms for constrained infra (e.g.
+# a db-f1-micro reached through the Cloud SQL Auth Proxy adds ~100ms+ per round trip).
 P99_TARGET_MS = 750.0
 
 
@@ -58,40 +60,53 @@ class TenantStats:
     other_errors: int = 0
 
 
-async def _provision(client: httpx.AsyncClient, tag: str) -> TenantStats:
-    """One-step signup → provisioned tenant + API key (the production self-serve path)."""
-    r = await client.post(
-        "/v1/signup",
-        json={"email": f"load-{tag}-{uuid.uuid4().hex[:8]}@loadtest.quaicu.dev", "name": f"load-{tag}"},
-    )
-    r.raise_for_status()
-    body = r.json()
-    stats = TenantStats(tenant_id=body["tenant_id"], api_key=body["api_key"])
-    print(f"provisioned tenant {stats.tenant_id}")
-    return stats
+async def _provision(dsn: str, tag: str) -> TenantStats:
+    """Provision a tenant + API key + plan straight into the DURABLE stores (no HTTP).
 
-
-async def _unthrottle(dsn: str, tenant_id: str) -> None:
-    """Lift the fresh tenant's tier rate/day quotas so the load hits the seal path, not the limiter.
-
-    Written straight to the durable plan store (quota_overrides = unbounded); every worker picks it
-    up via the D4-1 periodic entitlement re-hydrate (QUAICU_ENTITLEMENTS_REFRESH) — so this step
-    also exercises cross-worker tier-flip propagation.
+    This is deliberately out-of-band: the server's workers have never seen this tenant, so the very
+    first authenticated request exercises the D4-1 cross-worker fallbacks end-to-end (find_api_key →
+    find_account_by_tenant → entitlement ensure_loaded) exactly as if another instance had minted
+    the credentials. Requires QUAICU_API_KEY_PEPPER to match the server's. The plan carries
+    unbounded rate/day overrides so the load measures the seal path, not the tier limiter.
+    (The HTTP signup path is OTP-gated on any build_saas_app deployment — a log-only email sender
+    is always wired — so it is not scriptable here.)
     """
-    import asyncpg
+    from datetime import datetime, timezone
 
-    conn = await asyncpg.connect(dsn)
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from adapters.account.postgres import PostgresAccountRepository
+    from adapters.entitlements.postgres import PostgresEntitlementRepository
+    from core.account.engine import AccountEngine
+    from core.account.store import AccountStore
+    from core.entitlements.model import CustomerPlan, FeatureTier, PlanStatus
+    from core.entitlements.store import EntitlementStore
+
+    engine = AccountEngine(
+        AccountStore(repository=PostgresAccountRepository(dsn)), EntitlementStore()
+    )
+    account, api_key = await asyncio.to_thread(
+        engine.signup,
+        email=f"load-{tag}-{uuid.uuid4().hex[:8]}@loadtest.quaicu.dev",
+        name=f"load-{tag}",
+    )
+    now = datetime.now(tz=timezone.utc)
+    ents = PostgresEntitlementRepository(dsn)
     try:
-        async with conn.transaction():
-            await conn.execute("SELECT set_config('app.current_tenant', $1, true)", tenant_id)
-            await conn.execute(
-                "UPDATE quaicu_customer_plans SET quota_overrides = "
-                "'{\"rate_limit_per_min\": -1, \"max_actions_per_day\": -1}'::jsonb, "
-                "updated_at = now() WHERE tenant_id = $1",
-                tenant_id,
+        await ents.save_plan(
+            CustomerPlan(
+                tenant_id=account.tenant_id,
+                tier=FeatureTier.BUSINESS,
+                status=PlanStatus.ACTIVE,
+                created_at=now,
+                updated_at=now,
+                quota_overrides={"rate_limit_per_min": -1, "max_actions_per_day": -1},
             )
+        )
     finally:
-        await conn.close()
+        await ents.close()
+    stats = TenantStats(tenant_id=str(account.tenant_id), api_key=api_key)
+    print(f"provisioned tenant {stats.tenant_id} (durable stores; server has never seen it)")
+    return stats
 
 
 async def _fire(client: httpx.AsyncClient, stats: TenantStats, deadline: float) -> None:
@@ -159,10 +174,19 @@ async def _verify_ledger(dsn: str, stats: TenantStats) -> list[str]:
         await conn.close()
 
     seqs = [r["ledger_seq"] for r in rows]
-    if len(rows) != stats.sealed_ok:
+    if len(rows) < stats.sealed_ok:
+        # Fewer durable entries than acknowledged seals = a seal the server confirmed but never
+        # persisted — THE regression this harness exists to catch.
         errors.append(
-            f"{stats.tenant_id}: LOST SEALS — {stats.sealed_ok} sealed responses but "
+            f"{stats.tenant_id}: LOST SEALS — {stats.sealed_ok} sealed responses but only "
             f"{len(rows)} durable entries"
+        )
+    elif len(rows) > stats.sealed_ok:
+        # More entries than acks is the benign direction: the seal landed durably but the client
+        # timed out / the response failed afterwards. Correctness (dense seqs + root) still checked.
+        print(
+            f"note: {stats.tenant_id}: {len(rows) - stats.sealed_ok} durable seal(s) were never "
+            "acknowledged to the client (timeouts) — durable log is the source of truth"
         )
     if seqs != list(range(len(seqs))):
         errors.append(f"{stats.tenant_id}: ledger_seq not dense 0..n-1")
@@ -177,6 +201,33 @@ async def _verify_ledger(dsn: str, stats: TenantStats) -> list[str]:
         if bytes(sth["root_hash"]) != recomputed:
             errors.append(f"{stats.tenant_id}: STH root does not match recomputed Merkle root (FORK)")
     return errors
+
+
+async def _wipe_prior_runs(dsn: str) -> None:
+    """Delete rows left by previous load runs (tenants 'load-%') so cross-run residue can't trip
+    the foreign-row check. Owner-only NO FORCE toggle, same pattern as the integration suite."""
+    import asyncpg
+
+    tables = (
+        "quaicu_ledger_entries",
+        "quaicu_ledger_sth",
+        "quaicu_actions",
+        "quaicu_customer_plans",
+        "quaicu_api_keys",
+        "quaicu_accounts",
+    )
+    conn = await asyncpg.connect(dsn)
+    try:
+        async with conn.transaction():
+            for t in tables:
+                await conn.execute(f"ALTER TABLE {t} NO FORCE ROW LEVEL SECURITY")
+            await conn.execute("SET LOCAL row_security = off")
+            for t in tables:
+                await conn.execute(f"DELETE FROM {t} WHERE tenant_id LIKE 'load-%'")
+            for t in tables:
+                await conn.execute(f"ALTER TABLE {t} FORCE ROW LEVEL SECURITY")
+    finally:
+        await conn.close()
 
 
 async def _verify_no_cross_tenant(dsn: str, tenants: list[str]) -> list[str]:
@@ -207,6 +258,14 @@ async def main() -> int:
     parser.add_argument("--clients", type=int, default=50, help="concurrent clients per tenant")
     parser.add_argument("--seconds", type=int, default=60)
     parser.add_argument("--tenants", type=int, default=2)
+    parser.add_argument("--p99-ms", type=float, default=P99_TARGET_MS)
+    parser.add_argument(
+        "--no-latency-gate",
+        action="store_true",
+        help="Report latency but do not fail on it. For running the CORRECTNESS gate over a WAN "
+        "(e.g. workstation -> Cloud SQL Auth Proxy adds ~250ms per SQL statement, which swamps "
+        "any latency target); measure latency in-region against the deployed service instead.",
+    )
     args = parser.parse_args()
 
     dsn = os.environ.get("LOADTEST_DSN", "")
@@ -225,19 +284,11 @@ async def main() -> int:
             print(f"/readyz not ready: {r.status_code} {r.text}")
             return 1
 
-        all_stats = [await _provision(client, f"t{i}") for i in range(args.tenants)]
+        await _wipe_prior_runs(dsn)
+        all_stats = [await _provision(dsn, f"t{i}") for i in range(args.tenants)]
 
-        # Lift the STARTER 60/min rate limit (quota override in the durable plan store) and wait
-        # for every worker's periodic entitlement re-hydrate to pick it up.
-        for stats in all_stats:
-            await _unthrottle(dsn, stats.tenant_id)
-        refresh = float(os.environ.get("QUAICU_ENTITLEMENTS_REFRESH", "60"))
-        wait = refresh + 2.0
-        print(f"quota overrides written; waiting {wait:.0f}s for worker entitlement refresh …")
-        await asyncio.sleep(wait)
-
-        # Fire immediately after provisioning: with --workers N the keys were minted by ONE worker,
-        # so the very first requests on other workers exercise the D4-1 cross-worker key fallback.
+        # Fire immediately: the credentials were minted OUT-OF-BAND (never by these workers), so
+        # every worker's first request exercises the D4-1 cross-worker key/account/plan fallbacks.
         deadline = time.monotonic() + args.seconds
         tasks = [
             asyncio.create_task(_fire(client, stats, deadline))
@@ -270,17 +321,20 @@ async def main() -> int:
     )
     rps = total_sealed / elapsed if elapsed else 0.0
     print(
-        f"\n─ load result ─\n"
+        f"\n-- load result --\n"  # ASCII only: Windows consoles default to cp1252
         f"tenants={len(all_stats)} clients/tenant={args.clients} duration={elapsed:.1f}s\n"
         f"sealed={total_sealed} ({rps:.1f} seals/s)  "
         f"denied={sum(s.denied for s in all_stats)}  "
         f"401={sum(s.unauthorized for s in all_stats)}  "
         f"5xx={sum(s.server_errors for s in all_stats)}  "
         f"other={sum(s.other_errors for s in all_stats)}\n"
-        f"latency p50={p50:.0f}ms p99={p99:.0f}ms (target p99 < {P99_TARGET_MS:.0f}ms)"
+        f"latency p50={p50:.0f}ms p99={p99:.0f}ms (target p99 < {args.p99_ms:.0f}ms)"
     )
-    if all_latencies and p99 >= P99_TARGET_MS:
-        errors.append(f"p99 {p99:.0f}ms exceeds the {P99_TARGET_MS:.0f}ms target")
+    if all_latencies and p99 >= args.p99_ms:
+        if args.no_latency_gate:
+            print(f"note: p99 {p99:.0f}ms over the {args.p99_ms:.0f}ms target (latency gate off)")
+        else:
+            errors.append(f"p99 {p99:.0f}ms exceeds the {args.p99_ms:.0f}ms target")
     if total_sealed == 0:
         errors.append("no successful sealed decisions — the load never exercised the seal path")
 
